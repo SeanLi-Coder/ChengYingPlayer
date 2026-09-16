@@ -192,8 +192,23 @@ if DownloadCenterService.supportsRuntime {
     fullController.webView.evaluateJavaScript(script) { result, error in value = result; failure = error; done = true }
     let deadline = Date().addingTimeInterval(5)
     while !done && Date() < deadline { pumpEvents() }
-    guard done && failure == nil else { fatalError("The preserved frontend did not evaluate its test expression") }
+    guard done else { fatalError("WebKit evaluation timed out for fixed test expression: \(script)") }
+    if let error = failure as NSError? {
+      let detail = error.userInfo["WKJavaScriptExceptionMessage"] as? String ?? error.localizedDescription
+      fatalError("WebKit test expression failed (\(error.domain), \(error.code)): \(detail); expression: \(script)")
+    }
     return value
+  }
+  func waitForPage(_ description: String, _ script: String) {
+    let deadline = Date().addingTimeInterval(8)
+    var ready = false
+    repeat {
+      ready = fullPageValue(script) as? Bool == true
+      if ready { break }
+      pumpEvents(for: 0.01)
+    } while Date() < deadline
+    // Do not evaluate successful expressions again: some perform one UI action.
+    check(ready, description)
   }
   let decorationDeadline = Date().addingTimeInterval(8)
   var buttonCount = 0
@@ -213,22 +228,118 @@ if DownloadCenterService.supportsRuntime {
         "Embedding preserves the original frontend's build-identity gate")
   check(fullPageValue("performance.getEntriesByType('resource').some(e => new URL(e.name).pathname === '/api/health')") as? Bool == true,
         "The visible preserved frontend performs its actual backend identity handshake")
-  check(fullPageValue("document.querySelector('#download-dir').value") as? String == "/tmp/fixture/downloads",
-        "The preserved frontend loads its actual configuration after identity verification")
+  waitForPage("The preserved frontend loads its actual configuration after identity verification",
+              "document.querySelector('#download-dir')?.value === '/tmp/fixture/downloads'")
   check(fullPageValue("window.fixtureErrors.length") as? Int == 0,
         "The preserved frontend and desktop adapter run without JavaScript errors")
   check(fullPageValue("document.querySelectorAll('.download-item').length") as? Int == 2,
         "The preserved frontend renders both completed media items")
-  check(fullPageValue("document.querySelectorAll('.download-item')[1].querySelector('.desktop-output-actions').textContent") as? String == "在 Finder 中显示",
-        "An image output gets Finder reveal without a misleading play button")
+  // A real refresh replaces the item nodes synchronously, while the desktop
+  // adapter decorates them on the next animation frame. Observe that genuine
+  // interval and prove why a selector saved across evaluations is not stable.
+  waitForPage("A real frontend refresh starts the redraw regression probe", """
+    (() => {
+      const refresh = document.querySelector('#refresh-button');
+      const list = document.querySelector('#items-list');
+      if (!refresh || refresh.disabled || !list) return false;
+      window.fixtureRenderRace = { missingActions: 0, unsafeReadFailures: 0 };
+      window.fixtureRenderObserver = new MutationObserver(() => {
+        const image = document.querySelectorAll('.download-item')[1];
+        if (image && !image.querySelector('.desktop-output-actions')) {
+          window.fixtureRenderRace.missingActions++;
+          try {
+            document.querySelectorAll('.download-item')[1].querySelector('.desktop-output-actions').textContent;
+          } catch (error) {
+            if (error instanceof TypeError) window.fixtureRenderRace.unsafeReadFailures++;
+          }
+        }
+      });
+      window.fixtureRenderObserver.observe(list, { childList: true });
+      refresh.click();
+      return true;
+    })()
+    """)
+  waitForPage("The original unsafe read reproduces a TypeError during a genuine frontend redraw",
+              "window.fixtureRenderRace.missingActions > 0 && window.fixtureRenderRace.unsafeReadFailures > 0")
+  _ = fullPageValue("window.fixtureRenderObserver.disconnect(); undefined")
+  waitForPage("An image output gets Finder reveal without a misleading play button", """
+    (() => {
+      const image = document.querySelectorAll('.download-item')[1];
+      return image?.querySelector('.desktop-output-actions')?.textContent === '在 Finder 中显示';
+    })()
+    """)
   _ = fullPageValue("window.chengyingDownloadCenter.setDirectory('/tmp/Fixture folder'); undefined")
   check(fullPageValue("document.querySelector('#download-dir').value") as? String == "/tmp/Fixture folder",
         "The real native directory setter updates the original settings input without auto-saving")
-  _ = fullPageValue("document.querySelectorAll('.item-files summary').forEach(summary => summary.click()); undefined")
-  check(fullPageValue("document.querySelectorAll('.item-files[open]').length") as? Int == 2,
-        "The preserved saved-file disclosure controls expose both native output actions")
+  waitForPage("The preserved saved-file disclosure controls expose both native output actions", """
+    (() => {
+      const files = [...document.querySelectorAll('.item-files')];
+      if (files.length !== 2 || files.some(item => !item.querySelector('.desktop-output-actions'))) return false;
+      files.forEach(item => { if (!item.open) item.querySelector('summary').click(); });
+      return files.every(item => item.open);
+    })()
+    """)
+  waitForPage("A real refresh is requested while both saved-file lists are expanded", """
+    (() => {
+      const refresh = document.querySelector('#refresh-button');
+      const files = [...document.querySelectorAll('.item-files')];
+      if (!refresh || refresh.disabled || files.length !== 2 || files.some(item => !item.open)) return false;
+      window.fixtureExpandedRows = files;
+      refresh.click();
+      return true;
+    })()
+    """)
+  waitForPage("Real API-driven replacement preserves both expanded lists and restores their native buttons", """
+    (() => {
+      const refresh = document.querySelector('#refresh-button');
+      const files = [...document.querySelectorAll('.item-files')];
+      return refresh && !refresh.disabled
+        && window.fixtureExpandedRows.every(item => !item.isConnected)
+        && files.length === 2
+        && files.every(item => item.open && item.querySelector('.desktop-output-actions'))
+        && document.querySelectorAll('.desktop-output-actions button').length === 3;
+    })()
+    """)
+  waitForPage("Users can collapse both saved-file lists using the preserved controls", """
+    (() => {
+      const files = [...document.querySelectorAll('.item-files')];
+      if (files.length !== 2 || files.some(item => !item.querySelector('.desktop-output-actions'))) return false;
+      files.forEach(item => { if (item.open) item.querySelector('summary').click(); });
+      return files.every(item => !item.open);
+    })()
+    """)
+  waitForPage("A second real refresh is requested after the user collapses the lists", """
+    (() => {
+      const refresh = document.querySelector('#refresh-button');
+      const files = [...document.querySelectorAll('.item-files')];
+      if (!refresh || refresh.disabled || files.length !== 2 || files.some(item => item.open)) return false;
+      window.fixtureCollapsedRows = files;
+      refresh.click();
+      return true;
+    })()
+    """)
+  waitForPage("Real API-driven replacement respects the user's collapsed state", """
+    (() => {
+      const refresh = document.querySelector('#refresh-button');
+      const files = [...document.querySelectorAll('.item-files')];
+      return refresh && !refresh.disabled
+        && window.fixtureCollapsedRows.every(item => !item.isConnected)
+        && files.length === 2
+        && files.every(item => !item.open && item.querySelector('.desktop-output-actions'))
+        && document.querySelectorAll('.desktop-output-actions button').length === 3;
+    })()
+    """)
   PlayerCore.activeOrNew.opened = []
-  _ = fullPageValue("document.querySelector('.desktop-output-actions button').click(); undefined")
+  waitForPage("The real native play button is located and clicked atomically after any redraw", """
+    (() => {
+      const button = document.querySelector('.download-item .desktop-output-actions button');
+      if (!button || button.textContent !== '播放') return false;
+      const files = button.closest('.item-files');
+      if (!files.open) files.querySelector('summary').click();
+      button.click();
+      return true;
+    })()
+    """)
   wait("Clicking the real injected play button resolves output through the native authenticated API") {
     PlayerCore.activeOrNew.opened == [media]
   }

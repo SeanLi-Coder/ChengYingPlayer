@@ -5,6 +5,8 @@
   if (!bridge) return;
   const jobs = new Map();
   const outputs = new Map();
+  const expandedFiles = new Set();
+  const restoredFileLists = new WeakSet();
   let scheduled = false;
   let closed = false;
 
@@ -57,6 +59,15 @@
   }
 
   function decorateFiles() {
+    // The preserved frontend replaces result rows during polling and SSE updates.
+    // Keep user-expanded file lists open without changing its rendering pipeline.
+    document.querySelectorAll(".item-files").forEach((files) => {
+      if (restoredFileLists.has(files)) return;
+      const key = fileListKey(files);
+      if (!key) return;
+      restoredFileLists.add(files);
+      if (key && expandedFiles.has(key) && !files.open) files.open = true;
+    });
     document.querySelectorAll(".item-files li[title]").forEach((entry) => {
       if (entry.querySelector(".desktop-output-actions")) return;
       const path = entry.title;
@@ -82,6 +93,23 @@
       entry.append(actions);
     });
   }
+
+  function fileListKey(files) {
+    const paths = Array.from(files.querySelectorAll("li[title]"), (entry) => entry.title);
+    return paths.length ? JSON.stringify(paths) : null;
+  }
+
+  function rememberFileDisclosure(event) {
+    const files = event.target;
+    if (!(files instanceof HTMLDetailsElement) || !files.matches(".item-files") || !files.isConnected) return;
+    const key = fileListKey(files);
+    if (!key) return;
+    restoredFileLists.add(files);
+    if (files.open) expandedFiles.add(key);
+    else expandedFiles.delete(key);
+  }
+
+  document.addEventListener("toggle", rememberFileDisclosure, true);
 
   function acceptJob(job) {
     if (!job || typeof job.id !== "string" || !Array.isArray(job.items)) return;
@@ -136,5 +164,6 @@
     closed = true;
     events.close();
     observer.disconnect();
+    document.removeEventListener("toggle", rememberFileDisclosure, true);
   }, { once: true });
 })();

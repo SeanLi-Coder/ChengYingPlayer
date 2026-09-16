@@ -6,6 +6,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 from urllib.parse import parse_qs, urlsplit
 
 TOKEN = "native-test-session-" + "a" * 40
@@ -114,6 +115,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
 
+class LoopbackHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # The fixture has a fixed literal address; do not let HTTPServer perform
+        # a system reverse-DNS lookup just to populate its display name.
+        if self.server_address[0] != "127.0.0.1":
+            raise ValueError("The native fixture must bind only to literal loopback")
+        TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
+
+
 if MODE == "timeout":
     sys.stdin.read()
     raise SystemExit(0)
@@ -121,9 +133,9 @@ if MODE in {"already_running", "startup_failed"}:
     print(json.dumps({"type": "failed", "code": MODE, "message": "Do not expose this raw detail"}), flush=True)
     sys.stdin.read()
     raise SystemExit(0)
-server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+server = LoopbackHTTPServer(("127.0.0.1", 0), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
-ready = {"type": "ready", "protocol_version": 1, "url": "http://127.0.0.1:%d/" % server.server_port,
+ready = {"type": "ready", "protocol_version": 1, "url": f"http://127.0.0.1:{server.server_port}/",
          "token": TOKEN, "pid": os.getpid()}
 if MODE == "wrong_pid":
     ready["pid"] += 10000
