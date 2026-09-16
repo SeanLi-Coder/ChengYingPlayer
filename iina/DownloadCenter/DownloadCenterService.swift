@@ -21,7 +21,7 @@ final class DownloadCenterService {
         throw DownloadCenterError.missingHelper
       }
       let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-      return Locations(helper: directory.deletingLastPathComponent().appendingPathComponent("Helpers/DownloadCenter/chengying-download-center-helper"),
+      return Locations(helper: directory.deletingLastPathComponent().appendingPathComponent("Helpers/DownloadCenter.app/Contents/MacOS/chengying-download-center-helper"),
                        ffmpeg: directory.appendingPathComponent("ffmpeg"), ffprobe: directory.appendingPathComponent("ffprobe"),
                        data: support.appendingPathComponent("io.github.SeanLi-Coder.ChengYingPlayer/DownloadCenter", isDirectory: true),
                        downloads: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/ChengYing", isDirectory: true))

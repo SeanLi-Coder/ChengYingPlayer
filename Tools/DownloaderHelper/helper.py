@@ -50,7 +50,11 @@ def validate_paths(args):
         path = getattr(args, name).resolve()
         if path == Path(path.anchor) or path == Path.home():
             raise ValueError(f"{name} cannot be a home or filesystem root")
-        if path == ROOT or ROOT in path.parents:
+        if (
+            path == ROOT
+            or ROOT in path.parents
+            or any(part.lower().endswith(".app") for part in path.parts)
+        ):
             raise ValueError(f"{name} cannot be inside the helper bundle")
         path.mkdir(parents=True, exist_ok=True)
         if name == "data_dir":

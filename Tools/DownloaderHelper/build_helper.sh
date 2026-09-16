@@ -62,53 +62,27 @@ mkdir -p "$WORK_DIR/vendor/rednote"
 rsync -a --exclude '__pycache__' --exclude '.pytest_cache' "$VENDOR_DIR/" "$WORK_DIR/vendor/rednote/"
 VENDOR_DIR="$WORK_DIR/vendor/rednote"
 
-PYINSTALLER_ARGS=(
-  --clean --noconfirm --onedir --contents-directory _internal
-  --name "$HELPER_NAME"
-  --distpath "$WORK_DIR/dist"
-  --workpath "$WORK_DIR/work"
-  --specpath "$WORK_DIR/spec"
-  --target-arch "$TARGET_ARCH"
-  --codesign-identity "$CODESIGN_IDENTITY"
-  --osx-entitlements-file "$SCRIPT_DIR/runtime-entitlements.plist"
-  --paths "$VENDOR_DIR"
-  --paths "$SCRIPT_DIR"
-  --hidden-import bundle_smoke
-  --add-data "$VENDOR_DIR:vendor/rednote"
-  --add-data "$VENDOR_DIR/app/static:app/static"
-  --add-data "$SCRIPT_DIR/static:static"
-  --add-data "$SCRIPT_DIR/runtime-artifacts.json:."
-  --add-data "$SCRIPT_DIR/upstream-manifest.json:."
-)
-# The original engine is imported dynamically from the preserved source tree.
-# Collect the complete engine and its dynamic extractor/JS/browser dependencies.
-for package in app yt_dlp yt_dlp_ejs playwright uvicorn fastapi starlette pydantic \
-  pydantic_core requests urllib3 websockets Cryptodome certifi truststore mutagen; do
-  PYINSTALLER_ARGS+=(--collect-all "$package")
-done
-while IFS= read -r package; do
-  PYINSTALLER_ARGS+=(--copy-metadata "$package")
-done < <("$HELPER_PYTHON" - "$SCRIPT_DIR/runtime-artifacts.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-for package in json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["artifacts"]:
-    print(package["name"])
-PY
-)
+DENO_SOURCE="$("$HELPER_PYTHON" -c 'from deno import find_deno_bin; print(find_deno_bin())')"
+install -m 755 "$DENO_SOURCE" "$WORK_DIR/deno"
+codesign --force --sign "$CODESIGN_IDENTITY" --options runtime \
+  --entitlements "$SCRIPT_DIR/runtime-entitlements.plist" "$WORK_DIR/deno"
+"$HELPER_PYTHON" "$SCRIPT_DIR/collect_licenses.py" "$WORK_DIR/Legal"
 
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$VENDOR_DIR:$SCRIPT_DIR" \
-  "$HELPER_PYTHON" -m PyInstaller "${PYINSTALLER_ARGS[@]}" "$SCRIPT_DIR/helper.py"
-BUILT_DIR="$WORK_DIR/dist/$HELPER_NAME"
+  PYINSTALLER_STRICT_BUNDLE_CODESIGN_ERROR=1 PYINSTALLER_VERIFY_BUNDLE_SIGNATURE=1 \
+  CHENGYING_HELPER_SOURCE_DIR="$SCRIPT_DIR" CHENGYING_HELPER_VENDOR_DIR="$VENDOR_DIR" \
+  CHENGYING_HELPER_LEGAL_DIR="$WORK_DIR/Legal" CHENGYING_HELPER_DENO="$WORK_DIR/deno" \
+  CHENGYING_HELPER_SIGNING_IDENTITY="$CODESIGN_IDENTITY" CHENGYING_HELPER_TARGET_ARCH="$TARGET_ARCH" \
+  "$HELPER_PYTHON" -m PyInstaller --clean --noconfirm \
+    --distpath "$WORK_DIR/dist" --workpath "$WORK_DIR/work" "$SCRIPT_DIR/download_center.spec"
+BUILT_APP="$WORK_DIR/dist/DownloadCenter.app"
+BUILT_CONTENTS="$BUILT_APP/Contents"
 "$HELPER_PYTHON" "$SCRIPT_DIR/verify_vendor.py" \
-  --vendor-root "$BUILT_DIR/_internal/vendor/rednote" --manifest "$SCRIPT_DIR/upstream-manifest.json"
-DENO_SOURCE="$("$HELPER_PYTHON" -c 'from deno import find_deno_bin; print(find_deno_bin())')"
-install -m 755 "$DENO_SOURCE" "$BUILT_DIR/deno"
-"$HELPER_PYTHON" "$SCRIPT_DIR/collect_licenses.py" "$BUILT_DIR/Legal"
+  --vendor-root "$BUILT_CONTENTS/Resources/vendor/rednote" --manifest "$SCRIPT_DIR/upstream-manifest.json"
 
-# Playwright's Node is package data, and Deno is installed separately from Python modules.
-# Sign both explicitly with their own JIT permissions; never broaden the main app's entitlements.
-for binary in "$BUILT_DIR/deno" "$BUILT_DIR/_internal/playwright/driver/node" "$BUILT_DIR/$HELPER_NAME"; do
+# Re-sign the real executable leaves and then their helper bundle, inside out.
+# Scripts remain sealed resources; no recursive signing workaround is used here.
+for binary in "$BUILT_CONTENTS/MacOS/deno" "$BUILT_CONTENTS/Frameworks/playwright/driver/node" "$BUILT_CONTENTS/MacOS/$HELPER_NAME"; do
   if [[ ! -x "$binary" ]]; then
     echo "A required frozen executable is missing: $binary" >&2
     exit 3
@@ -121,22 +95,27 @@ for binary in "$BUILT_DIR/deno" "$BUILT_DIR/_internal/playwright/driver/node" "$
     --entitlements "$SCRIPT_DIR/runtime-entitlements.plist" "$binary"
   codesign --verify --strict "$binary"
 done
+codesign --force --sign "$CODESIGN_IDENTITY" --options runtime \
+  --entitlements "$SCRIPT_DIR/runtime-entitlements.plist" "$BUILT_APP"
+codesign --verify --deep --strict "$BUILT_APP"
 
-"$BUILT_DIR/$HELPER_NAME" --help >/dev/null
-PATH="$BUILT_DIR:$PATH" "$BUILT_DIR/$HELPER_NAME" --self-test
-if [[ -n "$(find "$BUILT_DIR" -type d -name '__pycache__' -print -quit)" ]]; then
+"$BUILT_CONTENTS/MacOS/$HELPER_NAME" --help >/dev/null
+PATH="$BUILT_CONTENTS/MacOS:$PATH" "$BUILT_CONTENTS/MacOS/$HELPER_NAME" --self-test
+if [[ -n "$(find "$BUILT_APP" -type d -name '__pycache__' -print -quit)" ]]; then
   echo "The frozen download center must not contain generated Python bytecode caches." >&2
   exit 3
 fi
+mkdir "$WORK_DIR/output"
+mv "$BUILT_APP" "$WORK_DIR/output/DownloadCenter.app"
 
 # A successful, verified build replaces only the previous generated helper directory.
 if [[ -e "$OUTPUT_DIR" ]]; then
   mv "$OUTPUT_DIR" "$WORK_DIR/previous"
 fi
-if ! mv "$BUILT_DIR" "$OUTPUT_DIR"; then
+if ! mv "$WORK_DIR/output" "$OUTPUT_DIR"; then
   if [[ -d "$WORK_DIR/previous" ]]; then
     mv "$WORK_DIR/previous" "$OUTPUT_DIR"
   fi
   exit 4
 fi
-printf '%s\n' "$OUTPUT_DIR/$HELPER_NAME"
+printf '%s\n' "$OUTPUT_DIR/DownloadCenter.app/Contents/MacOS/$HELPER_NAME"

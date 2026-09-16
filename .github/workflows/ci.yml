@@ -143,6 +143,12 @@ jobs:
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/SubtitleToolsHelper/build_helper.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/DownloaderHelper/build_helper.sh
 
+      - name: Test nested download-center signing
+        run: |
+          python Tools/DownloaderHelper/smoke_signing.py \
+            --app deps/download-center/DownloadCenter.app \
+            --ffmpeg "$PWD/deps/executable/ffmpeg" --ffprobe "$PWD/deps/executable/ffprobe"
+
       - name: Test live playlist reordering
         run: PATH="$PWD/deps/executable:$PATH" PLAYLIST_REQUIRE_LIVE_TESTS=1 bash Tools/PlaylistPlaybackTests/run.sh
 
@@ -182,8 +188,8 @@ jobs:
             codesign --verify --strict --verbose=2 "$executable_path"
           done
 
-          download_center="$app_path/Contents/Helpers/DownloadCenter"
-          for executable in chengying-download-center-helper deno _internal/playwright/driver/node; do
+          download_center="$app_path/Contents/Helpers/DownloadCenter.app"
+          for executable in Contents/MacOS/chengying-download-center-helper Contents/MacOS/deno Contents/Frameworks/playwright/driver/node; do
             if [[ ! -x "$download_center/$executable" ]]; then
               echo "Missing bundled download-center executable: $executable" >&2
               exit 1
@@ -214,10 +220,10 @@ jobs:
           "$app_path/Contents/MacOS/ffmpeg" -hide_banner -version
           "$app_path/Contents/MacOS/chengying-video-tools-helper" --help
           "$app_path/Contents/MacOS/chengying-subtitle-tools-helper" --help
-          "$download_center/chengying-download-center-helper" --help
-          PATH="$download_center:$PATH" "$download_center/chengying-download-center-helper" --self-test
+          "$download_center/Contents/MacOS/chengying-download-center-helper" --help
+          PATH="$download_center/Contents/MacOS:$PATH" "$download_center/Contents/MacOS/chengying-download-center-helper" --self-test
           python Tools/DownloaderHelper/smoke_helper.py \
-            --helper "$download_center/chengying-download-center-helper" \
+            --helper "$download_center/Contents/MacOS/chengying-download-center-helper" \
             --ffmpeg "$app_path/Contents/MacOS/ffmpeg" \
             --ffprobe "$app_path/Contents/MacOS/ffprobe"
           if [[ -n "$(find "$download_center" -type d -name '__pycache__' -print -quit)" ]]; then

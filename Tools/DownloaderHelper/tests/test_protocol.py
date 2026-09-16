@@ -98,3 +98,22 @@ def test_directory_must_not_be_home_or_bundle(tmp_path):
         )
         with pytest.raises(ValueError):
             validate_paths(arguments)
+
+
+@pytest.mark.parametrize("field", ["data_dir", "download_dir"])
+@pytest.mark.parametrize("directory", ["Frameworks", "Resources", "MacOS"])
+def test_writable_paths_cannot_enter_any_nested_app_bundle(tmp_path, field, directory):
+    executable = tmp_path / "ffmpeg"
+    executable.touch()
+    executable.chmod(0o755)
+    arguments = parse_arguments([
+        "--stdio", "--data-dir", str(tmp_path / "data"),
+        "--download-dir", str(tmp_path / "downloads"),
+        "--ffmpeg", str(executable), "--ffprobe", str(executable),
+    ])
+    destination = (tmp_path / "Host Player.app" / "Contents" / "Helpers"
+                   / "DownloadCenter.app" / "Contents" / directory / "user-files")
+    setattr(arguments, field, destination)
+    with pytest.raises(ValueError, match="inside the helper bundle"):
+        validate_paths(arguments)
+    assert not destination.exists()

@@ -12,8 +12,17 @@ SHA-256 hashes. `runtime-artifacts.json` records those wheel URLs and versions.
 These are binary-wheel inputs, not a claim of complete corresponding source for
 every embedded native dependency.
 
-`build_helper.sh` creates an **onedir** distribution at `deps/download-center`.
-The application copies that entire directory to `Contents/Helpers/DownloadCenter`.
+`build_helper.sh` creates a native PyInstaller **BUNDLE** application at
+`deps/download-center/DownloadCenter.app`. The player embeds this signed application
+at `Contents/Helpers/DownloadCenter.app`. The console bootloader retains its stdin/stdout
+protocol; `LSBackgroundOnly` and `LSUIElement` keep the helper out of the Dock.
+Its real executables live in `Contents/MacOS`, native libraries and the Playwright
+Node driver live in `Contents/Frameworks`, and Python sources, web assets, and notices
+live in `Contents/Resources`. PyInstaller's cross-links preserve package-relative
+lookups without treating scripts as nested code or hiding binaries among resources.
+The containing player is signed without recursively signing the helper's contents.
+The regression smoke test signs a minimal containing application and checks that
+resource tampering is detected and no signature is stored in file extended attributes.
 The launcher, Deno executable, Playwright Node driver, Python extensions, CA bundle,
 yt-dlp extractors, and EJS JavaScript files are bundled. Starting the application
 never creates a virtual environment, installs pip packages, or downloads a browser.

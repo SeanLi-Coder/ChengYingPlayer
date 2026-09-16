@@ -28,6 +28,8 @@ extend-ignore-re = [
 
 [default.extend-identifiers]
 "caf" = "caf"
+# Exact PyInstaller Analysis keyword and attribute name.
+"datas" = "datas"
 # Plural image-format acronym, not the unrelated word fragment "PN".
 "PNGs" = "PNGs"
 # Xcode uses this property in XIBs.

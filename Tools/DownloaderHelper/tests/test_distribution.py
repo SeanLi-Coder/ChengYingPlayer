@@ -79,13 +79,20 @@ def test_license_collection_retains_every_runtime_and_nested_driver_notice(tmp_p
         assert (destination / relative).stat().st_size > 0
 
 
-def test_onedir_build_includes_desktop_assets_and_uses_only_verified_vendor():
+def test_bundle_build_preserves_stdio_and_uses_only_verified_vendor():
     build = (ROOT / "build_helper.sh").read_text()
-    assert "--onedir --contents-directory _internal" in build
+    spec = (ROOT / "download_center.spec").read_text()
+    assert "application = BUNDLE(" in spec
+    assert "console=True" in spec
+    assert '"LSBackgroundOnly": True' in spec
+    assert '"LSUIElement": True' in spec
     assert "--onefile" not in build
-    assert '--add-data "$SCRIPT_DIR/static:static"' in build
-    assert '--add-data "$VENDOR_DIR:vendor/rednote"' in build
+    assert '(str(source / "static"), "static")' in spec
+    assert '(str(vendor), "vendor/rednote")' in spec
+    assert '[("deno", str(deno), "EXECUTABLE")]' in spec
     assert '"$SCRIPT_DIR/verify_vendor.py"' in build
+    assert '"$BUILT_CONTENTS/Resources/vendor/rednote"' in build
+    assert "PYINSTALLER_STRICT_BUNDLE_CODESIGN_ERROR=1" in build
     assert "--exclude '__pycache__' --exclude '.pytest_cache'" in build
     assert "playwright install" not in build
     assert "-m pip" not in build
@@ -109,9 +116,12 @@ def test_embedding_architecture_policy_uses_only_generated_helper_paths(tmp_path
     shutil.copyfile(ROOT.parents[1] / "other" / script.name, script)
     output = tmp_path / "Build With Spaces"
     contents = "Test Player.app/Contents"
-    destination = output / contents / "Helpers" / "DownloadCenter"
+    destination = output / contents / "Helpers" / "DownloadCenter.app"
     destination.mkdir(parents=True)
     (destination / "previous-arm-build").write_text("generated")
+    legacy = destination.parent / "DownloadCenter"
+    legacy.mkdir()
+    (legacy / "previous-flat-build").write_text("generated")
     preserved = destination.parent / "other-helper"
     preserved.write_text("preserved")
     environment = {
@@ -130,6 +140,7 @@ def test_embedding_architecture_policy_uses_only_generated_helper_paths(tmp_path
     assert intel.returncode == 0, intel.stderr
     assert "Skipping" in intel.stdout
     assert not destination.exists()
+    assert not legacy.exists()
     assert preserved.read_text() == "preserved"
     for architectures in ("arm64 x86_64", "", "i386"):
         environment["ARCHS"] = architectures
@@ -152,3 +163,52 @@ def test_embedding_architecture_policy_uses_only_generated_helper_paths(tmp_path
     )
     assert missing.returncode == 2
     assert "Build the complete download center" in missing.stderr
+
+
+def test_arm_embedding_replaces_legacy_layout_and_preserves_other_helpers(tmp_path):
+    project = tmp_path / "Project With Spaces"
+    scripts = project / "other"
+    scripts.mkdir(parents=True)
+    script = scripts / "embed_download_center.sh"
+    shutil.copyfile(ROOT.parents[1] / "other" / script.name, script)
+    source = project / "deps/download-center/DownloadCenter.app"
+    for relative in ("Contents/MacOS", "Contents/Frameworks"):
+        (source / relative).mkdir(parents=True)
+    for name in ("chengying-download-center-helper", "deno"):
+        executable = source / "Contents/MacOS" / name
+        executable.write_text("generated fixture")
+        executable.chmod(0o755)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    codesign = tools / "codesign"
+    codesign.write_text("#!/bin/sh\nexit 0\n")
+    codesign.chmod(0o755)
+    output = tmp_path / "Build With Spaces"
+    contents = "Test Player.app/Contents"
+    helpers = output / contents / "Helpers"
+    legacy = helpers / "DownloadCenter"
+    previous = helpers / "DownloadCenter.app"
+    legacy.mkdir(parents=True)
+    previous.mkdir()
+    (legacy / "old-flat-layout").write_text("generated")
+    (previous / "old-bundle-layout").write_text("generated")
+    preserved = helpers / "other-helper"
+    preserved.write_text("preserved")
+    result = subprocess.run(
+        ["bash", str(script)],
+        env={
+            **os.environ,
+            "PATH": str(tools) + os.pathsep + os.environ["PATH"],
+            "ARCHS": "arm64",
+            "TARGET_BUILD_DIR": str(output),
+            "CONTENTS_FOLDER_PATH": contents,
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not legacy.exists()
+    assert not (previous / "old-bundle-layout").exists()
+    assert (previous / "Contents/MacOS/deno").is_file()
+    assert preserved.read_text() == "preserved"

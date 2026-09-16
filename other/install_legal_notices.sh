@@ -89,7 +89,7 @@ tar -xOf "$PYINSTALLER_HOOKS_ARCHIVE" "pyinstaller_hooks_contrib-$PYINSTALLER_HO
 tar -xOf "$SETUPTOOLS_ARCHIVE" "setuptools-$SETUPTOOLS_VERSION/LICENSE" \
   > "$LEGAL_DIR/setuptools-LICENSE.txt"
 
-DOWNLOAD_CENTER_LEGAL="$PROJECT_ROOT/deps/download-center/Legal"
+DOWNLOAD_CENTER_LEGAL="$PROJECT_ROOT/deps/download-center/DownloadCenter.app/Contents/Resources/Legal"
 read -r -a BUILD_ARCHS <<< "${ARCHS:-arm64}"
 if [[ "${#BUILD_ARCHS[@]}" == "1" && "${BUILD_ARCHS[0]}" == "x86_64" ]]; then
   # No ARM-only runtime is included in an Intel application build.

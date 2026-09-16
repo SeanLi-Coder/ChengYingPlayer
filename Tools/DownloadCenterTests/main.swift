@@ -64,6 +64,28 @@ for message: [String: Any] in [
 
 let helper = URL(fileURLWithPath: CommandLine.arguments[1])
 let root = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true).resolvingSymlinksInPath()
+let applicationBundle = Bundle.main.bundleURL.standardizedFileURL
+check(Bundle.main.bundleIdentifier == "io.github.SeanLi-Coder.ChengYingPlayer.DownloadCenterTests"
+      && applicationBundle == root.appendingPathComponent("DownloadCenterTests.app", isDirectory: true),
+      "Bundle-path regressions execute inside the real temporary test application")
+let bundledLocations = try DownloadCenterService.Locations.bundled()
+let applicationExecutables = applicationBundle.appendingPathComponent("Contents/MacOS", isDirectory: true)
+check(Bundle.main.executableURL?.standardizedFileURL == applicationExecutables.appendingPathComponent("DownloadCenterTests"),
+      "Foundation identifies the main application's executable directory from its actual bundle")
+check(bundledLocations.helper.standardizedFileURL == applicationBundle.appendingPathComponent(
+        "Contents/Helpers/DownloadCenter.app/Contents/MacOS/chengying-download-center-helper"),
+      "The production bundle locator resolves the signed nested DownloadCenter application executable")
+check(bundledLocations.ffmpeg.standardizedFileURL == applicationExecutables.appendingPathComponent("ffmpeg"),
+      "FFmpeg stays beside the main player executable, outside the nested helper application")
+check(bundledLocations.ffprobe.standardizedFileURL == applicationExecutables.appendingPathComponent("ffprobe"),
+      "FFprobe stays beside the main player executable, outside the nested helper application")
+check(bundledLocations.helper.deletingLastPathComponent() != bundledLocations.ffmpeg.deletingLastPathComponent()
+      && bundledLocations.ffmpeg.deletingLastPathComponent() == bundledLocations.ffprobe.deletingLastPathComponent(),
+      "The helper and media tools cannot silently collapse onto the same MacOS directory")
+// Compute defaults only. Do not start a service or create state at user locations.
+check(!bundledLocations.data.path.hasPrefix(applicationBundle.path + "/")
+      && !bundledLocations.downloads.path.hasPrefix(applicationBundle.path + "/"),
+      "Writable defaults remain outside the signed application bundle")
 let media = root.appendingPathComponent("fixture.mp4")
 let image = root.appendingPathComponent("fixture.webp")
 let executable = root.appendingPathComponent("fixture.command")
