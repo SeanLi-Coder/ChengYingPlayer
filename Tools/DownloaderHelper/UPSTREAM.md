@@ -42,7 +42,7 @@ its private runtime directory, authenticated loopback transport, and shutdown.
 
 ## Preserved behavior
 
-The original engine retains Xiaohongshu, Douyin, and YouTube discovery/downloads;
+The original engine retains Xiaohongshu, Douyin, Bilibili, and YouTube discovery/downloads;
 author and item identity validation; original-quality selection and FFprobe
 verification; video/audio remuxing; photos and live photos; Chrome profile and
 login verification; per-task and per-item retry/cancel; persisted job recovery
@@ -73,7 +73,10 @@ both native writable paths and unchanged upstream defaults. Never run import-tim
 engine tests against a real user's original source checkout or data directory.
 The upstream runner copies only manifest-listed files, clears inherited native
 runtime paths, and blocks non-loopback TCP/UDP and external DNS in the pytest
-process. Its subprocess lifecycle tests create their own local services; real
+process and its Python subprocesses. A temporary, opt-in `sitecustomize.py` guard
+preserves each fixture's package paths while making loopback forward and reverse
+DNS independent of the system resolver. It is never installed in the application
+or the user's Python environment. Its subprocess lifecycle tests create their own local services; real
 network smoke scripts are not part of this offline run. Additional pytest
 arguments can follow `--`, for example `-- -k test_stop`.
 
