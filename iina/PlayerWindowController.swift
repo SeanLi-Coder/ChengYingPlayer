@@ -369,7 +369,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       player.setSpeed(speed)
     case .rotateLeft, .rotateRight:
       guard !player.isInMiniPlayer else { return false }
-      player.mainWindow.showSettingsSidebar(tab: .tools)
+      player.mainWindow.showSettingsSidebar(tab: .tools, hideIfAlreadyShown: false)
       player.mainWindow.quickSettingView.performVideoToolsShortcut(action)
     case .setA, .setB:
       player.mainWindow.quickSettingView.performVideoToolsShortcut(action)
