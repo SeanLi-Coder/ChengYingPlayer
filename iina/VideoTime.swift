@@ -45,40 +45,48 @@ class VideoTime {
     // Whether to include fractional seconds.
     let precise = precision >= 1 && precision <= 3
 
-    // When rounding to seconds IINA must do so by rounding half down in order to match up with the
-    // time displayed in the Control Center Now Playing module. At this time the Swift rounded
-    // method does not support such a rounding rule.
-    let rounded = precise ? Int(second) : Int(second.roundedHalfDown())
-
-    let h = rounded / 3600
-    let remaining = rounded % 3600
+    // Round the complete time before splitting it. Rounding only the seconds field can
+    // otherwise display 00:60.000 and hand an incorrect value back to the jump dialog.
+    let scale = precise ? Int(pow(10, Double(precision))) : 1
+    let rounded = precise ? (second * Double(scale)).rounded(.toNearestOrEven) : second.roundedHalfDown()
+    guard let signedTicks = Int(exactly: rounded), signedTicks != Int.min else { return "--:--" }
+    let ticks = abs(signedTicks)
+    let wholeSeconds = ticks / scale
+    let h = wholeSeconds / 3600
+    let remaining = wholeSeconds % 3600
     let m = remaining / 60
 
     let h_ = h > 0 ? "\(h):" : ""
     let m_ = m < 10 ? "0\(m)" : "\(m)"
-    let s_: String
+    let s = remaining % 60
+    var s_ = s < 10 ? "0\(s)" : "\(s)"
     if precise {
-      s_ = String(format: "%0\(precision + 3).\(precision)f", fmod(second, 60))
-    } else {
-      let s = remaining % 60
-      s_ = s < 10 ? "0\(s)" : "\(s)"
+      let fraction = String(ticks % scale)
+      s_ += "." + String(repeating: "0", count: Int(precision) - fraction.count) + fraction
     }
 
-    return h_ + m_ + ":" + s_
+    return (signedTicks < 0 ? "-" : "") + h_ + m_ + ":" + s_
   }
 
   convenience init?(_ format: String) {
-    let split = Array(format.split(separator: ":").reversed())
+    var input = format.trimmingCharacters(in: .whitespacesAndNewlines)
+    let negative = input.first == "-"
+    if negative || input.first == "+" { input.removeFirst() }
+    let fields = input.split(separator: ":", omittingEmptySubsequences: false)
+    guard (1...3).contains(fields.count), fields.allSatisfy({ !$0.isEmpty }),
+          let secondsField = fields.last,
+          secondsField.first != "-", secondsField.first != "+",
+          let seconds = Double(secondsField), seconds.isFinite, seconds >= 0 else { return nil }
 
-    let hour: Int? = split.count > 2 ? Int(split[2]) : nil
-    let minute: Int? = split.count > 1 ? Int(split[1]) : nil
-    let second: Double? = !split.isEmpty ? Double(split[0]) : nil
-
-    if hour == nil && minute == nil && second == nil {
-      return nil
+    var total = 0.0
+    for field in fields.dropLast() {
+      guard field.allSatisfy({ $0.isASCII && $0.isNumber }),
+            let value = Double(field), value.isFinite else { return nil }
+      total = total * 60 + value
     }
-
-    self.init(hour ?? 0, minute ?? 0, second ?? 0.0)
+    total = total * 60 + seconds
+    guard total.isFinite else { return nil }
+    self.init(negative ? -total : total)
   }
 
   init(_ second: Double) {
@@ -87,7 +95,7 @@ class VideoTime {
   }
 
   init(_ hour: Int, _ minute: Int, _ second: Double) {
-    self.second = Double(hour * 3600 + minute * 60) + second
+    self.second = Double(hour) * 3600 + Double(minute) * 60 + second
   }
 
   /** whether self in [min, max) */
@@ -99,14 +107,19 @@ class VideoTime {
 
 extension VideoTime: Comparable { }
 
+private func comparableSeconds(_ value: Double) -> Double {
+  let milliseconds = value * 1000
+  return milliseconds.isFinite ? milliseconds.rounded(.towardZero) / 1000 : value
+}
+
 func <(lhs: VideoTime, rhs: VideoTime) -> Bool {
   // ignore additional digits and compare the time in milliseconds
-  return Int(lhs.second * 1000) < Int(rhs.second * 1000)
+  return comparableSeconds(lhs.second) < comparableSeconds(rhs.second)
 }
 
 func ==(lhs: VideoTime, rhs: VideoTime) -> Bool {
   // ignore additional digits and compare the time in milliseconds
-  return Int(lhs.second * 1000) == Int(rhs.second * 1000)
+  return comparableSeconds(lhs.second) == comparableSeconds(rhs.second)
 }
 
 func *(lhs: VideoTime, rhs: Double) -> VideoTime {
@@ -114,8 +127,9 @@ func *(lhs: VideoTime, rhs: Double) -> VideoTime {
 }
 
 func /(lhs: VideoTime?, rhs: VideoTime?) -> Double? {
-  if let lhs = lhs, let rhs = rhs {
-    return lhs.second / rhs.second
+  if let lhs = lhs, let rhs = rhs, lhs.second.isFinite, rhs.second.isFinite, rhs.second > 0 {
+    let result = lhs.second / rhs.second
+    return result.isFinite ? result : nil
   } else {
     return nil
   }

@@ -56,12 +56,17 @@ class HistoryWindowController: NSWindowController, NSOutlineViewDelegate, NSOutl
 
   private var historyData: [String: [PlaybackHistory]] = [:]
   private var historyDataKeys: [String] = []
+  private var historyObserver: NSObjectProtocol?
+
+  deinit {
+    if let historyObserver { NotificationCenter.default.removeObserver(historyObserver) }
+  }
 
   override func windowDidLoad() {
     super.windowDidLoad()
 
-    NotificationCenter.default.addObserver(forName: .iinaHistoryUpdated, object: nil, queue: .main) { [unowned self] _ in
-      self.reloadData()
+    historyObserver = NotificationCenter.default.addObserver(forName: .iinaHistoryUpdated, object: nil, queue: .main) { [weak self] _ in
+      self?.reloadData()
     }
 
     prepareData()
@@ -113,12 +118,17 @@ class HistoryWindowController: NSWindowController, NSOutlineViewDelegate, NSOutl
     }
   }
 
-  private func prepareData(fromHistory historyList: [PlaybackHistory]? = nil) {
+  private func prepareData() {
     // reconstruct data
     historyData.removeAll()
     historyDataKeys.removeAll()
 
-    let historyList = historyList ?? HistoryController.shared.history
+    let query = historySearchField.stringValue
+    let historyList = HistoryController.shared.history.filter { entry in
+      guard !query.isEmpty else { return true }
+      let text = searchOption == .filename ? entry.name : entry.url.path
+      return text.localizedStandardContains(query)
+    }
 
     for entry in historyList {
       addToData(entry, forKey: getKey[groupBy]!(entry))
@@ -179,11 +189,9 @@ class HistoryWindowController: NSWindowController, NSOutlineViewDelegate, NSOutl
   }
 
   func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-    if let item = item {
-      return historyData[item as! String]!.count
-    } else {
-      return historyData.count
-    }
+    guard let item else { return historyDataKeys.count }
+    guard let key = item as? String else { return 0 }
+    return historyData[key]?.count ?? 0
   }
 
   func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
@@ -248,21 +256,7 @@ class HistoryWindowController: NSWindowController, NSOutlineViewDelegate, NSOutl
   // MARK: - Searching
 
   @IBAction func searchFieldAction(_ sender: NSSearchField) {
-    let searchString = sender.stringValue
-    guard !searchString.isEmpty else {
-      reloadData()
-      return
-    }
-    let newObjects = HistoryController.shared.$history.withLock {
-      $0.filter { entry in
-        let string = searchOption == .filename ? entry.name : entry.url.path
-        // Do a locale-aware, case and diacritic insensitive search:
-        return string.localizedStandardContains(searchString)
-      }
-    }
-    prepareData(fromHistory: newObjects)
-    outlineView.reloadData()
-    outlineView.expandItem(nil, expandChildren: true)
+    reloadData()
   }
 
   // MARK: - Menu
@@ -330,10 +324,12 @@ class HistoryWindowController: NSWindowController, NSOutlineViewDelegate, NSOutl
 
   @IBAction func searchOptionFilenameAction(_ sender: AnyObject) {
     searchOption = .filename
+    reloadData()
   }
 
   @IBAction func searchOptionFullPathAction(_ sender: AnyObject) {
     searchOption = .fullPath
+    reloadData()
   }
 
 }

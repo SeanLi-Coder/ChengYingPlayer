@@ -44,3 +44,16 @@ xcrun swiftc -o "$test_bundle/MacOS/PlaylistControllerTests" "${integration_sour
 for language in en zh-Hans; do
   "$test_bundle/MacOS/PlaylistControllerTests" "$project_root" -AppleLanguages "($language)"
 done
+
+action_sources=(
+  "$project_root/iina/Lock.swift"
+  "$project_root/iina/Atomic.swift"
+  "$project_root/iina/Regex.swift"
+  "$project_root/iina/MPVPlaylistItem.swift"
+  "$test_dir/Actions.swift"
+  "$project_root/Tools/PlaylistPresentationTests/Actions/Boundary.swift"
+)
+xcrun swiftc -target x86_64-apple-macos10.15 -typecheck "${action_sources[@]}"
+xcrun swiftc -o "$test_bundle/MacOS/PlaylistActionTests" "${action_sources[@]}" \
+  "$project_root/Tools/PlaylistPresentationTests/Actions/main.swift"
+"$test_bundle/MacOS/PlaylistActionTests"

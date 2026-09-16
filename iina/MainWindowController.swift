@@ -1079,6 +1079,7 @@ class MainWindowController: PlayerWindowController {
   }
 
   override func scrollWheel(with event: NSEvent) {
+    defer { finishTrackpadSeek(with: event, resumePlayback: !isInInteractiveMode) }
     guard !isInInteractiveMode else { return }
     if !isMomentumScrollingAllowed && !event.momentumPhase.isEmpty {
       // ignore delta caused by abrupt momentum phases
@@ -1878,10 +1879,10 @@ class MainWindowController: PlayerWindowController {
 
   // resize framebuffer in videoView after resizing.
   func windowDidEndLiveResize(_ notification: Notification) {
+    videoView.videoLayer.inLiveResize = false
     // Must not access mpv while it is asynchronously processing stop and quit commands.
     // See comments in windowWillExitFullScreen for details.
     guard player.info.state.active else { return }
-    videoView.videoLayer.inLiveResize = false
     updateWindowParametersForMPV()
   }
 

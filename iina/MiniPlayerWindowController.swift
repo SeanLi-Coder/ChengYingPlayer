@@ -148,6 +148,7 @@ class MiniPlayerWindowController: PlayerWindowController, NSPopoverDelegate {
   }
 
   override func scrollWheel(with event: NSEvent) {
+    defer { finishTrackpadSeek(with: event) }
     if isMouseEvent(event, inAnyOf: [playSlider]) && playSlider.isEnabled {
       seekOverride = true
     } else if isMouseEvent(event, inAnyOf: [volumeSliderView]) && volumeSlider.isEnabled {
@@ -189,6 +190,7 @@ class MiniPlayerWindowController: PlayerWindowController, NSPopoverDelegate {
   }
 
   func windowDidEndLiveResize(_ notification: Notification) {
+    videoView.videoLayer.inLiveResize = false
     guard player.info.state.active, let window = window else { return }
     let windowHeight = normalWindowHeight()
     if isPlaylistVisible {
@@ -205,7 +207,6 @@ class MiniPlayerWindowController: PlayerWindowController, NSPopoverDelegate {
         isPlaylistVisible = true
       }
     }
-    videoView.videoLayer.inLiveResize = false
   }
 
   // MARK: - Window delegate: Activeness status

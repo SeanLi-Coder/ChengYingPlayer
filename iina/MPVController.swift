@@ -812,18 +812,15 @@ class MPVController: NSObject {
   func getFilters(_ name: String) -> [MPVFilter] {
     Logger.ensure(name == MPVProperty.vf || name == MPVProperty.af, "getFilters() do not support \(name)!")
 
-    var result: [MPVFilter] = []
     var node = mpv_node()
-    mpv_get_property(mpv, name, MPV_FORMAT_NODE, &node)
-    guard let filters = (try? MPVNode.parse(node)!) as? [[String: Any?]] else { return result }
-    filters.forEach { f in
-      let filter = MPVFilter(name: f["name"] as! String,
-                             label: f["label"] as? String,
-                             params: f["params"] as? [String: String])
-      result.append(filter)
+    guard mpv != nil, mpv_get_property(mpv, name, MPV_FORMAT_NODE, &node) >= 0 else { return [] }
+    defer { mpv_free_node_contents(&node) }
+    guard let filters = (try? MPVNode.parse(node)) as? [[String: Any?]] else { return [] }
+    return filters.compactMap { filter in
+      guard let name = filter["name"] as? String else { return nil }
+      return MPVFilter(name: name, label: filter["label"] as? String,
+                       params: filter["params"] as? [String: String])
     }
-    mpv_free_node_contents(&node)
-    return result
   }
 
   /// Remove the audio or video filter at the given index in the list of filters.
@@ -862,10 +859,10 @@ class MPVController: NSObject {
 
     // Get the current list of filters from mpv as a mpv_node tree.
     var oldNode = mpv_node()
+    guard mpv != nil, mpv_get_property(mpv, name, MPV_FORMAT_NODE, &oldNode) >= 0 else { return false }
     defer { mpv_free_node_contents(&oldNode) }
-    mpv_get_property(mpv, name, MPV_FORMAT_NODE, &oldNode)
-
-    let oldList = oldNode.u.list!.pointee
+    guard oldNode.format == MPV_FORMAT_NODE_ARRAY, let list = oldNode.u.list else { return false }
+    let oldList = list.pointee
 
     // If the user uses mpv's JSON-based IPC protocol to make changes to mpv's filters behind IINA's
     // back then there is a very small window of vulnerability where the list of filters displayed
@@ -873,7 +870,7 @@ class MPVController: NSObject {
     // changes to mpv's filter properties and updates the filters displayed when changes occur, so
     // it is unlikely in practice that this method will be called with an invalid index, but we will
     // validate the index nonetheless to insure this code does not trigger a crash.
-    guard index < oldList.num else {
+    guard index >= 0, index < oldList.num, let oldValues = oldList.values else {
       log("Found \(oldList.num) \(name) filters, index of filter to remove (\(index)) is invalid",
           level: .error)
       return false
@@ -897,7 +894,7 @@ class MPVController: NSObject {
     // Make the new list of values point to the same values in the old list, skipping the entry to
     // be removed.
     var newValuesPtr = newValues
-    var oldValuesPtr = oldList.values!
+    var oldValuesPtr = oldValues
     for i in 0 ..< oldList.num {
       if i != index {
         newValuesPtr.pointee = oldValuesPtr.pointee
@@ -919,8 +916,7 @@ class MPVController: NSObject {
 
     // Set the list of filters using the new node that leaves out the filter to be removed.
     log("Set property: \(name)=<a mpv node>")
-    mpv_set_property(mpv, name, MPV_FORMAT_NODE, &newNode)
-    return true
+    return mpv_set_property(mpv, name, MPV_FORMAT_NODE, &newNode) >= 0
   }
 
   /** Set filter. only "af" or "vf" is supported for name */

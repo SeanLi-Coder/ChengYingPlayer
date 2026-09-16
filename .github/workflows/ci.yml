@@ -56,6 +56,13 @@ jobs:
       - name: Test native playback controls
         run: ./Tools/VideoToolsTests/run.sh
 
+      - name: Test inherited player bug regressions
+        run: |
+          bash Tools/PlaybackTimeTests/run.sh
+          bash Tools/HistorySearchTests/run.sh
+          bash Tools/PlaybackLifecycleTests/run.sh
+          bash Tools/WindowLifecycleTests/run.sh
+
       - name: Test simplified player features
         run: |
           ./Tools/SimplificationTests/run.sh
@@ -151,6 +158,9 @@ jobs:
 
       - name: Test live playlist reordering
         run: PATH="$PWD/deps/executable:$PATH" PLAYLIST_REQUIRE_LIVE_TESTS=1 bash Tools/PlaylistPlaybackTests/run.sh
+
+      - name: Test live filter node safety
+        run: bash Tools/PlaybackLifecycleTests/run_live.sh
 
       - name: Build application
         run: >-

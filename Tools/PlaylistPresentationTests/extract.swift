@@ -40,3 +40,19 @@ try controller.replacingOccurrences(of: "private ", with: "")
   .write(to: output.appendingPathComponent("Controller.swift"), atomically: true, encoding: .utf8)
 let cells = "import Cocoa\n" + section("class PlaylistTrackCellView:", "class SubPopoverViewController:")
 try cells.write(to: output.appendingPathComponent("Cells.swift"), atomically: true, encoding: .utf8)
+
+let actions = """
+import Cocoa
+
+final class PlaylistActionsUnderTest: NSObject {
+  let player: PlayerCore! = PlayerCore()
+  let playlistTableView = ActionTableView()
+  func buildMenu() -> NSMenu { NSMenu() }
+  func buildMenu(forRows rows: IndexSet) -> NSMenu { NSMenu() }
+\(section("  // MARK: - Context menu", "  private func buildMenu("))
+\(section("  func copyToPasteboard(", "  func tableView(_ tableView: NSTableView, writeRowsWith"))
+}
+\(section("class SubPopoverViewController:", "class ChapterTableCellView:"))
+"""
+try actions.replacingOccurrences(of: "private ", with: "")
+  .write(to: output.appendingPathComponent("Actions.swift"), atomically: true, encoding: .utf8)

@@ -192,7 +192,10 @@ class PlayerCore: NSObject {
     case ticketExpired
   }
 
-  private var backgroundTaskInUse = false
+  // Accessed only on the main thread. A previous file's completion can arrive after
+  // the next file has already queued its matcher, so a shared Boolean is insufficient.
+  private var backgroundTaskTickets = Set<Int>()
+  private var backgroundTaskInUse: Bool { !backgroundTaskTickets.isEmpty }
 
   var initialWindow: InitialWindowController!
   
@@ -1946,7 +1949,7 @@ class PlayerCore: NSObject {
     $backgroundQueueTicket.withLock { $0 += 1 }
     let shouldAutoLoadFiles = info.shouldAutoLoadFiles
     let currentTicket = backgroundQueueTicket
-    backgroundTaskInUse = true
+    backgroundTaskTickets.insert(currentTicket)
     backgroundQueue.async { [self] in
       do {
         // add files in same folder
@@ -1976,8 +1979,10 @@ class PlayerCore: NSObject {
       }
       // This code must be queued to the main thread to avoid thread data races.
       DispatchQueue.main.async { [self] in
-        backgroundTaskInUse = false
+        backgroundTaskTickets.remove(currentTicket)
         log("Background task has stopped")
+        // Do not stop or destroy mpv while another file's task still owns access to it.
+        guard !backgroundTaskInUse else { return }
         // If the player is stopping then that process has been waiting for this background task to
         // finish. Call stop again to continue with the process of stopping this player. Stop must
         // also be called if mpv itself stopped the core (idle state). If IINA is quitting then the

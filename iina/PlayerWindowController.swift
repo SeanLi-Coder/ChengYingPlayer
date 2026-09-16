@@ -104,7 +104,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       }
     case PK.relativeSeekAmount.rawValue:
       if let newValue = change[.newKey] as? Int {
-        relativeSeekAmount = newValue.clamped(to: 1...5)
+        relativeSeekAmount = newValue.clamped(to: 1...(AppData.seekAmountMap.count - 1))
       }
     case PK.volumeScrollAmount.rawValue:
       if let newValue = change[.newKey] as? Int {
@@ -507,20 +507,25 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
   }
   
   override func scrollWheel(with event: NSEvent) {
-    let isMouse = event.phase.isEmpty
+    // Momentum events have an empty phase too, but retain trackpad sensitivity.
+    let isMouse = event.phase.isEmpty && event.momentumPhase.isEmpty
     let isTrackpadBegan = event.phase.contains(.began)
-    let isTrackpadEnd = event.phase.contains(.ended)
+    let isTrackpadEnd = event.phase.contains(.ended) || event.phase.contains(.cancelled)
+    defer {
+      finishTrackpadSeek(with: event)
+      if event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled) {
+        scrollDirection = nil
+      }
+    }
 
     // determine direction
 
-    if isMouse || isTrackpadBegan {
+    if isMouse || isTrackpadBegan || scrollDirection == nil {
       if event.scrollingDeltaX != 0 {
         scrollDirection = .horizontal
       } else if event.scrollingDeltaY != 0 {
         scrollDirection = .vertical
       }
-    } else if isTrackpadEnd {
-      scrollDirection = nil
     }
 
     let scrollAction: Preference.ScrollAction
@@ -535,27 +540,24 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
         miniPlayer.handleVolumePopover(isTrackpadBegan, isTrackpadEnd, isMouse)
       }
     }
+    guard !event.phase.contains(.cancelled) else { return }
 
     // pause video when seek begins
 
     if scrollAction == .seek && isTrackpadBegan {
       // record pause status
+      wasPlayingBeforeSeeking = false
       if player.info.state == .playing {
         player.pause()
         wasPlayingBeforeSeeking = true
       }
     }
 
-    if isTrackpadEnd && wasPlayingBeforeSeeking {
-      // only resume playback when it was playing before seeking
-      if wasPlayingBeforeSeeking {
-        player.resume()
-      }
-      wasPlayingBeforeSeeking = false
-    }
-
     // handle the delta value
 
+    // unifiedDouble maps zero to a sign too; empty lifecycle packets must not act.
+    let rawDelta = scrollDirection == .horizontal ? event.scrollingDeltaX : event.scrollingDeltaY
+    guard rawDelta.isFinite, rawDelta != 0 else { return }
     let isPrecise = event.hasPreciseScrollingDeltas
     let isNatural = event.isDirectionInvertedFromDevice
 
@@ -569,26 +571,41 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     }
 
     let delta = scrollDirection == .horizontal ? deltaX : deltaY
+    guard delta.isFinite, delta != 0 else { return }
 
     // perform action
     
     switch scrollAction {
     case .seek:
-      let seekAmount = (isMouse ? AppData.seekAmountMapMouse : AppData.seekAmountMap)[relativeSeekAmount] * delta
+      let amounts = isMouse ? AppData.seekAmountMapMouse : AppData.seekAmountMap
+      let seekAmount = amounts[relativeSeekAmount.clamped(to: 1...(amounts.count - 1))] * delta
       player.seek(relativeSecond: seekAmount, option: useExactSeek)
     case .volume:
       // don't use precised delta for mouse
-      let newVolume = player.info.volume + (isMouse ? delta : AppData.volumeMap[volumeScrollAmount] * delta)
+      let sensitivity = AppData.volumeMap[volumeScrollAmount.clamped(to: 1...(AppData.volumeMap.count - 1))]
+      let newVolume = player.info.volume + (isMouse ? delta : sensitivity * delta)
       player.setVolume(newVolume)
       volumeSlider.doubleValue = newVolume
     case .playbackSpeed:
       let min = 0.05
       let max = 4.0
-      let newSpeed = round(1000 * (player.info.playSpeed + (player.info.playSpeed * AppData.playbackSpeedMap[playbackSpeedScrollAmount] * delta)).clamped(to: min...max)) / 1000
+      let sensitivity = AppData.playbackSpeedMap[playbackSpeedScrollAmount.clamped(to: 1...(AppData.playbackSpeedMap.count - 1))]
+      let newSpeed = round(1000 * (player.info.playSpeed + (player.info.playSpeed * sensitivity * delta)).clamped(to: min...max)) / 1000
       player.setSpeed(newSpeed)
     default:
       break
     }
+  }
+
+  /// Finish a seek even when a subclass rejects the event over a control or sidebar.
+  internal func finishTrackpadSeek(with event: NSEvent, resumePlayback: Bool = true) {
+    guard event.phase.contains(.ended) || event.phase.contains(.cancelled) else { return }
+    if wasPlayingBeforeSeeking {
+      wasPlayingBeforeSeeking = false
+      // The pause notification may still be queued when a short gesture ends.
+      if resumePlayback && (player.info.state == .playing || player.info.state == .paused) { player.resume() }
+    }
+    if event.phase.contains(.cancelled) { scrollDirection = nil }
   }
 
   /**
