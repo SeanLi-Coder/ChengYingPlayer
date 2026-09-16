@@ -42,15 +42,19 @@ def read_event(child, timeout=30):
     return json.loads(data)
 
 
-def request(url, *, token=None, origin=None):
+def request(url, *, token=None, origin=None, method="GET", payload=None):
     headers = {}
     if token:
         headers["Cookie"] = f"{COOKIE_NAME}={token}"
     if origin:
         headers["Origin"] = origin
+    data = None
+    if payload is not None:
+        data = json.dumps(payload).encode()
+        headers["Content-Type"] = "application/json"
     try:
         with build_opener(ProxyHandler({})).open(
-            Request(url, headers=headers), timeout=5
+            Request(url, headers=headers, method=method, data=data), timeout=5
         ) as response:
             return response.status, response.read(), response.headers
     except HTTPError as exc:
@@ -115,6 +119,41 @@ def run_smoke(command, ffmpeg, ffprobe):
                 config = json.loads(request(url + "api/config", token=token)[1])
                 assert config["download_dir"] == str(root / "downloads")
                 assert config["use_chrome_cookies"] is True
+                proxy_endpoint = url + "api/native/proxy"
+                assert request(proxy_endpoint)[0] == 403
+                assert (
+                    json.loads(request(proxy_endpoint, token=token)[1])["enabled"]
+                    is False
+                )
+                # Configure a nonresolving fixture only; never start a download or probe.
+                proxy_payload = {
+                    "enabled": True,
+                    "url": "https://fixture-user:fixture-password@proxy.example.invalid:8443/",
+                }
+                status, body, _ = request(
+                    proxy_endpoint, token=token, method="PUT", payload=proxy_payload
+                )
+                assert status == 200
+                assert json.loads(body) == {
+                    "enabled": True,
+                    "configured": True,
+                    "display_url": "https://proxy.example.invalid:8443",
+                    "has_credentials": True,
+                }
+                assert b"fixture-user" not in body and b"fixture-password" not in body
+                assert (root / "data/proxy.json").stat().st_mode & 0o077 == 0
+                assert (
+                    request(
+                        proxy_endpoint,
+                        token=token,
+                        method="PUT",
+                        payload={
+                            "enabled": True,
+                            "url": "socks5://fixture-user:fixture-password@localhost:1080",
+                        },
+                    )[0]
+                    == 422
+                )
                 duplicate = launch()
                 rejected = read_event(duplicate)
                 assert (
@@ -134,6 +173,19 @@ def run_smoke(command, ffmpeg, ffprobe):
                 fresh = read_event(restarted)
                 assert fresh["type"] == "ready" and fresh["token"] != token
                 assert request(fresh["url"], token=token)[0] == 403
+                restored_endpoint = fresh["url"] + "api/native/proxy"
+                restored_proxy = json.loads(
+                    request(restored_endpoint, token=fresh["token"])[1]
+                )
+                assert restored_proxy["enabled"] and restored_proxy["has_credentials"]
+                status, body, _ = request(
+                    restored_endpoint,
+                    token=fresh["token"],
+                    method="PUT",
+                    payload={"enabled": False, "url": ""},
+                )
+                assert status == 200 and not json.loads(body)["configured"]
+                assert "fixture-password" not in (root / "data/proxy.json").read_text()
                 restarted.stdin.close()
                 assert read_event(restarted)["type"] == "stopped"
                 assert restarted.wait(timeout=15) == 0
@@ -153,7 +205,7 @@ def run_smoke(command, ffmpeg, ffprobe):
                                 child.kill()
                             child.wait(timeout=5)
         print(
-            "Download center protocol, authentication, isolation, lock, restart, and EOF smoke checks passed."
+            "Download center protocol, authentication, proxy persistence, isolation, lock, restart, and EOF smoke checks passed."
         )
 
 

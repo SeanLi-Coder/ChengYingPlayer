@@ -52,6 +52,16 @@ def _check() -> dict[str, object]:
         raise RuntimeError("The bundled HTTPS certificate bundle is unavailable")
     if requests.Session is None or yt_dlp.YoutubeDL is None:
         raise RuntimeError("The bundled downloader imports are incomplete")
+    from proxy_config import normalize_proxy_url
+    from proxy_transport import RequestsRH, _browser_proxy, _download_proxy
+
+    proxy = normalize_proxy_url("socks5://127.0.0.1:7897/")
+    if _download_proxy(proxy) != "socks5h://127.0.0.1:7897":
+        raise RuntimeError("The bundled proxy transport has inconsistent SOCKS DNS routing")
+    if _browser_proxy(proxy) != {"server": "socks5://127.0.0.1:7897", "bypass": "<-loopback>"}:
+        raise RuntimeError("The bundled browser proxy configuration is unavailable")
+    if not {"http", "https", "socks5", "socks5h"}.issubset(RequestsRH._SUPPORTED_PROXY_SCHEMES):
+        raise RuntimeError("The bundled downloader lacks a required proxy protocol")
     extractors = gen_extractor_classes()
     names = {extractor.__name__ for extractor in extractors}
     if not {"YoutubeIE", "BiliBiliIE", "DouyinIE"}.issubset(names):

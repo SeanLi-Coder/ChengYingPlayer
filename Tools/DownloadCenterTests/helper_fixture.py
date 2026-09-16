@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Isolated stdio/loopback fixture; never imports app state or browser cookies."""
+import hashlib
 import json
 import os
 import sys
@@ -15,6 +16,10 @@ ROOT = Path(__file__).resolve().parents[2]
 VENDORED_ASSETS = ROOT / "Tools/DownloaderHelper/vendor/rednote/app/static"
 DESKTOP_ASSETS = ROOT / "Tools/DownloaderHelper/static"
 STOP = threading.Event()
+PROXY_LOCK = threading.RLock()
+PROXY = {"enabled": False, "url": "", "read_error": "", "busy": False,
+         "reads": 0, "writes": 0, "tests": 0, "config_writes": 0}
+CONFIG = {"download_dir": "/tmp/fixture/downloads", "use_chrome_cookies": False, "chrome_profile": None}
 PAGE = b"""<!doctype html><html><body><h1>Native bridge fixture</h1>
 <input id="download-dir"><p id="result">loaded</p>
 <script>
@@ -37,9 +42,89 @@ def fixture_job():
                        "output_paths": [image], "progress": {"percent": 100}}]}
 
 
+def proxy_status():
+    parsed = urlsplit(PROXY["url"])
+    return {"enabled": PROXY["enabled"], "configured": bool(PROXY["url"]),
+            "display_url": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}" if PROXY["url"] else "",
+            "has_credentials": bool(parsed.username or parsed.password)}
+
+
+def proxy_snapshot():
+    parsed = urlsplit(PROXY["url"])
+    credentials = f"{parsed.username or ''}:{parsed.password or ''}".encode()
+    return {**proxy_status(), "credential_digest": hashlib.sha256(credentials).hexdigest(),
+            "reads": PROXY["reads"], "writes": PROXY["writes"], "tests": PROXY["tests"],
+            "config_writes": PROXY["config_writes"], "download_dir": CONFIG["download_dir"]}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
+
+    def json_response(self, data, status=200):
+        content = json.dumps(data).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(content)
+
+    def proxy_error(self, code, status=503):
+        self.json_response({"detail": {"code": code, "message": "Never expose raw fixture-secret details"}}, status)
+
+    def do_PUT(self):
+        self.fixture_mutation()
+
+    def do_POST(self):
+        self.fixture_mutation()
+
+    def fixture_mutation(self):
+        if self.headers.get("Cookie") != "chengying_download_session=" + TOKEN:
+            self.json_response({}, 401)
+            return
+        if MODE != "frontend":
+            self.json_response({}, 404)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 4096:
+                raise ValueError("Invalid fixture payload length")
+            payload = json.loads(self.rfile.read(length))
+            if not isinstance(payload, dict):
+                raise ValueError("Invalid fixture payload")
+        except (ValueError, json.JSONDecodeError):
+            self.json_response({}, 400)
+            return
+        path = urlsplit(self.path).path
+        with PROXY_LOCK:
+            if path == "/api/fixture/proxy-mode" and self.command == "POST":
+                if "read_error" in payload:
+                    PROXY["read_error"] = payload["read_error"]
+                if "busy" in payload:
+                    PROXY["busy"] = payload["busy"] is True
+                self.json_response(proxy_snapshot())
+            elif path == "/api/native/proxy" and self.command == "PUT":
+                if PROXY["busy"]:
+                    self.proxy_error("proxy_busy", 409)
+                    return
+                if "url" in payload:
+                    PROXY["url"] = payload["url"]
+                PROXY["enabled"] = payload["enabled"]
+                PROXY["writes"] += 1
+                if payload.get("url") == "" and payload["enabled"] is False:
+                    PROXY["read_error"] = ""
+                self.json_response(proxy_status())
+            elif path == "/api/native/proxy/test" and self.command == "POST":
+                PROXY["tests"] += 1
+                # No actual outbound request or browser state is used by this fixture.
+                self.json_response({"ok": True, "elapsed_ms": 125})
+            elif path == "/api/config" and self.command == "PUT":
+                CONFIG.update(payload)
+                PROXY["config_writes"] += 1
+                self.json_response(CONFIG)
+            else:
+                self.json_response({}, 404)
 
     def do_GET(self):
         if self.headers.get("Cookie") != "chengying_download_session=" + TOKEN:
@@ -71,10 +156,28 @@ class Handler(BaseHTTPRequestHandler):
             mime = "application/json"
         elif MODE == "frontend":
             path = urlsplit(self.path).path
-            if path == "/":
+            if path == "/api/native/proxy":
+                with PROXY_LOCK:
+                    PROXY["reads"] += 1
+                    error = PROXY["read_error"]
+                    first_read = PROXY["reads"] == 1
+                    snapshot = proxy_status()
+                if first_read:
+                    STOP.wait(1)
+                if error:
+                    self.proxy_error("proxy_settings_unreadable" if error == "corrupt" else "proxy_unavailable")
+                else:
+                    self.json_response(snapshot)
+                return
+            elif path == "/api/fixture/proxy-mode":
+                with PROXY_LOCK:
+                    self.json_response(proxy_snapshot())
+                return
+            elif path == "/":
                 page = (VENDORED_ASSETS / "index.html").read_text()
                 page = page.replace("__APP_ID__", "native-fixture").replace("__APP_VERSION__", "1").replace("__BUILD_ID__", "fixture-build")
                 page = page.replace("<head>", "<head><script>window.fixtureErrors=[];addEventListener('error',e=>fixtureErrors.push(e.message));addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));</script>")
+                page = page.replace("</head>", "<script>new MutationObserver((records,observer)=>{const control=document.querySelector('#desktop-proxy-save');if(control){window.fixtureProxyInitiallyDisabled=control.disabled&&document.querySelector('#desktop-proxy-test').disabled&&document.querySelector('#desktop-proxy-url').disabled;observer.disconnect();}}).observe(document.documentElement,{childList:true,subtree:true});</script></head>")
                 page = page.replace("</head>", '<link rel="stylesheet" href="/native/desktop.css"><script src="/native/desktop.js" defer></script></head>')
                 content, mime = page.encode(), "text/html"
             elif path in {"/static/app.js", "/static/styles.css", "/static/favicon.svg", "/native/desktop.js", "/native/desktop.css"}:
@@ -86,7 +189,8 @@ class Handler(BaseHTTPRequestHandler):
                                       "source_build_id": "fixture-build", "restart_required": False}).encode()
                 mime = "application/json"
             elif path == "/api/config":
-                content = json.dumps({"download_dir": "/tmp/fixture/downloads", "use_chrome_cookies": False, "chrome_profile": None}).encode()
+                with PROXY_LOCK:
+                    content = json.dumps(CONFIG).encode()
                 mime = "application/json"
             elif path in {"/api/jobs", "/api/jobs/job"}:
                 content = json.dumps([fixture_job()] if path == "/api/jobs" else fixture_job()).encode()

@@ -102,6 +102,7 @@ jobs:
 
       - name: Test private download-center adapter
         run: |
+          node Tools/DownloaderProxyUITests/main.mjs
           python -m ruff check Tools/DownloaderHelper --exclude vendor
           python -m pytest -q Tools/DownloaderHelper/tests
           python Tools/DownloaderHelper/smoke_helper.py \

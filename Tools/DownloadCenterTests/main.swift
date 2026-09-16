@@ -384,12 +384,119 @@ if DownloadCenterService.supportsRuntime {
   wait("Clicking the image button resolves the saved image through the authenticated opening boundary") {
     PlayerCore.opened == [media, image]
   }
+  func proxyFixture(_ payload: String? = nil) {
+    let options = payload.map { "{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(\($0))}" } ?? "{cache:'no-store'}"
+    _ = fullPageValue("""
+      window.fixtureProxyDone = false;
+      fetch('/api/fixture/proxy-mode', \(options)).then(response => {
+        if (!response.ok) throw new Error('Fixture request failed');
+        return response.json();
+      }).then(data => { window.fixtureProxySnapshot = data; window.fixtureProxyDone = true; });
+      undefined
+      """)
+    waitForPage("The authenticated in-memory proxy fixture request completes", "window.fixtureProxyDone === true")
+  }
+  waitForPage("The real proxy UI finishes its initial read in direct mode", """
+    !document.querySelector('#desktop-proxy-save')?.disabled
+      && !document.querySelector('#desktop-proxy-enabled').checked
+      && document.querySelector('#desktop-proxy-saved').textContent.includes('直接连接')
+    """)
+  check(fullPageValue("window.fixtureProxyInitiallyDisabled") as? Bool == true,
+        "Proxy controls are disabled in the real DOM before the initial read completes")
+  check(fullPageValue("document.querySelector('#desktop-proxy-form').parentElement === document.querySelector('#settings-form').parentElement && !document.querySelector('#settings-form').contains(document.querySelector('#desktop-proxy-form'))") as? Bool == true,
+        "The proxy form is a sibling rather than a nested original settings form")
+  check(fullPageValue("document.querySelector('#desktop-proxy-url').type === 'password' && document.querySelector('#desktop-proxy-url').value === '' && document.querySelector('#desktop-proxy-url').autocomplete === 'off'") as? Bool == true,
+        "Real WebKit masks new proxy input without loading a saved credential into it")
+  proxyFixture()
+  check(fullPageValue("window.fixtureProxySnapshot.writes === 0 && window.fixtureProxySnapshot.config_writes === 0") as? Bool == true,
+        "Loading the independent proxy controls never writes either settings form")
+  _ = fullPageValue("document.querySelector('#download-dir').value = '/tmp/Fixture proxy settings'; document.querySelector('#save-settings-button').click(); undefined")
+  waitForPage("The original settings form still saves through its original implementation", "document.querySelector('#settings-saved').textContent === '已保存'")
+  proxyFixture()
+  check(fullPageValue("window.fixtureProxySnapshot.config_writes === 1 && window.fixtureProxySnapshot.writes === 0 && window.fixtureProxySnapshot.download_dir === '/tmp/Fixture proxy settings'") as? Bool == true,
+        "Saving the original directory does not save or enable the proxy")
+  for scheme in ["http", "https", "socks5"] {
+    _ = fullPageValue("""
+      document.querySelector('#desktop-proxy-url').value = '\(scheme)://127.0.0.1:7897/';
+      document.querySelector('#desktop-proxy-url').dispatchEvent(new Event('input', {bubbles:true}));
+      document.querySelector('#desktop-proxy-enabled').checked = true;
+      document.querySelector('#desktop-proxy-enabled').dispatchEvent(new Event('change', {bubbles:true}));
+      document.querySelector('#desktop-proxy-save').click(); undefined
+      """)
+    waitForPage("The real proxy form saves a \(scheme) endpoint", """
+      !document.querySelector('#desktop-proxy-save').disabled
+        && document.querySelector('#desktop-proxy-saved').textContent.includes('\(scheme)://127.0.0.1:7897')
+        && document.querySelector('#desktop-proxy-url').value === ''
+      """)
+    proxyFixture()
+    check(fullPageValue("window.fixtureProxySnapshot.enabled && window.fixtureProxySnapshot.display_url === '\(scheme)://127.0.0.1:7897' && window.fixtureProxySnapshot.config_writes === 1") as? Bool == true,
+          "Saving a \(scheme) proxy preserves the original download settings")
+  }
+  _ = fullPageValue("""
+    document.querySelector('#desktop-proxy-url').value = 'http://fixture-user:fixture-password@127.0.0.1:7897';
+    document.querySelector('#desktop-proxy-url').dispatchEvent(new Event('input', {bubbles:true}));
+    document.querySelector('#desktop-proxy-save').click(); undefined
+    """)
+  waitForPage("The proxy form saves HTTP authentication without echoing it", """
+    !document.querySelector('#desktop-proxy-save').disabled
+      && document.querySelector('#desktop-proxy-url').value === ''
+      && document.querySelector('#desktop-proxy-saved').textContent.includes('认证')
+      && !document.body.textContent.includes('fixture-user') && !document.body.textContent.includes('fixture-password')
+    """)
+  proxyFixture()
+  _ = fullPageValue("window.fixtureCredentialDigest = window.fixtureProxySnapshot.credential_digest; undefined")
+  for enabled in [false, true] {
+    _ = fullPageValue("document.querySelector('#desktop-proxy-enabled').checked = \(enabled); document.querySelector('#desktop-proxy-enabled').dispatchEvent(new Event('change', {bubbles:true})); document.querySelector('#desktop-proxy-save').click(); undefined")
+    waitForPage("A blank address can \(enabled ? "enable" : "disable") the saved authenticated endpoint", "!document.querySelector('#desktop-proxy-save').disabled && document.querySelector('#desktop-proxy-status').textContent.includes('\(enabled ? "保存并启用" : "已关闭")')")
+    proxyFixture()
+    check(fullPageValue("window.fixtureProxySnapshot.enabled === \(enabled) && window.fixtureProxySnapshot.has_credentials && window.fixtureProxySnapshot.credential_digest === window.fixtureCredentialDigest") as? Bool == true,
+          "Changing the enabled state with an empty input preserves the exact stored authentication")
+  }
+  _ = fullPageValue("""
+    window.fixtureWritesBeforeTest = window.fixtureProxySnapshot.writes;
+    document.querySelector('#desktop-proxy-url').value = 'https://127.0.0.1:7898';
+    document.querySelector('#desktop-proxy-url').dispatchEvent(new Event('input', {bubbles:true}));
+    document.querySelector('#desktop-proxy-test').click(); undefined
+    """)
+  waitForPage("Real WebKit can test an unsaved endpoint without clearing the draft", """
+    !document.querySelector('#desktop-proxy-test').disabled
+      && document.querySelector('#desktop-proxy-status').textContent.includes('HTTPS 连接成功')
+      && document.querySelector('#desktop-proxy-url').value === 'https://127.0.0.1:7898'
+    """)
+  proxyFixture()
+  check(fullPageValue("window.fixtureProxySnapshot.tests === 1 && window.fixtureProxySnapshot.writes === window.fixtureWritesBeforeTest && window.fixtureProxySnapshot.display_url === 'http://127.0.0.1:7897'") as? Bool == true,
+        "Testing changes neither the saved proxy endpoint nor its write count")
+  proxyFixture("{busy:true}")
+  _ = fullPageValue("document.querySelector('#desktop-proxy-save').click(); undefined")
+  waitForPage("A busy backend leaves the unsaved proxy draft available for retry", """
+    !document.querySelector('#desktop-proxy-save').disabled
+      && document.querySelector('#desktop-proxy-status').textContent.includes('后处理')
+      && document.querySelector('#desktop-proxy-url').value === 'https://127.0.0.1:7898'
+      && !document.body.textContent.includes('fixture-secret')
+    """)
+  proxyFixture("{busy:false}")
+  check(fullPageValue("window.fixtureProxySnapshot.writes === window.fixtureWritesBeforeTest") as? Bool == true,
+        "A rejected busy save cannot mutate the stored configuration")
+  _ = fullPageValue("""
+    document.querySelector('#desktop-proxy-url').value = 'socks5://fixture-user:fixture-password@127.0.0.1:7897';
+    document.querySelector('#desktop-proxy-test').click(); undefined
+    """)
+  check(fullPageValue("document.querySelector('#desktop-proxy-status').textContent.includes('本地 HTTP') && !document.body.textContent.includes('fixture-password')") as? Bool == true,
+        "Unsupported SOCKS authentication receives a safe local-HTTP instruction")
+  proxyFixture()
+  check(fullPageValue("window.fixtureProxySnapshot.tests === 1") as? Bool == true,
+        "Client-side SOCKS authentication rejection never reaches the test endpoint")
+  _ = fullPageValue("document.querySelector('#desktop-proxy-url').value = ''; undefined")
   if let captureDirectory = ProcessInfo.processInfo.environment["CHENGYING_CAPTURE_DIR"] {
     let directory = URL(fileURLWithPath: captureDirectory, isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let language = Bundle.main.preferredLocalizations.first ?? "en"
-    for section in ["overview", "outputs"] {
-      _ = fullPageValue(section == "overview" ? "window.scrollTo(0, 0); undefined" : "document.querySelectorAll('.item-files').forEach(files => { if (!files.open) files.querySelector('summary').click(); }); document.querySelector('#items-list').scrollIntoView(); undefined")
+    for section in ["overview", "outputs", "proxy"] {
+      let scrollScript: String
+      if section == "overview" { scrollScript = "window.scrollTo(0, 0); undefined" }
+      else if section == "proxy" { scrollScript = "document.querySelector('#desktop-proxy-form').scrollIntoView(); undefined" }
+      else { scrollScript = "document.querySelectorAll('.item-files').forEach(files => { if (!files.open) files.querySelector('summary').click(); }); document.querySelector('#items-list').scrollIntoView(); undefined" }
+      _ = fullPageValue(scrollScript)
       pumpEvents(for: 0.2)
       var captured: NSImage?
       var complete = false
@@ -403,6 +510,103 @@ if DownloadCenterService.supportsRuntime {
       try png.write(to: directory.appendingPathComponent("download-center-\(language)-\(section).png"))
     }
   }
+  let originalWindowSize = fullController.window!.frame.size
+  fullController.window?.setContentSize(NSSize(width: 800, height: 600))
+  pumpEvents(for: 0.2)
+  _ = fullPageValue("document.querySelector('#desktop-proxy-save').scrollIntoView({block:'center'}); undefined")
+  check(fullPageValue("""
+    (() => {
+      const form = document.querySelector('#desktop-proxy-form');
+      const input = document.querySelector('#desktop-proxy-url');
+      const buttons = [...form.querySelectorAll('button:not([hidden])')];
+      const formRect = form.getBoundingClientRect();
+      return document.documentElement.scrollWidth <= window.innerWidth + 1
+        && formRect.width > 250 && input.getBoundingClientRect().width <= formRect.width
+        && buttons.every(button => {
+          const rect = button.getBoundingClientRect();
+          return rect.left >= 0 && rect.right <= window.innerWidth && rect.height >= 30;
+        })
+        && document.querySelector('#desktop-proxy-save').getBoundingClientRect().bottom <= window.innerHeight;
+    })()
+    """) as? Bool == true,
+        "At the minimum native width, proxy fields and wrapped action buttons remain reachable without horizontal scrolling")
+  if let captureDirectory = ProcessInfo.processInfo.environment["CHENGYING_CAPTURE_DIR"] {
+    var captured: NSImage?
+    var complete = false
+    fullController.webView.takeSnapshot(with: nil) { image, _ in captured = image; complete = true }
+    wait("WebKit captures the minimum-width proxy controls") { complete }
+    guard let tiff = captured?.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+          let png = bitmap.representation(using: .png, properties: [:]) else { fatalError("The narrow proxy snapshot could not be encoded") }
+    let language = Bundle.main.preferredLocalizations.first ?? "en"
+    try png.write(to: URL(fileURLWithPath: captureDirectory).appendingPathComponent("download-center-\(language)-proxy-narrow.png"))
+  }
+  fullController.window?.setFrame(NSRect(origin: fullController.window!.frame.origin, size: originalWindowSize), display: true)
+
+  proxyFixture("{read_error:'unavailable'}")
+  fullController.webView.reload()
+  waitForPage("A failed first read disables proxy writes and offers only safe reload", """
+    document.querySelector('#desktop-proxy-retry') && !document.querySelector('#desktop-proxy-retry').hidden
+      && !document.querySelector('#desktop-proxy-retry').disabled
+      && document.querySelector('#desktop-proxy-save').disabled
+      && document.querySelector('#desktop-proxy-test').disabled
+      && document.querySelector('#desktop-proxy-clear').disabled
+      && document.querySelector('#desktop-proxy-status').textContent.includes('重新读取')
+    """)
+  proxyFixture("{read_error:''}")
+  _ = fullPageValue("document.querySelector('#desktop-proxy-retry').click(); undefined")
+  waitForPage("A successful retry recovers the saved proxy without exposing credentials", """
+    !document.querySelector('#desktop-proxy-save').disabled
+      && document.querySelector('#desktop-proxy-retry').hidden
+      && document.querySelector('#desktop-proxy-url').value === ''
+      && document.querySelector('#desktop-proxy-saved').textContent.includes('认证')
+    """)
+  proxyFixture("{read_error:'corrupt'}")
+  fullController.webView.reload()
+  waitForPage("A confirmed corrupt-settings response exposes explicit reset while save and test remain disabled", """
+    document.querySelector('#desktop-proxy-clear') && !document.querySelector('#desktop-proxy-clear').disabled
+      && document.querySelector('#desktop-proxy-clear').textContent.includes('损坏')
+      && document.querySelector('#desktop-proxy-save').disabled && document.querySelector('#desktop-proxy-test').disabled
+    """)
+  var resetClickFinished = false
+  fullController.webView.evaluateJavaScript("document.querySelector('#desktop-proxy-clear').click(); undefined") { _, _ in resetClickFinished = true }
+  wait("Resetting corrupt proxy settings requests a real native confirmation sheet") { fullController.window?.attachedSheet != nil }
+  if let sheet = fullController.window?.attachedSheet {
+    fullController.window?.endSheet(sheet, returnCode: .alertSecondButtonReturn)
+  }
+  wait("Cancelling the proxy reset dismisses its pending JavaScript confirmation") { resetClickFinished }
+  proxyFixture()
+  check(fullPageValue("window.fixtureProxySnapshot.writes === 6 && window.fixtureProxySnapshot.has_credentials") as? Bool == true,
+        "Cancelling reset preserves the authenticated configuration")
+  resetClickFinished = false
+  fullController.webView.evaluateJavaScript("document.querySelector('#desktop-proxy-clear').click(); undefined") { _, _ in resetClickFinished = true }
+  wait("A second explicit reset can present the native confirmation") { fullController.window?.attachedSheet != nil }
+  if let sheet = fullController.window?.attachedSheet {
+    fullController.window?.endSheet(sheet, returnCode: .alertFirstButtonReturn)
+  }
+  wait("Confirming reset resolves the JavaScript confirmation") { resetClickFinished }
+  waitForPage("Confirmed reset clears corrupt proxy state and returns the real form to direct mode", """
+    !document.querySelector('#desktop-proxy-save').disabled
+      && !document.querySelector('#desktop-proxy-enabled').checked
+      && document.querySelector('#desktop-proxy-clear').disabled
+      && document.querySelector('#desktop-proxy-saved').textContent.includes('直接连接')
+    """)
+  proxyFixture()
+  check(fullPageValue("window.fixtureProxySnapshot.writes === 7 && !window.fixtureProxySnapshot.configured && !window.fixtureProxySnapshot.has_credentials") as? Bool == true,
+        "Confirmed reset removes the endpoint and credentials in exactly one explicit write")
+  _ = fullPageValue("window.fixtureWritesBeforeBlock = window.fixtureProxySnapshot.writes; window.fixtureTestsBeforeBlock = window.fixtureProxySnapshot.tests; document.body.classList.add('version-blocked'); undefined")
+  waitForPage("A live version mismatch disables every proxy control in real WebKit", """
+    [...document.querySelector('#desktop-proxy-form').querySelectorAll('button,input')].every(control => control.disabled)
+    """)
+  _ = fullPageValue("""
+    document.querySelector('#desktop-proxy-form').dispatchEvent(new Event('submit', {bubbles:true,cancelable:true}));
+    document.querySelector('#desktop-proxy-test').dispatchEvent(new Event('click'));
+    document.querySelector('#desktop-proxy-clear').dispatchEvent(new Event('click')); undefined
+    """)
+  proxyFixture()
+  check(fullPageValue("window.fixtureProxySnapshot.writes === window.fixtureWritesBeforeBlock && window.fixtureProxySnapshot.tests === window.fixtureTestsBeforeBlock") as? Bool == true,
+        "Programmatic events cannot bypass the live version gate to save, clear, or test")
+  check(fullPageValue("window.fixtureErrors.length") as? Int == 0,
+        "All real proxy interactions finish without page errors or unhandled promise rejections")
   fullController.close()
   fullService.shutdown()
 } else {

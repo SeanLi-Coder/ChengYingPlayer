@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from proxy_config import ProxySettingsError
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -174,7 +175,9 @@ def validate_download_directory(value: object, *, bundle_root: Path) -> str:
     return str(path)
 
 
-def install_desktop_adapter(engine, *, token: str, origin: str, assets: Path):
+def install_desktop_adapter(
+    engine, *, token: str, origin: str, assets: Path, proxy_settings=None
+):
     application = engine.app
     # The original engine/API/static files remain unmodified. Only its host page
     # receives desktop affordances; its own build handshake still covers its source.
@@ -244,6 +247,98 @@ def install_desktop_adapter(engine, *, token: str, origin: str, assets: Path):
             Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         )
         return {"chrome_installed": any(path.is_file() for path in chrome_paths)}
+
+    def require_proxy_settings():
+        if proxy_settings is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "proxy_unavailable",
+                    "message": "Proxy settings are unavailable.",
+                },
+            )
+        return proxy_settings
+
+    def proxy_http_error(error):
+        return HTTPException(
+            status_code=error.status, detail={"code": error.code, "message": str(error)}
+        )
+
+    async def proxy_payload(request):
+        raw = bytearray()
+        async for part in request.stream():
+            raw.extend(part)
+            if len(raw) > 4096:
+                raise HTTPException(
+                    status_code=413,
+                    detail={
+                        "code": "invalid_proxy",
+                        "message": "Proxy settings are too large.",
+                    },
+                )
+        try:
+            import json
+
+            return json.loads(raw)
+        except (ValueError, UnicodeError):
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_proxy", "message": "Invalid proxy settings."},
+            ) from None
+
+    @application.get("/api/native/proxy", include_in_schema=False)
+    def proxy_status():
+        try:
+            return require_proxy_settings().status()
+        except ProxySettingsError as error:
+            raise proxy_http_error(error) from None
+
+    @application.put("/api/native/proxy", include_in_schema=False)
+    async def save_proxy(request: Request):
+        payload = await proxy_payload(request)
+        try:
+            return await run_in_threadpool(require_proxy_settings().save, payload)
+        except ProxySettingsError as error:
+            raise proxy_http_error(error) from None
+
+    @application.post("/api/native/proxy/test", include_in_schema=False)
+    async def test_proxy(request: Request):
+        settings = require_proxy_settings()
+        payload = await proxy_payload(request)
+        try:
+            url = settings.proxy_for_test(payload)
+        except ProxySettingsError as error:
+            raise proxy_http_error(error) from None
+
+        def probe():
+            from proxy_transport import probe_proxy
+
+            if not settings.test_lock.acquire(blocking=False):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "proxy_test_busy",
+                        "message": "A proxy connection test is already running.",
+                    },
+                )
+            try:
+                elapsed = probe_proxy(url, timeout=10)
+                return {
+                    "ok": True,
+                    "elapsed_ms": elapsed,
+                    "message": "The proxy reached the HTTPS test endpoint. This does not verify website login or download permissions.",
+                }
+            except Exception:  # noqa: BLE001 -- Do not expose transport credentials or diagnostics.
+                # Network errors may contain credentials. Return only a fixed message.
+                return {
+                    "ok": False,
+                    "code": "proxy_test_failed",
+                    "message": "The proxy could not reach the HTTPS test endpoint. Check the address, protocol, port, authentication, and trusted certificates.",
+                }
+            finally:
+                settings.test_lock.release()
+
+        return await run_in_threadpool(probe)
 
     application.mount("/native", StaticFiles(directory=assets), name="desktop-assets")
     application.add_middleware(DesktopSessionMiddleware, token=token, origin=origin)

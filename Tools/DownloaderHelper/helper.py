@@ -165,6 +165,7 @@ def main(argv=None):
     engine = None
     listener = None
     lock = None
+    restore_proxy_transports = None
     sys.stdout = sys.stderr
     # Private task/config files; this does not alter files in the user's source repo.
     os.umask(0o077)
@@ -196,6 +197,11 @@ def main(argv=None):
         lock = ProjectLock(args.data_dir / "desktop.lock")
         lock.acquire()
         engine = importlib.import_module("app.main")
+        from proxy_config import ProxySettings
+        from proxy_transport import install_proxy_transports
+
+        proxy_settings = ProxySettings(args.data_dir, engine.manager)
+        restore_proxy_transports = install_proxy_transports(proxy_settings.proxy_url)
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(("127.0.0.1", 0))
         listener.listen(128)
@@ -213,6 +219,7 @@ def main(argv=None):
             token=token,
             origin=origin,
             assets=ROOT / "static",
+            proxy_settings=proxy_settings,
         )
         import uvicorn
 
@@ -294,6 +301,8 @@ def main(argv=None):
             controller.request()
         if engine is not None:
             engine.manager.shutdown(wait=True, cancel_running=True)
+        if restore_proxy_transports is not None:
+            restore_proxy_transports()
         if listener is not None:
             listener.close()
         if lock is not None:

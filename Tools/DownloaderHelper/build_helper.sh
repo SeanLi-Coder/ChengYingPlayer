@@ -43,7 +43,7 @@ for package, version in expected.items():
         raise SystemExit(f"Install the pinned build lock: {package} {version} is required, found {actual}.")
 PY
 
-for required in helper.py host.py bundle_smoke.py runtime-artifacts.json vendor/rednote/app/main.py; do
+for required in helper.py host.py proxy_config.py proxy_transport.py bundle_smoke.py runtime-artifacts.json vendor/rednote/app/main.py; do
   if [[ ! -s "$SCRIPT_DIR/$required" ]]; then
     echo "Required helper source is unavailable: $required" >&2
     exit 2

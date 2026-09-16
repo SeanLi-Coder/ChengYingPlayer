@@ -42,6 +42,45 @@ its private runtime directory, authenticated loopback transport, and shutdown.
 
 ## Preserved behavior
 
+### Native proxy integration
+
+The native adapter adds `proxy_config.py` and `proxy_transport.py` without changing
+the imported downloader source or its manifest. Private `proxy.json` settings use
+atomic writes and owner-only permissions, separate from upstream `config.json`
+and task records. Authenticated `/api/native/proxy` endpoints expose only redacted
+status. Saving a changed route takes the manager's submission lock and refuses
+while any submitted job is unfinished, including queued work and cancellation
+cleanup. Retrying a completed or cancelled task uses the newly saved route.
+
+Only the helper process receives the transport hooks: both imported `YoutubeDL`
+references, Playwright's newly launched headless browsers, and Douyin's separate
+HTML `build_opener` path. The latter uses the already pinned yt-dlp `RequestsRH`,
+preserving the caller's cookie jar, HTTP errors, cancellation checks, redirect
+checks, body limit, and response lifetime. This avoids urllib's lack of full
+SOCKS5 and HTTPS-proxy support. No new networking dependency or local forwarding
+server is introduced. Both browser page requests and browser-context API requests
+use the explicit route; existing user Chrome sessions and system settings are
+not modified. Existing HTTP Range/retry and media validation logic is retained.
+
+Supported routes are HTTP, TLS-authenticated HTTPS proxies, and unauthenticated
+SOCKS5 with remote destination DNS. HTTP(S) credentials use ASCII to avoid differing
+browser and media-client authentication encodings. User information is separated into
+the browser's authentication fields and redacted from diagnostics. Chrome does
+not support authenticated SOCKS5; such settings are rejected before saving.
+Disabled proxy settings mean explicit direct mode, even if the parent process
+has proxy environment variables. An invalid saved file blocks network entry
+points until explicitly cleared or repaired; a failed proxy never falls back to
+direct mode. HTTPS certificate verification remains enabled.
+
+`tests/test_proxy_config.py` covers protected APIs and persistence, and
+`tests/test_proxy_transport.py` exercises local HTTP/SOCKS5/TLS proxy fixtures.
+When Google Chrome is installed it also tests real headless browser requests,
+without visiting public sites or loading user profiles. The isolated frontend
+suite is `node Tools/DownloaderProxyUITests/main.mjs`; native WebKit coverage is
+included in `bash Tools/DownloadCenterTests/run.sh`.
+
+### Original engine guarantees
+
 The original engine retains Xiaohongshu, Douyin, Bilibili, and YouTube discovery/downloads;
 author and item identity validation; original-quality selection and FFprobe
 verification; video/audio remuxing; photos and live photos; Chrome profile and
