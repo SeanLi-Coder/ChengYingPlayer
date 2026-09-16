@@ -28,7 +28,7 @@
 "guide.welcome.clip" = "只输入起点和终点即可高保真剪辑，并可实时预览所选区间。";
 "guide.welcome.frames" = "最多选择 5 秒区间，以原视频分辨率逐帧导出图片。";
 "guide.welcome.rotate" = "永久旋转 90°、180°、270° 或 360°，始终生成新文件，不覆盖原片。";
-"guide.welcome.source" = "查看项目源码与安装包";
+"guide.welcome.source" = "查看项目源码与发布页";
 "guide.basic_settings" = "基本设置";
 "guide.faq" = "常见问题";
 
