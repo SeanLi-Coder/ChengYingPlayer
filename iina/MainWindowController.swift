@@ -565,6 +565,7 @@ class MainWindowController: PlayerWindowController {
     [leftLabel, rightLabel].forEach {
       $0?.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
       $0?.textColor = .secondaryLabelColor
+      $0?.alphaValue = 1
     }
     playButton.contentTintColor = ChengYingStyle.accent
 

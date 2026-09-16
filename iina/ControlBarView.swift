@@ -36,7 +36,7 @@ class ControlBarView: NSVisualEffectView {
   }
 
   private func updateBorder() {
-    effectiveAppearance.performAsCurrentDrawingAppearance {
+    effectiveAppearance.applyAppearanceFor {
       layer?.borderColor = ChengYingStyle.border.cgColor
     }
   }
