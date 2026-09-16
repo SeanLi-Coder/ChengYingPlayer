@@ -74,6 +74,11 @@ class IPC:
             "seeking": self.get("seeking", optional=True),
             "pause": self.get("pause", optional=True),
             "path": self.get("path", optional=True),
+            "a": self.get("ab-loop-a", optional=True),
+            "b": self.get("ab-loop-b", optional=True),
+            "count": self.get("ab-loop-count", optional=True),
+            "remaining_loops": self.get("remaining-ab-loops", optional=True),
+            "idle": self.get("idle-active", optional=True),
         }
         self.trace.append(state)
         return state
@@ -169,11 +174,18 @@ def exercise(ipc: IPC, first: Path, second: Path):
     wait_until(lambda: same_path(ipc.get("path", optional=True), first), "first test media to load")
     wait_until(lambda: ipc.get("time-pos", optional=True) is not None, "first video timestamp")
     ipc.set("pause", True)
+    # IPC can see libmpv's first timestamp before AppKit processes fileStarted
+    # and fileLoaded. Native keyboard actions remain disabled during this phase.
+    # Let queued startup/UI callbacks settle before bypassing them through IPC.
+    monitor_range(ipc, first, 0, 3, duration=2.0)
+    check_paused(ipc)
     ipc.request(["seek", 0, "absolute+exact"])
     configure_loop(ipc, 0, 1)
     settled_in_range(ipc, first, 0, 1)
     if float(ipc.get("ab-loop-a")) != 0:
         raise AssertionError("A=0 was not retained by mpv")
+    if float(ipc.get("ab-loop-b")) != 1 or str(ipc.get("ab-loop-count")) != "inf":
+        raise AssertionError(f"Loop configuration was not retained: {ipc.snapshot()}")
     print("PASS: Zero-start loop is active in the real App", flush=True)
 
     for speed in (16.0, 0.1):
@@ -316,6 +328,7 @@ def main() -> int:
                 str(executable),
                 "--no-stdin", f"--mpv-input-ipc-server={directory / 'ipc.sock'}",
                 "--mpv-pause=yes", "--mpv-config=no", "--mpv-hwdec=no",
+                "-enableAdvancedSettings", "YES", "-enableLogging", "YES", "-logLevel", "0",
                 # Foundation's argument domain overrides preferences for this
                 # process only. Do not use defaults write or change the user's HOME.
                 "-recordPlaybackHistory", "NO", "-recordRecentFiles", "NO",
