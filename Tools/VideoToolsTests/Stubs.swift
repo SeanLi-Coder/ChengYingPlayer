@@ -29,8 +29,13 @@ final class MPVController {
   var hooks: [MPVHookValue] = []
   var reads = 0
   func getFlag(_ key: String) -> Bool { reads += 1; return values[key] as? Bool ?? false }
-  func getDouble(_ key: String) -> Double { reads += 1; return values[key] as? Double ?? 0 }
-  func getString(_ key: String) -> String? { reads += 1; return values[key] as? String }
+  func getDouble(_ key: String) -> Double { reads += 1; return values[key] as? Double ?? Double(values[key] as? String ?? "") ?? 0 }
+  func getString(_ key: String) -> String? {
+    reads += 1
+    if let value = values[key] as? String { return value }
+    if let value = values[key] as? Double { return String(value) }
+    return nil
+  }
   func getInt(_ key: String) -> Int { reads += 1; return values[key] as? Int ?? 0 }
   func setString(_ key: String, _ value: String) { values[key] = value }
   func setDouble(_ key: String, _ value: Double) { values[key] = value }
@@ -41,26 +46,68 @@ final class PlayerCore: NSObject {
   let info = PlaybackInfo()
   let mpv = MPVController()
   var videoToolsMediaGeneration: UInt64 = 1
+  var videoToolsLoopRecovery = VideoToolsLoopRecovery()
   var lastStepBackwards: Bool?
   func syncPositionIfNeeded() {}
   func togglePause() { mpv.values["pause"] = !mpv.getFlag("pause") }
   func pause() { mpv.values["pause"] = true }
   func resume() { mpv.values["pause"] = false }
-  func seek(absoluteSecond: Double) { mpv.values["time"] = absoluteSecond }
+  func seek(absoluteSecond: Double) { mpv.values["time"] = videoToolsLoopRange?.clamped(absoluteSecond) ?? absoluteSecond }
   func syncAbLoop() {}
   func frameStep(backwards: Bool) { lastStepBackwards = backwards; mpv.values["time"] = mpv.getDouble("time") + (backwards ? -1.0 : 1.0) / 30 }
   func setSpeed(_ value: Double) { mpv.values["speed"] = value }
 }
-final class VideoToolsTaskManager {
+final class VideoToolsTaskManager: VideoToolsRotationTaskManaging {
   static let shared = VideoToolsTaskManager()
   var snapshot: VideoToolsTaskSnapshot?
   var request: VideoToolsRequest?
+  var requests: [VideoToolsRequest] = []
+  var cancellations: [String] = []
+  var simulatesTaskLifecycle = false
+  var startError: Error?
   @discardableResult
   func start(operation: VideoToolsOperation, inputURL: URL, start: Double?, end: Double?, degrees: Int?, outputDirectory: URL?) throws -> String {
-    request = .start(id: "test", operation: operation, inputURL: inputURL, start: start, end: end, degrees: degrees, outputDirectory: outputDirectory)
-    return "test"
+    if snapshot?.isActive == true { throw VideoToolsClientError.busy }
+    if let startError { throw startError }
+    let id = "test-\(requests.count + 1)"
+    let newRequest = VideoToolsRequest.start(id: id, operation: operation, inputURL: inputURL, start: start, end: end, degrees: degrees, outputDirectory: outputDirectory)
+    request = newRequest
+    requests.append(newRequest)
+    if simulatesTaskLifecycle {
+      snapshot = VideoToolsTaskSnapshot(
+        id: id, operation: operation, inputURL: inputURL, phase: .starting,
+        progress: 0, message: "Starting", elapsedSeconds: nil, etaSeconds: nil,
+        frameCount: nil, outputURL: nil, errorCode: nil, error: nil
+      )
+      notifyTaskChange()
+    }
+    return id
   }
-  func cancelCurrent() {}
+  func cancelCurrent() {
+    guard let task = snapshot, task.isActive else { return }
+    cancellations.append(task.id)
+    finishTask(.cancelling)
+  }
+  func finishTask(_ phase: VideoToolsTaskPhase, outputURL: URL? = nil) {
+    snapshot?.phase = phase
+    if phase == .completed {
+      snapshot?.progress = 100
+      snapshot?.outputURL = outputURL
+    } else if phase == .failed {
+      snapshot?.error = "Test export failure"
+    }
+    notifyTaskChange()
+  }
+  func notifyTaskChange() {
+    NotificationCenter.default.post(name: .videoToolsTaskChanged, object: self)
+  }
+  func startRotation(inputURL: URL, degrees: Int) throws -> String {
+    try start(operation: .rotate, inputURL: inputURL, start: nil, end: nil, degrees: degrees, outputDirectory: nil)
+  }
+  func cancelRotation(taskID: String) {
+    guard snapshot?.id == taskID else { return }
+    cancelCurrent()
+  }
 }
 extension Notification.Name {
   static let iinaFileLoaded = Notification.Name("loaded")

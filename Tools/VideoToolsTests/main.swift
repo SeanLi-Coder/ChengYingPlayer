@@ -64,10 +64,10 @@ frames.selectedSegment = 1; action(frames)
 check(player.lastStepBackwards == false && player.mpv.getFlag("pause"), "Next frame pauses and steps")
 speeds.selectItem(at: 1); action(speeds)
 check(near(player.mpv.getDouble("speed"), 0.5), "Speed popup selects half speed")
-action(faster); check(near(player.mpv.getDouble("speed"), 0.75), "Faster picks next speed")
+action(faster); check(near(player.mpv.getDouble("speed"), 0.6), "Faster adds one tenth")
 action(slower); check(near(player.mpv.getDouble("speed"), 0.5), "Slower picks previous speed")
 player.mpv.values["speed"] = 1.1
-action(faster); check(near(player.mpv.getDouble("speed"), 1.25), "Faster handles arbitrary current speed")
+action(faster); check(near(player.mpv.getDouble("speed"), 1.2), "Faster handles arbitrary current speed")
 player.mpv.values["time"] = 59.9999996; action(setStart)
 check(start.stringValue == "01:00.000000", "Timestamp rounds across minute boundary")
 player.mpv.values["time"] = 12.123456; action(setStart)
@@ -112,8 +112,9 @@ check(player.mpv.getString("count") == "0", "Play action cancels pending automat
 action(preview)
 player.mpv.values["time"] = 14.0
 playback.selectedSegment = 2; action(playback)
-check(near(player.mpv.getDouble("time"), 19) && player.mpv.getString("count") == "0", "Manual seek leaves preview without restoring old position")
-action(preview)
+check(near(player.mpv.getDouble("time"), 19) && player.mpv.getString("count") == "inf", "Manual seek stays inside active preview")
+playback.selectedSegment = 2; action(playback)
+check(player.mpv.getDouble("time") < 20 && player.mpv.getString("count") == "inf", "Forward cannot escape active preview")
 player.mpv.values["time"] = 16.123456
 action(setStart)
 check(start.stringValue == "00:16.123456" && near(player.mpv.getDouble("time"), 16.123456) && player.mpv.getFlag("pause") && player.mpv.getString("count") == "0", "Marking during preview preserves selected frame and stops loop")
@@ -153,4 +154,165 @@ for (name, control) in [("playback", playback as NSView), ("frames", frames), ("
   print("\(name): \(rect)")
   check(rect.width > 0 && rect.minX >= 0 && rect.maxX <= 320, "\(name) fits sidebar width")
 }
+
+// Exercise the actual public keyboard entry points and their AppKit target/actions.
+let loopStatus = property("loopStatusLabel", as: NSTextField.self)
+let clearLoop = property("clearLoopButton", as: NSButton.self)
+let status = property("statusLabel", as: NSTextField.self)
+let cancel = property("cancelButton", as: NSButton.self)
+let rotationStatus = property("shortcutRotationLabel", as: NSTextField.self)
+let reveal = property("revealButton", as: NSButton.self)
+func pumpTasks(until predicate: () -> Bool) {
+  let deadline = Date().addingTimeInterval(2)
+  while !predicate(), Date() < deadline {
+    RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+  }
+  check(predicate(), "Expected asynchronous UI task state was reached")
+}
+func localized(_ key: String) -> String { NSLocalizedString(key, comment: "Test UI localization") }
+
+action(clearLoop)
+modes.selectedSegment = 1; action(modes)
+player.resume()
+player.mpv.values["time"] = 0.0
+controller.setLoopMarker(isEnd: false)
+check(player.mpv.getString("a") == "0.0" && player.mpv.getString("count") == "0", "Public A marker accepts zero without starting a loop")
+check(start.stringValue == "00:00.000000" && end.stringValue == "00:05.000000", "Public A marker updates frame range with the default five-second end")
+check(!player.mpv.getFlag("pause"), "Public A marker does not pause playback")
+check(loopStatus.stringValue == String(format: localized("videotools.loop.start"), "00:00.000"), "A marker status displays a localized pending endpoint")
+controller.setLoopMarker(isEnd: true)
+check(player.videoToolsLoopRange == nil && status.stringValue == localized("videotools.error.loop_end"), "Public B equal to A is rejected with the localized error")
+player.mpv.values["time"] = 4.0
+controller.setLoopMarker(isEnd: true)
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4), "Public B starts the selected zero-based loop")
+check(start.stringValue == "00:00.000000" && end.stringValue == "00:04.000000", "Public B writes both exact fields")
+check(near(player.mpv.getDouble("time"), 0) && !player.mpv.getFlag("pause"), "Public B returns to A without changing the playback pause state")
+check(loopStatus.stringValue == String(format: localized("videotools.loop.active"), "00:00.000", "00:04.000"), "Active keyboard loop displays the localized exact range")
+check(clearLoop.isEnabled && preview.title == localized("videotools.loop.clear"), "Both loop controls offer an explicit clear action")
+controller.setLoopMarker(isEnd: true)
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4), "An invalid replacement B preserves the existing valid loop")
+player.mpv.values["time"] = -1.0
+controller.setLoopMarker(isEnd: true)
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4), "B before A does not damage the active range")
+player.mpv.values["time"] = 1.0
+controller.setPlaybackControlsVisible(false)
+controller.stopPreview()
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4), "Hiding the tools panel does not cancel a keyboard-owned loop")
+action(preview)
+check(player.videoToolsLoopRange == nil && player.mpv.getString("a") == "no", "Range preview button clears a keyboard loop without nesting a preview snapshot")
+
+// Keyboard markers supersede the panel's pending automatic preview timer.
+modes.selectedSegment = 0; action(modes)
+start.stringValue = "10"; end.stringValue = "15"
+controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: end))
+player.mpv.values["time"] = 30.0
+controller.setLoopMarker(isEnd: false)
+player.mpv.values["time"] = 35.0
+controller.setLoopMarker(isEnd: true)
+RunLoop.main.run(until: Date().addingTimeInterval(0.45))
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 30, end: 35), "An old automatic-preview timer cannot replace keyboard markers")
+player.mpv.values["time"] = 29.0
+controller.setLoopMarker(isEnd: true)
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 30, end: 35), "B strictly before a nonzero A preserves the active interval")
+check(status.stringValue == localized("videotools.error.loop_end"), "Invalid replacement B surfaces the localized validation message")
+action(clearLoop)
+check(player.videoToolsLoopRange == nil && !clearLoop.isEnabled, "Dedicated clear button disables the loop and its markers")
+
+let taskManager = VideoToolsTaskManager.shared
+taskManager.simulatesTaskLifecycle = true
+taskManager.requests.removeAll()
+taskManager.request = nil
+taskManager.snapshot = nil
+player.mpv.values["rotation"] = 0
+player.mpv.values["time"] = 30.0
+controller.setLoopMarker(isEnd: false)
+player.mpv.values["time"] = 35.0
+controller.setLoopMarker(isEnd: true)
+player.resume()
+let rotationSource = player.info.currentURL!
+controller.requestPermanentRotation(clockwiseQuarterTurns: -1)
+check(player.mpv.getInt("rotation") == 270 && rotation.selectedSegment == 2, "Public left shortcut immediately previews a counterclockwise quarter turn")
+check(modes.selectedSegment == 2 && !rotationStatus.isHidden, "Public rotation shortcut exposes the native rotation mode and status")
+check(rotationStatus.stringValue.contains(localized("videotools.rotation.direction.left")), "Left rotation status displays the localized direction")
+check(rotationStatus.stringValue.contains(localized("videotools.rotation.shortcut_pending")), "Debounced export is visibly pending")
+check(!run.isEnabled && !cancel.isHidden && cancel.isEnabled, "Pending shortcut export disables manual run and enables cancellation")
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 30, end: 35) && !player.mpv.getFlag("pause"), "Permanent rotation does not interrupt a keyboard loop or pause playback")
+controller.requestPermanentRotation(clockwiseQuarterTurns: -1)
+check(player.mpv.getInt("rotation") == 180 && rotation.selectedSegment == 1, "Two public left presses accumulate to a half turn")
+controller.requestPermanentRotation(clockwiseQuarterTurns: 1)
+check(player.mpv.getInt("rotation") == 270, "A following right press reduces the cumulative left rotation")
+action(cancel)
+check(player.mpv.getInt("rotation") == 0 && cancel.isHidden && run.isEnabled, "Cancelling during debounce restores the last completed orientation and unlocks the panel")
+check(status.stringValue == localized("videotools.status.cancelled"), "Debounce cancellation is shown as cancelled rather than ready")
+RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+check(taskManager.requests.isEmpty, "Cancelling the pending UI request prevents an export")
+
+controller.requestPermanentRotation(clockwiseQuarterTurns: 1)
+check(player.mpv.getInt("rotation") == 90 && rotationStatus.stringValue.contains(localized("videotools.rotation.direction.right")), "Public right shortcut starts at the reset orientation and displays its direction")
+pumpTasks { taskManager.requests.count == 1 }
+check(taskManager.request?.operation == .rotate && taskManager.request?.degrees == 90 && taskManager.request?.inputPath == rotationSource.path, "The UI exports its first angle from the original file")
+controller.requestPermanentRotation(clockwiseQuarterTurns: 1)
+check(player.mpv.getInt("rotation") == 180 && rotationStatus.stringValue.contains(localized("videotools.rotation.shortcut_queued")), "An in-flight shortcut updates preview and reports the queued cumulative target")
+action(run)
+check(taskManager.requests.count == 1 && status.stringValue == localized("videotools.error.busy"), "Manual run cannot take over a pending cumulative rotation")
+let firstRotationOutput = URL(fileURLWithPath: "/tmp/chengying-rotation-first.mkv")
+taskManager.finishTask(.completed, outputURL: firstRotationOutput)
+pumpTasks { taskManager.requests.count == 2 }
+check(taskManager.request?.degrees == 180 && taskManager.request?.inputPath == rotationSource.path, "The queued UI angle is rendered from the original, not the previous output")
+let secondRotationOutput = URL(fileURLWithPath: "/tmp/chengying-rotation-second.mkv")
+taskManager.finishTask(.completed, outputURL: secondRotationOutput)
+check(player.mpv.getInt("rotation") == 180 && !reveal.isHidden && cancel.isHidden, "Completed rotation remains visible and offers its output without a cancel action")
+check(rotationStatus.stringValue.contains(localized("videotools.rotation.shortcut_saved")), "Successful rotation status explains where the output was saved")
+controller.setPlaybackControlsVisible(false)
+controller.stopPreview()
+check(player.mpv.getInt("rotation") == 180 && player.videoToolsLoopRange == VideoToolsLoopRange(start: 30, end: 35), "Hiding the panel preserves both permanent-rotation preview and keyboard loop")
+
+controller.requestPermanentRotation(clockwiseQuarterTurns: -1)
+pumpTasks { taskManager.requests.count == 3 }
+controller.requestPermanentRotation(clockwiseQuarterTurns: -1)
+let cancelledTaskID = taskManager.snapshot!.id
+action(cancel)
+check(taskManager.cancellations.last == cancelledTaskID && taskManager.snapshot?.phase == .cancelling, "The panel cancels its own active shortcut task by identity")
+check(player.mpv.getInt("rotation") == 180 && !cancel.isEnabled, "Cancellation rolls preview back to the last completed angle and disables repeated cancellation")
+taskManager.finishTask(.cancelled)
+RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+check(taskManager.requests.count == 3 && cancel.isHidden && run.isEnabled, "Cancelled in-flight rotation discards every queued shortcut")
+
+// A different window's helper job must not be taken over or cancelled by this UI.
+try taskManager.start(operation: .frames, inputURL: rotationSource, start: 0, end: 1, degrees: nil, outputDirectory: nil)
+let foreignTaskID = taskManager.snapshot!.id
+let cancellationsBeforeBusy = taskManager.cancellations.count
+controller.requestPermanentRotation(clockwiseQuarterTurns: 1)
+check(player.mpv.getInt("rotation") == 180 && status.stringValue == localized("videotools.error.busy"), "A foreign busy task rejects rotation without changing the displayed angle")
+action(cancel)
+check(taskManager.snapshot?.id == foreignTaskID && taskManager.cancellations.count == cancellationsBeforeBusy, "The panel cannot cancel a helper task owned by another window")
+taskManager.finishTask(.completed)
+
+controller.requestPermanentRotation(clockwiseQuarterTurns: 1)
+pumpTasks { taskManager.requests.count == 5 }
+controller.requestPermanentRotation(clockwiseQuarterTurns: 1)
+var unloadContinued = false
+for hook in player.mpv.hooks { hook.block { unloadContinued = true } }
+pumpTasks { unloadContinued }
+check(player.mpv.getInt("rotation") == 0, "The real unload hook restores the display orientation from before shortcut rotation")
+check(taskManager.snapshot?.phase == .cancelling, "The real unload hook cancels the current shortcut export")
+taskManager.finishTask(.cancelled)
+RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+check(taskManager.requests.count == 5, "Unloading media discards queued exports instead of producing stale outputs")
+player.videoToolsMediaGeneration += 1
+controller.refreshCurrentMedia(force: true)
+controller.requestPermanentRotation(clockwiseQuarterTurns: -1)
+check(player.mpv.getInt("rotation") == 270, "Reloading the same path begins a fresh cumulative rotation generation")
+action(cancel)
+
+runVideoToolsShortcutTests()
+runVideoToolsLoopTests()
+check(VideoToolsPlaybackCommand.parse(["seek", "5"]) == .seek(5, .relative), "Parse relative seek")
+check(VideoToolsPlaybackCommand.parse(["no-osd", "seek", "99", "absolute-percent+exact"]) == .seek(99, .absolutePercent), "Parse prefixed percent seek")
+check(VideoToolsPlaybackCommand.parse(["seek", "-3", "relative-percent"]) == .seek(-3, .relativePercent), "Parse relative percent seek")
+check(VideoToolsPlaybackCommand.parse(["frame-back-step"]) == .frame(backwards: true), "Parse backward frame command")
+check(VideoToolsPlaybackCommand.parse(["multiply", "speed", "1/1.1"]) == .speed(1/1.1, .multiply), "Parse fractional speed multiplier")
+check(VideoToolsPlaybackCommand.parse(["seek", "nan"]) == nil, "Reject invalid seek amount")
+check(VideoToolsPlaybackCommand.parse(["multiply", "speed", "1/0"]) == nil, "Reject invalid speed multiplier")
+check(VideoToolsPlaybackCommand.parse(["seek", "5;", "quit"]) == nil, "Do not silently truncate compound bindings")
 print("SUCCESS: \(passes) checks passed")

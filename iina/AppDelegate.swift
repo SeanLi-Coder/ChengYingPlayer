@@ -47,6 +47,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   private var commandLineStatus = CommandLineStatus()
 
   private var isTerminating = false
+  private var videoToolsShortcutMonitor: Any?
+  private var videoToolsMenuObservers: [NSObjectProtocol] = []
+  private var trackingMenuCount = 0
 
   /// Longest time to wait for asynchronous shutdown tasks to finish before giving up on waiting and proceeding with termination.
   ///
@@ -312,6 +315,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     if !isReady {
       getReady()
     }
+
+    installVideoToolsShortcuts()
 
     // see https://sparkle-project.org/documentation/api-reference/Classes/SPUUpdater.html#/c:objc(cs)SPUUpdater(im)clearFeedURLFromUserDefaults
     updaterController.updater.clearFeedURLFromUserDefaults()
@@ -688,8 +693,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    if let videoToolsShortcutMonitor {
+      NSEvent.removeMonitor(videoToolsShortcutMonitor)
+    }
+    videoToolsMenuObservers.forEach(NotificationCenter.default.removeObserver)
     Logger.log("App will terminate")
     Logger.closeLogFile()
+  }
+
+  private func installVideoToolsShortcuts() {
+    guard videoToolsShortcutMonitor == nil else { return }
+    let center = NotificationCenter.default
+    videoToolsMenuObservers.append(center.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.trackingMenuCount += 1
+    })
+    videoToolsMenuObservers.append(center.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+      guard let self else { return }
+      self.trackingMenuCount = max(0, self.trackingMenuCount - 1)
+    })
+    // A local monitor runs before menu key equivalents, preserving left/right Command bits.
+    videoToolsShortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      guard let self, !self.isTerminating, self.trackingMenuCount == 0,
+            let window = NSApp.keyWindow, event.window === window,
+            let controller = window.windowController as? PlayerWindowController else { return event }
+      return controller.handleVideoToolsShortcutEvent(event) ? nil : event
+    }
   }
 
   /**

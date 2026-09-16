@@ -16,6 +16,10 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   private let sourceLabel = NSTextField(labelWithString: "")
   private let playbackPositionLabel = NSTextField(labelWithString: "")
+  private let loopStatusLabel = NSTextField(labelWithString: "")
+  private let clearLoopButton = NSButton(
+    title: NSLocalizedString("videotools.loop.clear", comment: "Clear A/B loop"), target: nil, action: nil
+  )
   private let playbackControl = NSSegmentedControl(
     labels: [
       NSLocalizedString("videotools.playback.backward", comment: "Back five seconds"),
@@ -81,6 +85,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     target: nil,
     action: nil
   )
+  private let shortcutRotationLabel = NSTextField(labelWithString: "")
   private let outputField = NSTextField(string: "")
   private let chooseOutputButton = NSButton(
     title: NSLocalizedString("videotools.choose", comment: "Choose"),
@@ -112,6 +117,10 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private var previewTimer: Timer?
   private var playbackControlsTimer: Timer?
   private var previewSnapshot: VideoToolsPlayerSnapshot?
+  private var rotationCoordinator: VideoToolsRotationCoordinator?
+  private var rotationMediaGeneration: UInt64?
+  private var rotationInitialDisplayDegrees: Int?
+  private var ownedTaskID: String?
   private var outputDirectoryURL: URL?
   private var observedSourceURL: URL?
   private var observers: [NSObjectProtocol] = []
@@ -133,6 +142,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     previewTimer?.invalidate()
     playbackControlsTimer?.invalidate()
     stopPreview(updateButton: false)
+    resetPermanentRotation(restoreDisplayRotation: true)
     observers.forEach(NotificationCenter.default.removeObserver)
   }
 
@@ -215,10 +225,15 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     rotationPreviewButton.target = self
     rotationPreviewButton.action = #selector(toggleRotationPreview(_:))
     rotationPreviewButton.bezelStyle = .rounded
+    shortcutRotationLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+    shortcutRotationLabel.maximumNumberOfLines = 0
+    shortcutRotationLabel.lineBreakMode = .byWordWrapping
+    shortcutRotationLabel.isHidden = true
     rotationGroup = makeVerticalGroup([
       makeCaption(NSLocalizedString("videotools.rotation", comment: "Rotation")),
       rotationControl,
       rotationPreviewButton,
+      shortcutRotationLabel,
     ], spacing: 7)
     stack.addArrangedSubview(rotationGroup)
 
@@ -335,6 +350,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   func refreshCurrentMedia(force: Bool = false) {
     guard isViewLoaded else { return }
     let newURL = currentLocalMediaURL
+    if let coordinator = rotationCoordinator,
+       coordinator.state.inputURL != newURL?.standardizedFileURL ||
+        rotationMediaGeneration != player?.videoToolsMediaGeneration {
+      resetPermanentRotation(restoreDisplayRotation: false)
+    }
     if force || newURL != observedSourceURL {
       stopPreview(updateButton: true)
       observedSourceURL = newURL
@@ -365,6 +385,63 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     stopPreview(updateButton: true)
   }
 
+  func requestPermanentRotation(clockwiseQuarterTurns: Int) {
+    _ = view
+    guard let player, let inputURL = currentLocalMediaURL else {
+      showValidationError(NSLocalizedString("videotools.error.no_local_video", comment: "Open a local video first"))
+      return
+    }
+    stopPreview(updateButton: true, restorePlaybackState: false)
+    if rotationCoordinator == nil {
+      rotationMediaGeneration = player.videoToolsMediaGeneration
+      rotationInitialDisplayDegrees = player.mpv.getInt(MPVOption.Video.videoRotate)
+      let coordinator = VideoToolsRotationCoordinator(taskManager: taskManager)
+      coordinator.stateHandler = { [weak self] state in
+        self?.permanentRotationDidChange(state)
+      }
+      rotationCoordinator = coordinator
+    }
+    do {
+      try rotationCoordinator?.request(inputURL: inputURL, clockwiseQuarterTurns: clockwiseQuarterTurns)
+      modeControl.selectedSegment = 2
+      updateModeUI(resetFrameEnd: false)
+      updatePlaybackControls()
+    } catch {
+      showValidationError(error.localizedDescription)
+    }
+  }
+
+  /// Keyboard markers own their loop independently of this panel's temporary preview.
+  func setLoopMarker(isEnd: Bool) {
+    _ = view
+    guard let player, currentLocalMediaURL != nil else {
+      showValidationError(NSLocalizedString("videotools.error.no_local_video", comment: "Open a local video first"))
+      return
+    }
+    discardPreviewSnapshot()
+    if isEnd {
+      guard player.videoToolsSetLoopEnd(), let range = player.videoToolsLoopRange else {
+        updatePlaybackControls()
+        showValidationError(NSLocalizedString("videotools.error.loop_end", comment: "Set A before setting B after A"))
+        return
+      }
+      startField.stringValue = formatTimestamp(range.start, precision: 6)
+      endField.stringValue = formatTimestamp(range.end, precision: 6)
+    } else {
+      guard player.videoToolsSetLoopStart() else {
+        showValidationError(NSLocalizedString("videotools.error.invalid_range", comment: "End must be after start"))
+        return
+      }
+      let start = player.mpv.getDouble(MPVOption.PlaybackControl.abLoopA)
+      startField.stringValue = formatTimestamp(start, precision: 6)
+      if selectedOperation == .frames || (parseTimestamp(endField.stringValue) ?? 0) <= start {
+        setDefaultEnd(after: start)
+      }
+    }
+    updatePreviewButtons()
+    updatePlaybackControls()
+  }
+
   func setPlaybackControlsVisible(_ visible: Bool) {
     playbackControlsTimer?.invalidate()
     playbackControlsTimer = nil
@@ -388,7 +465,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       player.togglePause()
     } else {
       guard let position = player.videoToolsCurrentTime else { return }
-      stopPreview(updateButton: true, restorePlaybackState: false)
+      cancelScheduledPreview()
       player.videoToolsSeek(to: position + (sender.selectedSegment == 0 ? -5 : 5), pausePlayback: false)
     }
     updatePlaybackControls()
@@ -396,7 +473,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   @objc private func stepFrame(_ sender: NSSegmentedControl) {
     guard (0...1).contains(sender.selectedSegment), let player, player.info.state.loaded else { return }
-    stopPreview(updateButton: true, restorePlaybackState: false)
+    cancelScheduledPreview()
     player.pause()
     player.frameStep(backwards: sender.selectedSegment == 0)
     updatePlaybackControls()
@@ -405,6 +482,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   @objc private func selectPlaybackSpeed(_ sender: NSPopUpButton) {
     guard let player, player.info.state.loaded,
           Self.playbackSpeeds.indices.contains(sender.indexOfSelectedItem) else { return }
+    cancelScheduledPreview()
     player.setSpeed(Self.playbackSpeeds[sender.indexOfSelectedItem])
     updatePlaybackControls()
   }
@@ -413,10 +491,10 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     guard let player, player.info.state.loaded else { return }
     let currentSpeed = player.mpv.getDouble(MPVOption.PlaybackControl.speed)
     guard currentSpeed.isFinite else { return }
-    let speed = sender === slowerButton
-      ? Self.playbackSpeeds.last(where: { $0 < currentSpeed - 0.000_001 })
-      : Self.playbackSpeeds.first(where: { $0 > currentSpeed + 0.000_001 })
-    if let speed { player.setSpeed(speed) }
+    cancelScheduledPreview()
+    player.setSpeed(VideoToolsShortcuts.adjustedSpeed(
+      from: currentSpeed, direction: sender === slowerButton ? .decrease : .increase
+    ))
     updatePlaybackControls()
   }
 
@@ -424,7 +502,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     guard (0...1).contains(sender.selectedSegment) else { return }
     let field = sender.selectedSegment == 0 ? startField : endField
     guard let target = parseTimestamp(field.stringValue), let player, player.info.state.loaded else { return }
-    stopPreview(updateButton: true, restorePlaybackState: false)
+    cancelScheduledPreview()
     player.videoToolsSeek(to: target, pausePlayback: true)
     updatePlaybackControls()
   }
@@ -459,9 +537,18 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   @objc private func toggleRangePreview(_ sender: NSButton) {
     if previewSnapshot != nil {
       stopPreview(updateButton: true)
+    } else if player?.videoToolsLoopRange != nil {
+      clearLoop(sender)
     } else {
       previewRange(showValidationError: true)
     }
+  }
+
+  @objc private func clearLoop(_ sender: NSButton) {
+    discardPreviewSnapshot()
+    player?.videoToolsClearLoop()
+    updatePreviewButtons()
+    updatePlaybackControls()
   }
 
   @objc private func rotationChanged(_ sender: NSSegmentedControl) {
@@ -510,7 +597,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       showValidationError(NSLocalizedString("videotools.error.no_local_video", comment: "Open a local video first"))
       return
     }
-    guard taskManager.snapshot?.isActive != true else {
+    guard taskManager.snapshot?.isActive != true, !hasActiveShortcutRotation else {
       showValidationError(NSLocalizedString("videotools.error.busy", comment: "A video task is already running"))
       return
     }
@@ -526,7 +613,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
     stopPreview(updateButton: true)
     do {
-      try taskManager.start(
+      ownedTaskID = try taskManager.start(
         operation: operation,
         inputURL: inputURL,
         start: start,
@@ -534,13 +621,18 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
         degrees: operation == .rotate ? selectedRotation : nil,
         outputDirectory: operation == .rotate ? nil : outputDirectoryURL
       )
+      updateTaskUI()
     } catch {
       showValidationError(error.localizedDescription)
     }
   }
 
   @objc private func cancelTask(_ sender: NSButton) {
-    taskManager.cancelCurrent()
+    if hasActiveShortcutRotation {
+      rotationCoordinator?.cancel()
+    } else if taskManager.snapshot?.id == ownedTaskID {
+      taskManager.cancelCurrent()
+    }
   }
 
   @objc private func revealOutput(_ sender: NSButton) {
@@ -575,6 +667,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   private func previewRange(showValidationError: Bool) {
     guard let range = validatedRange(showError: showValidationError), let player else { return }
+    if previewSnapshot == nil, player.videoToolsLoopRange != nil {
+      player.videoToolsPreviewRange(start: range.start, end: range.end)
+      updatePreviewButtons()
+      return
+    }
     if previewSnapshot == nil {
       previewSnapshot = player.videoToolsCaptureSnapshot()
     }
@@ -589,8 +686,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func stopPreview(updateButton: Bool, restorePlaybackState: Bool = true) {
-    previewTimer?.invalidate()
-    previewTimer = nil
+    cancelScheduledPreview()
     if let previewSnapshot {
       player?.videoToolsRestoreSnapshot(previewSnapshot, restorePlaybackState: restorePlaybackState)
       self.previewSnapshot = nil
@@ -601,12 +697,12 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func stopPreviewBeforeMediaUnload() {
-    previewTimer?.invalidate()
-    previewTimer = nil
+    cancelScheduledPreview()
     if let previewSnapshot {
       player?.videoToolsRestorePreviewBeforeUnload(previewSnapshot)
       self.previewSnapshot = nil
     }
+    resetPermanentRotation(restoreDisplayRotation: true)
     if isViewLoaded {
       updatePreviewButtons()
     }
@@ -615,8 +711,72 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private func updatePreviewButtons() {
     let isPreviewing = previewSnapshot != nil
     let stopTitle = NSLocalizedString("videotools.stop_preview", comment: "Stop preview")
-    rangePreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString("videotools.preview_range", comment: "Preview range")
+    rangePreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString(
+      player?.videoToolsLoopRange != nil ? "videotools.loop.clear" : "videotools.preview_range",
+      comment: "Clear the active loop or preview a range"
+    )
     rotationPreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString("videotools.preview_rotation", comment: "Preview rotation")
+  }
+
+  private func cancelScheduledPreview() {
+    previewTimer?.invalidate()
+    previewTimer = nil
+  }
+
+  private func discardPreviewSnapshot() {
+    cancelScheduledPreview()
+    previewSnapshot = nil
+  }
+
+  private var hasActiveShortcutRotation: Bool {
+    guard let phase = rotationCoordinator?.state.phase else { return false }
+    return phase == .pending || phase == .exporting
+  }
+
+  private func resetPermanentRotation(restoreDisplayRotation: Bool) {
+    rotationCoordinator?.stateHandler = nil
+    rotationCoordinator?.reset(cancelActive: true)
+    rotationCoordinator = nil
+    rotationMediaGeneration = nil
+    if restoreDisplayRotation, let degrees = rotationInitialDisplayDegrees,
+       let player, player.info.state != .shuttingDown, player.info.state != .shutDown {
+      player.mpv.setInt(MPVOption.Video.videoRotate, degrees)
+    }
+    rotationInitialDisplayDegrees = nil
+    shortcutRotationLabel.isHidden = true
+  }
+
+  private func permanentRotationDidChange(_ state: VideoToolsRotationCoordinator.State) {
+    guard let player, player.info.state.loaded,
+          state.inputURL == currentLocalMediaURL?.standardizedFileURL,
+          rotationMediaGeneration == player.videoToolsMediaGeneration else { return }
+    player.videoToolsPreviewRotation(state.desiredDegrees)
+    rotationControl.selectedSegment = state.desiredDegrees == 0 ? 3 : state.desiredDegrees / 90 - 1
+    let directionKey: String
+    switch state.desiredDegrees {
+    case 90: directionKey = "videotools.rotation.direction.right"
+    case 180: directionKey = "videotools.rotation.direction.half"
+    case 270: directionKey = "videotools.rotation.direction.left"
+    default: directionKey = "videotools.rotation.direction.original"
+    }
+    var parts = [String(
+      format: NSLocalizedString("videotools.rotation.shortcut_orientation", comment: "Cumulative rotation from the original"),
+      NSLocalizedString(directionKey, comment: "Rotation direction")
+    )]
+    if state.hasQueuedRotation {
+      parts.append(NSLocalizedString(
+        state.phase == .pending ? "videotools.rotation.shortcut_pending" : "videotools.rotation.shortcut_queued",
+        comment: "A cumulative rotation export is pending"
+      ))
+    } else if state.phase == .completed {
+      parts.append(NSLocalizedString("videotools.rotation.shortcut_saved", comment: "Saved beside the original video"))
+    }
+    shortcutRotationLabel.stringValue = parts.joined(separator: "\n")
+    shortcutRotationLabel.isHidden = false
+    shortcutRotationLabel.textColor = state.phase == .failed ? .systemRed : .secondaryLabelColor
+    updateTaskUI()
+    updatePlaybackControls()
+    if let error = state.error { showValidationError(error.localizedDescription) }
   }
 
   // MARK: - Validation and state
@@ -756,10 +916,29 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private func updateTaskUI() {
     guard isViewLoaded else { return }
     let active = taskManager.snapshot?.isActive == true
-    runButton.isEnabled = currentLocalMediaURL != nil && !active
-    cancelButton.isHidden = !active
+    let ownsActiveTask = active && taskManager.snapshot?.id == ownedTaskID
+    runButton.isEnabled = currentLocalMediaURL != nil && !active && !hasActiveShortcutRotation
+    cancelButton.isHidden = !ownsActiveTask && !hasActiveShortcutRotation
     cancelButton.isEnabled = taskManager.snapshot?.phase != .cancelling
     revealButton.isHidden = taskManager.snapshot?.outputURL == nil
+
+    if rotationCoordinator?.state.phase == .pending {
+      progressIndicator.doubleValue = 0
+      statusLabel.textColor = .secondaryLabelColor
+      statusLabel.stringValue = NSLocalizedString("videotools.rotation.shortcut_pending", comment: "Rotation export is pending")
+      timingLabel.stringValue = ""
+      return
+    }
+    if let state = rotationCoordinator?.state, state.task == nil,
+       state.phase == .cancelled || state.phase == .failed {
+      progressIndicator.doubleValue = 0
+      statusLabel.textColor = state.phase == .failed ? .systemRed : .secondaryLabelColor
+      statusLabel.stringValue = state.error?.localizedDescription ?? NSLocalizedString(
+        "videotools.status.cancelled", comment: "Cancelled"
+      )
+      timingLabel.stringValue = ""
+      return
+    }
 
     guard let task = taskManager.snapshot else {
       progressIndicator.doubleValue = 0
@@ -856,6 +1035,13 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     speedHint.textColor = .secondaryLabelColor
     speedHint.maximumNumberOfLines = 0
     speedHint.lineBreakMode = .byWordWrapping
+    loopStatusLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+    loopStatusLabel.textColor = .secondaryLabelColor
+    loopStatusLabel.maximumNumberOfLines = 0
+    loopStatusLabel.lineBreakMode = .byWordWrapping
+    clearLoopButton.target = self
+    clearLoopButton.action = #selector(clearLoop(_:))
+    clearLoopButton.bezelStyle = .rounded
     return makeVerticalGroup([
       makeCaption(NSLocalizedString("videotools.playback.title", comment: "Playback and positioning")),
       playbackPositionLabel,
@@ -864,6 +1050,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       makeCaption(NSLocalizedString("videotools.playback.speed", comment: "Playback speed")),
       makeHorizontalGroup([slowerButton, speedPopup, fasterButton], spacing: 7),
       speedHint,
+      loopStatusLabel,
+      clearLoopButton,
     ], spacing: 7)
   }
 
@@ -878,12 +1066,16 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     guard isViewLoaded else { return }
     let loaded = player?.info.state.loaded == true
     let localMediaLoaded = loaded && currentLocalMediaURL != nil
+    updateLoopUI()
+    updatePreviewButtons()
     playbackControl.isEnabled = loaded
     frameStepControl.isEnabled = loaded && player?.info.vid != nil && player?.info.vid != 0
     speedPopup.isEnabled = loaded
     for control in [startField, endField, setStartButton, setEndButton, rangePreviewButton, rotationPreviewButton] as [NSControl] {
       control.isEnabled = localMediaLoaded
     }
+    rotationControl.isEnabled = localMediaLoaded && !hasActiveShortcutRotation
+    rotationPreviewButton.isEnabled = localMediaLoaded && !hasActiveShortcutRotation
     for (index, field) in [startField, endField].enumerated() {
       let target = parseTimestamp(field.stringValue)
       let withinDuration = target.map { $0 <= (player?.info.videoDuration?.second ?? .infinity) } ?? false
@@ -906,7 +1098,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     ), forSegment: 1)
     let speed = player.mpv.getDouble(MPVOption.PlaybackControl.speed)
     guard speed.isFinite, speed > 0 else { return }
-    slowerButton.isEnabled = speed > Self.playbackSpeeds[0]
+    slowerButton.isEnabled = speed > 0.1
     fasterButton.isEnabled = speed < Self.playbackSpeeds[Self.playbackSpeeds.count - 1]
     if let index = Self.playbackSpeeds.firstIndex(where: { abs($0 - speed) < 0.000_001 }) {
       speedPopup.selectItem(at: index)
@@ -921,6 +1113,29 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       speedPopup.item(at: Self.playbackSpeeds.count)?.title = title
       speedPopup.item(at: Self.playbackSpeeds.count)?.isEnabled = false
       speedPopup.selectItem(at: Self.playbackSpeeds.count)
+    }
+  }
+
+  private func updateLoopUI() {
+    guard let player, player.info.state.loaded else {
+      loopStatusLabel.stringValue = NSLocalizedString("videotools.loop.off", comment: "No A/B loop")
+      clearLoopButton.isEnabled = false
+      return
+    }
+    if let range = player.videoToolsLoopRange {
+      loopStatusLabel.stringValue = String(
+        format: NSLocalizedString("videotools.loop.active", comment: "A/B loop range"),
+        formatTimestamp(range.start), formatTimestamp(range.end)
+      )
+      clearLoopButton.isEnabled = true
+    } else if let start = VideoToolsLoopRange.marker(from: player.mpv.getString(MPVOption.PlaybackControl.abLoopA)) {
+      loopStatusLabel.stringValue = String(
+        format: NSLocalizedString("videotools.loop.start", comment: "A is set; B is not set"), formatTimestamp(start)
+      )
+      clearLoopButton.isEnabled = true
+    } else {
+      loopStatusLabel.stringValue = NSLocalizedString("videotools.loop.off", comment: "No A/B loop")
+      clearLoopButton.isEnabled = false
     }
   }
 

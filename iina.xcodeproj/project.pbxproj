@@ -241,6 +241,9 @@
 		D4C700032F6A000100000003 /* VideoToolsTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C700122F6A000100000003 /* VideoToolsTaskManager.swift */; };
 		D4C700042F6A000100000004 /* VideoToolsPlayerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C700132F6A000100000004 /* VideoToolsPlayerBridge.swift */; };
 		D4C700052F6A000100000005 /* VideoToolsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C700142F6A000100000005 /* VideoToolsViewController.swift */; };
+		D4C700062F6A000100000006 /* VideoToolsShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C700152F6A000100000006 /* VideoToolsShortcuts.swift */; };
+		D4C700072F6A000100000007 /* VideoToolsLoopPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C700162F6A000100000007 /* VideoToolsLoopPolicy.swift */; };
+		D4C700082F6A000100000008 /* VideoToolsRotationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C700172F6A000100000008 /* VideoToolsRotationCoordinator.swift */; };
 		D4C701012F6A000100000001 /* ffmpeg in Copy Video Tools */ = {isa = PBXBuildFile; fileRef = D4C701102F6A000100000001 /* ffmpeg */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		D4C701022F6A000100000002 /* ffprobe in Copy Video Tools */ = {isa = PBXBuildFile; fileRef = D4C701112F6A000100000002 /* ffprobe */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		D4C701032F6A000100000003 /* chengying-video-tools-helper in Copy Video Tools */ = {isa = PBXBuildFile; fileRef = D4C701122F6A000100000003 /* chengying-video-tools-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -1436,6 +1439,9 @@
 		D4C700122F6A000100000003 /* VideoToolsTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoToolsTaskManager.swift; sourceTree = "<group>"; };
 		D4C700132F6A000100000004 /* VideoToolsPlayerBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoToolsPlayerBridge.swift; sourceTree = "<group>"; };
 		D4C700142F6A000100000005 /* VideoToolsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoToolsViewController.swift; sourceTree = "<group>"; };
+		D4C700152F6A000100000006 /* VideoToolsShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoToolsShortcuts.swift; sourceTree = "<group>"; };
+		D4C700162F6A000100000007 /* VideoToolsLoopPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoToolsLoopPolicy.swift; sourceTree = "<group>"; };
+		D4C700172F6A000100000008 /* VideoToolsRotationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoToolsRotationCoordinator.swift; sourceTree = "<group>"; };
 		D4C701102F6A000100000001 /* ffmpeg */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = ffmpeg; path = deps/executable/ffmpeg; sourceTree = SOURCE_ROOT; };
 		D4C701112F6A000100000002 /* ffprobe */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = ffprobe; path = deps/executable/ffprobe; sourceTree = SOURCE_ROOT; };
 		D4C701122F6A000100000003 /* chengying-video-tools-helper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = "chengying-video-tools-helper"; path = "deps/executable/chengying-video-tools-helper"; sourceTree = SOURCE_ROOT; };
@@ -2433,6 +2439,9 @@
 				D4C700122F6A000100000003 /* VideoToolsTaskManager.swift */,
 				D4C700132F6A000100000004 /* VideoToolsPlayerBridge.swift */,
 				D4C700142F6A000100000005 /* VideoToolsViewController.swift */,
+				D4C700152F6A000100000006 /* VideoToolsShortcuts.swift */,
+				D4C700162F6A000100000007 /* VideoToolsLoopPolicy.swift */,
+				D4C700172F6A000100000008 /* VideoToolsRotationCoordinator.swift */,
 			);
 			path = VideoTools;
 			sourceTree = "<group>";
@@ -3164,6 +3173,9 @@
 				D4C700032F6A000100000003 /* VideoToolsTaskManager.swift in Sources */,
 				D4C700042F6A000100000004 /* VideoToolsPlayerBridge.swift in Sources */,
 				D4C700052F6A000100000005 /* VideoToolsViewController.swift in Sources */,
+				D4C700062F6A000100000006 /* VideoToolsShortcuts.swift in Sources */,
+				D4C700072F6A000100000007 /* VideoToolsLoopPolicy.swift in Sources */,
+				D4C700082F6A000100000008 /* VideoToolsRotationCoordinator.swift in Sources */,
 				84A0BA9E1D2FAD4000BC8DA1 /* MainWindowController.swift in Sources */,
 				E3785B092A83380E00787CB7 /* WebSocketServer.swift in Sources */,
 				84E48D4E1E0F1090002C7A3F /* FilterWindowController.swift in Sources */,

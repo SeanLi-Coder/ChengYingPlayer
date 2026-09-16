@@ -73,7 +73,7 @@
 "videotools.playback.previous_frame" = "Previous Frame";
 "videotools.playback.next_frame" = "Next Frame";
 "videotools.playback.speed" = "Playback Speed";
-"videotools.playback.speed_hint" = "Playback and preview only; exports keep the original speed.";
+"videotools.playback.speed_hint" = "C speeds up and X slows down by 0.1x. Exports keep their original speed.";
 "videotools.playback.normal_speed" = "1× (Normal)";
 "videotools.playback.slower" = "Slower";
 "videotools.playback.faster" = "Faster";
@@ -81,7 +81,7 @@
 "videotools.set_end" = "Set End";
 "videotools.go_start" = "Go to Start";
 "videotools.go_end" = "Go to End";
-"videotools.markers_hint" = "Find a frame, then set the start or end at the current position. Preview the range when ready. Typing new times updates the preview automatically.";
+"videotools.markers_hint" = "[ sets A; ] sets B and loops. Speed changes and seeks stay inside the loop. Clear the loop to seek outside it. Editing times updates the preview.";
 "videotools.mode" = "MODE";
 "videotools.operation.probe" = "Inspect";
 "videotools.operation.clip" = "Clip";
@@ -541,3 +541,18 @@
 "plugin.install_error.cannot_load" = "ChengYing cannot load this plugin. It might be in the wrong format.";
 "plugin.check_for_updates" = "Check for Updates";
 "plugin.updating" = "Downloading update…";
+
+"video_tools.loop_unplayable" = "This interval cannot be decoded reliably. Playback is paused. Adjust A/B and try again.";
+"videotools.loop.clear" = "Clear A/B loop";
+"videotools.loop.off" = "A/B loop off · [ sets A, ] sets B";
+"videotools.loop.start" = "A: %@ · Press ] after A to set B";
+"videotools.loop.active" = "Loop: A %@ → B %@";
+"videotools.error.loop_end" = "Set A with [ first, then press ] at a later position to set B.";
+"videotools.rotation.direction.right" = "90° right";
+"videotools.rotation.direction.half" = "180°";
+"videotools.rotation.direction.left" = "90° left";
+"videotools.rotation.direction.original" = "Original orientation";
+"videotools.rotation.shortcut_orientation" = "Cumulative rotation from original: %@";
+"videotools.rotation.shortcut_pending" = "Preparing the cumulative rotation export…";
+"videotools.rotation.shortcut_queued" = "The latest angle will be exported after the current task.";
+"videotools.rotation.shortcut_saved" = "Saved beside the original. Playback keeps the rotated original preview.";

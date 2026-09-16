@@ -73,7 +73,7 @@
 "videotools.playback.previous_frame" = "上一帧";
 "videotools.playback.next_frame" = "下一帧";
 "videotools.playback.speed" = "播放速度";
-"videotools.playback.speed_hint" = "仅影响播放与预览，导出保持原速。";
+"videotools.playback.speed_hint" = "C 加速、X 减速，每次 0.1×。仅影响播放，导出保持原速。";
 "videotools.playback.normal_speed" = "1×（正常速度）";
 "videotools.playback.slower" = "放慢";
 "videotools.playback.faster" = "加快";
@@ -81,7 +81,7 @@
 "videotools.set_end" = "设为终点";
 "videotools.go_start" = "定位起点";
 "videotools.go_end" = "定位终点";
-"videotools.markers_hint" = "找到画面后，将当前播放位置设为起点或终点，再点预览。直接修改时间会自动更新预览。";
+"videotools.markers_hint" = "[ 设置 A，] 设置 B 并循环。变速或跳转不退出循环；到区间外定位请先取消循环。修改时间会更新预览。";
 "videotools.mode" = "功能";
 "videotools.operation.probe" = "检测";
 "videotools.operation.clip" = "剪辑";
@@ -541,3 +541,18 @@
 "plugin.install_error.cannot_load" = "澄影无法加载此插件，可能是格式错误。";
 "plugin.check_for_updates" = "检查更新";
 "plugin.updating" = "下载更新中……";
+
+"video_tools.loop_unplayable" = "该区间无法稳定解码，已暂停。请调整 A/B 起止点后重试。";
+"videotools.loop.clear" = "取消 A/B 循环";
+"videotools.loop.off" = "A/B 循环未开启 · [ 设置 A，] 设置 B";
+"videotools.loop.start" = "A：%@ · 到结束位置后按 ] 设置 B";
+"videotools.loop.active" = "循环：A %@ → B %@";
+"videotools.error.loop_end" = "请先按 [ 设置 A，再到 A 之后的位置按 ] 设置 B。";
+"videotools.rotation.direction.right" = "向右 90°";
+"videotools.rotation.direction.half" = "180°";
+"videotools.rotation.direction.left" = "向左 90°";
+"videotools.rotation.direction.original" = "原始方向";
+"videotools.rotation.shortcut_orientation" = "相对原视频的累计旋转：%@";
+"videotools.rotation.shortcut_pending" = "正在准备导出累计旋转结果…";
+"videotools.rotation.shortcut_queued" = "当前任务完成后，将继续导出最新累计角度。";
+"videotools.rotation.shortcut_saved" = "已保存到原视频同级目录；播放器继续预览旋转后的原视频。";

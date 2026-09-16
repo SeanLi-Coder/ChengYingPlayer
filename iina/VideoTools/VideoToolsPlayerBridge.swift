@@ -14,9 +14,61 @@ struct VideoToolsPlayerSnapshot {
   let abLoopB: Double
   let abLoopCount: String
   let rotation: Int
+  var abLoopAOption: String? = nil
+  var abLoopBOption: String? = nil
 }
 
 extension PlayerCore {
+  var videoToolsLoopRange: VideoToolsLoopRange? {
+    guard info.state.loaded,
+          let count = mpv.getString(MPVOption.PlaybackControl.abLoopCount), count != "0" else { return nil }
+    return VideoToolsLoopRange(
+      start: VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA)),
+      end: VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopB)),
+      duration: info.videoDuration?.second
+    )
+  }
+
+  /// Replacing A also clears B so an old endpoint never silently starts a new loop.
+  @discardableResult
+  func videoToolsSetLoopStart() -> Bool {
+    guard let position = videoToolsCurrentTime else { return false }
+    if let duration = info.videoDuration?.second, position >= duration { return false }
+    videoToolsClearLoop()
+    mpv.setDouble(MPVOption.PlaybackControl.abLoopA, position)
+    syncAbLoop()
+    return true
+  }
+
+  @discardableResult
+  func videoToolsSetLoopEnd() -> Bool {
+    guard let position = videoToolsCurrentTime,
+          let range = VideoToolsLoopRange(
+            start: VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA)),
+            end: position, duration: info.videoDuration?.second) else { return false }
+    videoToolsActivateLoop(range)
+    seek(absoluteSecond: range.start)
+    return true
+  }
+
+  func videoToolsClearLoop() {
+    videoToolsLoopRecovery.reset()
+    guard info.state != .shuttingDown, info.state != .shutDown else { return }
+    mpv.setString(MPVOption.PlaybackControl.abLoopCount, "0")
+    mpv.setString(MPVOption.PlaybackControl.abLoopA, "no")
+    mpv.setString(MPVOption.PlaybackControl.abLoopB, "no")
+    syncAbLoop()
+  }
+
+  private func videoToolsActivateLoop(_ range: VideoToolsLoopRange) {
+    videoToolsLoopRecovery.reset()
+    mpv.setString(MPVOption.PlaybackControl.abLoopCount, "0")
+    mpv.setDouble(MPVOption.PlaybackControl.abLoopA, range.start)
+    mpv.setDouble(MPVOption.PlaybackControl.abLoopB, range.end)
+    mpv.setString(MPVOption.PlaybackControl.abLoopCount, "inf")
+    syncAbLoop()
+  }
+
   /// Read mpv directly so a marker does not use the UI timer's cached position.
   var videoToolsCurrentTime: Double? {
     guard info.state.loaded else { return nil }
@@ -34,7 +86,7 @@ extension PlayerCore {
     var shouldPause = pausePlayback
     if let duration = info.videoDuration?.second, duration.isFinite, duration > 0 {
       let lastPosition = max(0, duration - 0.001)
-      shouldPause = shouldPause || target >= lastPosition
+      shouldPause = shouldPause || (videoToolsLoopRange == nil && target >= lastPosition)
       target = min(target, lastPosition)
     }
     if shouldPause { pause() }
@@ -52,17 +104,16 @@ extension PlayerCore {
       abLoopA: mpv.getDouble(MPVOption.PlaybackControl.abLoopA),
       abLoopB: mpv.getDouble(MPVOption.PlaybackControl.abLoopB),
       abLoopCount: mpv.getString(MPVOption.PlaybackControl.abLoopCount) ?? "0",
-      rotation: mpv.getInt(MPVOption.Video.videoRotate)
+      rotation: mpv.getInt(MPVOption.Video.videoRotate),
+      abLoopAOption: mpv.getString(MPVOption.PlaybackControl.abLoopA),
+      abLoopBOption: mpv.getString(MPVOption.PlaybackControl.abLoopB)
     )
   }
 
   func videoToolsPreviewRange(start: Double, end: Double) {
-    guard info.state.loaded else { return }
-    mpv.setString(MPVOption.PlaybackControl.abLoopCount, "0")
-    mpv.setDouble(MPVOption.PlaybackControl.abLoopA, max(0.000001, start))
-    mpv.setDouble(MPVOption.PlaybackControl.abLoopB, max(0.000001, end))
-    mpv.setString(MPVOption.PlaybackControl.abLoopCount, "inf")
-    syncAbLoop()
+    guard info.state.loaded,
+          let range = VideoToolsLoopRange(start: start, end: end, duration: info.videoDuration?.second) else { return }
+    videoToolsActivateLoop(range)
     seek(absoluteSecond: start)
     resume()
   }
@@ -103,9 +154,10 @@ extension PlayerCore {
   }
 
   private func videoToolsRestorePreviewOptions(_ snapshot: VideoToolsPlayerSnapshot) {
+    videoToolsLoopRecovery.reset()
     mpv.setString(MPVOption.PlaybackControl.abLoopCount, "0")
-    mpv.setDouble(MPVOption.PlaybackControl.abLoopA, snapshot.abLoopA)
-    mpv.setDouble(MPVOption.PlaybackControl.abLoopB, snapshot.abLoopB)
+    mpv.setString(MPVOption.PlaybackControl.abLoopA, snapshot.abLoopAOption ?? (snapshot.abLoopA > 0 ? "\(snapshot.abLoopA)" : "no"))
+    mpv.setString(MPVOption.PlaybackControl.abLoopB, snapshot.abLoopBOption ?? (snapshot.abLoopB > 0 ? "\(snapshot.abLoopB)" : "no"))
     mpv.setString(MPVOption.PlaybackControl.abLoopCount, snapshot.abLoopCount)
     syncAbLoop()
     mpv.setInt(MPVOption.Video.videoRotate, snapshot.rotation)

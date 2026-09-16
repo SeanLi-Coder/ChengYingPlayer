@@ -218,6 +218,12 @@ jobs:
             fi
           done
 
+      - name: Test real application loop boundaries
+        timeout-minutes: 5
+        run: >-
+          python Tools/VideoToolsTests/app_loop_smoke.py
+          --app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
+
       - name: Package release source
         if: startsWith(github.ref, 'refs/tags/')
         id: package

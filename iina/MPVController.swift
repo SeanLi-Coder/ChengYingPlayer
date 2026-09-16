@@ -136,6 +136,9 @@ class MPVController: NSObject {
     MPVOption.Audio.volume: MPV_FORMAT_DOUBLE,
     MPVOption.Audio.audioDelay: MPV_FORMAT_DOUBLE,
     MPVOption.PlaybackControl.speed: MPV_FORMAT_DOUBLE,
+    MPVProperty.timePos: MPV_FORMAT_NONE,
+    MPVProperty.eofReached: MPV_FORMAT_NONE,
+    "seeking": MPV_FORMAT_NONE,
     MPVOption.Subtitles.secondarySubDelay: MPV_FORMAT_DOUBLE,
     MPVOption.Subtitles.secondarySubPos: MPV_FORMAT_DOUBLE,
     MPVOption.Subtitles.secondarySubVisibility: MPV_FORMAT_FLAG,
@@ -1073,6 +1076,7 @@ class MPVController: NSObject {
     case MPV_EVENT_SEEK:
       DispatchQueue.main.async { [self] in
         player.info.isSeeking = true
+        player.videoToolsEnforceLoopBounds()
         // When playback is paused the display link may be shutdown in order to not waste energy.
         // It must be running when seeking to avoid slowdowns caused by mpv waiting for IINA to call
         // mpv_render_report_swap.
@@ -1173,6 +1177,9 @@ class MPVController: NSObject {
   private func handlePropertyChange(_ name: String, _ property: mpv_event_property) {
 
     switch name {
+
+    case MPVProperty.timePos, MPVProperty.eofReached, "seeking":
+      DispatchQueue.main.async { self.player.videoToolsEnforceLoopBounds() }
 
     case MPVProperty.videoParams:
       DispatchQueue.main.async { self.player.needReloadQuickSettingsView() }

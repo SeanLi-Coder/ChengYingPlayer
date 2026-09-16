@@ -259,6 +259,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
         return false
       }
     } else {
+      if handleGuardedPlaybackCommand(keyBinding.action) { return true }
       // - mpv command
       let returnValue: Int32
       // execute the command
@@ -303,10 +304,10 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
 
   func syncSlider() {
     let a = player.abLoopA
-    playSlider.abLoopA.isHidden = a == 0
+    playSlider.abLoopA.isHidden = VideoToolsLoopRange.marker(from: player.mpv.getString(MPVOption.PlaybackControl.abLoopA)) == nil
     playSlider.abLoopA.doubleValue = secondsToPercent(a)
     let b = player.abLoopB
-    playSlider.abLoopB.isHidden = b == 0
+    playSlider.abLoopB.isHidden = VideoToolsLoopRange.marker(from: player.mpv.getString(MPVOption.PlaybackControl.abLoopB)) == nil
     playSlider.abLoopB.doubleValue = secondsToPercent(b)
     playSlider.needsDisplay = true
   }
@@ -330,6 +331,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
   }
 
   override func keyDown(with event: NSEvent) {
+    if handleVideoToolsShortcutEvent(event) { return }
     let keyCode = KeyCodeHelper.mpvKeyCode(from: event)
     let normalizedKeyCode = KeyCodeHelper.normalizeMpv(keyCode)
     
@@ -344,6 +346,71 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     }, defaultHandler: {
       super.keyDown(with: event)
     })
+  }
+
+  @discardableResult
+  func handleVideoToolsShortcutEvent(_ event: NSEvent) -> Bool {
+    guard let window, NSApp.keyWindow === window,
+          !player.mainWindow.isInInteractiveMode else { return false }
+    let responder = window.firstResponder
+    let isTextInput = responder is NSText || responder is NSTextField || responder is NSTextInputClient
+    guard let action = VideoToolsShortcuts.resolve(
+      event, hasMedia: player.info.state.loaded, isTextInput: isTextInput,
+      isModal: NSApp.modalWindow != nil || window.attachedSheet != nil
+    ) else { return false }
+    switch action {
+    case .consume:
+      break
+    case .speedUp, .speedDown:
+      let speed = VideoToolsShortcuts.adjustedSpeed(
+        from: player.mpv.getDouble(MPVOption.PlaybackControl.speed),
+        direction: action == .speedUp ? .increase : .decrease
+      )
+      player.setSpeed(speed)
+    case .rotateLeft, .rotateRight:
+      guard !player.isInMiniPlayer else { return false }
+      player.mainWindow.showSettingsSidebar(tab: .tools)
+      player.mainWindow.quickSettingView.performVideoToolsShortcut(action)
+    case .setA, .setB:
+      player.mainWindow.quickSettingView.performVideoToolsShortcut(action)
+      player.sendOSD(.abLoop(player.info.abLoopStatus))
+    }
+    return true
+  }
+
+  /// Route normal key-binding commands through the same loop-safe navigation as the UI.
+  private func handleGuardedPlaybackCommand(_ tokens: [String]) -> Bool {
+    guard player.videoToolsLoopRange != nil,
+          let command = VideoToolsPlaybackCommand.parse(tokens) else { return false }
+    switch command {
+    case .seek(let amount, let mode):
+      switch mode {
+      case .absolute:
+        guard let target = VideoToolsPlaybackCommand.absoluteSeekTarget(amount, duration: player.info.videoDuration?.second) else {
+          return false
+        }
+        player.seek(absoluteSecond: target)
+      case .relative: player.seek(relativeSecond: amount, option: .exact)
+      case .absolutePercent: player.seek(percent: amount, forceExact: true)
+      case .relativePercent:
+        if let duration = player.info.videoDuration?.second, duration.isFinite {
+          player.seek(relativeSecond: amount * duration / 100, option: .exact)
+        }
+      }
+    case .frame(let backwards):
+      player.pause()
+      player.frameStep(backwards: backwards)
+    case .speed(let amount, let mode):
+      let current = player.mpv.getDouble(MPVOption.PlaybackControl.speed)
+      let target: Double
+      switch mode {
+      case .set: target = amount
+      case .add: target = current + amount
+      case .multiply: target = current * amount
+      }
+      if target.isFinite { player.setSpeed(target) }
+    }
+    return true
   }
   
   override func keyUp(with event: NSEvent) {

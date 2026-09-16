@@ -10,14 +10,6 @@ import Cocoa
 
 class PlayerCore: NSObject {
 
-  /// Minimum value to set a mpv loop point to.
-  ///
-  /// Setting a loop point to zero disables looping, so when loop points are being adjusted IINA must insure the mpv property is not
-  /// set to zero. However using `Double.leastNonzeroMagnitude` as the minimum value did not work because mpv truncates
-  /// the value when storing the A-B loop points in the watch later file. As a result the state of the A-B loop feature is not properly
-  /// restored when the movies is played again. Using the following value as the minimum for loop points avoids this issue.
-  static private let minLoopPointTime = 0.000001
-
   // MARK: - Multiple instances
 
   static let first: PlayerCore = createPlayerCore()
@@ -148,6 +140,7 @@ class PlayerCore: NSObject {
   /// Changes for every mpv start-file event, including reloads of the same URL.
   /// Video tool previews use this to avoid restoring state into a different media load.
   private(set) var videoToolsMediaGeneration: UInt64 = 0
+  var videoToolsLoopRecovery = VideoToolsLoopRecovery()
 
   var touchBarSupport: TouchBarSupport {
     get {
@@ -259,14 +252,17 @@ class PlayerCore: NSObject {
     /// Sets the value of the A loop point as an absolute timestamp in seconds.
     ///
     /// The loop points of the mpv A-B loop command can be adjusted at runtime. This method updates the A loop point. Setting a
-    /// loop point to zero disables looping, so this method will adjust the value so it is not equal to zero in order to require use of the
-    /// A-B command to disable looping.
+    /// loop point to zero is valid; mpv uses the string "no" for an unset marker.
     /// - Precondition: The A loop point must have already been established using the A-B loop command otherwise the attempt
     ///     to change the loop point will be ignored.
     /// - Note: The value of the A loop point is not required by mpv to be before the B loop point.
     set {
       guard info.abLoopStatus == .aSet || info.abLoopStatus == .bSet else { return }
-      mpv.setDouble(MPVOption.PlaybackControl.abLoopA, max(PlayerCore.minLoopPointTime, newValue))
+      guard newValue.isFinite, newValue >= 0 else { return }
+      if let end = VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopB)), newValue >= end { return }
+      mpv.setDouble(MPVOption.PlaybackControl.abLoopA, newValue)
+      videoToolsLoopRecovery.reset()
+      videoToolsEnforceLoopBounds()
     }
   }
 
@@ -279,19 +275,22 @@ class PlayerCore: NSObject {
     /// Sets the value of the B loop point as an absolute timestamp in seconds.
     ///
     /// The loop points of the mpv A-B loop command can be adjusted at runtime. This method updates the B loop point. Setting a
-    /// loop point to zero disables looping, so this method will adjust the value so it is not equal to zero in order to require use of the
-    /// A-B command to disable looping.
+    /// loop point requires it to remain after A.
     /// - Precondition: The B loop point must have already been established using the A-B loop command otherwise the attempt
     ///     to change the loop point will be ignored.
     /// - Note: The value of the B loop point is not required by mpv to be after the A loop point.
     set {
       guard info.abLoopStatus == .bSet else { return }
-      mpv.setDouble(MPVOption.PlaybackControl.abLoopB, max(PlayerCore.minLoopPointTime, newValue))
+      guard VideoToolsLoopRange(start: VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA)),
+                                end: newValue, duration: info.videoDuration?.second) != nil else { return }
+      mpv.setDouble(MPVOption.PlaybackControl.abLoopB, newValue)
+      videoToolsLoopRecovery.reset()
+      videoToolsEnforceLoopBounds()
     }
   }
 
   var isABLoopActive: Bool {
-    abLoopA != 0 && abLoopB != 0 && mpv.getString(MPVOption.PlaybackControl.abLoopCount) != "0"
+    videoToolsLoopRange != nil
   }
 
   /// Whether to auto load files when opening the URL given in `pendingUrl`.
@@ -867,6 +866,8 @@ class PlayerCore: NSObject {
     if mpv.getFlag(MPVProperty.eofReached) {
       seek(absoluteSecond: 0)
     }
+    videoToolsEnforceLoopBounds()
+    guard !videoToolsLoopRecovery.suspended else { return }
     mpv.setFlag(MPVOption.PlaybackControl.pause, false, level: .verbose)
   }
 
@@ -890,6 +891,7 @@ class PlayerCore: NSObject {
   func stop() {
     guard info.state != .shutDown else { return }
     savePlaybackPosition()
+    videoToolsClearLoop()
 
     // The player may already be stopped in which case the state must not be set to stopping.
     if info.state != .idle {
@@ -930,6 +932,11 @@ class PlayerCore: NSObject {
   }
 
   func seek(percent: Double, forceExact: Bool = false) {
+    guard percent.isFinite else { return }
+    if videoToolsLoopRange != nil, let duration = info.videoDuration?.second, duration > 0 {
+      seek(absoluteSecond: duration * percent / 100)
+      return
+    }
     var percent = percent
     // mpv will play next file automatically when seek to EOF.
     // We clamp to a Range to ensure that we don't try to seek to 100%.
@@ -944,6 +951,11 @@ class PlayerCore: NSObject {
   }
 
   func seek(relativeSecond: Double, option: Preference.SeekOption) {
+    guard relativeSecond.isFinite else { return }
+    if videoToolsLoopRange != nil, let position = videoToolsLoopRecovery.pendingTarget ?? videoToolsCurrentTime {
+      seek(absoluteSecond: position + relativeSecond)
+      return
+    }
     switch option {
 
     case .relative:
@@ -969,7 +981,42 @@ class PlayerCore: NSObject {
   }
 
   func seek(absoluteSecond: Double) {
-    mpv.command(.seek, args: ["\(absoluteSecond)", "absolute+exact"])
+    guard absoluteSecond.isFinite else { return }
+    let target = videoToolsLoopRange?.clamped(absoluteSecond) ?? absoluteSecond
+    if videoToolsLoopRange != nil { videoToolsLoopRecovery.userSeek(to: target) }
+    mpv.command(.seek, args: ["\(target)", "absolute+exact"])
+  }
+
+  /// Enforce loop boundaries from mpv events even when the tools panel and UI timer are inactive.
+  /// Always query the current position instead of trusting an event payload from an older seek.
+  func videoToolsEnforceLoopBounds(playbackRestarted: Bool = false) {
+    guard info.state.loaded, let range = videoToolsLoopRange else {
+      videoToolsLoopRecovery.reset()
+      return
+    }
+    if videoToolsLoopRecovery.suspended {
+      if !mpv.getFlag(MPVOption.PlaybackControl.pause) { pause() }
+      return
+    }
+    guard !mpv.getFlag("seeking") else { return }
+    if playbackRestarted { videoToolsLoopRecovery.didRestart() }
+    guard videoToolsLoopRecovery.pendingTarget == nil,
+          let position = videoToolsCurrentTime else { return }
+    if range.contains(position), !mpv.getFlag(MPVProperty.eofReached) {
+      videoToolsLoopRecovery.reachedRange()
+      return
+    }
+    guard videoToolsLoopRecovery.beginCorrection(to: range.start) else {
+      if videoToolsLoopRecovery.suspended {
+        pause()
+        log("Paused an A-B loop after repeated out-of-range decoder restarts", level: .warning)
+        sendOSD(.custom(NSLocalizedString("video_tools.loop_unplayable", comment: "Loop decoder recovery failed")))
+      }
+      return
+    }
+    // Do not call seek(absoluteSecond:) here: a recovery seek must not reset its retry budget.
+    mainWindow.videoView.displayActive()
+    mpv.command(.seek, args: ["\(range.start)", "absolute+exact"], checkError: false)
   }
 
   func frameStep(backwards: Bool) {
@@ -977,6 +1024,15 @@ class PlayerCore: NSObject {
     // It must be running when stepping to avoid slowdowns caused by mpv waiting for IINA to call
     // mpv_render_report_swap.
     mainWindow.videoView.displayActive()
+    if let range = videoToolsLoopRange, let position = videoToolsCurrentTime {
+      let fps = mpv.getDouble("container-fps")
+      let step = fps.isFinite && fps > 0 ? 1 / fps : 1 / 24
+      if !range.contains(position + (backwards ? -step : step)) {
+        pause()
+        seek(absoluteSecond: backwards ? range.start : range.lastSeekPosition)
+        return
+      }
+    }
     if backwards {
       mpv.command(.frameBackStep)
     } else {
@@ -1131,34 +1187,22 @@ class PlayerCore: NSObject {
   ///
   /// When the command is first invoked it sets the A loop point to the timestamp of the current frame. When the command is invoked
   /// a second time it sets the B loop point to the timestamp of the current frame, activating looping and causing mpv to seek back to
-  /// the A loop point. When the command is invoked again both loop points are cleared (set to zero) and looping stops.
+  /// the A loop point. When the command is invoked again both loop points are cleared (set to "no") and looping stops.
   func abLoop() {
-    // may subject to change
-    mpv.command(.abLoop)
-    syncAbLoop()
+    switch info.abLoopStatus {
+    case .cleared: videoToolsSetLoopStart()
+    case .aSet: videoToolsSetLoopEnd()
+    case .bSet: videoToolsClearLoop()
+    }
     sendOSD(.abLoop(info.abLoopStatus))
   }
 
   /// Synchronize IINA with the state of the [mpv](https://mpv.io/manual/stable/) A-B loop command.
   func syncAbLoop() {
     // Obtain the values of the ab-loop-a and ab-loop-b options representing the A & B loop points.
-    let a = abLoopA
-    let b = abLoopB
-    if a == 0 {
-      if b == 0 {
-        // Neither point is set, the feature is disabled.
-        info.abLoopStatus = .cleared
-      } else {
-        // The B loop point is set without the A loop point having been set. This is allowed by mpv
-        // but IINA is not supposed to allow mpv to get into this state, so something has gone
-        // wrong. This is an internal error. Log it and pretend that just the A loop point is set.
-        log("Unexpected A-B loop state, ab-loop-a is \(a) ab-loop-b is \(b)", level: .error)
-        info.abLoopStatus = .aSet
-      }
-    } else {
-      // A loop point has been set. B loop point must be set as well to activate looping.
-      info.abLoopStatus = b == 0 ? .aSet : .bSet
-    }
+    let a = VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA))
+    let b = VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopB))
+    info.abLoopStatus = a == nil ? .cleared : (VideoToolsLoopRange(start: a, end: b) == nil ? .aSet : .bSet)
     log("Synchronized info.abLoopStatus \(info.abLoopStatus)")
 
     // If window is not loaded the play slider knobs can't be synchronized.
@@ -1247,8 +1291,10 @@ class PlayerCore: NSObject {
   }
 
   func setSpeed(_ speed: Double) {
+    guard speed.isFinite else { return }
     let speed = speed < AppData.mpvMinPlaybackSpeed ? AppData.mpvMinPlaybackSpeed : speed
     mpv.setDouble(MPVOption.PlaybackControl.speed, speed)
+    videoToolsEnforceLoopBounds()
   }
 
   func setVideoAspect(_ aspect: String) {
@@ -1985,6 +2031,7 @@ class PlayerCore: NSObject {
     guard info.state.active else { return }
     log("File started")
     videoToolsMediaGeneration &+= 1
+    videoToolsClearLoop()
     info.justStartedFile = true
     info.disableOSDForFileLoading = true
     currentMediaIsAudio = .unknown
@@ -2138,6 +2185,9 @@ class PlayerCore: NSObject {
   }
 
   func fileEnded(_ dueToStopCommand: Bool) {
+    // The preview unload hook may restore an old snapshot after stop() has cleared the loop.
+    // Clear again once unloading finishes so no loop options leak into an idle or reused core.
+    videoToolsClearLoop()
     // if receive end-file when loading file, might be error
     // wait for idle
     if info.state == .loading || info.state == .starting {
@@ -2257,6 +2307,11 @@ class PlayerCore: NSObject {
 
   func pauseChanged(_ paused: Bool) {
     guard mainWindow.loaded, info.state.loaded else { return }
+    if !paused, videoToolsLoopRecovery.suspended, videoToolsLoopRange != nil {
+      pause()
+      sendOSD(.custom(NSLocalizedString("video_tools.loop_unplayable", comment: "Loop decoder recovery failed")))
+      return
+    }
     if (info.state == .paused) != paused {
       sendOSD(paused ? .pause : .resume)
       // The NowPlayingInfoManager is notified when playback is paused or resumed. The video
@@ -2281,6 +2336,7 @@ class PlayerCore: NSObject {
 
   func playbackRestarted() {
     log("Playback restarted")
+    videoToolsEnforceLoopBounds(playbackRestarted: true)
 
     // Important to synchronize the time as mpv may slightly alter the playback position during a
     // restart even while paused. See issue #5337.
@@ -2341,6 +2397,7 @@ class PlayerCore: NSObject {
   func speedChanged(_ speed: Double) {
     guard info.state.active else { return }
     info.playSpeed = speed
+    videoToolsEnforceLoopBounds()
     sendOSD(.speed(speed))
     mainWindow.updateSpeedLabel(speed: speed)
     needReloadQuickSettingsView()

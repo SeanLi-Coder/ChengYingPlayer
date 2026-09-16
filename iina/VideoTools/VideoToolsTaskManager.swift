@@ -169,3 +169,14 @@ final class VideoToolsTaskManager {
     NotificationCenter.default.post(name: .videoToolsTaskChanged, object: self)
   }
 }
+
+extension VideoToolsTaskManager: VideoToolsRotationTaskManaging {
+  func startRotation(inputURL: URL, degrees: Int) throws -> String {
+    try start(operation: .rotate, inputURL: inputURL, degrees: degrees)
+  }
+
+  func cancelRotation(taskID: String) {
+    guard snapshot?.id == taskID else { return }
+    cancelCurrent()
+  }
+}

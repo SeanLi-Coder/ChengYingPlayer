@@ -15,9 +15,20 @@ done
 xcrun swiftc -o "$test_bundle/MacOS/NativeControlsTests" \
   "$project_root/Tools/VideoToolsTests/Stubs.swift" \
   "$project_root/iina/VideoTools/VideoToolsModels.swift" \
+  "$project_root/iina/VideoTools/VideoToolsShortcuts.swift" \
+  "$project_root/iina/VideoTools/VideoToolsLoopPolicy.swift" \
+  "$project_root/iina/VideoTools/VideoToolsRotationCoordinator.swift" \
   "$project_root/iina/VideoTools/VideoToolsPlayerBridge.swift" \
   "$project_root/iina/VideoTools/VideoToolsViewController.swift" \
+  "$project_root/Tools/VideoToolsTests/ShortcutTests.swift" \
+  "$project_root/Tools/VideoToolsTests/LoopPolicyTests.swift" \
   "$project_root/Tools/VideoToolsTests/main.swift"
 for language in en zh-Hans; do
   "$test_bundle/MacOS/NativeControlsTests" -AppleLanguages "($language)"
 done
+
+xcrun swiftc -o "$test_dir/RotationCoordinatorTests" \
+  "$project_root/iina/VideoTools/VideoToolsModels.swift" \
+  "$project_root/iina/VideoTools/VideoToolsRotationCoordinator.swift" \
+  "$project_root/Tools/VideoToolsTests/RotationCoordinatorTests.swift"
+"$test_dir/RotationCoordinatorTests"
