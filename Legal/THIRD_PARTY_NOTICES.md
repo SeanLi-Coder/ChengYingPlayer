@@ -62,6 +62,12 @@ The local application build stores these notices in the helper's `Contents/Resou
 
 See [`Tools/DownloaderHelper/DISTRIBUTION.md`](../Tools/DownloaderHelper/DISTRIBUTION.md) for limitations on redistribution. A source release includes the downloader source and dependency lock/manifest, not its runtime wheels or executables. Before anyone distributes a binary, all embedded runtime components, including nested Node/Deno dependencies, require the applicable notices and any corresponding-source obligations to be fulfilled for the exact distributed artifacts. The existing source-only release gate remains in force.
 
+## Native image viewer and WebP encoding
+
+The native image interface and ImageIO/Core Image/PDFKit integration are new project code. FlowVision, qView, Phoenix Slides, iMonet, and SDWebImage were evaluated as references; their implementation code is not copied or linked into this module. In particular, no Phoenix Slides code under its noncommercial license or retired FFmpegKit binaries are included.
+
+`chengying-image-codec` statically links libwebp **1.6.0**, including its SharpYUV component, built from the SHA-256-verified official source archive pinned in `other/third_party_sources.sh`. The upstream BSD-style `COPYING`, patent grant `PATENTS`, and `AUTHORS` are retained in the application's `Legal/libwebp` directory and the verified source archive accompanies tagged source releases. See [`Tools/ImageCodecHelper/README.md`](../Tools/ImageCodecHelper/README.md) and [`Legal/ThirdParty/libwebp/README.md`](ThirdParty/libwebp/README.md). This does not relax the source-only distribution gate for the existing playback stack.
+
 ## Integrity and source availability
 
 The authoritative checksums, filenames, and download URLs are stored in [`other/third_party_sources.sh`](../other/third_party_sources.sh) and reproduced as `SOURCE_MANIFEST.txt` in both a locally built application bundle and the release source archive. The build fails if a downloaded archive does not match its recorded SHA-256.

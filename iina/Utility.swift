@@ -15,7 +15,7 @@ typealias PK = Preference.Key
 class Utility {
 
   static let supportedFileExt: [MPVTrack.TrackType: [String]] = [
-    .video: ["mkv", "mp4", "avi", "m4v", "mov", "3gp", "ts", "mts", "m2ts", "wmv", "flv", "f4v", "asf", "webm", "rm", "rmvb", "qt", "dv", "mpg", "mpeg", "mxf", "vob", "gif", "ogv", "ogm"],
+    .video: ["mkv", "mp4", "avi", "m4v", "mov", "3gp", "ts", "mts", "m2ts", "wmv", "flv", "f4v", "asf", "webm", "rm", "rmvb", "qt", "dv", "mpg", "mpeg", "mxf", "vob", "ogv", "ogm"],
     .audio: ["mp3", "aac", "mka", "dts", "flac", "ogg", "oga", "mogg", "m4a", "ac3", "opus", "wav", "wv", "aiff", "aif", "ape", "tta", "tak"],
     .sub: ["utf", "utf8", "utf-8", "idx", "sub", "srt", "smi", "rt", "ssa", "aqt", "jss", "js", "ass", "mks", "vtt", "sup", "scc", "lrc"]
   ]
@@ -23,7 +23,7 @@ class Utility {
   static let singleFilePlaylistExt = ["cue"]
   static let multipleFilePlaylistExt = ["m3u", "m3u8", "pls"]
   static let playlistFileExt = singleFilePlaylistExt + multipleFilePlaylistExt
-  static let blacklistExt = supportedFileExt[.sub]! + multipleFilePlaylistExt
+  static let blacklistExt = supportedFileExt[.sub]! + multipleFilePlaylistExt + Array(ImageFileSupport.extensions)
   static let lut3dExt = ["3dl", "cube", "dat", "m3d"]
 
   /// Accept paths and file URLs while omitting network media from new playlists.
@@ -32,6 +32,14 @@ class Utility {
     if path.hasPrefix("/") { return true }
     guard let url = URL(string: path), url.scheme != nil else { return true }
     return url.isFileURL
+  }
+
+  /// Images belong to the native viewer, including paths pasted as file URLs.
+  static func isLocalPlaybackPath(_ path: String) -> Bool {
+    guard isLocalMediaPath(path) else { return false }
+    let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) :
+      (URL(string: path).flatMap { $0.isFileURL ? $0 : nil } ?? URL(fileURLWithPath: path))
+    return !ImageFileSupport.isImageURL(url)
   }
 
   /// File types that are subtitles or can contain subtitles.

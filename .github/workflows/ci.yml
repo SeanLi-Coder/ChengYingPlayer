@@ -80,6 +80,15 @@ jobs:
           bash Tools/PlaylistPlaybackTests/run.sh
           bash Tools/PlaylistPresentationTests/run.sh
 
+      - name: Test native image viewing and conversion
+        run: |
+          brew install cmake
+          bash other/build_image_codec.sh
+          bash Tools/ImageCodecHelper/run.sh
+          bash Tools/ImageViewerTests/run.sh
+          bash Tools/ImageViewerUITests/run.sh
+          bash Tools/ImageRoutingTests/run.sh
+
       - name: Test local subtitle tools
         run: |
           python -m ruff check Tools/SubtitleToolsHelper
@@ -147,6 +156,7 @@ jobs:
       - name: Build bundled video tools
         run: |
           ./other/build_media_binaries.sh
+          bash other/build_image_codec.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/VideoToolsHelper/build_helper.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/SubtitleToolsHelper/build_helper.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/DownloaderHelper/build_helper.sh
@@ -190,7 +200,7 @@ jobs:
           ./other/install_legal_notices.sh "$app_path/Contents/Resources"
           codesign --force --sign - --options runtime --entitlements iina/IINA.entitlements "$app_path"
 
-          for executable in ffmpeg ffprobe chengying-video-tools-helper chengying-subtitle-tools-helper chengying-cli; do
+          for executable in ffmpeg ffprobe chengying-video-tools-helper chengying-subtitle-tools-helper chengying-image-codec chengying-cli; do
             executable_path="$app_path/Contents/MacOS/$executable"
             if [[ ! -x "$executable_path" ]]; then
               echo "$executable was not copied into the application bundle." >&2
@@ -229,6 +239,7 @@ jobs:
           done
 
           "$app_path/Contents/MacOS/ffmpeg" -hide_banner -version
+          "$app_path/Contents/MacOS/chengying-image-codec" --version
           "$app_path/Contents/MacOS/chengying-video-tools-helper" --help
           "$app_path/Contents/MacOS/chengying-subtitle-tools-helper" --help
           "$download_center/Contents/MacOS/chengying-download-center-helper" --help
@@ -300,6 +311,9 @@ jobs:
             FriBidi-COPYING.txt \
             libunibreak-LICENCE.txt \
             libass-COPYING.txt \
+            libwebp/COPYING.txt \
+            libwebp/PATENTS.txt \
+            libwebp/AUTHORS.txt \
             CPython-LICENSE.txt \
             PyInstaller-COPYING.txt \
             PyInstaller-hooks-contrib-LICENSE.txt \

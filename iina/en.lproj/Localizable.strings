@@ -22,7 +22,7 @@
 
 // Guide Window
 "guide.highlights" = "Highlights";
-"guide.welcome.title" = "Welcome to ChengYingPlayer";
+"guide.welcome.title" = "Welcome to ChengYing View";
 "guide.welcome.subtitle" = "A local-first media player with practical video tools built directly into playback.";
 "guide.welcome.playback" = "Play local and network media with playlists, subtitles, chapters, history, and Picture in Picture.";
 "guide.welcome.clip" = "Create a high-fidelity clip by entering only its start and end times, with live range preview.";
@@ -33,7 +33,7 @@
 "guide.faq" = "Frequently Asked Questions";
 
 // Initial Window
-"initial.announcement" = "You are using a %@ version of ChengYing";
+"initial.announcement" = "You are using a %@ version of ChengYing View";
 "initial.beta.desc" = "To return to a stable version, disable beta updates in Settings > General and download the latest <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/releases/latest\">GitHub Release</a>.";
 "initial.nightly.desc" = "Nightly builds are intended for testing. Download newer builds from the project's <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/releases\">GitHub Releases</a>.";
 "initial.debug.desc" = "Debug builds are usually not optimized for performance, so it is not recommended to be used as daily drive. Debug builds do not support auto update.";
@@ -271,6 +271,7 @@
 "menu.pause" = "Pause";
 "menu.resume" = "Resume";
 "menu.speed" = "Speed: %@x";
+"menu.audio_device.image_disabled" = "Switch to a video window to select its audio device";
 "menu.chapters" = "Show Chapters Panel";
 "menu.hide_chapters" = "Hide Chapters Panel";
 "menu.playlist" = "Show Playlist Panel";
@@ -326,7 +327,7 @@
 "alert.unsupported_video" = "Unsupported external video file.";
 "alert.unsupported_sub" = "Unsupported external subtitle.";
 "alert.unsupported_url" = "Unsupported URL.";
-"alert.local_media_only" = "ChengYing opens local media files. Download the video first, then open the saved file.";
+"alert.local_media_only" = "ChengYing View opens local media files. Download the video or image first, then open the saved file.";
 "alert.wrong_url_format" = "Wrong URL format.";
 
 "alert.error_open" = "Cannot open file or stream!";
@@ -352,7 +353,7 @@
 "alert.add_filter.title" = "New Filter";
 "alert.add_filter.message" = "Please enter a filter string in format of mpv's vf or af command.";
 
-"alert.keybinding_config.error" = "Error parsing keybinding configuration file \"%@\"! Fallback to ChengYing Default keybinding setting. Please check your configuration.";
+"alert.keybinding_config.error" = "Error parsing keybinding configuration file \"%@\"! Fallback to ChengYing View Default keybinding setting. Please check your configuration.";
 
 "alert.extra_option.cannot_read" = "Cannot read user defined extra mpv options.";
 "alert.extra_option.empty" = "Key or value cannot be empty!";
@@ -369,8 +370,8 @@
 "alert.sub.cannot_login" = "Cannot login. Please check your username, password and network status.\n\n%@";
 "alert.sub.save_downloaded.title" = "Save Downloaded Subtitle";
 
-"alert.set_default.title" = "Setting ChengYing as Default App";
-"alert.set_default.message" = "ChengYing will be set as the default app for all file types it supports.";
+"alert.set_default.title" = "Setting ChengYing View as Default App";
+"alert.set_default.message" = "ChengYing View will be set as the default app for all file types it supports.";
 "alert.set_default.success" = "Finished with %d success and %d failed.";
 
 "alert.add_watch.title" = "Add Watch Property";
@@ -415,7 +416,7 @@
 
 "alert.duplicate_config" = "You cannot edit default configurations directly. Please duplicate one before editing.";
 
-"alert.assrt_register" = "ASSRT requires your own API token. Register for a token, then paste it into ChengYingPlayer.";
+"alert.assrt_register" = "ASSRT requires your own API token. Register for a token, then paste it into ChengYing View.";
 "alert.assrt_register.register" = "Register Now";
 "alert.assrt_register.try" = "Enter Token";
 "alert.assrt_token_prompt.title" = "Enter your API token";
@@ -538,7 +539,7 @@
 "plugin.install_error.file_not_found" = "Cannot find the package file.";
 "plugin.install_error.cannot_download" = "Failed to download the plugin.\n\nOutput:%@\n";
 "plugin.install_error.cannot_unpackage" = "Failed to unpackage the plugin.\n\nOutput:%@\n";
-"plugin.install_error.cannot_load" = "ChengYing cannot load this plugin. It might be in the wrong format.";
+"plugin.install_error.cannot_load" = "ChengYing View cannot load this plugin. It might be in the wrong format.";
 "plugin.check_for_updates" = "Check for Updates";
 "plugin.updating" = "Downloading update…";
 

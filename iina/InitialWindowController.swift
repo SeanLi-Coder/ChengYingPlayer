@@ -76,6 +76,8 @@ private final class WelcomeRecentCell: NSTableCellView {
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
   func configure(url: URL) {
+    fileIcon.image = ChengYingStyle.symbol(ImageFileSupport.isImageURL(url) ? "photo" : "film",
+                                          fallback: NSImage.multipleDocumentsName)
     filename.stringValue = url.lastPathComponent
     folder.stringValue = url.deletingLastPathComponent().lastPathComponent
     toolTip = url.path
@@ -293,7 +295,7 @@ class InitialWindowController: NSWindowController {
     let info = InfoDictionary.shared
     let version = info.version.0
     let build = info.buildType == .release ? "" : " · \(info.buildType.description)"
-    let versionLabel = welcomeLabel("ChengYing  \(version)\(build)", size: 10, color: .tertiaryLabelColor)
+    let versionLabel = welcomeLabel("ChengYing View  \(version)\(build)", size: 10, color: .tertiaryLabelColor)
 
     [icon, brand, eyebrow, title, description, primaryOpenButton, downloadCenterButton, dragHint, features, privacy, versionLabel]
       .forEach(hero.addSubview)
@@ -474,7 +476,8 @@ class InitialWindowController: NSWindowController {
     if Preference.bool(for: .recordRecentFiles),
        Preference.bool(for: .resumeLastPosition),
        let lastFile = Preference.url(for: .iinaLastPlayedFilePath),
-       lastFile.isFileURL, FileManager.default.fileExists(atPath: lastFile.path) {
+       lastFile.isFileURL, !ImageFileSupport.isImageURL(lastFile),
+       FileManager.default.fileExists(atPath: lastFile.path) {
       lastPlaybackURL = lastFile
       let position = VideoTime(Preference.double(for: .iinaLastPlayedFilePosition)).stringRepresentation
       resumeButton.title = String(format: welcomeString("welcome.resume"), lastFile.lastPathComponent, position)

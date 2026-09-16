@@ -38,13 +38,13 @@
 "4ae-MT-2L1.title" = "Audio Delay + 0.5s";
 
 /* Class = "NSMenuItem"; title = "Quit ChengYing"; ObjectID = "4sb-4s-VLi"; */
-"4sb-4s-VLi.title" = "Quit ChengYing";
+"4sb-4s-VLi.title" = "Quit ChengYing View";
 
 /* Class = "NSMenuItem"; title = "Reset Speed"; ObjectID = "5Gn-90-oDu"; */
 "5Gn-90-oDu.title" = "Reset Speed";
 
 /* Class = "NSMenuItem"; title = "About ChengYing"; ObjectID = "5kV-Vb-QxS"; */
-"5kV-Vb-QxS.title" = "About ChengYing";
+"5kV-Vb-QxS.title" = "About ChengYing View";
 
 /* Class = "NSMenu"; title = "Rotation"; ObjectID = "5xN-ZB-VLI"; */
 "5xN-ZB-VLI.title" = "Rotation";
@@ -134,7 +134,7 @@
 "F6G-Ln-fqI.title" = "Next Chapter";
 
 /* Class = "NSMenuItem"; title = "ChengYing Help"; ObjectID = "FKE-Sm-Kum"; */
-"FKE-Sm-Kum.title" = "ChengYing Help";
+"FKE-Sm-Kum.title" = "ChengYing View Help";
 
 /* Class = "NSMenu"; title = "Video Track"; ObjectID = "FTu-CF-O0R"; */
 "FTu-CF-O0R.title" = "Video Track";
@@ -224,7 +224,7 @@
 "OY7-WF-poV.title" = "Minimize";
 
 /* Class = "NSMenuItem"; title = "Hide ChengYing"; ObjectID = "Olw-nP-bQN"; */
-"Olw-nP-bQN.title" = "Hide ChengYing";
+"Olw-nP-bQN.title" = "Hide ChengYing View";
 
 /* Class = "NSMenuItem"; title = "Reset Subtitle Scale"; ObjectID = "P1a-ot-P31"; */
 "P1a-ot-P31.title" = "Reset Subtitle Scale";

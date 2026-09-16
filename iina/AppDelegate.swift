@@ -348,12 +348,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             return FileManager.default.fileExists(atPath: filename) ? URL(fileURLWithPath: filename) : nil
           }
         }
+        let plan = ImageViewerCoordinator.shared.openImages(in: Utility.resolveURLs(validFileURLs))
         if commandLineStatus.openSeparateWindows {
-          validFileURLs.forEach { url in
-            getNewPlayerCore().openURL(url)
+          plan.mediaURLs.forEach { url in
+            getNewPlayerCore().openMediaURLs([url])
           }
-        } else {
-          getNewPlayerCore().openURLs(validFileURLs)
+        } else if !plan.mediaURLs.isEmpty {
+          getNewPlayerCore().openMediaURLs(plan.mediaURLs)
         }
       }
 
@@ -411,19 +412,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   /// - Returns: `false` if the application should not be terminated when its last window is closed; otherwise, `true` to
   ///     terminate the application.
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    guard !ImageViewerCoordinator.shared.isBusy else { return false }
     // A download task is independent of player-window lifetime.
     guard !DownloadCenterService.shared.isRunning else { return false }
     // If the user has not enabled the setting then no need to check anything else.
     guard Preference.bool(for: .quitWhenNoOpenedWindow) else { return false }
     let player = PlayerCore.active
     guard !player.info.state.active else { return false }
-    guard player.mainWindow.loaded || player.initialWindow.loaded else { return false }
+    guard player.mainWindow.loaded || player.initialWindow.loaded else {
+      return ImageViewerCoordinator.shared.hasOpenedImages
+    }
     return !player.mainWindow.isWindowHidden
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     Logger.log("App should terminate")
     isTerminating = true
+    ImageViewerCoordinator.shared.cancelAndClose()
     SubtitleToolsService.shared.shutdown()
     DownloadCenterService.shared.shutdown()
 
@@ -676,6 +681,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    ImageViewerCoordinator.shared.cancelAndClose()
     SubtitleToolsService.shared.shutdown()
     DownloadCenterService.shared.shutdown()
     if let videoToolsShortcutMonitor {
@@ -859,6 +865,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         return
       }
 
+      let localURL = urlValue.hasPrefix("/") ? URL(fileURLWithPath: urlValue) : URL(string: urlValue)
+      let imagePlan: ImageOpenPlan?
+      if let localURL, localURL.isFileURL {
+        imagePlan = ImageOpenPlan.make(Utility.resolveURLs([localURL]), playbackExtensions: Set(Utility.playableFileExt))
+      } else {
+        imagePlan = nil
+      }
+      defer {
+        if let imagePlan { ImageViewerCoordinator.shared.openImages(in: imagePlan.imageURLs) }
+      }
+      // Image requests must not enqueue images or change a background video's presentation.
+      if imagePlan?.mediaURLs.isEmpty == true { return }
+
       // new_window
       let player: PlayerCore
       if let newWindowValue = queryDict["new_window"], newWindowValue == "1" {
@@ -870,9 +889,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
       // enqueue
       let playlistEmpty = PlayerCore.lastActive.info.$playlist.withLock { $0.isEmpty }
       if let enqueueValue = queryDict["enqueue"], enqueueValue == "1", !playlistEmpty {
-        PlayerCore.lastActive.appendToPlaylist(urlValue)
+        if let imagePlan, imagePlan.imageCount > 0 {
+          let files = PlayerCore.lastActive.getPlayableFiles(in: imagePlan.mediaURLs)
+          PlayerCore.lastActive.addToPlaylist(paths: files.map(\.path))
+        } else {
+          PlayerCore.lastActive.appendToPlaylist(urlValue)
+        }
         PlayerCore.lastActive.postNotification(.iinaPlaylistChanged)
         PlayerCore.lastActive.sendOSD(.addToPlaylist(1))
+      } else if let imagePlan {
+        player.openMediaURLs(imagePlan.mediaURLs)
       } else {
         player.openURLString(urlValue)
       }
@@ -951,6 +977,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   }
 
   @IBAction func menuSelectAudioDevice(_ sender: NSMenuItem) {
+    guard !ImageViewerCoordinator.blocksPlaybackMenu else { return }
     if let name = sender.representedObject as? String {
       PlayerCore.active.setAudioDevice(name)
     }

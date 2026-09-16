@@ -127,7 +127,9 @@ extension PlayerCore {
       }
 
       if hasPlayableFiles(in: paths)
-          || hasSubtitleFile(in: paths) {
+          || hasSubtitleFile(in: paths)
+          || !ImageOpenPlan.make(paths.map { URL(fileURLWithPath: $0) },
+                                playbackExtensions: Set(Utility.playableFileExt)).imageURLs.isEmpty {
         return .copy
       }
     } else if types.contains(.nsURL) {
@@ -182,8 +184,7 @@ extension PlayerCore {
         // openURLs already decided whether this was an explicit list or a single local file.
         return true
       } else {
-        // add multiple files to playlist
-        sendOSD(.addToPlaylist(loadedFileCount))
+        // The open operation already reports actual video additions; images use their own window.
         return true
       }
     } else if types.contains(.nsURL) {

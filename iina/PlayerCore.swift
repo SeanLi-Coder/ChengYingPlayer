@@ -86,17 +86,30 @@ class PlayerCore: NSObject {
    */
   @discardableResult
   static func openURLs(_ urls: [URL]) -> Int? {
+    guard !urls.isEmpty else { return 0 }
+    guard urls.allSatisfy(\.isFileURL) else {
+      Utility.showAlert("local_media_only", style: .informational)
+      return nil
+    }
+    let plan = ImageOpenPlan.make(Utility.resolveURLs(urls), playbackExtensions: Set(Utility.playableFileExt))
+    // Choose the existing video target before the image window changes NSApp.mainWindow.
+    defer { ImageViewerCoordinator.shared.openImages(in: plan.imageURLs) }
+    guard !plan.mediaURLs.isEmpty else { return plan.imageCount }
+    return plan.combinedCount(with: openMediaURLs(plan.mediaURLs))
+  }
+
+  private static func openMediaURLs(_ urls: [URL]) -> Int? {
     let openInCurrentWindow = !Preference.bool(for: .alwaysOpenInNewWindow)
     if openInCurrentWindow {
       // open all urls in the active window if any (or, all in one new window)
-      return activeOrNew.openURLs(urls)
+      return activeOrNew.openMediaURLs(urls)
     } else if
       urls.count > 1,
       Preference.bool(for: .groupSimultaneousOpensInPlaylist)
     {
       // create new window, open all urls in that window
       // this purposefully ignores `allowDuplicatePlayers`
-      return newPlayerCore.openURLs(urls)
+      return newPlayerCore.openMediaURLs(urls)
     } else {
       // open each url in its own new window. accumulate the return values
       return urls.reduce(nil) { currentReturnValue, url in
@@ -112,7 +125,7 @@ class PlayerCore: NSObject {
         }
 
         // open url, combine open result into return value
-        let openResult = newPlayerCore.openURLs([url])
+        let openResult = newPlayerCore.openMediaURLs([url])
 
         return
           if let openResult {
@@ -405,7 +418,19 @@ class PlayerCore: NSObject {
       Utility.showAlert("local_media_only", style: .informational)
       return nil
     }
-    let urls = Utility.resolveURLs(urls)
+    let plan = ImageViewerCoordinator.shared.openImages(in: Utility.resolveURLs(urls))
+    guard !plan.mediaURLs.isEmpty else { return plan.imageCount }
+    return plan.combinedCount(with: openMediaURLs(plan.mediaURLs, shouldAutoLoad: autoLoad))
+  }
+
+  /// Only call after ImageViewerCoordinator has removed standalone image inputs.
+  @discardableResult
+  func openMediaURLs(_ urls: [URL], shouldAutoLoad autoLoad: Bool = true) -> Int? {
+    guard !urls.isEmpty else { return 0 }
+    guard urls.allSatisfy(\.isFileURL) else {
+      Utility.showAlert("local_media_only", style: .informational)
+      return nil
+    }
     playlistMutationLock.lock()
     defer { playlistMutationLock.unlock() }
 
@@ -1385,7 +1410,7 @@ class PlayerCore: NSObject {
   }
 
   func appendToPlaylist(_ path: String, silent: Bool = false) {
-    guard Utility.isLocalMediaPath(path) else { return }
+    guard Utility.isLocalPlaybackPath(path) else { return }
     playlistMutationLock.lock()
     mpv.playlistAppend(path)
     playlistMutationLock.unlock()
@@ -1421,7 +1446,7 @@ class PlayerCore: NSObject {
   }
 
   func addToPlaylist(paths: [String], at index: Int = -1) {
-    let paths = paths.filter(Utility.isLocalMediaPath)
+    let paths = paths.filter(Utility.isLocalPlaybackPath)
     guard !paths.isEmpty else { return }
     playlistMutationLock.lock()
     defer { playlistMutationLock.unlock() }

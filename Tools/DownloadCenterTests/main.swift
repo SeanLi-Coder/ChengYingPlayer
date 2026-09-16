@@ -94,8 +94,14 @@ try Data("test image".utf8).write(to: image)
 try Data("test executable".utf8).write(to: executable)
 let videoOutput = DownloadCenterOutput(path: media.path, media_type: "video")
 check((try? videoOutput.validatedURL(forPlayback: true)) == media, "Authenticated regular video outputs can be played")
-check((try? DownloadCenterOutput(path: image.path, media_type: "image").validatedURL(forPlayback: true)) == nil,
-      "Image output is not dispatched to the video player")
+check((try? DownloadCenterOutput(path: image.path, media_type: "image").validatedURL(forPlayback: true)) == image,
+      "Authenticated image outputs can reach the image-aware opening boundary")
+check((try? DownloadCenterOutput(path: image.path, media_type: "video").validatedURL(forPlayback: true)) == nil,
+      "Image files cannot bypass validation by claiming a video media type")
+check((try? DownloadCenterOutput(path: media.path, media_type: "image").validatedURL(forPlayback: true)) == nil,
+      "Video files cannot bypass validation by claiming an image media type")
+check((try? DownloadCenterOutput(path: executable.path, media_type: "image").validatedURL(forPlayback: true)) == nil,
+      "An executable disguised as an image cannot be launched")
 check((try? DownloadCenterOutput(path: executable.path, media_type: "video").validatedURL(forPlayback: true)) == nil,
       "An executable disguised as video cannot be launched")
 check((try? DownloadCenterOutput(path: image.path, media_type: "image").validatedURL(forPlayback: false)) == image,
@@ -178,7 +184,7 @@ if DownloadCenterService.supportsRuntime {
   wait("The JavaScript confirmation receives its native answer") { confirmationFinished }
   check(javascript("document.getElementById('result').textContent") as? String == "yes", "Confirming the native sheet does not silently cancel the web action")
   _ = javascript("playResult()")
-  wait("The native bridge opens only the authenticated saved video") { PlayerCore.activeOrNew.opened == [media] }
+  wait("The native bridge opens only the authenticated saved video") { PlayerCore.opened == [media] }
 
   _ = javascript("location.href = 'https://example.invalid/'; undefined")
   _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.1))
@@ -236,14 +242,14 @@ if DownloadCenterService.supportsRuntime {
   var buttonCount = 0
   repeat {
     buttonCount = (fullPageValue("document.querySelectorAll('.desktop-output-actions button').length") as? NSNumber)?.intValue ?? 0
-    if buttonCount >= 3 { break }
+    if buttonCount >= 4 { break }
     pumpEvents(for: 0.1)
   } while Date() < decorationDeadline
-  if buttonCount != 3 {
+  if buttonCount != 4 {
     print("NATIVE DIAGNOSTIC: window=\(String(describing: fullController.window?.frame)), visible=\(String(describing: fullController.window?.isVisible)), occlusion=\(String(describing: fullController.window?.occlusionState)), web=\(fullController.webView.frame)")
     print("FRONTEND DIAGNOSTIC: \(fullPageValue("JSON.stringify({hidden:document.hidden,errors:window.fixtureErrors,text:document.body.innerText,resources:performance.getEntriesByType('resource').map(e=>e.name)})") ?? "nil")")
   }
-  check(buttonCount == 3, "Real desktop.js decorates preserved video and image output rows after API and SSE updates")
+  check(buttonCount == 4, "Real desktop.js decorates videos and images with open and reveal actions after API and SSE updates")
   check(fullPageValue("document.querySelectorAll('.desktop-folder-button').length") as? Int == 1,
         "The real directory chooser affordance is inserted beside the preserved settings form")
   check(fullPageValue("document.body.classList.contains('version-blocked')") as? Bool == false,
@@ -284,10 +290,10 @@ if DownloadCenterService.supportsRuntime {
   waitForPage("The original unsafe read reproduces a TypeError during a genuine frontend redraw",
               "window.fixtureRenderRace.missingActions > 0 && window.fixtureRenderRace.unsafeReadFailures > 0")
   _ = fullPageValue("window.fixtureRenderObserver.disconnect(); undefined")
-  waitForPage("An image output gets Finder reveal without a misleading play button", """
+  waitForPage("An image output gets a dedicated view action alongside Finder reveal", """
     (() => {
       const image = document.querySelectorAll('.download-item')[1];
-      return image?.querySelector('.desktop-output-actions')?.textContent === '在 Finder 中显示';
+      return image?.querySelector('.desktop-output-actions')?.textContent === '查看在 Finder 中显示';
     })()
     """)
   _ = fullPageValue("window.chengyingDownloadCenter.setDirectory('/tmp/Fixture folder'); undefined")
@@ -319,7 +325,7 @@ if DownloadCenterService.supportsRuntime {
         && window.fixtureExpandedRows.every(item => !item.isConnected)
         && files.length === 2
         && files.every(item => item.open && item.querySelector('.desktop-output-actions'))
-        && document.querySelectorAll('.desktop-output-actions button').length === 3;
+        && document.querySelectorAll('.desktop-output-actions button').length === 4;
     })()
     """)
   waitForPage("Users can collapse both saved-file lists using the preserved controls", """
@@ -348,10 +354,10 @@ if DownloadCenterService.supportsRuntime {
         && window.fixtureCollapsedRows.every(item => !item.isConnected)
         && files.length === 2
         && files.every(item => !item.open && item.querySelector('.desktop-output-actions'))
-        && document.querySelectorAll('.desktop-output-actions button').length === 3;
+        && document.querySelectorAll('.desktop-output-actions button').length === 4;
     })()
     """)
-  PlayerCore.activeOrNew.opened = []
+  PlayerCore.opened = []
   waitForPage("The real native play button is located and clicked atomically after any redraw", """
     (() => {
       const button = document.querySelector('.download-item .desktop-output-actions button');
@@ -363,7 +369,20 @@ if DownloadCenterService.supportsRuntime {
     })()
     """)
   wait("Clicking the real injected play button resolves output through the native authenticated API") {
-    PlayerCore.activeOrNew.opened == [media]
+    PlayerCore.opened == [media]
+  }
+  waitForPage("The real native image button can be clicked after a frontend redraw", """
+    (() => {
+      const button = [...document.querySelectorAll('.desktop-output-actions button')].find(item => item.textContent === '查看');
+      if (!button) return false;
+      const files = button.closest('.item-files');
+      if (!files.open) files.querySelector('summary').click();
+      button.click();
+      return true;
+    })()
+    """)
+  wait("Clicking the image button resolves the saved image through the authenticated opening boundary") {
+    PlayerCore.opened == [media, image]
   }
   if let captureDirectory = ProcessInfo.processInfo.environment["CHENGYING_CAPTURE_DIR"] {
     let directory = URL(fileURLWithPath: captureDirectory, isDirectory: true)

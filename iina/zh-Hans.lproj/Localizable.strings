@@ -22,7 +22,7 @@
 
 // Guide Window
 "guide.highlights" = "更新亮点";
-"guide.welcome.title" = "欢迎使用澄影播放器";
+"guide.welcome.title" = "欢迎使用澄影视界";
 "guide.welcome.subtitle" = "一款以本地播放为核心、把实用视频工具直接放进播放器的中文媒体应用。";
 "guide.welcome.playback" = "播放本地或网络媒体，支持播放列表、字幕、章节、历史记录和画中画。";
 "guide.welcome.clip" = "只输入起点和终点即可高保真剪辑，并可实时预览所选区间。";
@@ -33,7 +33,7 @@
 "guide.faq" = "常见问题";
 
 // Initial Window
-"initial.announcement" = "您正在使用澄影播放器 %@";
+"initial.announcement" = "您正在使用澄影视界 %@";
 "initial.beta.desc" = "如果要回到稳定版本，请在“设置” > “通用”中取消勾选“接收测试版本（Beta）更新”，并从本项目的 <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/releases/latest\">GitHub Release</a> 下载稳定版本。";
 "initial.nightly.desc" = "Nightly 版本适合测试，不建议用于日常播放。请从本项目的 <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/releases\">GitHub Release</a> 手动下载更新版本。";
 "initial.debug.desc" = "调试版本（Debug）通常没有对性能进行优化，所以不建议日常用。调试版本（Debug）不支持自动更新。";
@@ -271,6 +271,7 @@
 "menu.pause" = "暂停";
 "menu.resume" = "继续";
 "menu.speed" = "播放速度";
+"menu.audio_device.image_disabled" = "切换到视频窗口后设置音频设备";
 "menu.chapters" = "显示章节面板";
 "menu.hide_chapters" = "隐藏章节面板";
 "menu.playlist" = "显示播放列表面板";
@@ -326,7 +327,7 @@
 "alert.unsupported_video" = "不支持的外部视频文件。";
 "alert.unsupported_sub" = "不支持的外挂字幕。";
 "alert.unsupported_url" = "不支持的 URL。";
-"alert.local_media_only" = "澄影播放器只打开本地媒体文件。请先下载视频，再打开保存的文件。";
+"alert.local_media_only" = "澄影视界只打开本地媒体文件。请先下载视频或图片，再打开保存的文件。";
 "alert.wrong_url_format" = "URL 格式错误。";
 
 "alert.error_open" = "无法打开文件或流媒体！";
@@ -352,7 +353,7 @@
 "alert.add_filter.title" = "添加新滤镜";
 "alert.add_filter.message" = "请输入符合 mpv 的 vf 或 af 格式的滤镜字符串。";
 
-"alert.keybinding_config.error" = "无法读取快捷键配置文件“%@”！已回退至澄影播放器的默认键位设置。请检查快捷键配置。";
+"alert.keybinding_config.error" = "无法读取快捷键配置文件“%@”！已回退至澄影视界的默认键位设置。请检查快捷键配置。";
 
 "alert.extra_option.cannot_read" = "无法读取用户定义的 mpv 额外选项。";
 "alert.extra_option.empty" = "键或值不能为空！";
@@ -369,8 +370,8 @@
 "alert.sub.cannot_login" = "无法登录。请检查您的用户名、密码及网络状态。\n\n%@";
 "alert.sub.save_downloaded.title" = "保存已下载字幕";
 
-"alert.set_default.title" = "将澄影播放器设为默认程序";
-"alert.set_default.message" = "澄影播放器将作为默认程序打开所有支持的文件类型。";
+"alert.set_default.title" = "将澄影视界设为默认程序";
+"alert.set_default.message" = "澄影视界将作为默认程序打开所有支持的文件类型。";
 "alert.set_default.success" = "已完成。%d 成功，%d 失败。";
 
 "alert.add_watch.title" = "添加监视属性";
@@ -415,7 +416,7 @@
 
 "alert.duplicate_config" = "您无法直接编辑默认配置。请先复制后再编辑。";
 
-"alert.assrt_register" = "ASSRT 需要使用您自己的 API token。请先注册，然后将 token 粘贴到澄影播放器。";
+"alert.assrt_register" = "ASSRT 需要使用您自己的 API token。请先注册，然后将 token 粘贴到澄影视界。";
 "alert.assrt_register.register" = "立即注册";
 "alert.assrt_register.try" = "输入 Token";
 "alert.assrt_token_prompt.title" = "输入您的 API token";
@@ -538,7 +539,7 @@
 "plugin.install_error.file_not_found" = "找不到软件包文件。";
 "plugin.install_error.cannot_download" = "下载插件失败。\n\n输出: %@\n";
 "plugin.install_error.cannot_unpackage" = "解包插件失败。\n\n输出: %@\n";
-"plugin.install_error.cannot_load" = "澄影无法加载此插件，可能是格式错误。";
+"plugin.install_error.cannot_load" = "澄影视界无法加载此插件，可能是格式错误。";
 "plugin.check_for_updates" = "检查更新";
 "plugin.updating" = "下载更新中……";
 

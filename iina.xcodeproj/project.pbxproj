@@ -7,6 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D4CC00010001000000000001 /* ImageFileSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC00020001000000000001 /* ImageFileSupport.swift */; };
+		D4CC00010002000000000001 /* ImageDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC00020002000000000001 /* ImageDocument.swift */; };
+		D4CC00010003000000000001 /* ImageConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC00020003000000000001 /* ImageConverter.swift */; };
+		D4CC00010004000000000001 /* ImageCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC00020004000000000001 /* ImageCanvasView.swift */; };
+		D4CC00010005000000000001 /* ImageViewerWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC00020005000000000001 /* ImageViewerWindowController.swift */; };
+		D4CC00010006000000000001 /* ImageViewerCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC00020006000000000001 /* ImageViewerCoordinator.swift */; };
+		D4CC00010007000000000001 /* chengying-image-codec in Copy Video Tools */ = {isa = PBXBuildFile; fileRef = D4CC00020007000000000001 /* chengying-image-codec */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		D4CB00012F6A000100000001 /* DownloadCenterModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CB00112F6A000100000001 /* DownloadCenterModels.swift */; };
 		D4CB00022F6A000100000002 /* DownloadCenterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CB00122F6A000100000002 /* DownloadCenterService.swift */; };
 		D4CB00032F6A000100000003 /* DownloadCenterWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CB00132F6A000100000003 /* DownloadCenterWindowController.swift */; };
@@ -456,6 +463,7 @@
 				D4C701022F6A000100000002 /* ffprobe in Copy Video Tools */,
 				D4C701032F6A000100000003 /* chengying-video-tools-helper in Copy Video Tools */,
 				D4C801012F6A000100000001 /* chengying-subtitle-tools-helper in Copy Video Tools */,
+				D4CC00010007000000000001 /* chengying-image-codec in Copy Video Tools */,
 			);
 			name = "Copy Video Tools";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -587,6 +595,13 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D4CC00020001000000000001 /* ImageFileSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageFileSupport.swift; sourceTree = "<group>"; };
+		D4CC00020002000000000001 /* ImageDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDocument.swift; sourceTree = "<group>"; };
+		D4CC00020003000000000001 /* ImageConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageConverter.swift; sourceTree = "<group>"; };
+		D4CC00020004000000000001 /* ImageCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCanvasView.swift; sourceTree = "<group>"; };
+		D4CC00020005000000000001 /* ImageViewerWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewerWindowController.swift; sourceTree = "<group>"; };
+		D4CC00020006000000000001 /* ImageViewerCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewerCoordinator.swift; sourceTree = "<group>"; };
+		D4CC00020007000000000001 /* chengying-image-codec */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = "chengying-image-codec"; path = "deps/executable/chengying-image-codec"; sourceTree = SOURCE_ROOT; };
 		D4CB00112F6A000100000001 /* DownloadCenterModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterModels.swift; sourceTree = "<group>"; };
 		D4CB00122F6A000100000002 /* DownloadCenterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterService.swift; sourceTree = "<group>"; };
 		D4CB00132F6A000100000003 /* DownloadCenterWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterWindowController.swift; sourceTree = "<group>"; };
@@ -2191,6 +2206,19 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		D4CC00030001000000000001 /* ImageViewer */ = {
+			isa = PBXGroup;
+			children = (
+				D4CC00020001000000000001 /* ImageFileSupport.swift */,
+				D4CC00020002000000000001 /* ImageDocument.swift */,
+				D4CC00020003000000000001 /* ImageConverter.swift */,
+				D4CC00020004000000000001 /* ImageCanvasView.swift */,
+				D4CC00020005000000000001 /* ImageViewerWindowController.swift */,
+				D4CC00020006000000000001 /* ImageViewerCoordinator.swift */,
+			);
+			path = ImageViewer;
+			sourceTree = "<group>";
+		};
 		D4CB00202F6A000100000001 /* DownloadCenter */ = {
 			isa = PBXGroup;
 			children = (
@@ -2327,6 +2355,7 @@
 				D4C701112F6A000100000002 /* ffprobe */,
 				D4C701122F6A000100000003 /* chengying-video-tools-helper */,
 				D4C801102F6A000100000001 /* chengying-subtitle-tools-helper */,
+				D4CC00020007000000000001 /* chengying-image-codec */,
 			);
 			name = Executables;
 			path = iina;
@@ -2451,6 +2480,7 @@
 				D4C700202F6A000100000001 /* VideoTools */,
 				D4C800202F6A000100000001 /* SubtitleTools */,
 				D4CB00202F6A000100000001 /* DownloadCenter */,
+				D4CC00030001000000000001 /* ImageViewer */,
 				84A0BA931D2F9E9600BC8DA1 /* MainMenu.xib */,
 				E38BD4AE20054BD9007635FC /* MainWindow.swift */,
 				D1B4E24D2A3AFC9100E36F1D /* MiniPlayerWindow.swift */,
@@ -3252,6 +3282,12 @@
 				D4C700012F6A000100000001 /* VideoToolsModels.swift in Sources */,
 				D4C800012F6A000100000001 /* SubtitleToolsModels.swift in Sources */,
 				D4CB00012F6A000100000001 /* DownloadCenterModels.swift in Sources */,
+				D4CC00010001000000000001 /* ImageFileSupport.swift in Sources */,
+				D4CC00010002000000000001 /* ImageDocument.swift in Sources */,
+				D4CC00010003000000000001 /* ImageConverter.swift in Sources */,
+				D4CC00010004000000000001 /* ImageCanvasView.swift in Sources */,
+				D4CC00010005000000000001 /* ImageViewerWindowController.swift in Sources */,
+				D4CC00010006000000000001 /* ImageViewerCoordinator.swift in Sources */,
 				D4CB00022F6A000100000002 /* DownloadCenterService.swift in Sources */,
 				D4CB00032F6A000100000003 /* DownloadCenterWindowController.swift in Sources */,
 				D4C800022F6A000100000002 /* SubtitleToolsHelperClient.swift in Sources */,

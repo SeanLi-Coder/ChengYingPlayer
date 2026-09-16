@@ -15,6 +15,7 @@ test_python_dir="$(dirname "$test_python")"
 export PATH="$test_python_dir:$PATH"
 sources=(
   "$project_root/iina/ChengYingStyle.swift"
+  "$project_root/iina/ImageViewer/ImageFileSupport.swift"
   "$project_root/iina/DownloadCenter/DownloadCenterModels.swift"
   "$project_root/iina/DownloadCenter/DownloadCenterService.swift"
   "$project_root/iina/DownloadCenter/DownloadCenterWindowController.swift"

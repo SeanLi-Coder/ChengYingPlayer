@@ -68,6 +68,21 @@ sendKey(126)
 check(controller.recentFilesTableView.selectedRow == -1, "Up returns to the resume action")
 check(controller.resumeButton.state == .on, "The keyboard-selected resume action has visible selection state")
 
+let picture = temporary.appendingPathComponent("Photo.webp")
+try Data().write(to: picture)
+recent = [picture] + files
+controller.reloadData()
+controller.recentFilesTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+sendKey(36)
+check(player.opened.last == picture, "Recent images use the same image-aware opening boundary as videos")
+Preference.values[.iinaLastPlayedFilePath] = picture
+controller.reloadData()
+check(controller.resumeButton.isHidden, "An old image playback record never displays a fake video resume time")
+Preference.values[.iinaLastPlayedFilePath] = files[0]
+recent = files
+controller.reloadData()
+check(window.title == "ChengYing View" || window.title == "澄影视界", "The welcome window uses the visible media-viewer brand")
+
 if let output = ProcessInfo.processInfo.environment["CHENGYING_CAPTURE_DIR"] {
   let directory = URL(fileURLWithPath: output, isDirectory: true)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -141,7 +156,7 @@ check(!controller.recentFilesTableView.enclosingScrollView!.hasAmbiguousLayout,
 let openFrame = controller.primaryOpenButton.convert(controller.primaryOpenButton.bounds, to: content)
 check(content.bounds.contains(openFrame), "The open action remains inside the minimum-size window")
 let featureLabels = walk(content).compactMap { $0 as? NSTextField }
-let privacy = featureLabels.first { $0.stringValue.contains("NO VIDEO UPLOADS") || $0.stringValue.contains("你的视频不会上传") }!
+let privacy = featureLabels.first { $0.stringValue.contains("NO MEDIA UPLOADS") || $0.stringValue.contains("你的影像不会上传") }!
 let subtitleFeature = featureLabels.first { $0.stringValue == "AI subtitles" || $0.stringValue == "AI 字幕" }!
 let privacyFrame = privacy.convert(privacy.bounds, to: content)
 let subtitleFeatureFrame = subtitleFeature.convert(subtitleFeature.bounds, to: content)

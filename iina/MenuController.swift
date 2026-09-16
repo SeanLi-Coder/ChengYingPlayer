@@ -529,9 +529,16 @@ class MenuController: NSObject, NSMenuDelegate {
   }
 
   private func updateAudioDevice() {
+    audioDeviceMenu.removeAllItems()
+    guard !ImageViewerCoordinator.blocksPlaybackMenu else {
+      let item = NSMenuItem(title: NSLocalizedString("menu.audio_device.image_disabled", comment: "Audio device selection requires a video window"),
+                            action: nil, keyEquivalent: "")
+      item.isEnabled = false
+      audioDeviceMenu.addItem(item)
+      return
+    }
     let devices = PlayerCore.active.getAudioDevices()
     let currAudioDevice = PlayerCore.active.mpv.getString(MPVProperty.audioDevice)
-    audioDeviceMenu.removeAllItems()
     devices.forEach { device in
       audioDeviceMenu.addItem(withTitle: String(describing: device),
                               action: #selector(AppDelegate.menuSelectAudioDevice(_:)), tag: nil,

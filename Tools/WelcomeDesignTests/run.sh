@@ -18,6 +18,7 @@ cp "$project_root/iina/Assets.xcassets/Icons/iina_arrow.imageset/iina-arrow.png"
 xcrun swiftc -o "$test_bundle/MacOS/WelcomeDesignTests" \
   "$project_root/Tools/WelcomeDesignTests/Stubs.swift" \
   "$project_root/iina/ChengYingStyle.swift" \
+  "$project_root/iina/ImageViewer/ImageFileSupport.swift" \
   "$project_root/iina/InitialWindowController.swift" \
   "$project_root/Tools/WelcomeDesignTests/main.swift"
 for language in en zh-Hans; do

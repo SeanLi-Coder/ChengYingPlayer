@@ -63,7 +63,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(404)
                 self.end_headers()
                 return
-            content = json.dumps({"path": os.environ["CHENGYING_TEST_OUTPUT"], "media_type": "video"}).encode()
+            item = parse_qs(urlsplit(self.path).query).get("item_id", [""])[0]
+            output = Path(os.environ["CHENGYING_TEST_OUTPUT"])
+            if item == "image":
+                output = output.with_suffix(".webp")
+            content = json.dumps({"path": str(output), "media_type": "image" if item == "image" else "video"}).encode()
             mime = "application/json"
         elif MODE == "frontend":
             path = urlsplit(self.path).path

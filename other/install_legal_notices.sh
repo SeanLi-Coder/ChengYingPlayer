@@ -30,6 +30,7 @@ HARFBUZZ_ARCHIVE="$(fetch_verified_source harfbuzz "$SOURCE_CACHE_DIR")"
 FRIBIDI_ARCHIVE="$(fetch_verified_source fribidi "$SOURCE_CACHE_DIR")"
 UNIBREAK_ARCHIVE="$(fetch_verified_source libunibreak "$SOURCE_CACHE_DIR")"
 LIBASS_ARCHIVE="$(fetch_verified_source libass "$SOURCE_CACHE_DIR")"
+LIBWEBP_ARCHIVE="$(fetch_verified_source libwebp "$SOURCE_CACHE_DIR")"
 PYTHON_ARCHIVE="$(fetch_verified_source cpython "$SOURCE_CACHE_DIR")"
 PYINSTALLER_ARCHIVE="$(fetch_verified_source pyinstaller "$SOURCE_CACHE_DIR")"
 ALTGRAPH_ARCHIVE="$(fetch_verified_source altgraph "$SOURCE_CACHE_DIR")"
@@ -66,6 +67,20 @@ tar -xOf "$UNIBREAK_ARCHIVE" "libunibreak-$UNIBREAK_VERSION/LICENCE" \
   > "$LEGAL_DIR/libunibreak-LICENCE.txt"
 tar -xOf "$LIBASS_ARCHIVE" "libass-$LIBASS_VERSION/COPYING" \
   > "$LEGAL_DIR/libass-COPYING.txt"
+mkdir -p "$LEGAL_DIR/libwebp"
+tar -xOf "$LIBWEBP_ARCHIVE" "libwebp-$LIBWEBP_VERSION/COPYING" \
+  > "$LEGAL_DIR/libwebp/COPYING.txt"
+tar -xOf "$LIBWEBP_ARCHIVE" "libwebp-$LIBWEBP_VERSION/PATENTS" \
+  > "$LEGAL_DIR/libwebp/PATENTS.txt"
+tar -xOf "$LIBWEBP_ARCHIVE" "libwebp-$LIBWEBP_VERSION/AUTHORS" \
+  > "$LEGAL_DIR/libwebp/AUTHORS.txt"
+install -m 644 "$PROJECT_ROOT/Legal/ThirdParty/libwebp/README.md" "$LEGAL_DIR/libwebp/README.md"
+for notice in COPYING PATENTS AUTHORS; do
+  if [[ ! -s "$LEGAL_DIR/libwebp/$notice.txt" ]]; then
+    echo "libwebp legal notice is empty: $notice" >&2
+    exit 1
+  fi
+done
 tar -xOf "$PYTHON_ARCHIVE" "Python-$PYTHON_VERSION/LICENSE" \
   > "$LEGAL_DIR/CPython-LICENSE.txt"
 tar -xOf "$PYINSTALLER_ARCHIVE" "pyinstaller-$PYINSTALLER_VERSION/COPYING.txt" \

@@ -89,6 +89,7 @@
         actions.append(control);
       }
       if (/\.(mp4|m4v|mov|mkv|webm|avi|ts|m2ts|flv|mts|3gp|mpeg|mpg|ogv)$/i.test(path)) button("播放", "play");
+      if (/\.(jpe?g|png|webp|gif|heic|heif|avif|bmp|tiff?)$/i.test(path)) button("查看", "play");
       button("在 Finder 中显示", "reveal");
       entry.append(actions);
     });

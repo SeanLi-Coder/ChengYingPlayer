@@ -1,10 +1,10 @@
-# 澄影播放器（ChengYingPlayer）
+# 澄影视界（ChengYing View）
 
 <p align="center">
   <img src="Brand/ChengYingIconMaster.png" width="180" alt="ChengYingPlayer icon">
 </p>
 
-一款面向 macOS 的中文媒体播放器，兼顾日常播放、轻量视频处理、本地 AI 中文字幕与原画质素材下载。视频、音频和字幕处理在本机完成，不包含 AI 超分或云端转码。
+一款面向 macOS 的中文视频与图片查看器，兼顾日常播放、图片缩放与动图、图片格式转换、轻量视频处理、本地 AI 中文字幕与原画质素材下载。处理在本机完成，不包含 AI 超分或云端转码。应用显示名称已更新，原有 bundle id、设置、数据目录、CLI 和 GitHub 仓库地址保持兼容。
 
 原生界面采用石墨色与冰蓝点缀，提供深浅两套外观：欢迎页集中呈现打开文件、继续上次与最近播放；工具面板按操作分组，并将主要导出按钮固定在底部；AI 字幕的生成、模型和任务状态以独立卡片呈现。播放器时间轴与侧栏采用统一的强调色，保留原有快捷键和无障碍操作，不添加影响观影的装饰动画。
 
@@ -28,6 +28,28 @@ Release 中的 `ChengYingPlayer-<tag>-Release-Source.tar.gz` 是便于审核和�
 
 ## 核心功能
 
+### 原生看图与格式转换
+
+通过「打开文件」、Finder 双击、拖放、欢迎页最近文件或下载中心的「查看」打开图片。图片进入独立的原生窗口，不经过视频播放引擎；打开单张图片会列出同目录图片，显式多选保持选定顺序。混合文件夹的图片与视频分别进入各自窗口，GIF 不再混入视频播放列表。
+
+- 缩放：工具栏放大 / 缩小、适应窗口、100%；触控板捏合、鼠标滚轮缩放、拖动画面、双击切换适应 / 原尺寸。100% 是一张图片像素对应一颗显示器物理像素，兼容 Retina。
+- 浏览：左右方向键切换图片；侧栏展示 Finder 颜色标签，可按名称、大小、修改日期、创建日期排序及刷新。
+- 动图：GIF、APNG、animated WebP 可播放 / 暂停、逐帧查看；保留不同帧时长和有限 / 无限循环。TIFF / PDF 多页不会被误判为动画。动画按需后台解码，不一次把所有帧装入内存。
+- 转换：JPEG、PNG、GIF、APNG、TIFF、BMP、HEIC、AVIF、WebP。界面只显示当前系统实际可用的编码器；WebP 使用内置的固定版本开源编码器。默认输出到原图同级目录，自动生成 `原名_converted.ext`，重名自动递增，不覆盖原文件。
+- GIF / APNG / WebP 之间支持保留整段动画；转静态格式前明确确认仅导出当前帧。TIFF 支持保留多页。导出重新读取原始像素，不使用界面缩略图，保留方向和支持范围内的色彩配置。
+
+| 格式范围 | 查看 / 转换边界 |
+| --- | --- |
+| JPEG、PNG、GIF、APNG、TIFF、BMP、HEIC | 常用查看及导出；HEIC 依赖 macOS 编码器 |
+| WebP | macOS 11+ 原生查看及动图；内置 libwebp 静态 / 动画导出 |
+| AVIF、JPEG XL | 查看依赖 macOS 版本；AVIF 仅在实际编码探针通过时开放导出，JXL 只读 |
+| ICO、ICNS、PSD、TGA、EXR、JPEG 2000、相机 RAW | 使用系统解码器查看并转换到上面的导出格式；PSD 为合成图，RAW 依赖具体相机型号，不支持写回 RAW 或保留图层 |
+| SVG、PDF | 纯本地安全 SVG 与 PDF 多页栅格化查看 / 导出；SVG 使用固有尺寸，PDF 固定 144 dpi；不保留矢量编辑结构 |
+
+**格式互转不等于任何格式都无损。** JPEG / HEIC / AVIF 使用高质量有损编码；GIF 受 256 色限制；JPEG / BMP 不支持透明度，透明部分转为白底；WebP 只支持 8 位。PNG / TIFF 尽量保留原位深和 ICC。HDR、色彩和半透明像素的最终结果受目标编码器限制，EXIF / GPS 私人元数据不会复制。SVG 不允许脚本、外部资源、DTD 或实体。不能解码的文件会明确报错，不以错误缩略图冒充成功。
+
+看图实现采用 AppKit、ImageIO、Core Image、PDFKit，参考了 [FlowVision](https://github.com/netdcy/FlowVision) 的原生浏览思路；没有整体复制其他查看器，也没有引入其已停维护的 FFmpegKit。WebP 来源和许可证见 [图片编码器说明](Tools/ImageCodecHelper/README.md)。
+
 除完整的本地音视频播放、字幕、播放列表、章节、画中画与播放历史外，澄影播放器提供三项视频处理工具、独立的 AI 中文字幕面板与下载中心，无需离开播放器：
 
 在播放器菜单中打开 **视频 → 视频工具…**，或在播放器侧栏选择 **工具**。以下控制全部集成在 macOS 原生播放器内：
@@ -44,7 +66,7 @@ Release 中的 `ChengYingPlayer-<tag>-Release-Source.tar.gz` 是便于审核和�
 - 完整收录 `rednote_downloader`（原迹下载器）**1.2.23 / e532e4f** 的下载引擎与界面，支持小红书、抖音、B站、YouTube 的主页、作品链接及原引擎支持的合集。保留视频、原图、图集和 Live Photo 的原有支持范围。
 - 不设置清晰度上限，不重编码；继续使用原引擎的真实尺寸、时长、媒体 ID、作者归属和最高质量候选校验。不能证明身份或质量时会明确失败，不会用封面代替视频，也不会悄悄降到低清。
 - 保留逐作品状态、下载速度、阶段提示、预计剩余时间、结构化错误原因与解决办法；保留取消、失败项重试、全部失败重试、重启后任务恢复和已经验证的下载结果。
-- 默认保存到 `~/Downloads/ChengYing`，仍按作者和原来的命名规则整理；可用原生「选择文件夹」更改，再点击「保存设置」。下载完成的视频可直接点「播放」，图片和视频都可在 Finder 中显示。
+- 默认保存到 `~/Downloads/ChengYing`，仍按作者和原来的命名规则整理；可用原生「选择文件夹」更改，再点击「保存设置」。下载完成的视频可直接点「播放」，图片可点「查看」，两者都可在 Finder 中显示。
 - 文件列表的展开、收起状态会在定时刷新和实时任务更新后保留，避免准备播放时列表突然折叠。
 - 关闭下载中心窗口后，后台任务继续运行；退出播放器会停止任务，已下载文件保留。下次打开后，可按原界面的提示继续或重试，不会自动无提示启动旧任务。
 - Chrome Cookie 默认开启，保留账号绑定和显式匿名模式，不会因账号读取失败静默改成匿名请求。首次读取 Chrome 登录态可能触发 macOS 钥匙串授权；只应下载自己有权访问和保存的内容。
@@ -154,6 +176,7 @@ AI 字幕要求 **Apple Silicon、macOS 14 或更新版本，以及至少 96 GiB
 brew install cmake pkg-config
 python3 -m pip install --require-hashes --only-binary=:all: -r Tools/DownloaderHelper/requirements-build.txt
 ./other/build_media_binaries.sh
+bash other/build_image_codec.sh
 Tools/VideoToolsHelper/build_helper.sh
 Tools/SubtitleToolsHelper/build_helper.sh
 Tools/DownloaderHelper/build_helper.sh
@@ -174,6 +197,8 @@ open iina.xcodeproj
 如果需要自行构建 mpv 和 FFmpeg，请参考 [`other/`](other/) 中的构建与依赖处理脚本。动态库、编译选项和许可证必须与实际发布版本保持一致。
 
 ## 参与开发
+
+图片专项检查：`bash Tools/ImageViewerTests/run.sh`、`bash Tools/ImageViewerUITests/run.sh`、`bash Tools/ImageRoutingTests/run.sh`。先运行 `bash other/build_image_codec.sh` 再运行 `bash Tools/ImageCodecHelper/run.sh`，可测试真实 WebP 像素、动画时序、透明度、ICC、安全限制与取消。测试只生成临时素材，不读取个人相册。完整 App 仍由 CI 构建和签名验证，源码发布限制不变。
 
 欢迎提交中文界面、播放兼容性、剪辑准确性、逐帧导出、旋转处理、可访问性和稳定性方面的改进。提交前请确认：
 

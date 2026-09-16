@@ -104,7 +104,9 @@ struct DownloadCenterOutput: Decodable {
     }
     if forPlayback {
       let videoExtensions: Set<String> = ["mp4", "mkv", "webm", "mov", "m4v", "avi", "flv", "ts", "mts", "m2ts", "3gp", "mpeg", "mpg", "ogv"]
-      guard media_type == "video", videoExtensions.contains(url.pathExtension.lowercased()) else {
+      let isVideo = media_type == "video" && videoExtensions.contains(url.pathExtension.lowercased())
+      let isImage = media_type == "image" && ImageFileSupport.isImageURL(url)
+      guard isVideo || isImage else {
         throw DownloadCenterError.unsafeOutput
       }
     }

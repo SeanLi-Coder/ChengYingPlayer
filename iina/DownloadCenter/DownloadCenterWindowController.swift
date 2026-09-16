@@ -229,7 +229,7 @@ final class DownloadCenterWindowController: NSWindowController, NSWindowDelegate
         do {
           let output = try result.get()
           let url = try output.validatedURL(forPlayback: action == "play")
-          if action == "play" { PlayerCore.activeOrNew.openURL(url) }
+          if action == "play" { PlayerCore.openURLs([url]) }
           else { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         } catch { self.showFailure(DownloadCenterError.unsafeOutput, replacePage: false) }
       }
