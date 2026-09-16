@@ -125,7 +125,7 @@ codesign --verify --strict "$BUILT_HELPER"
 BUNDLED_FFMPEG="$OUTPUT_DIR/ffmpeg"
 BUNDLED_FFPROBE="$OUTPUT_DIR/ffprobe"
 if [[ -x "$BUNDLED_FFMPEG" && -x "$BUNDLED_FFPROBE" ]]; then
-  SMOKE_ARGS=()
+  SMOKE_ARGS=(--stdio)
   SMOKE_COMMAND=ping
   SMOKE_EVENT=pong
   if [[ "$HELPER_KIND" == "subtitle" ]]; then
@@ -139,8 +139,7 @@ if [[ -x "$BUNDLED_FFMPEG" && -x "$BUNDLED_FFPROBE" ]]; then
   } | "$BUILT_HELPER" \
     --ffmpeg "$BUNDLED_FFMPEG" \
     --ffprobe "$BUNDLED_FFPROBE" \
-    "${SMOKE_ARGS[@]}" \
-    --stdio)"
+    "${SMOKE_ARGS[@]}")"
   if ! grep -Eq '"type"[[:space:]]*:[[:space:]]*"ready"' <<<"$SMOKE_OUTPUT" || \
      ! grep -Eq "\"type\"[[:space:]]*:[[:space:]]*\"$SMOKE_EVENT\"" <<<"$SMOKE_OUTPUT"; then
     echo "Frozen helper smoke test failed." >&2
