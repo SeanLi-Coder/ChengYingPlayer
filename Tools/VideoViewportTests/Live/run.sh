@@ -45,7 +45,7 @@ xcrun swiftc -import-objc-header "$project_root/Tools/VideoViewportTests/Live/Re
   -framework OpenGL -framework AppKit -Xlinker -rpath -Xlinker "$project_root/deps/lib"
 
 # An external watchdog also bounds a driver or player deadlock.
-/usr/bin/perl -e '
+bash "$project_root/Tools/RenderTestSupport/run_with_capability_policy.sh" "$mode" 'Actual video viewport OpenGL pixels' /usr/bin/perl -e '
   use strict;
   use warnings;
   my $pid = fork();

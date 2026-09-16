@@ -50,7 +50,9 @@ guard CommandLine.arguments.count == 3 else {
   exit(2)
 }
 let hardware = CommandLine.arguments[2] == "hardware"
-expect(viewport_live_open(CommandLine.arguments[1], hardware), "Open the real AppKit, OpenGL, and libmpv renderer")
+let opened = viewport_live_open(CommandLine.arguments[1], hardware)
+if !opened && viewport_live_graphics_unavailable() { exit(77) }
+expect(opened, "Open the real AppKit, OpenGL, and libmpv renderer")
 defer { viewport_live_close() }
 let original = snapshot("original fitted viewport")
 expect(near(original.width, 80, tolerance: 2) && near(original.height, 40, tolerance: 2),

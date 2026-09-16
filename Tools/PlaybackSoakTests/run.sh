@@ -58,7 +58,7 @@ xcrun clang -std=c11 -Wall -Wextra -Werror -O2 \
 
 # A separate process enforces the deadline even if libmpv or a driver deadlocks.
 # Nothing is inherited from a user's mpv configuration or media library.
-/usr/bin/perl -e '
+bash "$project_root/Tools/RenderTestSupport/run_with_capability_policy.sh" "$mode" 'Actual 4K OpenGL render soak' /usr/bin/perl -e '
   use strict;
   use warnings;
   my ($seconds, @command) = @ARGV;

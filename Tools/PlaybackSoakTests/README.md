@@ -33,8 +33,19 @@ explicit software decode run is possible:
 PLAYBACK_SOAK_MODE=software bash Tools/PlaybackSoakTests/run.sh
 ```
 
-Software mode still requires real CGL rendering and labels itself as software
-decoding. Neither mode is a substitute for the complete AppKit/CAOpenGLLayer
+Software mode tries the accelerated context first, then Apple's Generic Float
+CGL 3.2 renderer. It still requires real OpenGL rendering and labels the decoder
+mode and GL renderer separately. If both context choices are unavailable before
+playback begins, it exits with capability status 77. Only an explicitly opted-in
+GitHub Actions software run (`CHENGYING_ALLOW_CI_GL_SKIP=1`) may turn that one
+status into a visible **SKIP** warning and job-summary entry. No OpenGL pass is
+reported. Hardware runs, local runs, later context recreation failures, decoder
+errors, bad pixels, memory failures and timeouts remain failures. The workflow
+still requires independent real decoder, libmpv initialization, native UI and
+complete application checks. `python3 Tools/RenderTestSupport/test_policy.py`
+tests the skip policy's full mode/environment/exit-status matrix.
+
+Neither mode is a substitute for the complete AppKit/CAOpenGLLayer
 window, fullscreen, display-reconfiguration, HDR-output, or multi-hour test.
 The generated Main10 clip is 10-bit SDR, not HDR. Six-second repeats exercise
 long-lived resources but cannot represent every long-file container or codec

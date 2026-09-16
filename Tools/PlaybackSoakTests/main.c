@@ -1,6 +1,7 @@
 // Exercise the shipped decoder and OpenGL renderer without user media or settings.
 #define GL_SILENCE_DEPRECATION
 #include <OpenGL/OpenGL.h>
+#include <OpenGL/CGLRenderers.h>
 #include <OpenGL/gl3.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -33,6 +34,7 @@ static atomic_uint switch_count;
 static double rss_samples[MAX_SAMPLES];
 static double footprint_samples[MAX_SAMPLES];
 static size_t memory_count;
+static bool graphics_unavailable;
 
 typedef struct {
   mpv_handle *mpv;
@@ -247,15 +249,36 @@ static bool run_generation(const char *first, const char *second, const char *mo
   atomic_store(&render_pending, false);
   atomic_store(&controller_done, false);
 
-  CGLPixelFormatAttribute attributes[] = {
+  CGLPixelFormatAttribute accelerated_attributes[] = {
     kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_3_2_Core,
     kCGLPFAAccelerated, kCGLPFAAllowOfflineRenderers, (CGLPixelFormatAttribute)0
   };
+  CGLPixelFormatAttribute software_attributes[] = {
+    kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_3_2_Core,
+    kCGLPFARendererID, (CGLPixelFormatAttribute)kCGLRendererGenericFloatID,
+    (CGLPixelFormatAttribute)0
+  };
+  const bool software_mode = strcmp(mode, "software") == 0;
+  bool context_ready = false;
   GLint pixel_count = 0;
-  if (CGLChoosePixelFormat(attributes, &pixel_format, &pixel_count) != kCGLNoError || !pixel_format ||
-      CGLCreateContext(pixel_format, NULL, &gl_context) != kCGLNoError || !gl_context ||
-      CGLSetCurrentContext(gl_context) != kCGLNoError) {
-    fail("An accelerated CGL 3.2 context is unavailable; no null-VO substitute was used");
+  for (unsigned attempt = 0; attempt < (software_mode ? 2u : 1u); attempt++) {
+    CGLPixelFormatAttribute *attributes = attempt ? software_attributes : accelerated_attributes;
+    if (CGLChoosePixelFormat(attributes, &pixel_format, &pixel_count) == kCGLNoError && pixel_format &&
+        CGLCreateContext(pixel_format, NULL, &gl_context) == kCGLNoError && gl_context &&
+        CGLSetCurrentContext(gl_context) == kCGLNoError) {
+      context_ready = true;
+      break;
+    }
+    if (gl_context) { CGLSetCurrentContext(NULL); CGLReleaseContext(gl_context); gl_context = NULL; }
+    if (pixel_format) { CGLReleasePixelFormat(pixel_format); pixel_format = NULL; }
+  }
+  if (!context_ready) {
+    if (software_mode && generation == 1) {
+      graphics_unavailable = true;
+      fprintf(stderr, "UNAVAILABLE: Neither accelerated nor Generic Float CGL 3.2 is available; no GL test ran\n");
+    } else {
+      fail("A required CGL 3.2 context is unavailable; no null-VO substitute was used");
+    }
     goto cleanup;
   }
   printf("GPU generation=%u renderer=%s version=%s mode=%s\n", generation,
@@ -352,7 +375,7 @@ cleanup:
   if (gl_context) { glFinish(); CGLSetCurrentContext(NULL); CGLReleaseContext(gl_context); }
   if (pixel_format) CGLReleasePixelFormat(pixel_format);
   if (gl_library) dlclose(gl_library);
-  return !atomic_load(&failed);
+  return !graphics_unavailable && !atomic_load(&failed);
 }
 
 static int compare_double(const void *left, const void *right) {
@@ -404,7 +427,7 @@ int main(int argc, char **argv) {
   for (unsigned generation = 1; generation <= 3; generation++) {
     const char *first = generation % 2 ? argv[1] : argv[2];
     const char *second = generation % 2 ? argv[2] : argv[1];
-    if (!run_generation(first, second, argv[4], duration / 3, generation)) return 1;
+    if (!run_generation(first, second, argv[4], duration / 3, generation)) return graphics_unavailable ? 77 : 1;
   }
   if (memory_count < 15) { fail("Insufficient memory samples"); return 1; }
   size_t window = memory_count / 6;

@@ -62,6 +62,7 @@ jobs:
         run: |
           bash Tools/DMGPackagingTests/run.sh
           bash Tools/PlaybackDistributionTests/run.sh
+          python Tools/RenderTestSupport/test_policy.py
 
       - name: Test inherited player bug regressions
         run: |
@@ -170,6 +171,7 @@ jobs:
           bash other/build_playback_libraries.sh
           bash Tools/PlaybackBuildTests/run.sh
           python other/verify_playback_distribution.py "$PWD/deps"
+          bash Tools/RenderTestSupport/test_native_capability.sh
 
       - name: Build bundled video tools
         run: |
@@ -195,10 +197,10 @@ jobs:
         run: bash Tools/ThumbnailDecoderTests/run.sh
 
       - name: Test real 4K playback rendering
-        run: PLAYBACK_SOAK_MODE=software PLAYBACK_SOAK_SECONDS=180 bash Tools/PlaybackSoakTests/run.sh
+        run: CHENGYING_ALLOW_CI_GL_SKIP=1 PLAYBACK_SOAK_MODE=software PLAYBACK_SOAK_SECONDS=180 bash Tools/PlaybackSoakTests/run.sh
 
       - name: Test real video picture zoom and pan
-        run: VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
+        run: CHENGYING_ALLOW_CI_GL_SKIP=1 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
 
       - name: Build application
         run: >-

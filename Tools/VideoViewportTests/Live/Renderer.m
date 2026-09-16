@@ -1,6 +1,7 @@
 // Render generated media through the shipped libmpv in a real AppKit window.
 #define GL_SILENCE_DEPRECATION
 #import <AppKit/AppKit.h>
+#include <OpenGL/CGLRenderers.h>
 #include <OpenGL/gl3.h>
 #include <dlfcn.h>
 #include <math.h>
@@ -24,6 +25,7 @@ static void *gl_library;
 static GLuint texture, framebuffer;
 static atomic_bool render_pending;
 static bool failed, loaded;
+static bool graphics_unavailable;
 static unsigned frame_count;
 static uint64_t next_request = 1, awaited_request;
 static bool received_reply;
@@ -155,22 +157,43 @@ bool viewport_live_wait(double seconds) {
 }
 
 bool viewport_live_open(const char *path, bool hardware) {
+  graphics_unavailable = false;
   [NSApplication sharedApplication];
   [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
   [NSApp finishLaunching];
-  NSOpenGLPixelFormatAttribute attributes[] = {
+  NSOpenGLPixelFormatAttribute accelerated_attributes[] = {
     NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersion3_2Core,
     NSOpenGLPFADoubleBuffer, NSOpenGLPFAAccelerated,
     NSOpenGLPFAAllowOfflineRenderers, NSOpenGLPFAColorSize, 24, 0
   };
-  NSOpenGLPixelFormat *format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
-  if (!require(format != nil, "A real accelerated OpenGL pixel format is required")) return false;
+  NSOpenGLPixelFormatAttribute software_attributes[] = {
+    NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersion3_2Core,
+    NSOpenGLPFADoubleBuffer, NSOpenGLPFARendererID, kCGLRendererGenericFloatID,
+    NSOpenGLPFAColorSize, 24, 0
+  };
+  NSOpenGLPixelFormat *format = nil;
+  NSOpenGLContext *context = nil;
+  for (unsigned attempt = 0; attempt < (hardware ? 1u : 2u); attempt++) {
+    NSOpenGLPixelFormatAttribute *attributes = attempt ? software_attributes : accelerated_attributes;
+    format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
+    if (format) context = [[NSOpenGLContext alloc] initWithFormat:format shareContext:nil];
+    if (context) break;
+  }
+  if (!context) {
+    if (!hardware) {
+      graphics_unavailable = true;
+      fprintf(stderr, "UNAVAILABLE: Neither accelerated nor Generic Float AppKit CGL 3.2 is available; no GL test ran\n");
+      return false;
+    }
+    return require(false, "A real accelerated OpenGL context is required in hardware mode");
+  }
   window = [[NSWindow alloc] initWithContentRect:NSMakeRect(120, 120, WIDTH, HEIGHT)
                                        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                                          backing:NSBackingStoreBuffered defer:NO];
   window.releasedWhenClosed = NO;
   window.title = @"Generated Video Viewport Test";
   view = [[NSOpenGLView alloc] initWithFrame:NSMakeRect(0, 0, WIDTH, HEIGHT) pixelFormat:format];
+  view.openGLContext = context;
   window.contentView = view;
   [window orderFront:nil];
   [view.openGLContext makeCurrentContext];
@@ -231,6 +254,10 @@ bool viewport_live_open(const char *path, bool hardware) {
   printf("DECODER: %s; SOURCE: %.0fx%.0f\n", reply_string, width, height);
   bool expected = strcmp(reply_string, hardware ? "videotoolbox" : "no") == 0;
   return require(expected, "The requested decoder mode must be active; no silent hardware fallback is allowed");
+}
+
+bool viewport_live_graphics_unavailable(void) {
+  return graphics_unavailable;
 }
 
 bool viewport_live_get_double(const char *name, double *value) {

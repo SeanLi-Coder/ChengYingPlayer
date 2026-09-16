@@ -22,6 +22,7 @@ typedef struct {
 } ViewportLiveSnapshot;
 
 bool viewport_live_open(const char *path, bool hardware);
+bool viewport_live_graphics_unavailable(void);
 bool viewport_live_get_double(const char *name, double *value);
 bool viewport_live_set_double(const char *name, double value);
 bool viewport_live_set_speed(double speed);
