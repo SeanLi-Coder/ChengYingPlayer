@@ -13,7 +13,7 @@ To package the real, already assembled and signed application:
 ```sh
 bash other/package_dmg.sh \
   /absolute/build/Release/ChengYing.app \
-  /absolute/existing-output-directory/ChengYingPlayer-0.2.5-Apple-Silicon.dmg
+  /absolute/existing-output-directory/ChengYingPlayer-v0.2.6-Apple-Silicon.dmg
 ```
 
 The macOS build machine needs Python 3 and the system `codesign`, `ditto`, and `hdiutil` commands. Neither Python nor those build tools are installation prerequisites for the packaged player. The input application is never repaired or re-signed by this command. Its bundle identifier, required native tools, legal notices, all Mach-O ARM64 slices, internal symlinks, runtime search paths, dynamically linked dependencies, and deep strict code signature must pass before packaging.

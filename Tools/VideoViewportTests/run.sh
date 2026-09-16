@@ -20,11 +20,15 @@ sources=(
 xcrun swiftc -target x86_64-apple-macos10.15 -typecheck "${sources[@]}"
 test_bundle="$test_dir/VideoViewportTests.app/Contents"
 mkdir -p "$test_bundle/MacOS" "$test_bundle/Resources"
+cp "$project_root/Tools/VideoViewportTests/Info.plist" "$test_bundle/Info.plist"
 for language in en zh-Hans; do
   mkdir -p "$test_bundle/Resources/$language.lproj"
   cp "$source_root/iina/$language.lproj/Localizable.strings" "$test_bundle/Resources/$language.lproj/"
 done
 xcrun swiftc -o "$test_bundle/MacOS/VideoViewportTests" "${sources[@]}"
 for language in en zh-Hans; do
-  "$test_bundle/MacOS/VideoViewportTests" -AppleLanguages "($language)"
+  /usr/bin/perl -e '
+    alarm 60;
+    exec @ARGV or die "Unable to launch native viewport tests: $!";
+  ' "$test_bundle/MacOS/VideoViewportTests" -AppleLanguages "($language)"
 done

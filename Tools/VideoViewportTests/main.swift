@@ -146,10 +146,7 @@ unchangedPlayback(reset, "New-file reset")
 
 // These are actual AppKit windows, field editors, sheets and NSEvent instances.
 // No global event taps, key injection, user preferences or playback files are used.
-_ = NSApplication.shared
-NSApp.setActivationPolicy(.regular)
-NSApp.finishLaunching()
-NSApp.activate(ignoringOtherApps: true)
+func runNativeTests() -> Never {
 let window = NSWindow(contentRect: NSRect(x: 150, y: 150, width: 700, height: 420),
                       styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
 window.title = "Video Viewport Regression"
@@ -158,8 +155,6 @@ let surface = PlaybackSurface(frame: window.contentView!.bounds)
 window.contentView = surface
 let controller = PlayerWindowController(window: window)
 window.windowController = controller
-window.makeKeyAndOrderFront(nil)
-window.makeFirstResponder(surface)
 func settle(_ seconds: Double = 0.15) {
   let deadline = Date(timeIntervalSinceNow: seconds)
   repeat {
@@ -169,7 +164,33 @@ func settle(_ seconds: Double = 0.15) {
     RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.01)))
   } while Date() < deadline
 }
-settle()
+func waitFor(_ message: String, timeout: Double = 10, condition: () -> Bool) {
+  let deadline = ProcessInfo.processInfo.systemUptime + timeout
+  while !condition() && ProcessInfo.processInfo.systemUptime < deadline {
+    settle(0.02)
+  }
+  guard condition() else {
+    let keyNumber = NSApp.keyWindow?.windowNumber ?? -1
+    print("FAIL: \(message); active=\(NSApp.isActive), keyWindow=\(keyNumber)")
+    print("Video viewport tests: \(checks) checks, \(failures + 1) failures")
+    exit(1)
+  }
+}
+func focus(_ target: NSWindow, responder: NSResponder? = nil) {
+  target.makeKeyAndOrderFront(nil)
+  NSApp.activate(ignoringOtherApps: true)
+  // Activation is asynchronous on a newly launched GUI process. Wait for the
+  // real application state before requesting the window's keyboard ownership.
+  waitFor("The native fixture application becomes active") { NSApp.isActive }
+  target.makeKeyAndOrderFront(nil)
+  if let responder { target.makeFirstResponder(responder) }
+  waitFor("The requested native window owns keyboard focus") {
+    NSApp.keyWindow === target && target.isKeyWindow
+      && (responder == nil || target.firstResponder === responder)
+  }
+  settle()
+}
+focus(window, responder: surface)
 check(NSApp.keyWindow === window, "The fixture owns a real key playback window")
 let frame = window.frame
 func key(_ code: UInt16, _ modifiers: NSEvent.ModifierFlags = [], repeated: Bool = false) -> NSEvent {
@@ -243,23 +264,19 @@ check(window.attachedSheet === sheet, "The fixture presents a real attached shee
 check(!controller.handleVideoToolsShortcutEvent(key(24)), "Dialog sheets cannot trigger video zoom")
 window.endSheet(sheet)
 sheet.orderOut(nil)
-settle()
-window.makeKeyAndOrderFront(nil)
-window.makeFirstResponder(surface)
+waitFor("The real dialog sheet finishes detaching") { window.attachedSheet == nil }
+focus(window, responder: surface)
 controller.player.mainWindow.isInInteractiveMode = true
 check(!controller.handleVideoToolsShortcutEvent(key(24)), "Interactive crop mode retains its own keyboard interaction")
 controller.player.mainWindow.isInInteractiveMode = false
 let second = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 300, height: 200),
                       styleMask: [.titled], backing: .buffered, defer: false)
 second.isReleasedWhenClosed = false
-second.makeKeyAndOrderFront(nil)
-settle()
+focus(second)
 check(NSApp.keyWindow === second, "A second native window can hold keyboard focus")
 check(!controller.handleVideoToolsShortcutEvent(key(24)), "A background player cannot steal another window's shortcut")
 second.orderOut(nil)
-window.makeKeyAndOrderFront(nil)
-window.makeFirstResponder(surface)
-settle()
+focus(window, responder: surface)
 
 controller.player.info.vid = nil
 let audioReads = controller.player.mpv.reads.count
@@ -285,3 +302,17 @@ second.close()
 sheet.close()
 print("Video viewport tests: \(checks) checks, \(failures) failures")
 exit(failures == 0 ? 0 : 1)
+}
+
+final class FixtureApplicationDelegate: NSObject, NSApplicationDelegate {
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    // Enter the normal event loop before creating windows or activating the app.
+    DispatchQueue.main.async { runNativeTests() }
+  }
+}
+let fixtureDelegate = FixtureApplicationDelegate()
+_ = NSApplication.shared
+NSApp.delegate = fixtureDelegate
+NSApp.setActivationPolicy(.regular)
+NSApp.run()
+fatalError("The native fixture event loop stopped before its assertions completed")

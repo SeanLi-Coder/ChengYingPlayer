@@ -39,5 +39,13 @@ The suite creates only temporary test windows and build output. It does not
 inject global input, read or change user settings, open user media, or claim to
 validate actual mpv rendering. Live-renderer coverage belongs in `Live/`.
 
+The fixture is a native application bundle with its own identifier. Window tests
+begin after the real `NSApplication` launch callback and event-loop entry. Focus
+transitions wait up to ten seconds for actual application activation, key-window
+ownership and the requested first responder; they do not assume a fixed delay is
+sufficient. Missing GUI activation is a hard failure, not a skipped test. Each
+language run also has a sixty-second process deadline. Run GUI suites serially
+so unrelated test windows do not compete for keyboard focus.
+
 Set `VIDEO_VIEWPORT_SOURCE_ROOT` to another checkout for source mutation tests.
 The complete application and its matching sources are validated separately before release.
