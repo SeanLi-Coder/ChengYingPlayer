@@ -1,26 +1,18 @@
-/* Class = "NSTextFieldCell"; title = "Uncheck \"receive beta updates\" from Settings > General, and install a stable release from our <a href=\"https://iina.io\">official website</a>."; ObjectID = "3aN-Hg-GkT"; */
-"3aN-Hg-GkT.title" = "Disable beta updates in Settings > General, then download the latest stable <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/releases/latest\">GitHub Release</a>.";
-
-/* Class = "NSTextFieldCell"; title = "Report to us via <a href=\"mailto:developers@iina.io\">email</a> or <a href=\"https://github.com/iina/iina/issues\">GitHub issue</a>."; ObjectID = "BIz-NQ-0qD"; */
-"BIz-NQ-0qD.title" = "Report the problem through the project's <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/issues\">GitHub Issues</a>.";
-
-/* Class = "NSTextFieldCell"; title = "Open URL…"; ObjectID = "FKG-Tz-TCV"; */
-"FKG-Tz-TCV.title" = "Open URL…";
-
-/* Class = "NSTextFieldCell"; title = "You are using a beta version of ChengYing"; ObjectID = "H7D-2H-wQn"; */
-"H7D-2H-wQn.title" = "You are using a beta version of ChengYing";
-
-/* Class = "NSTextFieldCell"; title = "Found a bug?"; ObjectID = "I6R-Jl-2Jk"; */
-"I6R-Jl-2Jk.title" = "Found a bug?";
-
-/* Class = "NSTextFieldCell"; title = "Resume"; ObjectID = "KWZ-BM-GBN"; */
-"KWZ-BM-GBN.title" = "Resume";
-
-/* Class = "NSTextFieldCell"; title = "BETA"; ObjectID = "g2g-dy-qBH"; */
-"g2g-dy-qBH.title" = "BETA";
-
-/* Class = "NSTextFieldCell"; title = "Open…"; ObjectID = "qsU-lZ-WQq"; */
-"qsU-lZ-WQq.title" = "Open…";
-
-/* Class = "NSTextFieldCell"; title = "Want to rollback?"; ObjectID = "s3U-4u-gYp"; */
-"s3U-4u-gYp.title" = "Want to rollback?";
+/* Native welcome window copy. */
+"welcome.window_title" = "ChengYing";
+"welcome.brand" = "ChengYing";
+"welcome.eyebrow" = "YOUR LOCAL VIDEO STUDIO";
+"welcome.headline" = "More than play.\nMake it your cut.";
+"welcome.description" = "Watch, trim, capture, and add subtitles.\nYour video stays right here, on your Mac.";
+"welcome.open" = "Open a local video     ⌘O";
+"welcome.drop" = "Or drop your files anywhere in this window";
+"welcome.feature.trim" = "Precise trimming";
+"welcome.feature.frames" = "Frame capture";
+"welcome.feature.rotate" = "Permanent rotation";
+"welcome.feature.subtitle" = "AI subtitles";
+"welcome.privacy" = "LOCAL PROCESSING  ·  NO VIDEO UPLOADS";
+"welcome.recent" = "Recent videos";
+"welcome.keyboard" = "↑↓  Navigate       ↩  Play";
+"welcome.empty.title" = "Ready for your next video";
+"welcome.empty.hint" = "Open a file and your recent videos\nwill appear here.";
+"welcome.resume" = "CONTINUE WATCHING\n%@\nContinue from %@";

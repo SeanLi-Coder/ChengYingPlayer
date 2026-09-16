@@ -560,6 +560,13 @@ class MainWindowController: PlayerWindowController {
 
     // sidebar views
     sideBarView.isHidden = true
+    sideBarView.material = .sidebar
+    controlBarBottom.material = .hudWindow
+    [leftLabel, rightLabel].forEach {
+      $0?.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+      $0?.textColor = .secondaryLabelColor
+    }
+    playButton.contentTintColor = ChengYingStyle.accent
 
     // osc views
     fragControlView.addView(fragControlViewLeftView, in: .center)
@@ -620,7 +627,7 @@ class MainWindowController: PlayerWindowController {
     }
     // hide other views
     osdVisualEffectView.isHidden = true
-    osdVisualEffectView.roundCorners(withRadius: 10)
+    osdVisualEffectView.roundCorners(withRadius: 14)
     additionalInfoView.roundCorners(withRadius: 10)
     leftArrowLabel.isHidden = true
     rightArrowLabel.isHidden = true

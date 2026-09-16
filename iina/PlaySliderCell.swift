@@ -29,8 +29,8 @@ class PlaySliderCell: NSSliderCell {
   let barRadius: CGFloat = 1.5
 
   private var knobColor = NSColor(named: .mainSliderKnob)!
-  private var knobActiveColor = NSColor(named: .mainSliderKnobActive)!
-  private var barColorLeft = NSColor(named: .mainSliderBarLeft)!
+  private var knobActiveColor = ChengYingStyle.accent
+  private var barColorLeft = ChengYingStyle.accent
   private var barColorRight = NSColor(named: .mainSliderBarRight)!
 
   var drawChapters = Preference.bool(for: .showChapterPos)

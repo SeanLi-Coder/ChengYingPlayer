@@ -2,6 +2,16 @@ import Cocoa
 
 private final class SubtitleToolsDocumentView: NSView {
   override var isFlipped: Bool { true }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    ChengYingStyle.surface.setFill()
+    dirtyRect.fill()
+  }
 }
 
 final class SubtitleToolsViewController: NSViewController {
@@ -60,78 +70,108 @@ final class SubtitleToolsViewController: NSViewController {
       stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -16),
       stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 14),
     ])
-    let title = label(subtitleToolsString("title"))
-    title.font = .boldSystemFont(ofSize: 14)
-    stack.addArrangedSubview(title)
+    stack.spacing = 14
+    stack.addArrangedSubview(ChengYingStyle.heading(subtitleToolsString("title"), subtitle: subtitleToolsString("heading.subtitle")))
     tabs.selectedSegment = 0
     tabs.target = self
     tabs.action = #selector(tabChanged(_:))
     tabs.segmentDistribution = .fillEqually
+    ChengYingStyle.segmented(tabs)
     stack.addArrangedSubview(tabs)
     styleDescription(hardwareLabel)
     stack.addArrangedSubview(hardwareLabel)
 
     styleDescription(sourceLabel)
+    sourceLabel.font = .systemFont(ofSize: 14, weight: .medium)
+    sourceLabel.maximumNumberOfLines = 1
     sourceLabel.lineBreakMode = .byTruncatingMiddle
+    sourceLabel.setAccessibilityLabel(subtitleToolsString("generate.source"))
     for code in Self.languages { languagePopup.addItem(withTitle: subtitleToolsString("language.\(code)")) }
     languagePopup.setAccessibilityLabel(subtitleToolsString("generate.language"))
+    if #available(macOS 11.0, *) { languagePopup.controlSize = .large }
+    languagePopup.font = .systemFont(ofSize: 13)
     burnCheckbox.state = .off
+    burnCheckbox.font = .systemFont(ofSize: 12)
     burnCheckbox.lineBreakMode = .byWordWrapping
     configure(generateButton, action: #selector(generate(_:)))
-    generationGroup = vertical([
-      sourceLabel,
-      label(subtitleToolsString("generate.language")), languagePopup,
+    ChengYingStyle.primaryButton(generateButton)
+    generateButton.image = ChengYingStyle.symbol("captions.bubble")
+    generateButton.imagePosition = .imageLeading
+    let sourceCard = ChengYingStyle.card(vertical([
+      sectionLabel(subtitleToolsString("generate.source")), sourceLabel,
+    ]))
+    let optionsCard = ChengYingStyle.card(vertical([
+      sectionLabel(subtitleToolsString("generate.options")),
+      label(subtitleToolsString("generate.language"), secondary: true), languagePopup,
       burnCheckbox,
       label(subtitleToolsString("generate.external_hint"), secondary: true),
-      label(subtitleToolsString("generate.quality_hint"), secondary: true),
+    ]))
+    generationGroup = vertical([
+      sourceCard,
+      optionsCard,
       generateButton,
+      label(subtitleToolsString("generate.quality_hint"), secondary: true),
     ])
+    generationGroup.spacing = 14
     stack.addArrangedSubview(generationGroup)
 
     var modelViews: [NSView] = [label(subtitleToolsString("models.fixed"), secondary: true)]
     for model in SubtitleToolsModel.fixedModels {
+      let role = sectionLabel(subtitleToolsString("models.role.\(model.id)"))
+      role.textColor = ChengYingStyle.accent
       let name = label(model.name)
-      name.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+      name.font = .systemFont(ofSize: 13, weight: .semibold)
       let details = label("")
-      details.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+      details.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+      details.textColor = .secondaryLabelColor
       let bar = NSProgressIndicator()
       bar.style = .bar
+      bar.controlSize = .small
       bar.isIndeterminate = false
       bar.minValue = 0
       bar.maxValue = 1
       modelLabels[model.id] = details
       modelProgress[model.id] = bar
-      modelViews.append(vertical([name, details, bar]))
+      modelViews.append(ChengYingStyle.card(vertical([role, name, details, bar])))
     }
     configure(prepareButton, action: #selector(prepare(_:)))
+    ChengYingStyle.primaryButton(prepareButton)
+    prepareButton.image = ChengYingStyle.symbol("arrow.down.circle")
+    prepareButton.imagePosition = .imageLeading
     modelViews.append(prepareButton)
     modelViews.append(label(subtitleToolsString("models.resume_hint"), secondary: true))
-    modelViews.append(label(subtitleToolsString("models.license_hint"), secondary: true))
     let qwenLicense = NSButton(title: "Qwen · Apache 2.0", target: self, action: #selector(openQwenLicense(_:)))
-    qwenLicense.bezelStyle = .rounded
     let hyLicense = NSButton(title: "HY-MT2 · Tencent Hy Community License", target: self, action: #selector(openHYLicense(_:)))
-    hyLicense.bezelStyle = .rounded
-    hyLicense.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-    modelViews += [qwenLicense, hyLicense]
+    for button in [qwenLicense, hyLicense] {
+      ChengYingStyle.secondaryButton(button)
+      button.font = .systemFont(ofSize: 10, weight: .medium)
+      button.image = ChengYingStyle.symbol("arrow.up.right")
+      button.imagePosition = .imageTrailing
+    }
+    modelViews.append(ChengYingStyle.card(vertical([
+      sectionLabel(subtitleToolsString("models.licenses")),
+      label(subtitleToolsString("models.license_hint"), secondary: true), qwenLicense, hyLicense,
+    ])))
     modelsGroup = vertical(modelViews)
+    modelsGroup.spacing = 12
     modelsGroup.isHidden = true
     stack.addArrangedSubview(modelsGroup)
-    let separator = NSBox()
-    separator.boxType = .separator
-    stack.addArrangedSubview(separator)
     progress.style = .bar
+    progress.controlSize = .small
     progress.minValue = 0
     progress.maxValue = 1
-    stack.addArrangedSubview(progress)
     styleDescription(statusLabel)
-    stack.addArrangedSubview(statusLabel)
     styleDescription(rateLabel)
-    rateLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-    stack.addArrangedSubview(rateLabel)
+    rateLabel.textColor = .secondaryLabelColor
+    rateLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
     configure(cancelButton, action: #selector(cancel(_:)))
     configure(revealButton, action: #selector(reveal(_:)))
-    stack.addArrangedSubview(cancelButton)
-    stack.addArrangedSubview(revealButton)
+    ChengYingStyle.secondaryButton(cancelButton)
+    ChengYingStyle.secondaryButton(revealButton)
+    stack.addArrangedSubview(ChengYingStyle.card(vertical([
+      sectionLabel(subtitleToolsString("task.heading")), statusLabel, progress, rateLabel,
+      cancelButton, revealButton,
+    ])))
     for child in stack.arrangedSubviews {
       child.translatesAutoresizingMaskIntoConstraints = false
       child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -182,6 +222,7 @@ final class SubtitleToolsViewController: NSViewController {
     modelsGroup.isHidden = sender.selectedSegment != 1
     service.refreshStatus()
     updateUI()
+    scrollView?.contentView.scroll(to: .zero)
     view.needsLayout = true
   }
 
@@ -283,6 +324,7 @@ final class SubtitleToolsViewController: NSViewController {
     progress.isIndeterminate = active && task?.progress == nil
     if progress.isIndeterminate { progress.startAnimation(nil) } else { progress.stopAnimation(nil) }
     progress.doubleValue = task?.progress ?? 0
+    progress.isHidden = !active && task?.phase != .completed
     statusLabel.textColor = task?.phase == .failed || service.statusError != nil ? .systemRed : .labelColor
     if let task {
       let phaseKey: String
@@ -315,6 +357,8 @@ final class SubtitleToolsViewController: NSViewController {
       statusLabel.stringValue = service.statusError ?? subtitleToolsString(service.isReady ? "status.ready" : "status.needs_models")
       rateLabel.stringValue = ""
     }
+    rateLabel.isHidden = rateLabel.stringValue.isEmpty
+    view.needsLayout = true
   }
 
   private func stageTitle(_ stage: String) -> String {
@@ -351,17 +395,25 @@ final class SubtitleToolsViewController: NSViewController {
     return field
   }
 
+  private func sectionLabel(_ text: String) -> NSTextField {
+    let field = label(text)
+    field.font = .systemFont(ofSize: 11, weight: .semibold)
+    return field
+  }
+
   private func styleDescription(_ field: NSTextField) {
     field.maximumNumberOfLines = 0
     field.lineBreakMode = .byWordWrapping
-    field.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+    field.font = .systemFont(ofSize: 12)
+    field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    field.setContentCompressionResistancePriority(.required, for: .vertical)
   }
 
   private func vertical(_ children: [NSView]) -> NSStackView {
     let stack = NSStackView(views: children)
     stack.orientation = .vertical
     stack.alignment = .leading
-    stack.spacing = 10
+    stack.spacing = 8
     stack.detachesHiddenViews = true
     for child in children {
       child.translatesAutoresizingMaskIntoConstraints = false

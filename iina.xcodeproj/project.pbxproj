@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D4C900012F6A000100000001 /* ChengYingStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C900022F6A000100000001 /* ChengYingStyle.swift */; };
 		D4C800012F6A000100000001 /* SubtitleToolsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C800102F6A000100000001 /* SubtitleToolsModels.swift */; };
 		D4C800022F6A000100000002 /* SubtitleToolsHelperClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C800112F6A000100000002 /* SubtitleToolsHelperClient.swift */; };
 		D4C800032F6A000100000003 /* SubtitleToolsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C800122F6A000100000003 /* SubtitleToolsService.swift */; };
@@ -578,6 +579,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D4C900022F6A000100000001 /* ChengYingStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChengYingStyle.swift; sourceTree = "<group>"; };
 		D4C800102F6A000100000001 /* SubtitleToolsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsModels.swift; sourceTree = "<group>"; };
 		D4C800112F6A000100000002 /* SubtitleToolsHelperClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsHelperClient.swift; sourceTree = "<group>"; };
 		D4C800122F6A000100000003 /* SubtitleToolsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsService.swift; sourceTree = "<group>"; };
@@ -2477,6 +2479,7 @@
 		84A0BAA61D2FAF8400BC8DA1 /* Utils */ = {
 			isa = PBXGroup;
 			children = (
+				D4C900022F6A000100000001 /* ChengYingStyle.swift */,
 				84A886E21E24F2D3008755BB /* Sub */,
 				8497A4831D2FF573005F504F /* iina-Bridging-Header.h */,
 				513A4FF929B53F8100A8EA7D /* Atomic.swift */,
@@ -3202,6 +3205,7 @@
 				D4C800022F6A000100000002 /* SubtitleToolsHelperClient.swift in Sources */,
 				D4C800032F6A000100000003 /* SubtitleToolsService.swift in Sources */,
 				D4C800042F6A000100000004 /* SubtitleToolsViewController.swift in Sources */,
+				D4C900012F6A000100000001 /* ChengYingStyle.swift in Sources */,
 				D4C700022F6A000100000002 /* VideoToolsHelperClient.swift in Sources */,
 				D4C700032F6A000100000003 /* VideoToolsTaskManager.swift in Sources */,
 				D4C700042F6A000100000004 /* VideoToolsPlayerBridge.swift in Sources */,

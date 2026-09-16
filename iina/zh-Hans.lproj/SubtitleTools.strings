@@ -1,9 +1,12 @@
 "title" = "AI 字幕";
+"heading.subtitle" = "听懂原声，生成中文字幕。全程本地处理。";
 "sidebar.tab" = "AI 字幕";
 "menu.show" = "生成中文字幕…";
 "tab.generate" = "生成字幕";
 "tab.models" = "模型管理";
 "generate.language" = "原音频语言";
+"generate.source" = "当前视频";
+"generate.options" = "字幕选项";
 "generate.burn" = "同时生成烧录字幕的新视频";
 "generate.run" = "生成字幕";
 "generate.external_hint" = "ASS 和 SRT 字幕默认保存在原视频同级目录，不重新编码原片。可选烧录会生成无损 FFV1 MKV 并复制音轨，文件可能非常大。";
@@ -17,6 +20,10 @@
 "language.ko" = "韩语";
 "hardware.ready" = "Apple Silicon 质量优先流程 · 至少需要 96 GiB 统一内存。";
 "models.fixed" = "可在这里提前下载全部固定模型，再生成字幕。已有的部分下载会继续使用。";
+"models.role.asr" = "01 · 语音识别";
+"models.role.aligner" = "02 · 时间轴对齐";
+"models.role.translator" = "03 · 中文翻译";
+"models.licenses" = "模型许可";
 "models.download" = "下载并准备模型";
 "models.resume" = "继续下载和准备";
 "models.verify" = "校验和准备模型";
@@ -29,6 +36,7 @@
 "models.ready" = "已就绪";
 "models.not_ready" = "尚未就绪";
 "task.cancel" = "取消";
+"task.heading" = "任务状态";
 "task.reveal" = "在 Finder 中显示结果";
 "task.eta" = "本阶段预计剩余：%@";
 "task.eta.download" = "下载预计剩余：%@";

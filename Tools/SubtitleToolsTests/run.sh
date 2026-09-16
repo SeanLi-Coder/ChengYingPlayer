@@ -14,6 +14,7 @@ done
 # Compile the production AppKit controller, service, protocol models, and helper client.
 xcrun swiftc -o "$test_bundle/MacOS/SubtitleControlsTests" \
   "$project_root/Tools/SubtitleToolsTests/Stubs.swift" \
+  "$project_root/iina/ChengYingStyle.swift" \
   "$project_root/iina/SubtitleTools/SubtitleToolsModels.swift" \
   "$project_root/iina/SubtitleTools/SubtitleToolsHelperClient.swift" \
   "$project_root/iina/SubtitleTools/SubtitleToolsService.swift" \

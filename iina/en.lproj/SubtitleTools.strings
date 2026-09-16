@@ -1,9 +1,12 @@
 "title" = "AI subtitles";
+"heading.subtitle" = "Speech to Chinese subtitles. Entirely on your Mac.";
 "sidebar.tab" = "AI Subs";
 "menu.show" = "Generate Chinese Subtitles…";
 "tab.generate" = "Generate subtitles";
 "tab.models" = "Model manager";
 "generate.language" = "Source audio language";
+"generate.source" = "CURRENT VIDEO";
+"generate.options" = "SUBTITLE OPTIONS";
 "generate.burn" = "Also create a video with burned-in subtitles";
 "generate.run" = "Generate subtitles";
 "generate.external_hint" = "ASS and SRT subtitles are saved beside the original video without re-encoding it. Optional burn-in creates a lossless FFV1 MKV with copied audio; this video can be extremely large.";
@@ -17,6 +20,10 @@
 "language.ko" = "Korean";
 "hardware.ready" = "Apple Silicon quality-first workflow · at least 96 GiB unified memory required.";
 "models.fixed" = "Pre-download the complete fixed model set here before generating subtitles. Existing partial downloads are reused.";
+"models.role.asr" = "01 · SPEECH RECOGNITION";
+"models.role.aligner" = "02 · TIMESTAMP ALIGNMENT";
+"models.role.translator" = "03 · CHINESE TRANSLATION";
+"models.licenses" = "MODEL LICENSES";
 "models.download" = "Download and prepare models";
 "models.resume" = "Resume download and preparation";
 "models.verify" = "Verify and prepare models";
@@ -29,6 +36,7 @@
 "models.ready" = "Ready";
 "models.not_ready" = "Not ready";
 "task.cancel" = "Cancel";
+"task.heading" = "TASK STATUS";
 "task.reveal" = "Show output in Finder";
 "task.eta" = "Current stage remaining: %@";
 "task.eta.download" = "Download remaining: %@";

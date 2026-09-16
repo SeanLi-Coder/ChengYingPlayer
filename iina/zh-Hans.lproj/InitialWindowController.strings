@@ -1,26 +1,18 @@
-/* Class = "NSTextFieldCell"; title = "Uncheck \"receive beta updates\" from Settings > General, and install a stable release from our <a href=\"https://iina.io\">official website</a>."; ObjectID = "3aN-Hg-GkT"; */
-"3aN-Hg-GkT.title" = "请在“设置” > “通用”中取消勾选“接收测试版本（Beta）更新”，然后从本项目的 <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/releases/latest\">GitHub Release</a> 下载稳定版本。";
-
-/* Class = "NSTextFieldCell"; title = "Report to us via <a href=\"mailto:developers@iina.io\">email</a> or <a href=\"https://github.com/iina/iina/issues\">GitHub issue</a>."; ObjectID = "BIz-NQ-0qD"; */
-"BIz-NQ-0qD.title" = "请通过本项目的 <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/issues\">GitHub Issues</a> 报告问题。";
-
-/* Class = "NSTextFieldCell"; title = "Open URL…"; ObjectID = "FKG-Tz-TCV"; */
-"FKG-Tz-TCV.title" = "打开URL…";
-
-/* Class = "NSTextFieldCell"; title = "You are using a beta version of ChengYing"; ObjectID = "H7D-2H-wQn"; */
-"H7D-2H-wQn.title" = "您正在使用澄影播放器的测试版本（Beta）";
-
-/* Class = "NSTextFieldCell"; title = "Found a bug?"; ObjectID = "I6R-Jl-2Jk"; */
-"I6R-Jl-2Jk.title" = "发现错误？";
-
-/* Class = "NSTextFieldCell"; title = "Resume"; ObjectID = "KWZ-BM-GBN"; */
-"KWZ-BM-GBN.title" = "继续播放";
-
-/* Class = "NSTextFieldCell"; title = "BETA"; ObjectID = "g2g-dy-qBH"; */
-"g2g-dy-qBH.title" = "测试版本（Beta）";
-
-/* Class = "NSTextFieldCell"; title = "Open…"; ObjectID = "qsU-lZ-WQq"; */
-"qsU-lZ-WQq.title" = "打开…";
-
-/* Class = "NSTextFieldCell"; title = "Want to rollback?"; ObjectID = "s3U-4u-gYp"; */
-"s3U-4u-gYp.title" = "是否需要回滚到上一稳定版本？";
+/* Native welcome window copy. */
+"welcome.window_title" = "澄影播放器";
+"welcome.brand" = "澄影";
+"welcome.eyebrow" = "本地影像工作台";
+"welcome.headline" = "不止播放，\n也能剪出好片段。";
+"welcome.description" = "剪辑、逐帧截图、永久旋转、AI 字幕。\n看视频，也把灵感留下。";
+"welcome.open" = "打开本地视频     ⌘O";
+"welcome.drop" = "也可以将文件直接拖到这个窗口";
+"welcome.feature.trim" = "精准剪辑";
+"welcome.feature.frames" = "逐帧截图";
+"welcome.feature.rotate" = "永久旋转";
+"welcome.feature.subtitle" = "AI 字幕";
+"welcome.privacy" = "本机处理 · 你的视频不会上传";
+"welcome.recent" = "最近播放";
+"welcome.keyboard" = "↑↓  选择       ↩  播放";
+"welcome.empty.title" = "这里还很安静";
+"welcome.empty.hint" = "打开一个视频，\n最近播放会显示在这里。";
+"welcome.resume" = "继续上次\n%@\n从 %@ 继续播放";

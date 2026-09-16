@@ -591,7 +591,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     let currentTag = currentTab.buttonTag
     [videoTabBtn, audioTabBtn, subTabBtn, toolsTabBtn, subtitleToolsTabBtn].compactMap { $0 }.forEach { btn in
       let isActive = currentTag == btn.tag
-      btn.contentTintColor = isActive ? .sidebarTabTintActive : .sidebarTabTint
+      ChengYingStyle.tabButton(btn, selected: isActive)
     }
   }
 
@@ -1270,5 +1270,15 @@ extension QuickSettingViewController: NSMenuDelegate {
 class QuickSettingView: NSView {
 
   override func mouseDown(with event: NSEvent) {}
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    ChengYingStyle.surface.setFill()
+    dirtyRect.fill()
+  }
 
 }

@@ -127,6 +127,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private weak var toolsScrollView: NSScrollView?
   private weak var toolsDocumentView: NSView?
   private weak var contentStack: NSStackView?
+  private weak var taskButtonStack: NSStackView?
 
   init(player: PlayerCore, mainWindow: MainWindowController) {
     self.player = player
@@ -147,10 +148,14 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   override func loadView() {
+    let container = VideoToolsSurfaceView()
+
     let scrollView = NSScrollView()
     scrollView.drawsBackground = false
     scrollView.hasVerticalScroller = true
     scrollView.autohidesScrollers = true
+    scrollView.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(scrollView)
 
     let documentView = FlippedView(frame: NSRect(x: 0, y: 0, width: 360, height: 600))
     documentView.autoresizingMask = []
@@ -159,30 +164,26 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     let stack = NSStackView()
     stack.orientation = .vertical
     stack.alignment = .leading
-    stack.spacing = 10
+    stack.spacing = 14
     stack.detachesHiddenViews = true
     stack.translatesAutoresizingMaskIntoConstraints = false
     documentView.addSubview(stack)
 
-    let titleLabel = makeLabel(
-      NSLocalizedString("videotools.title", comment: "Local video tools"),
-      font: .boldSystemFont(ofSize: 14)
-    )
-    stack.addArrangedSubview(titleLabel)
-
     sourceLabel.lineBreakMode = .byTruncatingMiddle
     sourceLabel.textColor = .secondaryLabelColor
-    sourceLabel.maximumNumberOfLines = 2
-    stack.addArrangedSubview(sourceLabel)
+    sourceLabel.font = .systemFont(ofSize: 11)
+    sourceLabel.maximumNumberOfLines = 1
+    let header = makeVerticalGroup([
+      ChengYingStyle.heading(NSLocalizedString("videotools.title", comment: "Local video tools")),
+      sourceLabel,
+    ], spacing: 5)
+    stack.addArrangedSubview(header)
 
-    stack.addArrangedSubview(makePlaybackControls())
-    stack.addArrangedSubview(makeSeparator())
-
-    stack.addArrangedSubview(makeCaption(NSLocalizedString("videotools.mode", comment: "Mode")))
     modeControl.selectedSegment = 0
     modeControl.target = self
     modeControl.action = #selector(modeChanged(_:))
-    modeControl.segmentStyle = .rounded
+    ChengYingStyle.segmented(modeControl)
+    modeControl.setAccessibilityLabel(NSLocalizedString("videotools.mode", comment: "Mode"))
     stack.addArrangedSubview(modeControl)
 
     configureTimeFields()
@@ -198,91 +199,102 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     )
     rangePreviewButton.target = self
     rangePreviewButton.action = #selector(toggleRangePreview(_:))
-    rangePreviewButton.bezelStyle = .rounded
+    ChengYingStyle.secondaryButton(rangePreviewButton)
     rangeNavigationControl.target = self
     rangeNavigationControl.action = #selector(navigateToRangeBoundary(_:))
     rangeNavigationControl.segmentDistribution = .fillEqually
+    ChengYingStyle.segmented(rangeNavigationControl)
     let markerHint = makeLabel(NSLocalizedString("videotools.markers_hint", comment: "How to select a range"))
     markerHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
     markerHint.textColor = .secondaryLabelColor
     markerHint.maximumNumberOfLines = 0
     markerHint.lineBreakMode = .byWordWrapping
-    timeGroup = makeVerticalGroup([
+    let timeContent = makeVerticalGroup([
       startRow, endRow, rangeNavigationControl, rangePreviewButton, markerHint,
-    ], spacing: 7)
+    ], spacing: 10)
+    timeGroup = makeVerticalGroup([ChengYingStyle.card(timeContent)], spacing: 0)
     stack.addArrangedSubview(timeGroup)
 
     frameHintLabel.stringValue = NSLocalizedString("videotools.frames_hint", comment: "Frame extraction limit")
     frameHintLabel.textColor = .secondaryLabelColor
     frameHintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-    frameHintLabel.maximumNumberOfLines = 2
+    frameHintLabel.maximumNumberOfLines = 0
     frameHintLabel.lineBreakMode = .byWordWrapping
     stack.addArrangedSubview(frameHintLabel)
 
     rotationControl.selectedSegment = 0
     rotationControl.target = self
     rotationControl.action = #selector(rotationChanged(_:))
+    ChengYingStyle.segmented(rotationControl)
     rotationPreviewButton.target = self
     rotationPreviewButton.action = #selector(toggleRotationPreview(_:))
-    rotationPreviewButton.bezelStyle = .rounded
+    ChengYingStyle.secondaryButton(rotationPreviewButton)
     shortcutRotationLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
     shortcutRotationLabel.maximumNumberOfLines = 0
     shortcutRotationLabel.lineBreakMode = .byWordWrapping
     shortcutRotationLabel.isHidden = true
-    rotationGroup = makeVerticalGroup([
+    let rotationContent = makeVerticalGroup([
       makeCaption(NSLocalizedString("videotools.rotation", comment: "Rotation")),
       rotationControl,
       rotationPreviewButton,
       shortcutRotationLabel,
-    ], spacing: 7)
+    ], spacing: 10)
+    rotationGroup = makeVerticalGroup([ChengYingStyle.card(rotationContent)], spacing: 0)
     stack.addArrangedSubview(rotationGroup)
+
+    stack.addArrangedSubview(ChengYingStyle.card(makePlaybackControls()))
 
     outputField.isEditable = false
     outputField.isSelectable = true
     outputField.lineBreakMode = .byTruncatingMiddle
     outputField.placeholderString = NSLocalizedString("videotools.output_default", comment: "Same folder as source")
+    ChengYingStyle.textField(outputField)
     chooseOutputButton.target = self
     chooseOutputButton.action = #selector(chooseOutputDirectory(_:))
-    chooseOutputButton.bezelStyle = .rounded
+    ChengYingStyle.secondaryButton(chooseOutputButton)
     let outputRow = makeHorizontalGroup([outputField, chooseOutputButton], spacing: 7)
     outputField.setContentHuggingPriority(.defaultLow, for: .horizontal)
     outputField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    outputGroup = makeVerticalGroup([
+    let outputContent = makeVerticalGroup([
       makeCaption(NSLocalizedString("videotools.output_folder", comment: "Output folder")),
       outputRow,
-    ], spacing: 6)
+    ], spacing: 8)
+    outputGroup = makeVerticalGroup([ChengYingStyle.card(outputContent)], spacing: 0)
     stack.addArrangedSubview(outputGroup)
 
     runButton.target = self
     runButton.action = #selector(runTask(_:))
-    runButton.bezelStyle = .rounded
+    ChengYingStyle.primaryButton(runButton)
     runButton.keyEquivalent = "\r"
-    stack.addArrangedSubview(runButton)
-
-    stack.addArrangedSubview(makeSeparator())
 
     progressIndicator.style = .bar
     progressIndicator.isIndeterminate = false
     progressIndicator.minValue = 0
     progressIndicator.maxValue = 100
-    stack.addArrangedSubview(progressIndicator)
 
     statusLabel.maximumNumberOfLines = 3
     statusLabel.lineBreakMode = .byWordWrapping
-    stack.addArrangedSubview(statusLabel)
+    statusLabel.font = .systemFont(ofSize: 11)
 
     timingLabel.textColor = .secondaryLabelColor
     timingLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-    stack.addArrangedSubview(timingLabel)
+    timingLabel.maximumNumberOfLines = 0
+    timingLabel.lineBreakMode = .byWordWrapping
 
     cancelButton.target = self
     cancelButton.action = #selector(cancelTask(_:))
-    cancelButton.bezelStyle = .rounded
+    ChengYingStyle.secondaryButton(cancelButton)
     revealButton.target = self
     revealButton.action = #selector(revealOutput(_:))
-    revealButton.bezelStyle = .rounded
+    ChengYingStyle.secondaryButton(revealButton)
     let taskButtons = makeHorizontalGroup([cancelButton, revealButton], spacing: 8)
-    stack.addArrangedSubview(taskButtons)
+    taskButtonStack = taskButtons
+    let taskContent = makeVerticalGroup([
+      runButton, progressIndicator, statusLabel, timingLabel, taskButtons,
+    ], spacing: 8)
+    let taskCard = ChengYingStyle.card(taskContent)
+    taskCard.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(taskCard)
 
     for arrangedView in stack.arrangedSubviews {
       arrangedView.translatesAutoresizingMaskIntoConstraints = false
@@ -290,15 +302,22 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     }
 
     NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 16),
-      stack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -16),
-      stack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 14),
+      stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 14),
+      stack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -14),
+      stack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 18),
+      scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+      scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+      scrollView.topAnchor.constraint(equalTo: container.topAnchor),
+      scrollView.bottomAnchor.constraint(equalTo: taskCard.topAnchor, constant: -12),
+      taskCard.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+      taskCard.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+      taskCard.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -14),
     ])
 
     toolsScrollView = scrollView
     toolsDocumentView = documentView
     contentStack = stack
-    view = scrollView
+    view = container
     updateModeUI(resetFrameEnd: false)
     updateTaskUI()
     updatePlaybackControls()
@@ -315,6 +334,18 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     frame.size.width = visibleSize.width
     documentView.frame = frame
     documentView.layoutSubtreeIfNeeded()
+    // Equal-fill cells can keep stale segment widths after their first narrow layout.
+    // Resolve widths explicitly so every segment is visible before any appearance change.
+    for control in [modeControl, playbackControl, frameStepControl, rangeNavigationControl, rotationControl] {
+      guard control.bounds.width > 0 else { continue }
+      if control.segmentDistribution != .fit { control.segmentDistribution = .fit }
+      let segmentWidth = control.bounds.width / CGFloat(control.segmentCount)
+      for index in 0..<control.segmentCount {
+        if abs(control.width(forSegment: index) - segmentWidth) > 0.01 {
+          control.setWidth(segmentWidth, forSegment: index)
+        }
+      }
+    }
     frame.size.height = max(visibleSize.height, stack.fittingSize.height + 30)
     if documentView.frame.size != frame.size {
       documentView.frame = frame
@@ -918,6 +949,12 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private func updateTaskUI() {
     guard isViewLoaded else { return }
     let active = taskManager.snapshot?.isActive == true
+    defer {
+      timingLabel.isHidden = timingLabel.stringValue.isEmpty
+      progressIndicator.isHidden = taskManager.snapshot == nil && !hasActiveShortcutRotation
+      taskButtonStack?.isHidden = cancelButton.isHidden && revealButton.isHidden
+      view.needsLayout = true
+    }
     let ownsActiveTask = active && taskManager.snapshot?.id == ownedTaskID
     runButton.isEnabled = currentLocalMediaURL != nil && !active && !hasActiveShortcutRotation
     cancelButton.isHidden = !ownsActiveTask && !hasActiveShortcutRotation
@@ -1009,7 +1046,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   // MARK: - UI construction
 
   private func makePlaybackControls() -> NSStackView {
-    playbackPositionLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+    playbackPositionLabel.font = .monospacedDigitSystemFont(ofSize: 16, weight: .medium)
+    playbackPositionLabel.textColor = ChengYingStyle.accent
     playbackPositionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     playbackControl.target = self
     playbackControl.action = #selector(playbackControlClicked(_:))
@@ -1017,7 +1055,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     frameStepControl.action = #selector(stepFrame(_:))
     for control in [playbackControl, frameStepControl] {
       control.segmentDistribution = .fillEqually
-      control.segmentStyle = .rounded
+      ChengYingStyle.segmented(control)
     }
     for speed in Self.playbackSpeeds {
       speedPopup.addItem(withTitle: playbackSpeedTitle(speed))
@@ -1026,11 +1064,12 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     speedPopup.action = #selector(selectPlaybackSpeed(_:))
     speedPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
     speedPopup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    speedPopup.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
     speedPopup.setAccessibilityLabel(NSLocalizedString("videotools.playback.speed", comment: "Playback speed"))
     for button in [slowerButton, fasterButton] {
       button.target = self
       button.action = #selector(changePlaybackSpeed(_:))
-      button.bezelStyle = .rounded
+      ChengYingStyle.secondaryButton(button)
     }
     let speedHint = makeLabel(NSLocalizedString("videotools.playback.speed_hint", comment: "Playback speed does not change exports"))
     speedHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -1043,7 +1082,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     loopStatusLabel.lineBreakMode = .byWordWrapping
     clearLoopButton.target = self
     clearLoopButton.action = #selector(clearLoop(_:))
-    clearLoopButton.bezelStyle = .rounded
+    ChengYingStyle.secondaryButton(clearLoopButton)
     return makeVerticalGroup([
       makeCaption(NSLocalizedString("videotools.playback.title", comment: "Playback and positioning")),
       playbackPositionLabel,
@@ -1054,7 +1093,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       speedHint,
       loopStatusLabel,
       clearLoopButton,
-    ], spacing: 7)
+    ], spacing: 9)
   }
 
   private func playbackSpeedTitle(_ speed: Double) -> String {
@@ -1145,23 +1184,26 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     for field in [startField, endField] {
       field.delegate = self
       field.placeholderString = "00:00.000"
+      ChengYingStyle.textField(field)
       field.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
       field.setContentHuggingPriority(.defaultLow, for: .horizontal)
       field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
     setStartButton.target = self
     setStartButton.action = #selector(setStartToCurrentTime(_:))
-    setStartButton.bezelStyle = .rounded
+    ChengYingStyle.secondaryButton(setStartButton)
     setEndButton.target = self
     setEndButton.action = #selector(setEndToCurrentTime(_:))
-    setEndButton.bezelStyle = .rounded
+    ChengYingStyle.secondaryButton(setEndButton)
   }
 
   private func makeTimeRow(title: String, field: NSTextField, button: NSButton) -> NSStackView {
-    let label = makeLabel(title)
-    label.alignment = .right
-    label.widthAnchor.constraint(equalToConstant: 42).isActive = true
-    return makeHorizontalGroup([label, field, button], spacing: 7)
+    field.setAccessibilityLabel(title)
+    button.setContentCompressionResistancePriority(.required, for: .horizontal)
+    return makeVerticalGroup([
+      makeCaption(title),
+      makeHorizontalGroup([field, button], spacing: 8),
+    ], spacing: 5)
   }
 
   private func makeLabel(_ value: String, font: NSFont? = nil) -> NSTextField {
@@ -1171,8 +1213,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func makeCaption(_ value: String) -> NSTextField {
-    let label = makeLabel(value, font: .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold))
-    label.textColor = .secondaryLabelColor
+    let label = makeLabel(value, font: .systemFont(ofSize: 12, weight: .medium))
+    label.textColor = .labelColor
     return label
   }
 
@@ -1199,9 +1241,18 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     return stack
   }
 
-  private func makeSeparator() -> NSBox {
-    let separator = NSBox()
-    separator.boxType = .separator
-    return separator
+}
+
+private final class VideoToolsSurfaceView: NSView {
+  override var isOpaque: Bool { true }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    ChengYingStyle.surface.setFill()
+    dirtyRect.fill()
   }
 }

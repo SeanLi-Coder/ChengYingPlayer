@@ -58,6 +58,11 @@ jobs:
           ./Tools/SimplificationTests/run.sh
           bash Tools/PreferenceSearchTests/run.sh
 
+      - name: Test native visual design
+        run: |
+          bash Tools/VisualStyleTests/run.sh
+          bash Tools/WelcomeDesignTests/run.sh
+
       - name: Test local subtitle tools
         run: |
           python -m ruff check Tools/SubtitleToolsHelper

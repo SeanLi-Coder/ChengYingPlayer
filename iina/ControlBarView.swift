@@ -20,12 +20,25 @@ class ControlBarView: NSVisualEffectView {
   private var isAlignFeedbackSent = false
 
   override func awakeFromNib() {
-    if #available(macOS 26, *) {
-      self.roundCorners(withRadius: 10)
-    } else {
-      self.roundCorners(withRadius: 6)
-    }
+    super.awakeFromNib()
+    self.roundCorners(withRadius: 16)
+    material = .hudWindow
+    blendingMode = .withinWindow
+    wantsLayer = true
+    layer?.borderWidth = 1
+    updateBorder()
     self.translatesAutoresizingMaskIntoConstraints = false
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateBorder()
+  }
+
+  private func updateBorder() {
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      layer?.borderColor = ChengYingStyle.border.cgColor
+    }
   }
 
   override func mouseDown(with event: NSEvent) {

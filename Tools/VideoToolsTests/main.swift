@@ -44,6 +44,81 @@ let modes = property("modeControl", as: NSSegmentedControl.self)
 let run = property("runButton", as: NSButton.self)
 let faster = property("fasterButton", as: NSButton.self)
 let slower = property("slowerButton", as: NSButton.self)
+
+// Capture the actual AppKit hierarchy in both appearances without changing test behavior.
+if let captureDirectory = ProcessInfo.processInfo.environment["CHENGYING_CAPTURE_DIR"] {
+  let directory = URL(fileURLWithPath: captureDirectory, isDirectory: true)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let language = Bundle.main.preferredLocalizations.first ?? "en"
+  let sourceLabel = property("sourceLabel", as: NSTextField.self)
+  let originalSource = sourceLabel.stringValue
+  sourceLabel.stringValue = "Summer by the sea · 4K.mp4"
+  func refreshSnapshotDisplay(_ view: NSView) {
+    view.needsDisplay = true
+    view.subviews.forEach(refreshSnapshotDisplay)
+  }
+  for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+    panel.appearance = NSAppearance(named: appearance)
+    for height in [600, 1200] {
+      panel.setContentSize(NSSize(width: 320, height: height))
+      controller.view.layoutSubtreeIfNeeded()
+      controller.viewDidLayout()
+      controller.view.layoutSubtreeIfNeeded()
+      RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+      controller.view.layoutSubtreeIfNeeded()
+      for control in [modes, playback, frames, navigation] {
+        let rect = controller.view.convert(control.bounds, from: control)
+        check(rect.minX >= 0 && rect.maxX <= 320, "Captured segmented control fits \(name) sidebar")
+      }
+      guard let bitmap = controller.view.bitmapImageRepForCachingDisplay(in: controller.view.bounds) else {
+        fatalError("Unable to allocate native control screenshot")
+      }
+      refreshSnapshotDisplay(controller.view)
+      controller.view.cacheDisplay(in: controller.view.bounds, to: bitmap)
+      guard let png = bitmap.representation(using: .png, properties: [:]) else {
+        fatalError("Unable to encode native control screenshot")
+      }
+      try png.write(to: directory.appendingPathComponent("video-tools-\(language)-\(name)-\(height).png"))
+    }
+    panel.setContentSize(NSSize(width: 320, height: 600))
+    for (index, operation) in [(1, "frames"), (2, "rotate")] {
+      modes.selectedSegment = index
+      action(modes)
+      controller.view.layoutSubtreeIfNeeded()
+      controller.viewDidLayout()
+      controller.view.layoutSubtreeIfNeeded()
+      RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+      controller.view.layoutSubtreeIfNeeded()
+      guard let bitmap = controller.view.bitmapImageRepForCachingDisplay(in: controller.view.bounds) else {
+        fatalError("Unable to allocate native operation screenshot")
+      }
+      refreshSnapshotDisplay(controller.view)
+      controller.view.cacheDisplay(in: controller.view.bounds, to: bitmap)
+      guard let png = bitmap.representation(using: .png, properties: [:]) else {
+        fatalError("Unable to encode native operation screenshot")
+      }
+      try png.write(to: directory.appendingPathComponent("video-tools-\(language)-\(name)-\(operation).png"))
+    }
+    modes.selectedSegment = 0
+    action(modes)
+  }
+  sourceLabel.stringValue = originalSource
+  panel.appearance = nil
+  panel.setContentSize(NSSize(width: 320, height: 600))
+  controller.view.layoutSubtreeIfNeeded()
+  controller.viewDidLayout()
+}
+let initialRunRect = controller.view.convert(run.bounds, from: run)
+check(initialRunRect.width >= 240 && initialRunRect.minY >= 0 && initialRunRect.maxY <= 600,
+      "Primary export action remains visible in a 320 by 600 sidebar")
+for (name, field) in [("start", start), ("end", end)] {
+  check(field.frame.width >= 130, "\(name) timestamp has room for microsecond precision at sidebar width")
+}
+for control in [modes, playback, frames, navigation] {
+  let widths = (0..<control.segmentCount).map { control.width(forSegment: $0) }
+  check(widths.allSatisfy { $0 > 0 } && abs(widths.reduce(0, +) - control.bounds.width) < 0.1,
+        "Segment widths fit their control on the first narrow layout")
+}
 // Momentary controls expose a selected segment only during mouse tracking.
 // Preserve a synthetic selection while invoking their actual target/action.
 for control in [playback, frames, navigation] { control.trackingMode = .selectOne }

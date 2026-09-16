@@ -1086,7 +1086,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   @IBAction
   func clearRecentDocuments(_ sender: Any?) {
     NSDocumentController.shared.clearRecentDocuments(sender)
+    // Clearing recent files must also remove the welcome page's separate resume entry.
+    Preference.set(nil, for: .iinaLastPlayedFilePath)
+    Preference.set(nil, for: .iinaLastPlayedFilePosition)
     saveRecentDocuments()
+    for player in PlayerCore.playerCores where player.initialWindow.loaded {
+      player.initialWindow.reloadData()
+    }
   }
 
   /// Adds or replaces an Open Recent menu item corresponding to the data located by the URL.

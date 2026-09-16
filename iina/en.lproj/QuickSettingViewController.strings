@@ -65,7 +65,7 @@
 "Lpw-ws-Ezh.title" = "-12 dB";
 
 /* Class = "NSButtonCell"; title = "SUBTITLES"; ObjectID = "NxO-to-jcI"; */
-"NxO-to-jcI.title" = "SUBTITLES";
+"NxO-to-jcI.title" = "Subtitles";
 
 /* Class = "NSTextFieldCell"; title = "4x"; ObjectID = "PLX-gY-e0h"; */
 "PLX-gY-e0h.title" = "4x";
@@ -116,7 +116,7 @@
 "cdR-uY-riN.title" = "Brightness:";
 
 /* Class = "NSButtonCell"; title = "AUDIO"; ObjectID = "cpm-5o-a2c"; */
-"cpm-5o-a2c.title" = "AUDIO";
+"cpm-5o-a2c.title" = "Audio";
 
 /* Class = "NSTextFieldCell"; title = "Contrast:"; ObjectID = "eDl-Si-LSa"; */
 "eDl-Si-LSa.title" = "Contrast:";
@@ -152,7 +152,7 @@
 "lBn-YS-jL7.title" = "0 dB";
 
 /* Class = "NSButtonCell"; title = "VIDEO"; ObjectID = "lQt-I0-jHO"; */
-"lQt-I0-jHO.title" = "VIDEO";
+"lQt-I0-jHO.title" = "Video";
 
 /* Class = "NSTextFieldCell"; title = "1x"; ObjectID = "ldQ-YL-IEp"; */
 "ldQ-YL-IEp.title" = "1x";

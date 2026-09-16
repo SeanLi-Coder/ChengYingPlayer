@@ -75,27 +75,54 @@ func checkPanelWidth(_ controls: [(String, NSView)]) {
     check(rect.width > 0 && rect.minX >= 0 && rect.maxX <= 340.5, "\(name) fits the 340-point native sidebar")
   }
 }
+func visibleLabels(in view: NSView) -> [NSTextField] {
+  guard !view.isHiddenOrHasHiddenAncestor else { return [] }
+  return (view as? NSTextField).map { [$0] } ?? view.subviews.flatMap(visibleLabels)
+}
 checkPanelWidth([("Source language", languages), ("Burn option", burn), ("Generate action", generate), ("Task status", status)])
+let hardware = property("hardwareLabel", of: controller, as: NSTextField.self)
+check(!hardware.isHiddenOrHasHiddenAncestor && hardware.stringValue.contains("96 GiB"),
+      "The required unified-memory capacity remains visible above both tabs")
+check(visibleLabels(in: controller.view).contains { $0.stringValue == subtitleToolsString("generate.external_hint") },
+      "The generation page retains the lossless output and large-file explanation")
+check(generate.bezelColor != nil, "The primary generation action has a distinct accent treatment")
+check(!generate.isHiddenOrHasHiddenAncestor && prepare.isHiddenOrHasHiddenAncestor,
+      "The generation page hides the complete model-manager hierarchy")
 tabs.selectedSegment = 1; action(tabs)
 let modelLabels = property("modelLabels", of: controller, as: [String: NSTextField].self)
 checkPanelWidth(modelLabels.sorted(by: { $0.key < $1.key }).map { ($0.key, $0.value as NSView) } + [("Model preparation", prepare)])
+check(generate.isHiddenOrHasHiddenAncestor && !prepare.isHiddenOrHasHiddenAncestor,
+      "The model page hides the complete generation-card hierarchy")
+check(prepare.bezelColor != nil, "The model preparation action shares the primary accent treatment")
+let modelPageLabels = visibleLabels(in: controller.view)
+check(modelPageLabels.contains { $0.stringValue == subtitleToolsString("models.license_hint") },
+      "The model page retains the complete usage and territory license notice")
+for model in SubtitleToolsModel.fixedModels {
+  check(modelPageLabels.contains { $0.stringValue == model.name }, "The model card displays the exact fixed model name: \(model.id)")
+  check(modelPageLabels.contains { $0.stringValue == subtitleToolsString("models.role.\(model.id)") },
+        "The model card identifies its pipeline role: \(model.id)")
+}
 check(transport.requests.allSatisfy { $0.command == "status" }, "Opening either tab never starts an unsolicited model download")
 if let artifactPath = ProcessInfo.processInfo.environment["SUBTITLE_TEST_ARTIFACT_DIR"],
    let document = (controller.view as? NSScrollView)?.documentView {
-  panel.appearance = NSAppearance(named: .aqua)
-  document.wantsLayer = true
-  document.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
   let artifactDirectory = URL(fileURLWithPath: artifactPath, isDirectory: true)
   try FileManager.default.createDirectory(at: artifactDirectory, withIntermediateDirectories: true)
   let language = UserDefaults.standard.stringArray(forKey: "AppleLanguages")?.first ?? "unknown"
-  for selectedTab in [0, 1] {
-    tabs.selectedSegment = selectedTab; action(tabs)
-    controller.view.layoutSubtreeIfNeeded()
-    controller.viewDidLayout()
-    if let bitmap = document.bitmapImageRepForCachingDisplay(in: document.bounds) {
-      document.cacheDisplay(in: document.bounds, to: bitmap)
-      if let image = bitmap.representation(using: .png, properties: [:]) {
-        try image.write(to: artifactDirectory.appendingPathComponent("subtitle-\(language)-\(selectedTab).png"))
+  for (style, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+    panel.appearance = NSAppearance(named: appearanceName)
+    for selectedTab in [0, 1] {
+      tabs.selectedSegment = selectedTab; action(tabs)
+      controller.view.layoutSubtreeIfNeeded()
+      controller.viewDidLayout()
+      document.layoutSubtreeIfNeeded()
+      document.needsDisplay = true
+      if let bitmap = document.bitmapImageRepForCachingDisplay(in: document.bounds) {
+        panel.effectiveAppearance.performAsCurrentDrawingAppearance {
+          document.cacheDisplay(in: document.bounds, to: bitmap)
+        }
+        if let image = bitmap.representation(using: .png, properties: [:]) {
+          try image.write(to: artifactDirectory.appendingPathComponent("subtitle-\(language)-\(style)-\(selectedTab).png"))
+        }
       }
     }
   }
@@ -231,6 +258,11 @@ let smallHardware = SubtitleToolsHardware(supportsRuntime: true, physicalMemory:
 let smallService = SubtitleToolsService(transport: smallTransport, hardware: smallHardware)
 smallService.refreshStatus()
 smallTransport.ready()
+let smallController = SubtitleToolsViewController(player: player, service: smallService)
+_ = smallController.view
+let memoryWarning = property("hardwareLabel", of: smallController, as: NSTextField.self)
+check(memoryWarning.stringValue == SubtitleToolsError.insufficientMemory.localizedDescription && !memoryWarning.isHiddenOrHasHiddenAncestor,
+      "The redesigned panel preserves the full low-memory warning")
 do { try smallService.start(inputURL: source, language: "auto", burnSubtitles: false); fatalError("Low memory should fail") }
 catch SubtitleToolsError.insufficientMemory { check(true, "Insufficient unified memory blocks generation without selecting smaller models") }
 let smallPreparationID = try smallService.prepareModels()
