@@ -1,4 +1,5 @@
--r requirements-runtime.txt
+# Distribution tests exercise the same notice collector as the frozen build.
+-r requirements-build.txt
 -r ../VideoToolsHelper/requirements-dev.txt
 # Kept only for the preserved upstream's own Deno regression test. Never bundled.
 deno==2.9.5 \
