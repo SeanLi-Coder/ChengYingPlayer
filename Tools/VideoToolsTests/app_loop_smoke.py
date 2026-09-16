@@ -173,11 +173,12 @@ def check_paused(ipc: IPC):
 def exercise(ipc: IPC, first: Path, second: Path):
     wait_until(lambda: same_path(ipc.get("path", optional=True), first), "first test media to load")
     wait_until(lambda: ipc.get("time-pos", optional=True) is not None, "first video timestamp")
-    ipc.set("pause", True)
     # IPC can see libmpv's first timestamp before AppKit processes fileStarted
     # and fileLoaded. Native keyboard actions remain disabled during this phase.
-    # Let queued startup/UI callbacks settle before bypassing them through IPC.
-    monitor_range(ipc, first, 0, 3, duration=2.0)
+    # The App initially pauses manual opens, then resumes from its main-thread
+    # notifyWindowVideoSizeChanged callback after fileLoaded and window setup.
+    wait_until(lambda: ipc.get("pause") is False, "AppKit to finish opening the first video", timeout=15)
+    ipc.set("pause", True)
     check_paused(ipc)
     ipc.request(["seek", 0, "absolute+exact"])
     configure_loop(ipc, 0, 1)
@@ -243,6 +244,7 @@ def exercise(ipc: IPC, first: Path, second: Path):
     ipc.request(["loadfile", str(second), "replace"])
     wait_until(lambda: same_path(ipc.get("path", optional=True), second), "replacement media to load")
     wait_until(lambda: ipc.get("time-pos", optional=True) is not None, "replacement video timestamp")
+    wait_until(lambda: ipc.get("pause") is False, "AppKit to finish opening replacement media", timeout=15)
     wait_until(
         lambda: ipc.get("ab-loop-a") == "no" and ipc.get("ab-loop-b") == "no"
         and str(ipc.get("ab-loop-count")) == "0",
@@ -332,6 +334,7 @@ def main() -> int:
                 # Foundation's argument domain overrides preferences for this
                 # process only. Do not use defaults write or change the user's HOME.
                 "-recordPlaybackHistory", "NO", "-recordRecentFiles", "NO",
+                "-pauseWhenOpen", "NO",
                 "-resumeLastPosition", "NO", "-enableRecentDocumentsWorkaround", "NO",
                 "-playlistAutoAdd", "NO", "-enableThumbnailPreview", "NO",
                 "-SUEnableAutomaticChecks", "NO", str(first),
