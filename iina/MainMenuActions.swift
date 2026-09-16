@@ -57,18 +57,6 @@ class MainMenuActionHandler: NSResponder, NSMenuItemValidation {
     }
   }
 
-  // currently only being used for key command
-  @objc func menuDeleteCurrentFileHard(_ sender: NSMenuItem) {
-    guard let url = player.info.currentURL, !player.info.isNetworkResource else { return }
-    do {
-      let index = player.mpv.getInt(MPVProperty.playlistPos)
-      player.playlistRemove(index)
-      try FileManager.default.removeItem(at: url)
-    } catch let error {
-      Utility.showAlert("playlist.error_deleting", arguments: [error.localizedDescription])
-    }
-  }
-
 }
 
 // MARK: - Control
@@ -266,41 +254,7 @@ extension MainMenuActionHandler {
 
   @objc
   func menuToggleVideoFilterString(_ sender: NSMenuItem) {
-    if let string = (sender.representedObject as? String) {
-      menuToggleFilterString(string, forType: MPVProperty.vf)
-    }
-  }
-
-  private func menuToggleFilterString(_ string: String, forType type: String) {
-    let isVideo = type == MPVProperty.vf
-    if let filter = MPVFilter(rawString: string) {
-      // Removing a filter based on its position within the filter list is the preferred way to do
-      // it as per discussion with the mpv project. Search the list of filters and find the index
-      // of the specified filter (if present).
-      if let index = player.mpv.getFilters(type).firstIndex(of: filter) {
-        // remove
-        if isVideo {
-          _ = player.removeVideoFilter(filter, index)
-        } else {
-          _ = player.removeAudioFilter(filter, index)
-        }
-      } else {
-        // add
-        if isVideo {
-          if !player.addVideoFilter(filter) {
-            Utility.showAlert("filter.incorrect")
-          }
-        } else {
-          if !player.addAudioFilter(filter) {
-            Utility.showAlert("filter.incorrect")
-          }
-        }
-      }
-    }
-    let vfWindow = AppDelegate.shared.vfWindow
-    if vfWindow.loaded {
-      vfWindow.reloadTable()
-    }
+    // Saved filter shortcuts are no longer part of the local editing workflow.
   }
 }
 
@@ -344,9 +298,7 @@ extension MainMenuActionHandler {
 
   @objc
   func menuToggleAudioFilterString(_ sender: NSMenuItem) {
-    if let string = (sender.representedObject as? String) {
-      menuToggleFilterString(string, forType: MPVProperty.af)
-    }
+    // Saved filter shortcuts are no longer part of the local editing workflow.
   }
 }
 

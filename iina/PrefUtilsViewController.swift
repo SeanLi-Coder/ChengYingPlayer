@@ -24,11 +24,10 @@ class PrefUtilsViewController: PreferenceViewController, PreferenceWindowEmbedda
   }
 
   override var sectionViews: [NSView] {
-    return [sectionDefaultAppView, sectionRestoreAlertsView, sectionClearCacheView]
+    return [sectionDefaultAppView, sectionClearCacheView]
   }
 
   @IBOutlet var sectionDefaultAppView: NSView!
-  @IBOutlet var sectionRestoreAlertsView: NSView!
   @IBOutlet var sectionClearCacheView: NSView!
   @IBOutlet var setAsDefaultSheet: NSWindow!
   @IBOutlet weak var setAsDefaultVideoCheckBox: NSButton!
@@ -37,7 +36,6 @@ class PrefUtilsViewController: PreferenceViewController, PreferenceWindowEmbedda
   @IBOutlet weak var thumbCacheSizeLabel: NSTextField!
   @IBOutlet weak var savedPlaybackProgressClearedLabel: NSTextField!
   @IBOutlet weak var playHistoryClearedLabel: NSTextField!
-  @IBOutlet weak var restoreAlertsRestoredLabel: NSTextField!
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -124,16 +122,6 @@ class PrefUtilsViewController: PreferenceViewController, PreferenceWindowEmbedda
 
   @IBAction func setAsDefaultCancelBtnAction(_ sender: Any) {
     view.window!.endSheet(setAsDefaultSheet)
-  }
-
-  @IBAction func resetSuppressedAlertsBtnAction(_ sender: Any) {
-    Utility.quickAskPanel("restore_alerts", sheetWindow: view.window) { respond in
-      guard respond == .alertFirstButtonReturn else { return }
-      // This operation used to restore an alert about preventing display sleeping failing. That
-      // alert has been removed so at this time we do not have any alerts that can be suppressed.
-      // That might change in the future, so for now we are retaining this operation.
-      self.restoreAlertsRestoredLabel.isHidden = false
-    }
   }
 
   @IBAction func clearWatchLaterBtnAction(_ sender: Any) {

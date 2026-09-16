@@ -37,4 +37,14 @@ enum IINACommand: String {
   case findOnlineSubs = "find-online-subs"
   case saveDownloadedSub = "save-downloaded-sub"
 
+  /// Keep retired command identifiers readable without allowing old bindings to execute them.
+  var isAvailable: Bool {
+    switch self {
+    case .openURL, .findOnlineSubs, .saveDownloadedSub, .toggleMusicMode, .deleteCurrentFileHard:
+      return false
+    default:
+      return true
+    }
+  }
+
 }

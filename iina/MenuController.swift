@@ -325,15 +325,7 @@ class MenuController: NSObject, NSMenuDelegate {
     // -- deinterlace
     deinterlace.action = #selector(MainMenuActionHandler.menuToggleDeinterlace(_:))
 
-    // -- delogo
-    delogo.action = #selector(MainWindowController.menuSetDelogo(_:))
-
-    // -- filter
-    videoFilters.action = #selector(AppDelegate.showVideoFilterWindow(_:))
-
-    savedVideoFiltersMenu.delegate = self
-    updateSavedFilters(forType: MPVProperty.vf,
-                       from: Preference.array(for: .savedVideoFilters)?.compactMap(SavedFilter.init(dict:)) ?? [])
+    updateSavedFilters(forType: MPVProperty.vf, from: [])
 
     // Audio menu
 
@@ -357,12 +349,7 @@ class MenuController: NSObject, NSMenuDelegate {
     // - audio device
     audioDeviceMenu.delegate = self
 
-    // - filters
-    audioFilters.action = #selector(AppDelegate.showAudioFilterWindow(_:))
-
-    savedAudioFiltersMenu.delegate = self
-    updateSavedFilters(forType: MPVProperty.af,
-                       from: Preference.array(for: .savedAudioFilters)?.compactMap(SavedFilter.init(dict:)) ?? [])
+    updateSavedFilters(forType: MPVProperty.af, from: [])
 
     // Subtitle
 
@@ -407,7 +394,16 @@ class MenuController: NSObject, NSMenuDelegate {
 
     customTouchBar.action = #selector(NSApplication.toggleTouchBarCustomizationPalette(_:))
 
-    miniPlayer.action = #selector(MainWindowController.menuSwitchToMiniPlayer(_:))
+    // Retain the nib objects for existing outlets, but expose no action or shortcut.
+    for item in [miniPlayer, delogo, videoFilters, audioFilters] {
+      item?.isHidden = true
+      item?.action = nil
+      item?.keyEquivalent = ""
+    }
+    for menu in [savedVideoFiltersMenu, savedAudioFiltersMenu] {
+      menu?.delegate = nil
+      menu?.supermenu?.items.first(where: { $0.submenu === menu })?.isHidden = true
+    }
   }
 
   // MARK: - Update Menus
@@ -689,26 +685,14 @@ class MenuController: NSObject, NSMenuDelegate {
   func updateSavedFilters(forType type: String, from filters: [SavedFilter]) {
     let isVideo = type == MPVProperty.vf
     let menu: NSMenu! = isVideo ? savedVideoFiltersMenu : savedAudioFiltersMenu
+    // Saved presets are retired. Do not revive their independent keyboard shortcuts.
     menu.removeAllItems()
-    for filter in filters {
-      let menuItem = NSMenuItem()
-      menuItem.title = filter.name
-      menuItem.action = isVideo ? #selector(MainMenuActionHandler.menuToggleVideoFilterString(_:)) : #selector(MainMenuActionHandler.menuToggleAudioFilterString(_:))
-      menuItem.keyEquivalent = filter.shortcutKey
-      menuItem.keyEquivalentModifierMask = filter.shortcutKeyModifiers
-      menuItem.representedObject = filter.filterString
-      menu.addItem(menuItem)
-    }
   }
 
   func updateKeyEquivalentsFrom(_ keyBindings: [KeyMapping]) {
-    let removedCommands: Set<String> = [
-      IINACommand.openURL.rawValue,
-      IINACommand.findOnlineSubs.rawValue,
-      IINACommand.saveDownloadedSub.rawValue,
-    ]
     let keyBindings = keyBindings.filter { binding in
-      !binding.isIINACommand || !removedCommands.contains(binding.action.first ?? "")
+      !binding.isIINACommand ||
+        IINACommand(rawValue: binding.action.first ?? "")?.isAvailable == true
     }
     let settings: [(NSMenuItem, Bool, [String], Bool, ClosedRange<Double>?, String?)] = [
       (showCurrentFileInFinder, true, [IINACommand.showCurrentFileInFinder.rawValue], false, nil, nil),
@@ -724,7 +708,6 @@ class MenuController: NSObject, NSMenuDelegate {
       (biggerSize, true, [IINACommand.biggerWindow.rawValue], false, nil, nil),
       (smallerSize, true, [IINACommand.smallerWindow.rawValue], false, nil, nil),
       (fitToScreen, true, [IINACommand.fitToScreen.rawValue], false, nil, nil),
-      (miniPlayer, true, [IINACommand.toggleMusicMode.rawValue], false, nil, nil),
       (pictureInPicture, true, [IINACommand.togglePIP.rawValue], false, nil, nil),
       (cycleVideoTracks, false, ["cycle", "video"], false, nil, nil),
       (cycleAudioTracks, false, ["cycle", "audio"], false, nil, nil),

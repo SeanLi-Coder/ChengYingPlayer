@@ -533,9 +533,9 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
 
         func getCachedMetadata() -> (artist: String, title: String)? {
           guard Preference.bool(for: .playlistShowMetadata) else { return nil }
-          if Preference.bool(for: .playlistShowMetadataInMusicMode) && !player.isInMiniPlayer {
-            return nil
-          }
+          // Keep source and exported video filenames distinguishable in the editing playlist.
+          let fileExtension = (item.filename as NSString).pathExtension
+          guard Utility.mediaType(forExtension: fileExtension) == .audio else { return nil }
           guard let metadata = info.getCachedMetadata(item.filename) else { return nil }
           guard let artist = metadata.artist, let title = metadata.title else { return nil }
           return (artist, title)

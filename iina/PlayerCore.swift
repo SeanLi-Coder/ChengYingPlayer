@@ -225,10 +225,6 @@ class PlayerCore: NSObject {
   var displayOSD: Bool = true
 
   var isInMiniPlayer = false
-  /// Set this to `true` if user changes "music mode" status manually. This disables `autoSwitchToMusicMode`
-  /// functionality for the duration of this player even if the preference is `true`. But if they manually change the
-  /// "music mode" status again, change this to `false` so that the preference is honored again.
-  var overrideAutoSwitchToMusicMode = false
 
   var isSearchingOnlineSubtitle = false
 
@@ -601,7 +597,7 @@ class PlayerCore: NSObject {
     mpv.mpvInit()
     events.emit(.mpvInitialized)
 
-    let audioDevice = Preference.string(for: .audioDevice)!
+    let audioDevice = Preference.effectiveAudioDeviceName
     if !getAudioDevices().contains(where: { $0.name == audioDevice }) {
       log("Audio device configured in settings not found, will default to auto:\n  \(audioDevice)")
       setAudioDevice("auto")
@@ -693,98 +689,9 @@ class PlayerCore: NSObject {
     }
   }
 
-  /// Switch the current player to mini player from the main window.
-  ///
-  /// - Parameters:
-  ///     - showMiniPlayer: set to false when this function is called when tracklist is changed.
-  ///     In this case, wait for `MPV_EVENT_VIDEO_RECONFIG` to show the mini player.
-  ///
-  /// This function is called:
-  /// 1) On `trackListChanged`, it will check the current media and settings to determine whether
-  /// or not to switch to mini player automatically
-  /// 2) On user initiated button actions
-  ///
+  /// Keep legacy callers harmless without moving playback out of the editing window.
   func switchToMiniPlayer(automatically: Bool = false, showMiniPlayer: Bool = true) {
-    log("Switch to mini player, automatically=\(automatically)")
-    if !automatically {
-      // Toggle manual override
-      overrideAutoSwitchToMusicMode = !overrideAutoSwitchToMusicMode
-      Logger.log("Changed overrideAutoSwitchToMusicMode to \(overrideAutoSwitchToMusicMode)",
-                 level: .verbose, subsystem: subsystem)
-    }
-
-    // The call to orderOut handles being in full screen mode if using the AppKit supplied full
-    // screen mode, but if legacy full screen mode is being used then IINA needs to handle it.
-    if mainWindow.fsState.isFullscreen, Preference.bool(for: .useLegacyFullScreen) {
-      mainWindow.toggleWindowFullScreen()
-    }
-    // hide main window
-    mainWindow.window?.orderOut(self)
-
-    let needRestoreLayout = !miniPlayer.loaded
-    let _ = miniPlayer.window
-
-    miniPlayer.updateTitle()
-    refreshSyncUITimer()
-    let playlistView = mainWindow.playlistView.view
-    let videoView = mainWindow.videoView
-    // reset down shift for playlistView
-    mainWindow.playlistView.downShift = 0
-    // hide sidebar
-    if mainWindow.sideBarStatus != .hidden {
-      mainWindow.hideSideBar(animate: false)
-    }
-
-    // move playlist view
-    playlistView.removeFromSuperview()
-    mainWindow.playlistView.useCompactTabHeight = true
-    miniPlayer.playlistWrapperView.addSubview(playlistView)
-    Utility.quickConstraints(["H:|[v]|", "V:|[v]|"], ["v": playlistView])
-    // move video view
-    videoView.removeFromSuperview()
-    miniPlayer.videoWrapperView.addSubview(videoView, positioned: .below, relativeTo: nil)
-    Utility.quickConstraints(["H:|[v]|", "V:|[v]|"], ["v": videoView])
-
-    // if received video size before switching to music mode, hide default album art
-    let width, height: Int
-    if info.vid != 0 {
-      miniPlayer.defaultAlbumArt.isHidden = true
-      (width, height) = videoSizeForDisplay
-    } else {
-      (width, height) = (1, 1)
-    }
-
-    let aspect = CGFloat(width) / CGFloat(height)
-    miniPlayer.updateVideoViewAspectConstraint(withAspect: aspect)
-    miniPlayer.window?.layoutIfNeeded()
-
-    // in case of video size changed, reset mini player window size if playlist is folded
-    if !miniPlayer.isPlaylistVisible {
-      miniPlayer.setToInitialWindowSize(display: true, animate: false)
-    }
-
-    isInMiniPlayer = true
-
-    // restore layout
-    if needRestoreLayout {
-      if !Preference.bool(for: .musicModeShowAlbumArt) {
-        miniPlayer.toggleVideoView(self)
-        if let origin = miniPlayer.window?.frame.origin {
-          miniPlayer.window?.setFrameOrigin(.init(x: origin.x, y: origin.y + miniPlayer.videoView.frame.height))
-        }
-      }
-      if Preference.bool(for: .musicModeShowPlaylist) {
-        miniPlayer.togglePlaylist(self)
-      }
-    }
-
-    currentController.setupUI()
-    miniPlayer.pendingShow = true
-    if showMiniPlayer {
-      notifyWindowVideoSizeChanged()
-    }
-    mainWindow.forceDraw("entered music mode")
-    events.emit(.musicModeChanged, data: true)
+    log("Ignoring a removed music mode request", level: .verbose)
   }
 
   /// Switch the current player to main player from the mini player.
@@ -794,19 +701,11 @@ class PlayerCore: NSObject {
   ///     In this case, wait for `MPV_EVENT_VIDEO_RECONFIG` to show the main window. Also set to false
   ///     when the mini player is closed.
   ///
-  /// This function is called:
-  /// 1) On `trackListChanged`, it will check the current media and settings to determine whether
-  /// or not to switch to main window automatically
-  /// 2) On user initiated button actions
-  /// 3) When closing the mini player
+  /// Retained for a legacy mini window that needs to return its views or close safely.
   ///
   func switchBackFromMiniPlayer(automatically: Bool = false, showMainWindow: Bool = true) {
     log("Switch to normal window from mini player, automatically=\(automatically)")
-    if !automatically {
-      overrideAutoSwitchToMusicMode = !overrideAutoSwitchToMusicMode
-      Logger.log("Changed overrideAutoSwitchToMusicMode to \(overrideAutoSwitchToMusicMode)",
-                 level: .verbose, subsystem: subsystem)
-    }
+    guard isInMiniPlayer else { return }
     mainWindow.playlistView.view.removeFromSuperview()
     mainWindow.playlistView.useCompactTabHeight = false
     // add back video view
@@ -1853,49 +1752,16 @@ class PlayerCore: NSObject {
     return result
   }
 
-  /// Return the list of audio devices.
-  ///
-  /// This function obtains the list of audio devices from mpv using the
-  /// [audio-device-list](https://mpv.io/manual/stable/#command-interface-audio-device-list) property. It then
-  /// filters out audio devices that are not applicable based on the current IINA audio output driver setting
-  /// (`audioDriverEnableAVFoundation`) and returns the results as a list of `MPVAudioDevice` objects.
-  ///
-  /// A mpv audio device is tied to a specific audio output driver (with the exception of the `auto` pseudo device). Thus an individual
-  /// audio device appears twice in the list, once for the `coreaudio` driver and once for the `avfoundation` driver. This allows
-  /// you to select both an audio device and a driver at the same time when setting the
-  /// [--audio-device](https://mpv.io/manual/stable/#options-audio-device) mpv option. The documentation for
-  /// [--audio-device](https://mpv.io/manual/stable/#options-audio-device) contains this caution:
-  /// ```
-  /// However, the --ao option will strictly force a specific AO. To avoid confusion, don't use --ao
-  /// and --audio-device together.
-  /// ```
-  /// What the manual means by confusion is that if [--ao](https://mpv.io/manual/stable/#audio-output-drivers-ao)
-  /// has been set to a specific audio output driver and
-  /// [--audio-device](https://mpv.io/manual/stable/#options-audio-device) is then set to an audio device for a
-  /// driver that is not contained in the list of drivers specified by
-  /// [--ao](https://mpv.io/manual/stable/#audio-output-drivers-ao) then mpv will not be able to use that audio
-  /// device and will fall back to the default audio device.
-  ///
-  /// IINA sets [--ao](https://mpv.io/manual/stable/#audio-output-drivers-ao) to either `coreaudio` or
-  /// `avfoundation` based on the IINA `audioDriverEnableAVFoundation` setting. This is intentional as the
-  /// `avfoundation` driver is experimental and has some problems that still need to be resolved. We want the user to explicitly
-  /// choose to use the `avfoundation` driver, not accidentally choose it when selecting an audio output device.
-  ///
-  /// The [audio-device-list](https://mpv.io/manual/stable/#command-interface-audio-device-list) property
-  /// returns the full list of audio devices regardless of the
-  /// [--ao](https://mpv.io/manual/stable/#audio-output-drivers-ao) setting. Thus IINA must filter the list and
-  /// remove audio devices tied to an audio output device that is not configured in
-  /// [--ao](https://mpv.io/manual/stable/#audio-output-drivers-ao).
-  /// - Returns: An array of `MPVAudioDevice` objects  that identify the available audio devices.
+  /// Return Core Audio devices and the automatic device used by the fixed output driver.
+  /// Legacy AVFoundation preferences must not hide the actual playback devices.
   func getAudioDevices() -> [MPVAudioDevice] {
     let raw = mpv.getNode(MPVProperty.audioDeviceList)
     guard let list = raw as? [[String: String]] else { return [] }
-    let ignore = Preference.bool(for: .audioDriverEnableAVFoundation) ? "coreaudio" : "avfoundation"
     var result: [MPVAudioDevice] = []
     for dict in list {
       let device = MPVAudioDevice(dict)
-      guard device.driver != ignore else {
-        log("Ignored audio device due to audio driver setting:\n \(device)", level: .verbose)
+      guard device.name == "auto" || device.driver == "coreaudio" else {
+        log("Ignored an unsupported audio output driver:\n \(device)", level: .verbose)
         continue
       }
       result.append(device)
@@ -2150,7 +2016,7 @@ class PlayerCore: NSObject {
     if mainWindow.isVideoLoaded {
       generateThumbnails()
     }
-    // call `trackListChanged` to load tracks and check whether need to switch to music mode
+    // Load the tracks without changing the playback window.
     trackListChanged()
     getPlaylist()
     getChapters()
@@ -2433,18 +2299,7 @@ class PlayerCore: NSObject {
     let audioStatus = checkCurrentMediaIsAudio()
     currentMediaIsAudio = audioStatus
 
-    // if need to switch to music mode
-    if Preference.bool(for: .autoSwitchToMusicMode) {
-      if overrideAutoSwitchToMusicMode {
-        log("Skipping music mode auto-switch because overrideAutoSwitchToMusicMode is true", level: .verbose)
-      } else if audioStatus == .isAudio && !isInMiniPlayer && !mainWindow.fsState.isFullscreen {
-        log("Current media is audio: auto-switching to mini player")
-        switchToMiniPlayer(automatically: true, showMiniPlayer: false)
-      } else if audioStatus == .notAudio && isInMiniPlayer {
-        log("Current media is not audio: auto-switching to normal window")
-        switchBackFromMiniPlayer(automatically: true, showMainWindow: false)
-      }
-    }
+    // Always retain the main playback window, including for audio-only media.
     postNotification(.iinaTracklistChanged)
   }
 

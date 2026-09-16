@@ -379,8 +379,8 @@ CA
                             <menuItem title="Float on Top" id="wex-rX-PcY">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                             </menuItem>
-                            <menuItem isSeparatorItem="YES" id="xpM-h7-A4R"/>
-                            <menuItem title="Enter Music Mode" id="bGN-E4-V5A">
+                            <menuItem isSeparatorItem="YES" hidden="YES" id="xpM-h7-A4R"/>
+                            <menuItem title="Enter Music Mode" hidden="YES" id="bGN-E4-V5A">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="4J5-eU-sei"/>
@@ -412,14 +412,14 @@ CA
                             <menuItem title="Deinterlace" id="yHI-7D-OaI">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                             </menuItem>
-                            <menuItem title="Delogo" id="ArE-2s-JIV">
+                            <menuItem title="Delogo" hidden="YES" id="ArE-2s-JIV">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                             </menuItem>
-                            <menuItem isSeparatorItem="YES" id="kNp-jq-01c"/>
-                            <menuItem title="Video Filters…" keyEquivalent="F" id="PyY-pR-jz7">
-                                <modifierMask key="keyEquivalentModifierMask" shift="YES" command="YES"/>
+                            <menuItem isSeparatorItem="YES" hidden="YES" id="kNp-jq-01c"/>
+                            <menuItem title="Video Filters…" hidden="YES" id="PyY-pR-jz7">
+                                <modifierMask key="keyEquivalentModifierMask"/>
                             </menuItem>
-                            <menuItem title="Saved Video Filters" id="BDr-G9-IRx">
+                            <menuItem title="Saved Video Filters" hidden="YES" id="BDr-G9-IRx">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <menu key="submenu" title="Saved Video Filters" id="xhY-fF-oio"/>
                             </menuItem>
@@ -487,11 +487,11 @@ CA
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <menu key="submenu" title="Audio Device" id="2Dp-Ol-Zcf"/>
                             </menuItem>
-                            <menuItem isSeparatorItem="YES" id="MVW-Uu-gB1"/>
-                            <menuItem title="Audio Filters…" keyEquivalent="G" id="8Zh-hU-Cc4">
-                                <modifierMask key="keyEquivalentModifierMask" shift="YES" command="YES"/>
+                            <menuItem isSeparatorItem="YES" hidden="YES" id="MVW-Uu-gB1"/>
+                            <menuItem title="Audio Filters…" hidden="YES" id="8Zh-hU-Cc4">
+                                <modifierMask key="keyEquivalentModifierMask"/>
                             </menuItem>
-                            <menuItem title="Saved Audio Filters" id="wgZ-DO-nn3">
+                            <menuItem title="Saved Audio Filters" hidden="YES" id="wgZ-DO-nn3">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <menu key="submenu" title="Saved Audio Filters" id="vuV-uP-CAD"/>
                             </menuItem>

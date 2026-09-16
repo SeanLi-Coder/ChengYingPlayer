@@ -325,9 +325,8 @@ class ViewLayer: CAOpenGLLayer {
       }
       glFormat += glFormatOptional
 
-      if !Preference.bool(for: .forceDedicatedGPU) {
-        glFormat += [glFormatAutoGPU]
-      }
+      // Let macOS choose the GPU; retired expert preferences must not override it.
+      glFormat += [glFormatAutoGPU]
 
       for index in stride(from: glFormat.count-1, through: 0, by: -1) {
         let format = glFormat.flatMap { $0 } + [_CGLPixelFormatAttribute(rawValue: 0)]

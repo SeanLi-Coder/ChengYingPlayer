@@ -54,11 +54,8 @@ if userArgs.contains(where: { $0 == "--help" || $0 == "-h" }) {
     --keep-running:
             Normally chengying-cli launches ChengYing and quits immediately. Supply this option
             if you would like to keep it running until the main application exits.
-    --music-mode:
-            Enter music mode after opening the media.
     --pip:
-            Enter Picture-in-Picture after opening the media. Music mode does not
-            support Picture-in-Picture.
+            Enter Picture-in-Picture after opening the media.
     --help | -h:
             Print this message.
 
@@ -69,9 +66,10 @@ if userArgs.contains(where: { $0 == "--help" || $0 == "-h" }) {
   exit(0)
 }
 
-if userArgs.contains("--music-mode"), userArgs.contains("--pip") {
-  // Music mode does not support Picture-in-Picture. Combining these options is not permitted.
-  print("Cannot specify both --music-mode and --pip")
+if userArgs.prefix(while: { $0 != "--" }).contains(where: {
+  $0 == "--music-mode" || $0.hasPrefix("--music-mode=")
+}) {
+  print("The --music-mode option is no longer supported. Open the media without this option.")
   // Command line usage error.
   exit(EX_USAGE)
 }

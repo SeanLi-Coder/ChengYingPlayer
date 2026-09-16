@@ -202,11 +202,15 @@ class PreferenceWindowController: NSWindowController {
       navTableSearchFieldSpacingConstraint.constant = 10.0
     }
 
-    // Index only the preference pages exposed by this build.
+    // Index the actual sections after each controller has applied this build's UI policy.
+    // Loading every top-level object from the nib can expose retired sections in search.
     let labelDict = [String: [String: [String]]](
       uniqueKeysWithValues: viewControllers.compactMap { controller in
-        guard let nibName = controller.nibName else { return nil }
-        return (controller.preferenceTabTitle, self.getLabelDict(inNibNamed: nibName))
+        guard let preference = controller as? PreferenceViewController else { return nil }
+        _ = preference.view
+        let sections = preference.sectionViews
+        return (controller.preferenceTabTitle,
+                self.getLabelDict(in: sections.isEmpty ? [preference.view] : sections))
       })
 
 #if DEBUG
@@ -299,10 +303,8 @@ class PreferenceWindowController: NSWindowController {
 
     // find label
     if let title = title, let label = findLabel(titled: title, in: vc.view) {
+      revealSearchResult(label, in: vc.view)
       maskView.perform(#selector(maskView.highlight(_:)), with: label, afterDelay: 0.25)
-      if let collapseView = findCollapseView(label) {
-        collapseView.setCollapsed(false, animated: false)
-      }
     }
 
     // As per Apple's Human Interface Guidelines update the window’s title to reflect the currently
@@ -312,20 +314,10 @@ class PreferenceWindowController: NSWindowController {
     return vc
   }
 
-  private func getLabelDict(inNibNamed name: NSNib.Name) -> [String: [String]] {
-    var objects: NSArray? = NSArray()
-    Bundle.main.loadNibNamed(name, owner: nil, topLevelObjects: &objects)
-    if let topObjects = objects as? [Any] {
-      // we assume this nib is a preference view controller, so each section must be a top-level `NSView`.
-      return [String: [String]](uniqueKeysWithValues: topObjects.compactMap { view -> (title: String, labels: [String])? in
-        if let section = view as? NSView {
-          return findLabels(inSection: section)
-        } else {
-          return nil
-        }
-      })
-    }
-    return [:]
+  private func getLabelDict(in sections: [NSView]) -> [String: [String]] {
+    [String: [String]](uniqueKeysWithValues: sections.filter { !$0.isHidden }.compactMap {
+      findLabels(inSection: $0)
+    })
   }
 
   private func findLabels(inSection section: NSView) -> (title: String, labels: [String])? {
@@ -336,19 +328,30 @@ class PreferenceWindowController: NSWindowController {
     }
     let title = formSearchTerm((sectionTitleLabel as! NSTextField).stringValue)
     var labels = findLabels(in: section)
-    labels.remove(at: labels.firstIndex(of: title)!)
+    if let titleIndex = labels.firstIndex(of: title) {
+      labels.remove(at: titleIndex)
+    }
     return (title, labels)
   }
 
   private func findLabels(in view: NSView) -> [String] {
     var labels: [String] = []
-    for subView in view.subviews {
+    for subView in searchableSubviews(of: view) {
       if let title = getTitle(from: subView) {
         labels.append(title)
       }
       labels.append(contentsOf: findLabels(in: subView))
     }
     return labels
+  }
+
+  private func searchableSubviews(of view: NSView) -> [NSView] {
+    let children = (view as? NSStackView)?.views ?? view.subviews
+    return children.filter { child in
+      // A collapsed section remains a supported search destination: selecting it expands it.
+      // Other hidden rows are not part of the exposed preferences and must not be indexed.
+      !child.isHidden || (view is CollapseView && child.identifierStartsWith("Content"))
+    }
   }
 
   /// Form a search term from the given string.
@@ -362,7 +365,7 @@ class PreferenceWindowController: NSWindowController {
   }
 
   private func findLabel(titled title: String, in view: NSView) -> NSView? {
-    for subView in view.subviews {
+    for subView in searchableSubviews(of: view) {
       if getTitle(from: subView) == title {
         return subView
       }
@@ -385,15 +388,17 @@ class PreferenceWindowController: NSWindowController {
     return nil
   }
 
-  private func findCollapseView(_ view: NSView) -> CollapseView? {
-    if let superview = view.superview {
-      if let collapseView = superview as? CollapseView {
-        return collapseView
-      } else {
-        return findCollapseView(_:superview)
+  @discardableResult
+  private func revealSearchResult(_ target: NSView, in view: NSView) -> Bool {
+    if view === target { return true }
+    // Walk the stack's logical children because collapsed content may be detached.
+    for child in searchableSubviews(of: view) {
+      if revealSearchResult(target, in: child) {
+        (view as? CollapseView)?.setCollapsed(false, animated: false)
+        return true
       }
     }
-    return nil
+    return false
   }
 
   @discardableResult

@@ -731,7 +731,7 @@ struct Preference {
     case plugins
 
     var isAvailable: Bool {
-      self != .plugins
+      self != .plugins && self != .musicMode
     }
 
     func image() -> NSImage {
@@ -881,7 +881,7 @@ struct Preference {
     .playlistAutoAdd: true,
     .playlistAutoPlayNext: true,
     .playlistShowMetadata: true,
-    .playlistShowMetadataInMusicMode: true,
+    .playlistShowMetadataInMusicMode: false,
 
     .autoRepeat: false,
     .defaultRepeatMode: DefaultRepeatMode.playlist.rawValue,
@@ -898,7 +898,7 @@ struct Preference {
     .maxThumbnailPreviewCacheSize: 500,
     .enableThumbnailForRemoteFiles: false,
     .thumbnailWidth: 240,
-    .autoSwitchToMusicMode: true,
+    .autoSwitchToMusicMode: false,
     .musicModeShowPlaylist: false,
     .musicModeShowAlbumArt: true,
     .displayTimeAndBatteryInFullScreen: false,
@@ -932,7 +932,7 @@ struct Preference {
     .replayGainPreamp: 0,
     .replayGainClip: false,
     .replayGainFallback: 0,
-    .gaplessAudio: GaplessAudioOption.weak.rawValue,
+    .gaplessAudio: GaplessAudioOption.disabled.rawValue,
 
     .subAutoLoadIINA: IINAAutoLoadAction.iina.rawValue,
     .subAutoLoadPriorityString: "",
@@ -1034,6 +1034,14 @@ struct Preference {
 
 
   static private let ud = UserDefaults.standard
+
+  /// Preserve the selected device while ignoring the retired experimental audio driver.
+  /// The stored value remains untouched until the user explicitly selects another device.
+  static var effectiveAudioDeviceName: String {
+    let name = string(for: .audioDevice) ?? "auto"
+    guard name.hasPrefix("avfoundation/") else { return name }
+    return "coreaudio/" + name.dropFirst("avfoundation/".count)
+  }
 
   static func object(for key: Key) -> Any? {
     return ud.object(forKey: key.rawValue)

@@ -67,16 +67,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   lazy var guideWindow: GuideWindowController = GuideWindowController()
   lazy var logWindow: LogWindowController = LogWindowController()
 
-  lazy var vfWindow: FilterWindowController = {
-    let w = FilterWindowController(filterType: MPVProperty.vf, autosaveName: Constants.WindowAutosaveName.videoFilters)
-    return w
-  }()
-
-  lazy var afWindow: FilterWindowController = {
-    let w = FilterWindowController(filterType: MPVProperty.af, autosaveName: Constants.WindowAutosaveName.audioFilters)
-    return w
-  }()
-
   lazy var preferenceWindowController: PreferenceWindowController = {
     let list: [NSViewController & PreferenceWindowEmbeddable] = [
       PrefGeneralViewController(),
@@ -366,20 +356,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         }
       }
 
-      if let pc = lastPlayerCore {
-        if commandLineStatus.enterMusicMode {
-          if commandLineStatus.enterPIP {
-            // PiP is not supported in music mode. Combining these options is not permitted and is
-            // rejected by iina-cli. The IINA executable must have been invoked directly with
-            // arguments.
-            Logger.log("Cannot specify both --music-mode and --pip", level: .error)
-            // Command line usage error.
-            exit(EX_USAGE)
-          }
-          pc.switchToMiniPlayer()
-        } else if commandLineStatus.enterPIP {
-          pc.mainWindow.enterPIP()
-        }
+      if let pc = lastPlayerCore, commandLineStatus.enterPIP {
+        pc.mainWindow.enterPIP()
       }
     }
 
@@ -978,11 +956,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   }
 
   @IBAction func showVideoFilterWindow(_ sender: AnyObject) {
-    vfWindow.showWindow(self)
+    // Retired action retained for compatibility with archived responder connections.
   }
 
   @IBAction func showAudioFilterWindow(_ sender: AnyObject) {
-    afWindow.showWindow(self)
+    // Retired action retained for compatibility with archived responder connections.
   }
 
   @IBAction func showAboutWindow(_ sender: AnyObject) {
@@ -1229,7 +1207,6 @@ struct CommandLineStatus {
   var isCommandLine = false
   var isStdin = false
   var openSeparateWindows = false
-  var enterMusicMode = false
   var enterPIP = false
   var mpvArguments: [(String, String)] = []
   var iinaArguments: [(String, String)] = []
@@ -1269,7 +1246,7 @@ struct CommandLineStatus {
           openSeparateWindows = true
         }
         if name == "music-mode" {
-          enterMusicMode = true
+          Logger.log("The --music-mode option is no longer supported; using the main player.")
         }
         if name == "pip" {
           enterPIP = true

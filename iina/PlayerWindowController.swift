@@ -66,8 +66,6 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     .horizontalScrollAction,
     .verticalScrollAction,
     .playlistShowMetadata,
-    .playlistShowMetadataInMusicMode,
-    .autoSwitchToMusicMode,
   ]
   
   override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
@@ -124,12 +122,10 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       if let newValue = change[.newKey] as? Int {
         doubleClickAction = Preference.MouseClickAction(rawValue: newValue)!
       }
-    case PK.playlistShowMetadata.rawValue, PK.playlistShowMetadataInMusicMode.rawValue:
+    case PK.playlistShowMetadata.rawValue:
       if player.isPlaylistVisible {
         player.mainWindow.playlistView.playlistTableView.reloadData()
       }
-    case PK.autoSwitchToMusicMode.rawValue:
-      player.overrideAutoSwitchToMusicMode = false
     default:
       return
     }
@@ -252,6 +248,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     if keyBinding.isIINACommand {
       // - IINA command
       if let iinaCommand = IINACommand(rawValue: keyBinding.rawAction) {
+        guard iinaCommand.isAvailable else { return true }
         handleIINACommand(iinaCommand)
         return true
       } else {
@@ -764,6 +761,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
   }
 
   internal func handleIINACommand(_ cmd: IINACommand) {
+    guard cmd.isAvailable else { return }
     switch cmd {
     case .openFile:
       AppDelegate.shared.openFile(self)
@@ -771,8 +769,6 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       break
     case .deleteCurrentFile:
       menuActionHandler.menuDeleteCurrentFile(.dummy)
-    case .deleteCurrentFileHard:
-      menuActionHandler.menuDeleteCurrentFileHard(.dummy)
     default:
       break
     }

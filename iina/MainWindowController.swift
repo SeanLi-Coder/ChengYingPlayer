@@ -3276,12 +3276,13 @@ class MainWindowController: PlayerWindowController {
   }
 
   @objc func toolBarButtonAction(_ sender: NSButton) {
-    guard let buttonType = Preference.ToolBarButton(rawValue: sender.tag) else { return }
+    guard let buttonType = Preference.ToolBarButton(rawValue: sender.tag),
+          buttonType.isAvailable else { return }
     switch buttonType {
     case .fullScreen:
       toggleWindowFullScreen()
     case .musicMode:
-      player.switchToMiniPlayer()
+      break
     case .pip:
       if pipStatus == .inPIP {
         exitPIP()
@@ -3297,7 +3298,7 @@ class MainWindowController: PlayerWindowController {
     case .screenshot:
       player.screenshot()
     case .plugins:
-      showPluginSidebar(tab: nil)
+      break
     }
   }
 

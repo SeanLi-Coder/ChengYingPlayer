@@ -387,10 +387,9 @@ class MPVController: NSObject {
 
     // - Codec
 
-    setUserOption(PK.videoThreads, type: .int, forName: MPVOption.Video.vdLavcThreads,
-                  verboseIfDefault: true)
-    setUserOption(PK.audioThreads, type: .int, forName: MPVOption.Audio.adLavcThreads,
-                  verboseIfDefault: true)
+    // Let the decoders choose their worker count; retired tuning values are ignored.
+    chkErr(setOptionString(MPVOption.Video.vdLavcThreads, "0", level: .verbose))
+    chkErr(setOptionString(MPVOption.Audio.adLavcThreads, "0", level: .verbose))
 
     setUserOption(PK.hardwareDecoder, type: .other, forName: MPVOption.Video.hwdec,
                   verboseIfDefault: true) { key in
@@ -402,32 +401,14 @@ class MPVController: NSObject {
                   level: .verbose)
     setUserOption(PK.maxVolume, type: .int, forName: MPVOption.Audio.volumeMax, level: .verbose)
 
-    var spdif: [String] = []
-    if Preference.bool(for: PK.spdifAC3) { spdif.append("ac3") }
-    if Preference.bool(for: PK.spdifDTS){ spdif.append("dts") }
-    if Preference.bool(for: PK.spdifDTSHD) { spdif.append("dts-hd") }
-    chkErr(setOptionString(MPVOption.Audio.audioSpdif, spdif.joined(separator: ","),
-                           verboseIfDefault: true))
+    // Decode audio normally without music-library gain or bitstream passthrough.
+    chkErr(setOptionString(MPVOption.Audio.audioSpdif, "", level: .verbose))
+    chkErr(setOptionString(MPVOption.Audio.replaygain, "no", level: .verbose))
+    chkErr(setOptionString(MPVOption.Audio.gaplessAudio, "no", level: .verbose))
 
-    setUserOption(PK.audioDevice, type: .string, forName: MPVOption.Audio.audioDevice,
-                  verboseIfDefault: true)
-
-    setUserOption(PK.replayGain, type: .other, forName: MPVOption.Audio.replaygain,
-                  verboseIfDefault: true) { key in
-      let value = Preference.integer(for: key)
-      return Preference.ReplayGainOption(rawValue: value)?.mpvString ?? "no"
-    }
-    setUserOption(PK.replayGainPreamp, type: .float, forName: MPVOption.Audio.replaygainPreamp,
-                  verboseIfDefault: true)
-    setUserOption(PK.replayGainClip, type: .bool, forName: MPVOption.Audio.replaygainClip,
-                  verboseIfDefault: true)
-    setUserOption(PK.replayGainFallback, type: .float, forName: MPVOption.Audio.replaygainFallback,
-                  verboseIfDefault: true)
-
-    setUserOption(PK.gaplessAudio, type: .other, forName: MPVOption.Audio.gaplessAudio,
-                  verboseIfDefault: true) { key in
-      let value = Preference.integer(for: key)
-      return Preference.GaplessAudioOption(rawValue: value)?.mpvString ?? "weak"
+    setUserOption(PK.audioDevice, type: .other, forName: MPVOption.Audio.audioDevice,
+                  verboseIfDefault: true) { _ in
+      Preference.effectiveAudioDeviceName
     }
 
     // - Sub
@@ -524,10 +505,7 @@ class MPVController: NSObject {
             "\(MPVOption.PlaybackControl.abLoopA),\(MPVOption.PlaybackControl.abLoopB)," +
             "\(MPVOption.PlaybackControl.abLoopCount),\(MPVOption.Video.videoRotate)", level: .verbose))
 
-    setUserOption(PK.audioDriverEnableAVFoundation, type: .other, forName: MPVOption.Audio.ao,
-                  verboseIfDefault: true) { key in
-      Preference.bool(for: key) ? "avfoundation" : "coreaudio"
-    }
+    chkErr(setOptionString(MPVOption.Audio.ao, "coreaudio", level: .verbose))
 
     // Load keybindings. This is still required for mpv to handle media keys or apple remote.
     let userConfigs = PrefKeyBindingViewController.userConfigs

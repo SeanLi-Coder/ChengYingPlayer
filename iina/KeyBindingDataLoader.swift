@@ -58,12 +58,13 @@ class KeyBindingDataLoader {
     KBI("save-playlist", type: .iinaCmd),
     KBI("show-current-file-in-finder", type: .iinaCmd),
     KBI("delete-current-file", type: .iinaCmd),
-    KBI("delete-current-file-hard", type: .iinaCmd),
     KBI.separator(),
     KBI("write-watch-later-config"),
     KBI("stop"),
     KBI("quit")
-  ]
+  ].filter { item in
+    item.type != .iinaCmd || IINACommand(rawValue: item.name)?.isAvailable == true
+  }
 
   fileprivate static let propertyList: [(String, PropertyType)] = [
     ("pause", .bool),
