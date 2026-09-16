@@ -121,3 +121,7 @@ deps/plugins
 deps/sources
 /deps/download-center/
 /deps/.download-center-build.*/
+# Source-built playback SDK and per-build provenance are generated artifacts.
+# Previously tracked bootstrap headers remain tracked and match the pinned ABI.
+/deps/include/
+/deps/playback-build-record/

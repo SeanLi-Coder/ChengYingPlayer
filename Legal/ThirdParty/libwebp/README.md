@@ -12,4 +12,4 @@ reproduced in `COPYING.txt`, with the additional patent grant in `PATENTS.txt`.
 The source archive, including the complete upstream contributor list and these
 license texts, is included through the project's verified third-party source
 manifest. The application and the new helper wrapper remain under the repository
-GPLv3 license. This does not lift the application's source-only release gate.
+GPLv3 license. Application releases preserve these notices and the matching source archive.

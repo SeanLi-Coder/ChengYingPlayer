@@ -40,7 +40,6 @@ def validate_layout(application):
     assert info["LSMinimumSystemVersion"] == "13.5"
     for relative in (
         "MacOS/chengying-download-center-helper",
-        "MacOS/deno",
         "Frameworks/playwright/driver/node",
     ):
         executable = contents / relative

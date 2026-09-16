@@ -265,7 +265,7 @@ static bool run_generation(const char *first, const char *second, const char *mo
   mpv = mpv_create();
   if (!mpv) { fail("Unable to create the shipped libmpv core"); goto cleanup; }
   const char *options[][2] = {
-    {"config", "no"}, {"load-scripts", "no"}, {"ytdl", "no"}, {"terminal", "no"},
+    {"config", "no"}, {"terminal", "no"},
     {"input-default-bindings", "no"}, {"input-terminal", "no"}, {"idle", "yes"},
     {"vo", "libmpv"}, {"ao", "null"}, {"loop-file", "inf"}, {"keep-open", "yes"},
     {"gpu-hwdec-interop", "auto"}, {"hwdec", strcmp(mode, "hardware") == 0 ? "auto" : "no"},
@@ -372,7 +372,7 @@ static double median(const double *samples, size_t start, size_t count) {
 
 int main(int argc, char **argv) {
   if (argc != 6) {
-    fprintf(stderr, "Usage: PlaybackSoakTests H264 HEVC SECONDS hardware|software DAV1D_LIBRARY\n");
+    fprintf(stderr, "Usage: PlaybackSoakTests H264 HEVC SECONDS hardware|software AVCODEC_LIBRARY\n");
     return 2;
   }
   char *end = NULL;
@@ -383,24 +383,24 @@ int main(int argc, char **argv) {
     fprintf(stderr, "FAIL: Expected 60..14400 seconds and an explicit hardware or software mode\n");
     return 2;
   }
-  void *dav1d = dlopen(argv[5], RTLD_NOW | RTLD_LOCAL);
-  const char *(*version)(void) = dav1d ? dlsym(dav1d, "dav1d_version") : NULL;
-  unsigned major = 0, minor = 0, patch = 0;
-  const char *version_text = version ? version() : NULL;
-  if (!version_text || sscanf(version_text, "%u.%u.%u", &major, &minor, &patch) != 3 ||
-      major < 1 || (major == 1 && minor < 5) || (major == 1 && minor == 5 && patch < 1)) {
-    fprintf(stderr, "FAIL: The loaded dav1d decoder does not meet the verified 1.5.1 baseline\n");
-    if (dav1d) dlclose(dav1d);
+  void *codec = dlopen(argv[5], RTLD_NOW | RTLD_LOCAL);
+  const char *(*configuration)(void) = codec ? dlsym(codec, "avcodec_configuration") : NULL;
+  const void *(*find_decoder)(const char *) = codec ? dlsym(codec, "avcodec_find_decoder_by_name") : NULL;
+  const char *configuration_text = configuration ? configuration() : NULL;
+  if (!configuration_text || !strstr(configuration_text, "--enable-libdav1d") ||
+      !find_decoder || !find_decoder("libdav1d")) {
+    fprintf(stderr, "FAIL: The loaded FFmpeg library does not expose the pinned dav1d decoder\n");
+    if (codec) dlclose(codec);
     return 1;
   }
-  printf("VERSIONS dav1d=%s architecture=%s\n", version_text,
+  printf("DECODER libdav1d=available architecture=%s\n",
 #if defined(__arm64__)
          "arm64"
 #else
          "x86_64"
 #endif
   );
-  dlclose(dav1d);
+  dlclose(codec);
   for (unsigned generation = 1; generation <= 3; generation++) {
     const char *first = generation % 2 ? argv[1] : argv[2];
     const char *second = generation % 2 ? argv[2] : argv[1];

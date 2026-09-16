@@ -40,4 +40,4 @@ inject global input, read or change user settings, open user media, or claim to
 validate actual mpv rendering. Live-renderer coverage belongs in `Live/`.
 
 Set `VIDEO_VIEWPORT_SOURCE_ROOT` to another checkout for source mutation tests.
-The source-only app release restriction is unchanged.
+The complete application and its matching sources are validated separately before release.

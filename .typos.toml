@@ -11,6 +11,9 @@ ignore-hidden = false
 
 [default]
 extend-ignore-re = [
+    # Exact upstream FFmpeg makefile extension and Rust crate identifiers.
+    '(?:config|\*)\.mak\b',
+    '"(?:name|package|filename)": "writeable(?:-[^"]+)?"',
     "\\bBig Sur\\b",
     '(firstItem|secondItem|id|destination|headerView)="[0-9A-Za-z]+-[0-9A-Za-z]+-[0-9A-Za-z]+"',
     'apiKey = "[^"]+"',

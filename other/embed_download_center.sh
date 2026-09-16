@@ -26,7 +26,7 @@ if [[ "${#BUILD_ARCHS[@]}" != "1" || "${BUILD_ARCHS[0]:-}" != "arm64" ]]; then
   echo "Download-center embedding requires ARCHS=arm64; universal builds are not supported." >&2
   exit 2
 fi
-if [[ ! -x "$SOURCE_DIR/Contents/MacOS/chengying-download-center-helper" || ! -d "$SOURCE_DIR/Contents/Frameworks" || ! -x "$SOURCE_DIR/Contents/MacOS/deno" ]]; then
+if [[ ! -x "$SOURCE_DIR/Contents/MacOS/chengying-download-center-helper" || ! -d "$SOURCE_DIR/Contents/Frameworks" || ! -x "$SOURCE_DIR/Contents/Frameworks/playwright/driver/node" ]]; then
   echo "Build the complete download center with Tools/DownloaderHelper/build_helper.sh first." >&2
   exit 2
 fi

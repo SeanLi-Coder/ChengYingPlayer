@@ -37,7 +37,8 @@ def test_runtime_lock_matches_proven_versions_and_artifact_hashes():
         )
     }
     artifacts = manifest["artifacts"]
-    assert len(inputs) == len(locked) == len(artifacts) == 33
+    assert len(inputs) == len(locked) == len(artifacts) == 32
+    assert "deno" not in locked
     for package in artifacts:
         name = normalized(package["name"])
         assert (
@@ -75,6 +76,8 @@ def test_license_collection_retains_every_runtime_and_nested_driver_notice(tmp_p
         "playwright/playwright/driver/LICENSE",
         "playwright/playwright/driver/package/NOTICE",
         "playwright/playwright/driver/package/lib/utilsBundle.js.LICENSE",
+        "setuptools/setuptools/_vendor/backports.tarfile-1.2.0.dist-info/LICENSE",
+        "setuptools/setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE.APACHE",
     ):
         assert (destination / relative).stat().st_size > 0
 
@@ -89,7 +92,8 @@ def test_bundle_build_preserves_stdio_and_uses_only_verified_vendor():
     assert "--onefile" not in build
     assert '(str(source / "static"), "static")' in spec
     assert '(str(vendor), "vendor/rednote")' in spec
-    assert '[("deno", str(deno), "EXECUTABLE")]' in spec
+    assert "CHENGYING_HELPER_DENO" not in spec
+    assert "verify_build_environment.py" in build
     assert '"$SCRIPT_DIR/verify_vendor.py"' in build
     assert '"$BUILT_CONTENTS/Resources/vendor/rednote"' in build
     assert "PYINSTALLER_STRICT_BUNDLE_CODESIGN_ERROR=1" in build
@@ -174,10 +178,14 @@ def test_arm_embedding_replaces_legacy_layout_and_preserves_other_helpers(tmp_pa
     source = project / "deps/download-center/DownloadCenter.app"
     for relative in ("Contents/MacOS", "Contents/Frameworks"):
         (source / relative).mkdir(parents=True)
-    for name in ("chengying-download-center-helper", "deno"):
+    for name in ("chengying-download-center-helper",):
         executable = source / "Contents/MacOS" / name
         executable.write_text("generated fixture")
         executable.chmod(0o755)
+    driver = source / "Contents/Frameworks/playwright/driver/node"
+    driver.parent.mkdir(parents=True)
+    driver.write_text("generated fixture")
+    driver.chmod(0o755)
     tools = tmp_path / "tools"
     tools.mkdir()
     codesign = tools / "codesign"
@@ -210,5 +218,5 @@ def test_arm_embedding_replaces_legacy_layout_and_preserves_other_helpers(tmp_pa
     assert result.returncode == 0, result.stderr
     assert not legacy.exists()
     assert not (previous / "old-bundle-layout").exists()
-    assert (previous / "Contents/MacOS/deno").is_file()
+    assert (previous / "Contents/Frameworks/playwright/driver/node").is_file()
     assert preserved.read_text() == "preserved"

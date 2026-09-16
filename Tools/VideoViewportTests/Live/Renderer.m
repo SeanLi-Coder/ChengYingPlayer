@@ -183,7 +183,7 @@ bool viewport_live_open(const char *path, bool hardware) {
   player = mpv_create();
   if (!require(player != NULL, "The shipped libmpv must initialize")) return false;
   const char *options[][2] = {
-    {"config", "no"}, {"load-scripts", "no"}, {"ytdl", "no"}, {"terminal", "no"},
+    {"config", "no"}, {"terminal", "no"},
     {"input-default-bindings", "no"}, {"input-terminal", "no"}, {"idle", "yes"},
     {"vo", "libmpv"}, {"ao", "null"}, {"loop-file", "inf"}, {"keep-open", "yes"},
     {"gpu-hwdec-interop", "auto"}, {"hwdec", hardware ? "auto" : "no"},

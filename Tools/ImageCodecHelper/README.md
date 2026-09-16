@@ -3,7 +3,7 @@
 This source-built, local-only helper links libwebp 1.6.0 statically. It has no
 Homebrew runtime dependency, subprocess launcher, network client, or image parser.
 The native application performs color-managed image decoding and supplies bounded
-RGBA data. The project source-only release gate remains unchanged.
+RGBA data. Application releases include this codec's matching source and notices.
 
 ## Build and test
 

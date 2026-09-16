@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
-import os
-import subprocess
+import re
 import sys
 from pathlib import Path
 
@@ -15,16 +14,31 @@ def _check() -> dict[str, object]:
     import playwright
     import requests
     import yt_dlp
+    from ejs_smoke import verify_ejs_runtime
     from playwright.sync_api import sync_playwright
     from yt_dlp.extractor import gen_extractor_classes
-    from yt_dlp.utils._jsruntime import DenoJsRuntime
 
     root = Path(__file__).resolve().parent
     runtime_root = Path(getattr(sys, "_MEIPASS", root))
     vendor_root = runtime_root / "vendor" / "rednote"
-    executable_root = Path(sys.executable).resolve().parent
     manifest_path = runtime_root / "runtime-artifacts.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    expected_names = {
+        re.sub(r"[-_.]+", "-", package["name"]).lower()
+        for package in manifest["artifacts"]
+    }
+    # Inspect top-level runtime distributions. Setuptools intentionally exposes
+    # its separately source-pinned importlib_metadata vendor directory on sys.path.
+    installed_names = {
+        re.sub(r"[-_.]+", "-", distribution.metadata["Name"]).lower()
+        for distribution in importlib.metadata.distributions(path=[str(runtime_root)])
+    }
+    if getattr(sys, "frozen", False) and installed_names != expected_names:
+        raise RuntimeError(
+            "The frozen helper contains missing or unpinned runtime metadata: "
+            f"extra={sorted(installed_names - expected_names)}, "
+            f"missing={sorted(expected_names - installed_names)}"
+        )
     versions = {}
     for package in manifest["artifacts"]:
         actual = importlib.metadata.version(package["name"])
@@ -57,10 +71,17 @@ def _check() -> dict[str, object]:
 
     proxy = normalize_proxy_url("socks5://127.0.0.1:7897/")
     if _download_proxy(proxy) != "socks5h://127.0.0.1:7897":
-        raise RuntimeError("The bundled proxy transport has inconsistent SOCKS DNS routing")
-    if _browser_proxy(proxy) != {"server": "socks5://127.0.0.1:7897", "bypass": "<-loopback>"}:
+        raise RuntimeError(
+            "The bundled proxy transport has inconsistent SOCKS DNS routing"
+        )
+    if _browser_proxy(proxy) != {
+        "server": "socks5://127.0.0.1:7897",
+        "bypass": "<-loopback>",
+    }:
         raise RuntimeError("The bundled browser proxy configuration is unavailable")
-    if not {"http", "https", "socks5", "socks5h"}.issubset(RequestsRH._SUPPORTED_PROXY_SCHEMES):
+    if not {"http", "https", "socks5", "socks5h"}.issubset(
+        RequestsRH._SUPPORTED_PROXY_SCHEMES
+    ):
         raise RuntimeError("The bundled downloader lacks a required proxy protocol")
     extractors = gen_extractor_classes()
     names = {extractor.__name__ for extractor in extractors}
@@ -72,22 +93,28 @@ def _check() -> dict[str, object]:
     if not solver.is_file() or len(solver.read_bytes()) < 100:
         raise RuntimeError("The bundled YouTube JavaScript solver is unavailable")
 
-    deno = executable_root / "deno"
-    if not os.access(deno, os.X_OK):
-        raise RuntimeError("The bundled Deno executable is unavailable")
-    deno_result = subprocess.run(
-        [str(deno), "eval", "console.log(6 * 7)"],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-        env={**os.environ, "DENO_NO_UPDATE_CHECK": "1"},
-    )
-    if deno_result.stdout.strip() != "42":
-        raise RuntimeError("The bundled Deno JavaScript runtime failed")
-    runtime = DenoJsRuntime(str(deno)).info
-    if runtime is None or not runtime.supported:
-        raise RuntimeError("yt-dlp cannot use the bundled Deno runtime")
+    node_version = verify_ejs_runtime()
+    import decimal
+    import sqlite3
+    import ssl
+
+    source_versions = {
+        item["name"]: item["version"]
+        for item in json.loads((runtime_root / "runtime-sources.json").read_text())[
+            "artifacts"
+        ]
+    }
+    native_versions = {
+        "openssl": ssl.OPENSSL_VERSION.split()[1],
+        "sqlite": sqlite3.sqlite_version,
+        "mpdecimal": decimal.__libmpdec_version__,
+    }
+    if any(
+        source_versions[name] != version for name, version in native_versions.items()
+    ):
+        raise RuntimeError(
+            "The frozen Python native libraries do not match their source locks"
+        )
 
     driver = Path(playwright.__file__).resolve().parent / "driver"
     if not (driver / "node").is_file() or not (driver / "package" / "cli.js").is_file():
@@ -103,7 +130,9 @@ def _check() -> dict[str, object]:
         "status": "ok",
         "dependencies": versions,
         "extractor_count": len(names),
-        "deno_version": runtime.version,
+        "node_version": node_version,
+        "native_library_versions": native_versions,
+        "ejs_challenges": "n-and-signature-solved-offline",
         "playwright_driver": "ready",
         "browser": "external-google-chrome",
         "minimum_macos": manifest["minimum_macos"],

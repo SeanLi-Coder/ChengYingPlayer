@@ -69,8 +69,10 @@ def prepare_environment(args):
     os.environ["PYTHONUTF8"] = "1"
     os.environ["PYTHONIOENCODING"] = "utf-8"
     executable_dir = str(Path(sys.executable).resolve().parent)
-    # In a frozen build Deno is next to the helper. On macOS yt-dlp only searches
-    # PATH, unlike its Windows executable-directory fallback.
+    # Keep local media tools discoverable. JavaScript uses the sealed Node path,
+    # never a user-installed runtime or injected Node startup script.
+    os.environ.pop("NODE_OPTIONS", None)
+    os.environ.pop("NODE_PATH", None)
     os.environ["PATH"] = os.pathsep.join(
         [
             str(args.ffmpeg.parent),
@@ -166,6 +168,7 @@ def main(argv=None):
     listener = None
     lock = None
     restore_proxy_transports = None
+    restore_js_runtime = None
     sys.stdout = sys.stderr
     # Private task/config files; this does not alter files in the user's source repo.
     os.umask(0o077)
@@ -197,10 +200,12 @@ def main(argv=None):
         lock = ProjectLock(args.data_dir / "desktop.lock")
         lock.acquire()
         engine = importlib.import_module("app.main")
+        from js_runtime import install_js_runtime
         from proxy_config import ProxySettings
         from proxy_transport import install_proxy_transports
 
         proxy_settings = ProxySettings(args.data_dir, engine.manager)
+        restore_js_runtime = install_js_runtime()
         restore_proxy_transports = install_proxy_transports(proxy_settings.proxy_url)
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(("127.0.0.1", 0))
@@ -303,6 +308,8 @@ def main(argv=None):
             engine.manager.shutdown(wait=True, cancel_running=True)
         if restore_proxy_transports is not None:
             restore_proxy_transports()
+        if restore_js_runtime is not None:
+            restore_js_runtime()
         if listener is not None:
             listener.close()
         if lock is not None:

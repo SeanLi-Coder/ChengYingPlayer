@@ -12,7 +12,6 @@ from PyInstaller.utils.hooks import collect_all, copy_metadata
 source = Path(os.environ["CHENGYING_HELPER_SOURCE_DIR"])
 vendor = Path(os.environ["CHENGYING_HELPER_VENDOR_DIR"])
 legal = Path(os.environ["CHENGYING_HELPER_LEGAL_DIR"])
-deno = Path(os.environ["CHENGYING_HELPER_DENO"])
 identity = os.environ["CHENGYING_HELPER_SIGNING_IDENTITY"]
 architecture = os.environ["CHENGYING_HELPER_TARGET_ARCH"]
 
@@ -21,6 +20,7 @@ data_files = [
     (str(vendor / "app/static"), "app/static"),
     (str(source / "static"), "static"),
     (str(source / "runtime-artifacts.json"), "."),
+    (str(source / "runtime-sources.json"), "."),
     (str(source / "upstream-manifest.json"), "."),
     (str(legal), "Legal"),
 ]
@@ -78,10 +78,9 @@ collection = COLLECT(
     name="chengying-download-center-helper",
 )
 # BUNDLE relocates Mach-O code to Frameworks and data to Resources, preserving
-# package-relative paths with cross-links. Deno is a second real executable.
+# package-relative paths with cross-links. Its Node driver is shared with EJS.
 application = BUNDLE(
     collection,
-    [("deno", str(deno), "EXECUTABLE")],
     name="DownloadCenter.app",
     bundle_identifier="io.github.SeanLi-Coder.ChengYingPlayer.DownloadCenter",
     info_plist={

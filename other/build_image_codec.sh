@@ -66,4 +66,4 @@ fi
 mkdir -p "$OUTPUT_DIR"
 install -m 755 "$EXECUTABLE" "$OUTPUT_DIR/chengying-image-codec"
 "$OUTPUT_DIR/chengying-image-codec" --version
-echo "Source-built image codec is ready. The source-only release gate remains in force."
+echo "Source-built image codec is ready. Matching source and notices are required for distribution."

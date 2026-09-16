@@ -20,10 +20,22 @@ if [[ "$mode" != hardware && "$mode" != software ]]; then
 fi
 
 ffmpeg="${PLAYBACK_SOAK_FFMPEG:-$project_root/deps/executable/ffmpeg}"
-if [[ ! -x "$ffmpeg" || ! -f "$project_root/deps/lib/libmpv.2.dylib" || ! -f "$project_root/deps/lib/libdav1d.7.dylib" ]]; then
-  echo 'ERROR: The actual fetched playback libraries and built FFmpeg are required.' >&2
+if [[ ! -x "$ffmpeg" || ! -f "$project_root/deps/lib/libmpv.2.dylib" || ! -f "$project_root/deps/playback-build-record/library-sha256.txt" ]]; then
+  echo 'ERROR: The actual source-built playback libraries and built FFmpeg are required.' >&2
   exit 1
 fi
+# dav1d is now statically linked into libavcodec. Verify the executing library
+# against its build record and the exact pinned decoder source, not an unused dylib.
+# shellcheck source=other/playback_sources.sh
+source "$project_root/other/playback_sources.sh"
+expected_decoder="$(playback_source_records | awk -F '\t' '$1 == "dav1d"')"
+actual_decoder="$(awk -F '\t' '$1 == "dav1d"' "$project_root/deps/playback-build-record/sources.tsv")"
+if [[ -z "$expected_decoder" || "$actual_decoder" != "$expected_decoder" ]]; then
+  echo 'ERROR: The compiled decoder source does not match the pinned AV1 baseline.' >&2
+  exit 1
+fi
+(cd "$project_root/deps/lib" && shasum -a 256 -c ../playback-build-record/library-sha256.txt)
+echo "Verified statically linked dav1d source: $PLAYBACK_DAV1D_VERSION"
 
 echo 'Generating isolated 3840x2160 H.264 and HEVC Main10 fixtures.'
 "$ffmpeg" -hide_banner -loglevel error -nostdin -f lavfi \
@@ -67,4 +79,4 @@ xcrun clang -std=c11 -Wall -Wextra -Werror -O2 \
   exit($status >> 8);
 ' "$duration" "$test_dir/PlaybackSoakTests" \
   "$test_dir/h264.mp4" "$test_dir/hevc-main10.mp4" "$duration" "$mode" \
-  "$project_root/deps/lib/libdav1d.7.dylib"
+  "$project_root/deps/lib/libavcodec.61.dylib"

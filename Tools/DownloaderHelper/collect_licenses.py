@@ -15,7 +15,12 @@ def collect(destination: Path, source: Path) -> None:
         (source / "runtime-artifacts.json").read_text(encoding="utf-8")
     )
     destination.mkdir(parents=True, exist_ok=True)
-    for package in manifest["artifacts"]:
+    # PyInstaller's setuptools runtime hook also embeds its vendored libraries.
+    # Their complete source is in the separately pinned setuptools source archive.
+    for package in [
+        *manifest["artifacts"],
+        {"name": "setuptools", "version": "84.0.0"},
+    ]:
         distribution = importlib.metadata.distribution(package["name"])
         if distribution.version != package["version"]:
             raise RuntimeError(
@@ -52,6 +57,16 @@ def collect(destination: Path, source: Path) -> None:
     shutil.copyfile(
         source / "runtime-artifacts.json", destination / "runtime-artifacts.json"
     )
+    shutil.copyfile(
+        source / "runtime-sources.json", destination / "runtime-sources.json"
+    )
+    # The EJS wheel embeds third-party MIT/ISC notices in the leading JavaScript
+    # comment rather than separate LICENSE files. Preserve the complete files.
+    solver = importlib.metadata.distribution("yt-dlp-ejs")
+    for filename in ("core.min.js", "lib.min.js"):
+        original = Path(solver.locate_file(f"yt_dlp_ejs/yt/solver/{filename}"))
+        target = destination / "yt-dlp-ejs" / filename
+        shutil.copyfile(original, target)
     shutil.copyfile(source / "DISTRIBUTION.md", destination / "DISTRIBUTION.md")
 
 

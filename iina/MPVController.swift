@@ -500,7 +500,7 @@ class MPVController: NSObject {
     setUserOption(PK.secPrefech, type: .int, forName: MPVOption.Cache.cacheSecs, verboseIfDefault: true)
 
     // The local player does not load the network-video downloader.
-    chkErr(setOptionString(MPVOption.ProgramBehavior.ytdl, "no", level: .verbose))
+    // The bundled source-built libmpv has no Lua or external download scripts.
     chkErr(setOptionString(MPVOption.ProgramBehavior.resetOnNextFile,
             "\(MPVOption.PlaybackControl.abLoopA),\(MPVOption.PlaybackControl.abLoopB)," +
             "\(MPVOption.PlaybackControl.abLoopCount),\(MPVOption.Video.videoRotate)," +

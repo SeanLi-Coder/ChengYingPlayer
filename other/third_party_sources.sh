@@ -4,6 +4,14 @@
 # helper runtime/build tools. Python build wheels are pinned separately in
 # Tools/VideoToolsHelper/requirements-build.txt.
 
+# shellcheck source=other/playback_sources.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/playback_sources.sh"
+
+JUST_COMMIT="1824bf84cf52d11d69ae20cfb89f0ce5bffa5650"
+PROMISEKIT_COMMIT="8a98e31a47854d3180882c8068cc4d9381bf382d"
+GRMUSTACHE_COMMIT="6e9dcfb807959e19f2915be1928aeccf01babba5"
+SPARKLE_COMMIT="0ca3004e98712ea2b39dd881d28448630cce1c99"
+
 FFMPEG_VERSION="9.0.1"
 FFMPEG_SOURCE_FILE="ffmpeg-${FFMPEG_VERSION}.tar.xz"
 FFMPEG_SOURCE_URL="https://ffmpeg.org/releases/${FFMPEG_SOURCE_FILE}"
@@ -102,7 +110,16 @@ third_party_source_records() {
     "macholib" "$MACHOLIB_VERSION" "$MACHOLIB_SOURCE_FILE" "$MACHOLIB_SOURCE_URL" "$MACHOLIB_SOURCE_SHA256" \
     "packaging" "$PACKAGING_VERSION" "$PACKAGING_SOURCE_FILE" "$PACKAGING_SOURCE_URL" "$PACKAGING_SOURCE_SHA256" \
     "pyinstaller-hooks-contrib" "$PYINSTALLER_HOOKS_VERSION" "$PYINSTALLER_HOOKS_SOURCE_FILE" "$PYINSTALLER_HOOKS_SOURCE_URL" "$PYINSTALLER_HOOKS_SOURCE_SHA256" \
-    "setuptools" "$SETUPTOOLS_VERSION" "$SETUPTOOLS_SOURCE_FILE" "$SETUPTOOLS_SOURCE_URL" "$SETUPTOOLS_SOURCE_SHA256"
+    "setuptools" "$SETUPTOOLS_VERSION" "$SETUPTOOLS_SOURCE_FILE" "$SETUPTOOLS_SOURCE_URL" "$SETUPTOOLS_SOURCE_SHA256" \
+    "just" "$JUST_COMMIT" "Just-$JUST_COMMIT.tar.gz" "https://github.com/dduan/Just/archive/$JUST_COMMIT.tar.gz" \
+    "8e3f95382267ba1e01ddd3912a7102395f90018f6df2f1bf54a22984d5dd3451" \
+    "promisekit" "$PROMISEKIT_COMMIT" "PromiseKit-$PROMISEKIT_COMMIT.tar.gz" "https://github.com/mxcl/PromiseKit/archive/$PROMISEKIT_COMMIT.tar.gz" \
+    "85e1cfef1432e4d25336a88b75cfe3f5ec3b346b2e4b7713690a835ef7f3aead" \
+    "grmustache" "$GRMUSTACHE_COMMIT" "GRMustache-$GRMUSTACHE_COMMIT.tar.gz" "https://github.com/groue/GRMustache.swift/archive/$GRMUSTACHE_COMMIT.tar.gz" \
+    "382f070dd39429ff4c165060ce6975cd7e1ec506b978c3ad66e9127627538e47" \
+    "sparkle" "$SPARKLE_COMMIT" "Sparkle-$SPARKLE_COMMIT.tar.gz" "https://github.com/sparkle-project/Sparkle/archive/$SPARKLE_COMMIT.tar.gz" \
+    "687e9327d7c08dfe745f09ce2ecd6df1566b4ee10d1989788722e0b3df18150b"
+  playback_source_records
 }
 
 fetch_verified_source() {
@@ -177,5 +194,7 @@ write_third_party_source_manifest() {
       printf '%s  %s  %s  %s  %s\n' \
         "$expected_sha256" "$filename" "$record_name" "$version" "$url"
     done < <(third_party_source_records)
+    "${HELPER_PYTHON:-python3}" "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/Tools/DownloaderHelper/source_materials.py" manifest |
+      awk '{printf "%s  download-runtime/%s  %s  %s  %s\n", $1, $2, $3, $4, $5}'
   } > "$destination"
 }

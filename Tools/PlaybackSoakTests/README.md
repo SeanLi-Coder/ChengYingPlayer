@@ -1,6 +1,6 @@
 # Actual 4K playback soak
 
-Run on a Mac with the fetched playback libraries and source-built media tools:
+Run on a Mac with the source-built playback libraries and media tools:
 
 ```sh
 bash Tools/PlaybackSoakTests/run.sh
@@ -46,9 +46,10 @@ The 256 MiB growth and 2 GiB absolute limits are intentionally broad regression
 guards for this isolated fixture, not application-wide memory limits. Separate
 system processes such as WindowServer and VTDecoderXPCService are not measured.
 Driver cache differences should be investigated rather than hidden by raising limits.
-An external watchdog bounds even a driver or core deadlock. The loaded dav1d
-version must meet the verified 1.5.1 baseline; this checks the executing
-architecture slice, not only strings from an unrelated universal slice.
+An external watchdog bounds even a driver or core deadlock. dav1d is statically
+linked into libavcodec: the test verifies the built library hashes and exact
+pinned dav1d source record, then checks that the executing FFmpeg library exposes
+the libdav1d decoder. It does not inspect an unrelated or unused decoder dylib.
 
 Relevant upstream history:
 

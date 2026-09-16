@@ -21,6 +21,7 @@ if [[ "${HELPER_REQUIRE_SIGNING:-0}" == "1" && "$CODESIGN_IDENTITY" == "-" ]]; t
   echo "HELPER_CODESIGN_IDENTITY is required for a distribution-signed build." >&2
   exit 2
 fi
+"$HELPER_PYTHON" -I "$SCRIPT_DIR/verify_build_environment.py"
 "$HELPER_PYTHON" - "$SCRIPT_DIR/runtime-artifacts.json" "$PYTHON_VERSION" \
   "altgraph=$ALTGRAPH_VERSION" "macholib=$MACHOLIB_VERSION" "packaging=$PACKAGING_VERSION" \
   "pyinstaller=$PYINSTALLER_VERSION" "pyinstaller-hooks-contrib=$PYINSTALLER_HOOKS_VERSION" \
@@ -43,7 +44,7 @@ for package, version in expected.items():
         raise SystemExit(f"Install the pinned build lock: {package} {version} is required, found {actual}.")
 PY
 
-for required in helper.py host.py proxy_config.py proxy_transport.py bundle_smoke.py runtime-artifacts.json vendor/rednote/app/main.py; do
+for required in helper.py host.py proxy_config.py proxy_transport.py js_runtime.py bundle_smoke.py runtime-artifacts.json runtime-sources.json vendor/rednote/app/main.py; do
   if [[ ! -s "$SCRIPT_DIR/$required" ]]; then
     echo "Required helper source is unavailable: $required" >&2
     exit 2
@@ -62,16 +63,13 @@ mkdir -p "$WORK_DIR/vendor/rednote"
 rsync -a --exclude '__pycache__' --exclude '.pytest_cache' "$VENDOR_DIR/" "$WORK_DIR/vendor/rednote/"
 VENDOR_DIR="$WORK_DIR/vendor/rednote"
 
-DENO_SOURCE="$("$HELPER_PYTHON" -c 'from deno import find_deno_bin; print(find_deno_bin())')"
-install -m 755 "$DENO_SOURCE" "$WORK_DIR/deno"
-codesign --force --sign "$CODESIGN_IDENTITY" --options runtime \
-  --entitlements "$SCRIPT_DIR/runtime-entitlements.plist" "$WORK_DIR/deno"
 "$HELPER_PYTHON" "$SCRIPT_DIR/collect_licenses.py" "$WORK_DIR/Legal"
+"$HELPER_PYTHON" "$SCRIPT_DIR/source_materials.py" notices "$WORK_DIR/Legal/Sources"
 
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$VENDOR_DIR:$SCRIPT_DIR" \
   PYINSTALLER_STRICT_BUNDLE_CODESIGN_ERROR=1 PYINSTALLER_VERIFY_BUNDLE_SIGNATURE=1 \
   CHENGYING_HELPER_SOURCE_DIR="$SCRIPT_DIR" CHENGYING_HELPER_VENDOR_DIR="$VENDOR_DIR" \
-  CHENGYING_HELPER_LEGAL_DIR="$WORK_DIR/Legal" CHENGYING_HELPER_DENO="$WORK_DIR/deno" \
+  CHENGYING_HELPER_LEGAL_DIR="$WORK_DIR/Legal" \
   CHENGYING_HELPER_SIGNING_IDENTITY="$CODESIGN_IDENTITY" CHENGYING_HELPER_TARGET_ARCH="$TARGET_ARCH" \
   "$HELPER_PYTHON" -m PyInstaller --clean --noconfirm \
     --distpath "$WORK_DIR/dist" --workpath "$WORK_DIR/work" "$SCRIPT_DIR/download_center.spec"
@@ -82,7 +80,7 @@ BUILT_CONTENTS="$BUILT_APP/Contents"
 
 # Re-sign the real executable leaves and then their helper bundle, inside out.
 # Scripts remain sealed resources; no recursive signing workaround is used here.
-for binary in "$BUILT_CONTENTS/MacOS/deno" "$BUILT_CONTENTS/Frameworks/playwright/driver/node" "$BUILT_CONTENTS/MacOS/$HELPER_NAME"; do
+for binary in "$BUILT_CONTENTS/Frameworks/playwright/driver/node" "$BUILT_CONTENTS/MacOS/$HELPER_NAME"; do
   if [[ ! -x "$binary" ]]; then
     echo "A required frozen executable is missing: $binary" >&2
     exit 3

@@ -18,13 +18,17 @@
 - 设置中移除无实际作用的自动更新选项、“恢复隐藏提示”，以及 ReplayGain、手动解码线程、强制独显、实验音频驱动、音乐无缝播放、SPDIF 直通等高级项目；使用安全的自动/中立配置。旧偏好数据不会被删除，但不再影响这些已移除功能。
 - 保留硬件解码、HDR、ICC 色彩管理、音频输出设备、字幕/音画同步、播放速度与 A/B 循环；设置搜索仅显示仍然可用的项目。
 
-## 当前发布方式
+## 下载与安装
 
-当前 GitHub Releases **仅发布源码，不提供 App、DMG 或 ZIP 安装包**。CI 会在临时环境中构建并测试应用，但不会上传或发布该应用二进制。
+安装版在 [GitHub Releases](https://github.com/SeanLi-Coder/ChengYingPlayer/releases) 提供 `ChengYingPlayer-v<版本>-Apple-Silicon.dmg`，原生支持 Apple Silicon Mac，包括 **M4 Max MacBook Pro**。早期标有 Source Only 的版本仅有源码，不是安装包。
 
-这是因为当前本地/CI 构建使用的预编译播放动态库还没有完整闭合到可用、精确匹配的对应源码与构建记录。在播放栈全部由固定版本源码重建并完成合规验证之前，项目不会对外分发应用二进制。
+1. 下载后双击 DMG，把 **ChengYing** 拖到 **Applications（应用程序）**。
+2. 拷贝完成后推出安装磁盘，从“应用程序”打开“澄影视界”。
+3. 不需要 Homebrew、Python、FFmpeg 或 `start.command`；媒体工具和下载运行环境随 App 安装。AI 字幕的大模型仍在应用内按需下载，不塞进安装包。
 
-Release 中的 `ChengYingPlayer-<tag>-Release-Source.tar.gz` 是便于审核和本地构建的源码归档，不是可直接运行的安装包，也不是对任何未分发播放二进制的源码要约。
+当前安装版使用 ad-hoc 签名，**尚未经过 Apple Developer ID 签名与公证**。若系统阻止首次打开，在确认来源和校验文件后，按 [Apple 官方说明](https://support.apple.com/zh-cn/102445) 前往“系统设置 → 隐私与安全性 → 仍要打开”。不需要关闭 Gatekeeper 或执行删除隔离属性的命令；这不是免安全确认的公证安装。
+
+每个安装版 Release 同时提供 DMG 的 `.sha256` 校验文件、对应的 `Release-Source.tar.gz` 源码包及清单。普通使用只需 DMG。播放栈由固定版本源码构建，源码包保留同次构建记录与依赖源码；签名、架构、动态依赖、源码对应或实际 App 测试失败时不会发布。
 
 ## 核心功能
 
@@ -76,7 +80,7 @@ Release 中的 `ChengYingPlayer-<tag>-Release-Source.tar.gz` 是便于审核和�
 - 关闭下载中心窗口后，后台任务继续运行；退出播放器会停止任务，已下载文件保留。下次打开后，可按原界面的提示继续或重试，不会自动无提示启动旧任务。
 - Chrome Cookie 默认开启，保留账号绑定和显式匿名模式，不会因账号读取失败静默改成匿名请求。首次读取 Chrome 登录态可能触发 macOS 钥匙串授权；只应下载自己有权访问和保存的内容。
 
-下载中心当前固定为 **Apple Silicon、macOS 13.5 或更新系统**。Python、Playwright 驱动、yt-dlp、Deno 和媒体工具由构建流程打包，不要求最终用户安装开发环境；**Google Chrome 仍需用户安装并登录**，播放器内的网页不是 Chrome 登录环境。该模块不会提高其他本地播放功能的最低系统要求。站点的限流、登录、地区、内容权限和临时接口变更仍可能阻止下载；这里不是绕过网站限制的服务，也不新增直播或 DRM 内容支持。
+下载中心当前固定为 **Apple Silicon、macOS 13.5 或更新系统**。Python、Playwright 驱动、yt-dlp、Node 和媒体工具由构建流程打包，不要求最终用户安装开发环境；**Google Chrome 仍需用户安装并登录**，播放器内的网页不是 Chrome 登录环境。该模块不会提高其他本地播放功能的最低系统要求。站点的限流、登录、地区、内容权限和临时接口变更仍可能阻止下载；这里不是绕过网站限制的服务，也不新增直播或 DRM 内容支持。
 
 任务和设置独立保存在 `~/Library/Application Support/io.github.SeanLi-Coder.ChengYingPlayer/DownloadCenter`。不会自动读取、迁移或修改原 `rednote_downloader` 项目的任务目录；不会把 Cookie、浏览器用户数据、下载文件或个人配置打包进应用源码。内置服务仅监听随机本机端口，页面、API、静态资源和实时事件流均需要每次启动的新会话凭据，拒绝外部网页跨来源访问。
 
@@ -177,12 +181,12 @@ AI 字幕要求 **Apple Silicon、macOS 14 或更新版本，以及至少 96 GiB
 - 上述视频和 AI 字幕处理均在 Mac 本地运行，不会把视频、提取音频或识别结果上传到云端推理服务。
 - 项目不收集视频内容，也不包含 AI 超分。只有用户主动准备字幕模型时才下载锁定的模型和独立运行环境；不依赖云端字幕账户。
 - 已移除网络地址打开、在线字幕搜索和插件入口，主 App 不再附带浏览器扩展、插件安装器或网络视频下载器。这是功能精简，不是操作系统级的断网隔离。
-- 当前本仓库不发布可安装二进制；如需使用，请审查并自行从源码构建。
+- Release 安装包不包含个人媒体、账号、Cookie、员工邮箱或签名私钥；构建与测试使用临时合成素材。
 
 ## 系统要求
 
-- Apple Silicon 源码构建目标需要 macOS 12 或更高版本
-- Intel Mac 源码构建的最低部署目标为 macOS 10.15
+- Apple Silicon 安装包支持 M1 / M2 / M3 / M4 系列及更新机型，本地播放和视频工具需要 macOS 12 或更高版本
+- 下载中心需要 macOS 13.5+，并自行安装 Google Chrome；当前不提供 Intel 或 universal 安装包
 - AI 字幕为 Apple Silicon / macOS 14+ 功能，生成任务至少需要 96 GiB 统一内存；普通播放器无需这些模型
 - 从源码构建需要最新公开版 Xcode 和 CPython 3.13.2
 
@@ -191,9 +195,11 @@ AI 字幕要求 **Apple Silicon、macOS 14 或更新版本，以及至少 96 GiB
 克隆本仓库后，在项目根目录执行：
 
 ```console
-./other/download_libs.sh
-brew install cmake pkg-config
-python3 -m pip install --require-hashes --only-binary=:all: -r Tools/DownloaderHelper/requirements-build.txt
+brew install cmake pkg-config meson ninja autoconf automake libtool
+python3.13 -m venv .build/release-python
+source .build/release-python/bin/activate
+python -m pip install --require-hashes --only-binary=:all: -r Tools/DownloaderHelper/requirements-build.txt
+bash other/build_playback_libraries.sh
 ./other/build_media_binaries.sh
 bash other/build_image_codec.sh
 Tools/VideoToolsHelper/build_helper.sh
@@ -202,24 +208,21 @@ Tools/DownloaderHelper/build_helper.sh
 open iina.xcodeproj
 ```
 
-`download_libs.sh` 默认下载 universal 动态库，也可以只下载指定架构：
+完整构建使用 Apple Silicon、CPython **3.13.2** 和 Xcode；上面的 Python 必须是这个补丁版本，不能用任意 3.13。构建依赖必须装进独立、干净的 venv，不能混入 pytest 等开发包。`HELPER_PYTHON` 可指定该环境的 Python。
 
-```console
-./other/download_libs.sh --arch arm64
-./other/download_libs.sh --arch x86_64
-```
+`build_playback_libraries.sh` 从固定源码构建 libmpv、播放 FFmpeg 和 AV1 / 字幕 / 色彩管理依赖，保留 VideoToolbox 硬解、OpenGL、CoreAudio、ICC 与 HDR 所需能力。它与视频处理使用的 FFmpeg CLI 独立；不再从其他播放器的 DMG 提取动态库。原 `download_libs.sh` 仅保留作历史开发参考，不能用于发行构建。播放依赖目前仅支持原生 arm64 构建。
 
-以上完整构建使用 Apple Silicon、CPython **3.13.2** 和 Xcode；`HELPER_PYTHON` 可指定安装固定依赖的 Python。媒体工具构建脚本会下载并校验固定版本的 FFmpeg、x264、x265，以及 libass 和其字幕渲染依赖源码，再由源码生成 App 内置的 `ffmpeg`、`ffprobe`。脚本默认将 Apple Silicon 的最低系统版本固定为 macOS 12.0、Intel 固定为 macOS 10.15；可以通过 `MACOSX_DEPLOYMENT_TARGET` 显式提高目标版本，但不能低于对应架构的默认值，构建结束后还会检查实际 Mach-O 最低版本。helper 使用固定版本的 CPython 与 PyInstaller 构建；下载中心另外校验完整依赖锁并打包自己的 Node/Deno，单独要求 macOS 13.5。AI 字幕另在用户主动准备模型时建立校验锁定的独立运行环境，因此最终用户无需安装 Homebrew、系统 Python 或 FFmpeg。Intel 的本地媒体工具还需要 `brew install nasm`，但不支持 AI 字幕推理或当前固定的下载中心运行环境。随后在 Xcode 中选择应用 target 并构建。用于公开分发的构建还需要配置自己的 Developer ID、签名、notarization 和更新渠道；不得继续使用上游项目的签名身份或更新地址。
+媒体处理工具、WebP 编码器和三个 helper 也由固定输入构建。下载模块复用 Playwright 内置 Node 执行 yt-dlp 的 JavaScript 求解，不再额外打包 Deno；不改变原有下载质量、登录、代理和重试策略。AI 字幕在用户主动准备模型时建立独立运行环境。
 
-每个带标签的源码 Release 都附带由同一提交生成的 `Release-Source.tar.gz`、SHA-256 校验文件和独立的第三方源码清单。归档包含项目源码、构建脚本以及经过 SHA-256 校验的 FFmpeg、x264、x265、CPython、PyInstaller 和 helper 构建依赖源码包。它用于该源码版本的重建与审核，不宣称为未发布播放二进制的完整对应源码。具体版本、校验值与许可证见 [`other/third_party_sources.sh`](other/third_party_sources.sh)、[`NOTICE.md`](NOTICE.md) 和 [`Legal/THIRD_PARTY_NOTICES.md`](Legal/THIRD_PARTY_NOTICES.md)。
+完整 App 通过验证后，用 `bash other/package_dmg.sh /绝对路径/ChengYing.app /已有输出目录/ChengYingPlayer-v<版本>-Apple-Silicon.dmg` 打包。脚本不会修改输入 App，不覆盖已有输出，并验证签名、arm64、内部动态依赖、只读挂载和拷贝完整性。正式 Developer ID 签名与公证需要自己的 Apple 开发者凭据；不得使用上游身份或在仓库中提交私钥。
 
-如果需要自行构建 mpv 和 FFmpeg，请参考 [`other/`](other/) 中的构建与依赖处理脚本。动态库、编译选项和许可证必须与实际发布版本保持一致。
+每个安装版 Release 的源码归档包含同一提交的项目、Swift 包、播放栈、媒体工具、helper 对应依赖源码与播放构建记录。具体版本、校验值与许可证见 [`other/third_party_sources.sh`](other/third_party_sources.sh)、[`other/playback_sources.sh`](other/playback_sources.sh)、[`Tools/DownloaderHelper/runtime-sources.json`](Tools/DownloaderHelper/runtime-sources.json)、[`NOTICE.md`](NOTICE.md) 和 [`Legal/THIRD_PARTY_NOTICES.md`](Legal/THIRD_PARTY_NOTICES.md)。依赖或选项变化时，必须同步更新源码、通知、校验和回归测试。
 
 ## 参与开发
 
 播放稳定性专项检查：`bash Tools/ThumbnailLifecycleTests/run.sh` 验证真实请求生命周期；`bash Tools/ThumbnailCacheTests/run.sh` 验证损坏缓存与清理；`bash Tools/RenderLifecycleTests/run.sh` 验证 CGL 引用与退出锁顺序。准备好播放动态库和媒体工具后，`bash Tools/ThumbnailDecoderTests/run.sh` 验证实际 FFmpeg 缩略图解码，执行 `PLAYBACK_SOAK_SECONDS=600 bash Tools/PlaybackSoakTests/run.sh` 可做 10 分钟真实 4K 硬件解码与 OpenGL 渲染检查；明确设置 `PLAYBACK_SOAK_MODE=software` 才使用软件解码，测试结果会分别标示，不把软件回退当作硬件验证成功。详细范围见各测试目录的 README。
 
-图片专项检查：`bash Tools/ImageViewerTests/run.sh`、`bash Tools/ImageViewerUITests/run.sh`、`bash Tools/ImageRoutingTests/run.sh`、`bash Tools/ImageSlideshowTests/run.sh`、`bash Tools/ImageSlideshowUITests/run.sh`。幻灯片覆盖实际 AppKit 控件、Finder 多色标签、排序、慢图 / 坏图 / 动图、动态间隔、最小化恢复与转换隔离，并使用临时偏好域。先运行 `bash other/build_image_codec.sh` 再运行 `bash Tools/ImageCodecHelper/run.sh`，可测试真实 WebP 像素、动画时序、透明度、ICC、安全限制与取消。测试只生成临时素材，不读取个人相册。完整 App 仍由 CI 构建和签名验证，源码发布限制不变。
+图片专项检查：`bash Tools/ImageViewerTests/run.sh`、`bash Tools/ImageViewerUITests/run.sh`、`bash Tools/ImageRoutingTests/run.sh`、`bash Tools/ImageSlideshowTests/run.sh`、`bash Tools/ImageSlideshowUITests/run.sh`。幻灯片覆盖实际 AppKit 控件、Finder 多色标签、排序、慢图 / 坏图 / 动图、动态间隔、最小化恢复与转换隔离，并使用临时偏好域。先运行 `bash other/build_image_codec.sh` 再运行 `bash Tools/ImageCodecHelper/run.sh`，可测试真实 WebP 像素、动画时序、透明度、ICC、安全限制与取消。测试只生成临时素材，不读取个人相册。完整 App 由 CI 构建、签名验证及 DMG 打包检查。
 
 欢迎提交中文界面、播放兼容性、剪辑准确性、逐帧导出、旋转处理、可访问性和稳定性方面的改进。提交前请确认：
 
@@ -260,7 +263,7 @@ python3 -m pytest -q Tools/DownloaderHelper/tests
 bash Tools/DownloadCenterTests/run.sh
 ```
 
-原下载器测试会在临时副本运行，避免在应用源码或原项目目录创建任务数据。打包时还会实际启动冻结后的 Playwright 驱动、Deno 和下载服务，核对动态端口认证、任务目录隔离、重复进程锁、重启与父进程退出清理。
+原下载器测试会在临时副本运行，避免在应用源码或原项目目录创建任务数据。打包时还会实际启动冻结后的 Playwright 驱动、Node 和下载服务，核对真实 JavaScript 求解、动态端口认证、任务目录隔离、重复进程锁、重启与父进程退出清理。
 
 ## 开源许可与版权
 

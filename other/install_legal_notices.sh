@@ -47,6 +47,18 @@ install -m 644 "$PROJECT_ROOT/NOTICE.md" "$LEGAL_DIR/ChengYingPlayer-NOTICE.md"
 install -m 644 "$PROJECT_ROOT/Legal/THIRD_PARTY_NOTICES.md" "$LEGAL_DIR/THIRD_PARTY_NOTICES.md"
 write_third_party_source_manifest "$LEGAL_DIR/SOURCE_MANIFEST.txt"
 
+"${HELPER_PYTHON:-python3}" "$SCRIPT_DIR/verify_playback_distribution.py" "$PROJECT_ROOT/deps"
+ditto --noqtn "$PROJECT_ROOT/deps/playback-build-record" "$LEGAL_DIR/Playback"
+
+JUST_ARCHIVE="$(fetch_verified_source just "$SOURCE_CACHE_DIR")"
+PROMISEKIT_ARCHIVE="$(fetch_verified_source promisekit "$SOURCE_CACHE_DIR")"
+GRMUSTACHE_ARCHIVE="$(fetch_verified_source grmustache "$SOURCE_CACHE_DIR")"
+SPARKLE_ARCHIVE="$(fetch_verified_source sparkle "$SOURCE_CACHE_DIR")"
+tar -xOf "$JUST_ARCHIVE" "Just-$JUST_COMMIT/LICENSE.md" > "$LEGAL_DIR/Just-LICENSE.md"
+tar -xOf "$PROMISEKIT_ARCHIVE" "PromiseKit-$PROMISEKIT_COMMIT/LICENSE" > "$LEGAL_DIR/PromiseKit-LICENSE.txt"
+tar -xOf "$GRMUSTACHE_ARCHIVE" "GRMustache.swift-$GRMUSTACHE_COMMIT/LICENSE" > "$LEGAL_DIR/GRMustache-LICENSE.txt"
+tar -xOf "$SPARKLE_ARCHIVE" "Sparkle-$SPARKLE_COMMIT/LICENSE" > "$LEGAL_DIR/Sparkle-LICENSE.txt"
+
 tar -xOf "$FFMPEG_ARCHIVE" "ffmpeg-$FFMPEG_VERSION/COPYING.GPLv3" \
   > "$LEGAL_DIR/FFmpeg-COPYING.GPLv3.txt"
 tar -xOf "$FFMPEG_ARCHIVE" "ffmpeg-$FFMPEG_VERSION/LICENSE.md" \
@@ -83,6 +95,8 @@ for notice in COPYING PATENTS AUTHORS; do
 done
 tar -xOf "$PYTHON_ARCHIVE" "Python-$PYTHON_VERSION/LICENSE" \
   > "$LEGAL_DIR/CPython-LICENSE.txt"
+tar -xOf "$PYTHON_ARCHIVE" "Python-$PYTHON_VERSION/Doc/license.rst" \
+  > "$LEGAL_DIR/CPython-THIRD-PARTY-NOTICES.rst"
 tar -xOf "$PYINSTALLER_ARCHIVE" "pyinstaller-$PYINSTALLER_VERSION/COPYING.txt" \
   > "$LEGAL_DIR/PyInstaller-COPYING.txt"
 tar -xOf "$PYINSTALLER_ARCHIVE" "pyinstaller-$PYINSTALLER_VERSION/bootloader/waflib/LICENSE" \
