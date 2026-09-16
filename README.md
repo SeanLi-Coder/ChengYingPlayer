@@ -191,6 +191,8 @@ open iina.xcodeproj
 
 继承的播放器代码另有专项回归：`bash Tools/PlaybackTimeTests/run.sh` 检查时间进位、非法输入和异常时长；`bash Tools/HistorySearchTests/run.sh` 检查历史刷新后保留搜索条件；`bash Tools/PlaybackLifecycleTests/run.sh` 复现快速切文件后停止/退出的后台任务竞争，并用 Address Sanitizer 检查滤镜节点访问；`bash Tools/WindowLifecycleTests/run.sh` 通过真实 AppKit 滚动事件验证触控板取消、惯性灵敏度和窗口缩放收尾。播放列表测试还覆盖右键菜单打开后列表变化，避免误操作另一个文件；文件回收在测试中被替换为记录器，不会删除用户文件。
 
+`bash Tools/AutoFileMatchingTests/run.sh` 运行完整的同目录字幕自动匹配流程，验证第 1 集不会因为名称包含关系而抢走第 10 集的字幕，同时保留语言后缀、发行前缀与原有剧集匹配规则。
+
 AI 字幕的原生界面与离线 helper 回归测试：
 
 ```console

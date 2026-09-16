@@ -62,6 +62,7 @@ jobs:
           bash Tools/HistorySearchTests/run.sh
           bash Tools/PlaybackLifecycleTests/run.sh
           bash Tools/WindowLifecycleTests/run.sh
+          bash Tools/AutoFileMatchingTests/run.sh
 
       - name: Test simplified player features
         run: |

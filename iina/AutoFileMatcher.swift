@@ -252,7 +252,7 @@ class AutoFileMatcher {
       if subAutoLoadOption.shouldLoadSubsContainingVideoName() {
         log("Matching subtitles containing video name...", level: .verbose)
         try subtitles.filter {
-          $0.filename.contains(video.filename) && !$0.isMatched
+          !$0.isMatched && Self.subtitleName($0.filename, containsVideoName: video.filename)
         }.forEach { sub in
           try checkTicket()
           log("Matched \(sub.filename) and \(video.filename)", level: .verbose)
@@ -304,6 +304,22 @@ class AutoFileMatcher {
 
     try checkTicket()
     player.info.currentVideosInfo = filesGroupedByMediaType[.video]!
+  }
+
+  private static func subtitleName(_ subtitle: String, containsVideoName video: String) -> Bool {
+    guard !video.isEmpty else { return false }
+    // Preserve release/language affixes, but do not consume part of another episode number.
+    // Without these boundaries, an earlier Episode 1 can claim Episode 10's subtitles.
+    var searchStart = subtitle.startIndex
+    while let match = subtitle.range(of: video, range: searchStart..<subtitle.endIndex) {
+      let joinsPreviousNumber = video.first?.isNumber == true && match.lowerBound > subtitle.startIndex &&
+        subtitle[subtitle.index(before: match.lowerBound)].isNumber
+      let joinsNextNumber = video.last?.isNumber == true && match.upperBound < subtitle.endIndex &&
+        subtitle[match.upperBound].isNumber
+      if !joinsPreviousNumber && !joinsNextNumber { return true }
+      searchStart = subtitle.index(after: match.lowerBound)
+    }
+    return false
   }
 
   private func forceMatchUnmatchedVideos() throws {
