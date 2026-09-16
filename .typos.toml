@@ -4,6 +4,8 @@ extend-exclude = [
     "deps/",
     "iina.xcodeproj/",
     "**/*.strings",
+    # Keep the checksum-verified upstream snapshot unchanged.
+    "Tools/DownloaderHelper/vendor/rednote/**",
 ]
 ignore-hidden = false
 
@@ -20,10 +22,14 @@ extend-ignore-re = [
 
 [default.extend-words]
 "abitrate" = "abitrate"
+# Exact name of the bundled Python CA certificate package.
+"certifi" = "certifi"
 "splitted" = "splitted"
 
 [default.extend-identifiers]
 "caf" = "caf"
+# Plural image-format acronym, not the unrelated word fragment "PN".
+"PNGs" = "PNGs"
 # Xcode uses this property in XIBs.
 "customObjectInstantitationMethod" = "customObjectInstantitationMethod"
 "iy" = "iy"

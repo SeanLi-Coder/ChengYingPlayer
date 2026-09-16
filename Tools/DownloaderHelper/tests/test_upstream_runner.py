@@ -119,6 +119,7 @@ import os
 import socket
 import subprocess
 import sys
+from pathlib import Path
 assert getattr(socket, "_chengying_offline_guard", False)
 assert socket.getfqdn("127.0.0.1") == "localhost"
 try:
@@ -128,6 +129,10 @@ except OSError:
 else:
     raise AssertionError("External reverse DNS was not blocked")
 depth = int(sys.argv[1])
+if depth < 2:
+    import fixture_dependency
+    assert fixture_dependency.VALUE == "fixture dependency preserved"
+    assert Path(fixture_dependency.__file__).resolve() == Path(sys.argv[2], "fixture_dependency.py").resolve()
 if depth:
     environment = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": sys.argv[2]}
     child = subprocess.run(
@@ -146,6 +151,9 @@ print("Guard inherited.")
             guard = directory / "guard"
             packages = directory / "fixture-package-path"
             packages.mkdir()
+            (packages / "fixture_dependency.py").write_text(
+                'VALUE = "fixture dependency preserved"\n', encoding="utf-8",
+            )
             RUNNER.create_offline_guard(guard)
             environment = RUNNER.isolated_environment(os.environ)
             environment[RUNNER.OFFLINE_GUARD_ENV] = str(guard)
@@ -156,6 +164,66 @@ print("Guard inherited.")
                 env=environment,
             )
             self.assertEqual(result.stdout.strip(), "Guard inherited.")
+
+    def test_positional_popen_environment_is_preserved_without_mutating_callers(self):
+        probe = r'''
+import os
+import subprocess
+import sys
+assert getattr(__import__("socket"), "_chengying_offline_guard", False)
+environment = {
+    "PATH": os.environ.get("PATH", ""),
+    "PYTHONPATH": sys.argv[1],
+    "FIXTURE_MARKER": "explicit environment preserved",
+}
+original = environment.copy()
+parent_environment = dict(os.environ)
+child_probe = """
+import os
+import socket
+import sys
+from pathlib import Path
+import fixture_dependency
+assert getattr(socket, "_chengying_offline_guard", False)
+assert socket.getfqdn("127.0.0.1") == "localhost"
+assert fixture_dependency.VALUE == "positional dependency preserved"
+assert Path(fixture_dependency.__file__).resolve() == Path(sys.argv[1], "fixture_dependency.py").resolve()
+assert os.environ["PYTHONPATH"].split(os.pathsep) == [sys.argv[2], sys.argv[1]]
+assert os.environ["CHENGYING_OFFLINE_TEST_GUARD_PATH"] == sys.argv[2]
+assert os.environ["FIXTURE_MARKER"] == "explicit environment preserved"
+assert "OFFLINE_PARENT_SENTINEL" not in os.environ
+print("Positional environment preserved.")
+"""
+command = [getattr(sys, "_base_executable", sys.executable), "-B", "-c", child_probe, sys.argv[1], sys.argv[2]]
+# The eleventh positional argument is env in the real Popen signature.
+with subprocess.Popen(command, -1, None, None, subprocess.PIPE, subprocess.PIPE,
+                      None, True, False, None, environment, text=True) as child:
+    stdout, stderr = child.communicate(timeout=5)
+    assert child.returncode == 0, stderr
+assert stdout.strip() == "Positional environment preserved."
+assert environment == original
+assert dict(os.environ) == parent_environment
+print("Positional environment preserved.")
+'''
+        with tempfile.TemporaryDirectory(prefix="chengying-positional-guard-") as name:
+            directory = Path(name)
+            guard = directory / "guard"
+            packages = directory / "fixture-package-path"
+            packages.mkdir()
+            (packages / "fixture_dependency.py").write_text(
+                'VALUE = "positional dependency preserved"\n', encoding="utf-8",
+            )
+            RUNNER.create_offline_guard(guard)
+            environment = RUNNER.isolated_environment(os.environ)
+            environment[RUNNER.OFFLINE_GUARD_ENV] = str(guard)
+            environment["PYTHONPATH"] = str(guard)
+            environment["OFFLINE_PARENT_SENTINEL"] = "not inherited by an explicit environment"
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", probe, str(packages), str(guard)],
+                capture_output=True, text=True, check=True, timeout=10,
+                env=environment,
+            )
+            self.assertEqual(result.stdout.strip(), "Positional environment preserved.")
 
 
 if __name__ == "__main__":
