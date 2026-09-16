@@ -113,6 +113,7 @@ browser/Firefox_Open_In_IINA/*
 
 deps/executable/youtube-dl
 deps/executable/chengying-video-tools-helper
+deps/executable/chengying-subtitle-tools-helper
 deps/executable/ffmpeg
 deps/executable/ffprobe
 deps/plugins

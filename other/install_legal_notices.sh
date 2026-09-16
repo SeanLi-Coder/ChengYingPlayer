@@ -25,6 +25,11 @@ done
 FFMPEG_ARCHIVE="$(fetch_verified_source ffmpeg "$SOURCE_CACHE_DIR")"
 X264_ARCHIVE="$(fetch_verified_source x264 "$SOURCE_CACHE_DIR")"
 X265_ARCHIVE="$(fetch_verified_source x265 "$SOURCE_CACHE_DIR")"
+FREETYPE_ARCHIVE="$(fetch_verified_source freetype "$SOURCE_CACHE_DIR")"
+HARFBUZZ_ARCHIVE="$(fetch_verified_source harfbuzz "$SOURCE_CACHE_DIR")"
+FRIBIDI_ARCHIVE="$(fetch_verified_source fribidi "$SOURCE_CACHE_DIR")"
+UNIBREAK_ARCHIVE="$(fetch_verified_source libunibreak "$SOURCE_CACHE_DIR")"
+LIBASS_ARCHIVE="$(fetch_verified_source libass "$SOURCE_CACHE_DIR")"
 PYTHON_ARCHIVE="$(fetch_verified_source cpython "$SOURCE_CACHE_DIR")"
 PYINSTALLER_ARCHIVE="$(fetch_verified_source pyinstaller "$SOURCE_CACHE_DIR")"
 ALTGRAPH_ARCHIVE="$(fetch_verified_source altgraph "$SOURCE_CACHE_DIR")"
@@ -49,6 +54,18 @@ tar -xOf "$X264_ARCHIVE" "x264-$X264_COMMIT/COPYING" \
   > "$LEGAL_DIR/x264-COPYING.txt"
 tar -xOf "$X265_ARCHIVE" "x265_$X265_VERSION/COPYING" \
   > "$LEGAL_DIR/x265-COPYING.txt"
+tar -xOf "$FREETYPE_ARCHIVE" "freetype-$FREETYPE_VERSION/docs/FTL.TXT" \
+  > "$LEGAL_DIR/FreeType-FTL.txt"
+tar -xOf "$FREETYPE_ARCHIVE" "freetype-$FREETYPE_VERSION/docs/GPLv2.TXT" \
+  > "$LEGAL_DIR/FreeType-GPLv2.txt"
+tar -xOf "$HARFBUZZ_ARCHIVE" "harfbuzz-$HARFBUZZ_VERSION/COPYING" \
+  > "$LEGAL_DIR/HarfBuzz-COPYING.txt"
+tar -xOf "$FRIBIDI_ARCHIVE" "fribidi-$FRIBIDI_VERSION/COPYING" \
+  > "$LEGAL_DIR/FriBidi-COPYING.txt"
+tar -xOf "$UNIBREAK_ARCHIVE" "libunibreak-$UNIBREAK_VERSION/LICENCE" \
+  > "$LEGAL_DIR/libunibreak-LICENCE.txt"
+tar -xOf "$LIBASS_ARCHIVE" "libass-$LIBASS_VERSION/COPYING" \
+  > "$LEGAL_DIR/libass-COPYING.txt"
 tar -xOf "$PYTHON_ARCHIVE" "Python-$PYTHON_VERSION/LICENSE" \
   > "$LEGAL_DIR/CPython-LICENSE.txt"
 tar -xOf "$PYINSTALLER_ARCHIVE" "pyinstaller-$PYINSTALLER_VERSION/COPYING.txt" \

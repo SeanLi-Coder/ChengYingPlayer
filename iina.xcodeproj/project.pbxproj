@@ -7,6 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D4C800012F6A000100000001 /* SubtitleToolsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C800102F6A000100000001 /* SubtitleToolsModels.swift */; };
+		D4C800022F6A000100000002 /* SubtitleToolsHelperClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C800112F6A000100000002 /* SubtitleToolsHelperClient.swift */; };
+		D4C800032F6A000100000003 /* SubtitleToolsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C800122F6A000100000003 /* SubtitleToolsService.swift */; };
+		D4C800042F6A000100000004 /* SubtitleToolsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C800132F6A000100000004 /* SubtitleToolsViewController.swift */; };
+		D4C800052F6A000100000005 /* SubtitleTools.strings in Resources */ = {isa = PBXBuildFile; fileRef = D4C800302F6A000100000001 /* SubtitleTools.strings */; };
+		D4C801012F6A000100000001 /* chengying-subtitle-tools-helper in Copy Video Tools */ = {isa = PBXBuildFile; fileRef = D4C801102F6A000100000001 /* chengying-subtitle-tools-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		1326717E20852D0D000FA7E2 /* SubChooseViewController.xib in Resources */ = {isa = PBXBuildFile; fileRef = 1326718020852D0D000FA7E2 /* SubChooseViewController.xib */; };
 		3412DB8E2C2FC64C00BBC142 /* Equalizations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3412DB8D2C2FC64800BBC142 /* Equalizations.swift */; };
 		348F71962DE2A819006C587D /* MPVCommandWrappers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 348F71952DE2A814006C587D /* MPVCommandWrappers.swift */; };
@@ -440,6 +446,7 @@
 				D4C701012F6A000100000001 /* ffmpeg in Copy Video Tools */,
 				D4C701022F6A000100000002 /* ffprobe in Copy Video Tools */,
 				D4C701032F6A000100000003 /* chengying-video-tools-helper in Copy Video Tools */,
+				D4C801012F6A000100000001 /* chengying-subtitle-tools-helper in Copy Video Tools */,
 			);
 			name = "Copy Video Tools";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -571,6 +578,13 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D4C800102F6A000100000001 /* SubtitleToolsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsModels.swift; sourceTree = "<group>"; };
+		D4C800112F6A000100000002 /* SubtitleToolsHelperClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsHelperClient.swift; sourceTree = "<group>"; };
+		D4C800122F6A000100000003 /* SubtitleToolsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsService.swift; sourceTree = "<group>"; };
+		D4C800132F6A000100000004 /* SubtitleToolsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsViewController.swift; sourceTree = "<group>"; };
+		D4C800312F6A000100000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/SubtitleTools.strings; sourceTree = "<group>"; };
+		D4C800322F6A000100000002 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/SubtitleTools.strings"; sourceTree = "<group>"; };
+		D4C801102F6A000100000001 /* chengying-subtitle-tools-helper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = "chengying-subtitle-tools-helper"; path = "deps/executable/chengying-subtitle-tools-helper"; sourceTree = SOURCE_ROOT; };
 		0507C25E2B5617650043AD05 /* he */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = he; path = he.lproj/MainMenu.strings; sourceTree = "<group>"; };
 		0507C25F2B5617660043AD05 /* he */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = he; path = he.lproj/MainWindowController.strings; sourceTree = "<group>"; };
 		0507C2602B5617660043AD05 /* he */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = he; path = he.lproj/QuickSettingViewController.strings; sourceTree = "<group>"; };
@@ -2157,6 +2171,17 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		D4C800202F6A000100000001 /* SubtitleTools */ = {
+			isa = PBXGroup;
+			children = (
+				D4C800102F6A000100000001 /* SubtitleToolsModels.swift */,
+				D4C800112F6A000100000002 /* SubtitleToolsHelperClient.swift */,
+				D4C800122F6A000100000003 /* SubtitleToolsService.swift */,
+				D4C800132F6A000100000004 /* SubtitleToolsViewController.swift */,
+			);
+			path = SubtitleTools;
+			sourceTree = "<group>";
+		};
 		49542976216C34950058F680 /* OpenInIINA */ = {
 			isa = PBXGroup;
 			children = (
@@ -2271,6 +2296,7 @@
 				D4C701102F6A000100000001 /* ffmpeg */,
 				D4C701112F6A000100000002 /* ffprobe */,
 				D4C701122F6A000100000003 /* chengying-video-tools-helper */,
+				D4C801102F6A000100000001 /* chengying-subtitle-tools-helper */,
 			);
 			name = Executables;
 			path = iina;
@@ -2380,6 +2406,7 @@
 				84EB1EDB1D2F51D3004FA5A1 /* Assets.xcassets */,
 				84EB1EE01D2F51D3004FA5A1 /* Info.plist */,
 				845AC09E1E1AE6C10080B614 /* Localizable.strings */,
+				D4C800302F6A000100000001 /* SubtitleTools.strings */,
 				34F294BF2C0B68B300F14962 /* Contribution.rtf */,
 				8483FAFF1EDFF325000F55D6 /* Credits.rtf */,
 			);
@@ -2390,6 +2417,7 @@
 			isa = PBXGroup;
 			children = (
 				D4C700202F6A000100000001 /* VideoTools */,
+				D4C800202F6A000100000001 /* SubtitleTools */,
 				84A0BA931D2F9E9600BC8DA1 /* MainMenu.xib */,
 				E38BD4AE20054BD9007635FC /* MainWindow.swift */,
 				D1B4E24D2A3AFC9100E36F1D /* MiniPlayerWindow.swift */,
@@ -3048,6 +3076,7 @@
 				6100FF2B1EDF9806002CF0FB /* dsa_pub.pem in Resources */,
 				849581F31F03D55A00D3B359 /* InitialWindowController.xib in Resources */,
 				845AC09C1E1AE6C10080B614 /* Localizable.strings in Resources */,
+				D4C800052F6A000100000005 /* SubtitleTools.strings in Resources */,
 				8400D5F61E1AB34D006785F5 /* PrefNetworkViewController.xib in Resources */,
 				8400D5D51E1AB317006785F5 /* FilterWindowController.xib in Resources */,
 				E3B3DD5720FDB8A600325184 /* PreferenceWindowController.xib in Resources */,
@@ -3169,6 +3198,10 @@
 				842904E21F0EC01600478376 /* AutoFileMatcher.swift in Sources */,
 				8466BE181D5CDD0300039D03 /* QuickSettingViewController.swift in Sources */,
 				D4C700012F6A000100000001 /* VideoToolsModels.swift in Sources */,
+				D4C800012F6A000100000001 /* SubtitleToolsModels.swift in Sources */,
+				D4C800022F6A000100000002 /* SubtitleToolsHelperClient.swift in Sources */,
+				D4C800032F6A000100000003 /* SubtitleToolsService.swift in Sources */,
+				D4C800042F6A000100000004 /* SubtitleToolsViewController.swift in Sources */,
 				D4C700022F6A000100000002 /* VideoToolsHelperClient.swift in Sources */,
 				D4C700032F6A000100000003 /* VideoToolsTaskManager.swift in Sources */,
 				D4C700042F6A000100000004 /* VideoToolsPlayerBridge.swift in Sources */,
@@ -3333,6 +3366,15 @@
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
+		D4C800302F6A000100000001 /* SubtitleTools.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				D4C800312F6A000100000001 /* en */,
+				D4C800322F6A000100000002 /* zh-Hans */,
+			);
+			name = SubtitleTools.strings;
+			sourceTree = "<group>";
+		};
 		1326718020852D0D000FA7E2 /* SubChooseViewController.xib */ = {
 			isa = PBXVariantGroup;
 			children = (

@@ -443,6 +443,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     Logger.log("App should terminate")
     isTerminating = true
+    SubtitleToolsService.shared.shutdown()
 
     // Normally termination happens fast enough that the user does not have time to initiate
     // additional actions, however to be sure shutdown further input from the user.
@@ -693,12 +694,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    SubtitleToolsService.shared.shutdown()
     if let videoToolsShortcutMonitor {
       NSEvent.removeMonitor(videoToolsShortcutMonitor)
     }
     videoToolsMenuObservers.forEach(NotificationCenter.default.removeObserver)
     Logger.log("App will terminate")
     Logger.closeLogFile()
+  }
+
+  @objc func menuShowSubtitleTools(_ sender: NSMenuItem) {
+    // Model preparation must also be available from the welcome window.
+    guard let controller = PlayerCore.active.mainWindow else { return }
+    _ = controller.window
+    controller.showWindow(sender)
+    controller.window?.makeKeyAndOrderFront(sender)
+    controller.showSettingsSidebar(tab: .aiSubtitles, hideIfAlreadyShown: false)
   }
 
   private func installVideoToolsShortcuts() {

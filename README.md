@@ -4,7 +4,7 @@
   <img src="Brand/ChengYingIconMaster.png" width="180" alt="ChengYingPlayer icon">
 </p>
 
-一款面向 macOS 的中文本地媒体播放器，兼顾日常播放与轻量视频处理。视频处理在本机完成，不包含 AI 超分、AI 模型下载或云端转码。
+一款面向 macOS 的中文本地媒体播放器，兼顾日常播放、轻量视频处理与本地 AI 中文字幕。视频、音频和字幕处理在本机完成，不包含 AI 超分或云端转码。
 
 界面只保留本地播放与视频处理需要的入口：不提供网络地址播放、在线字幕搜索、插件、浏览器扩展和开发调试菜单。字幕加载、播放列表、章节、画中画、播放历史和快捷键设置仍然保留；旧版本保存的插件工具栏按钮会自动隐藏，旧的在线字幕自动搜索和高级 mpv 配置不再执行。
 
@@ -18,7 +18,7 @@ Release 中的 `ChengYingPlayer-<tag>-Release-Source.tar.gz` 是便于审核和�
 
 ## 核心功能
 
-除完整的本地音视频播放、字幕、播放列表、章节、画中画与播放历史外，澄影播放器重点提供三项无需离开播放器的工具：
+除完整的本地音视频播放、字幕、播放列表、章节、画中画与播放历史外，澄影播放器提供三项视频处理工具和独立的 AI 中文字幕面板，无需离开播放器：
 
 在播放器菜单中打开 **视频 → 视频工具…**，或在播放器侧栏选择 **工具**。以下控制全部集成在 macOS 原生播放器内：
 
@@ -70,10 +70,35 @@ Release 中的 `ChengYingPlayer-<tag>-Release-Source.tar.gz` 是便于审核和�
 
 为避免静默损坏画质或元数据，工具遇到当前无法安全保留的动态 HDR、异常像素格式或隔行旋转素材时会明确停止并提示，而不会悄悄降级输出。
 
+### 本地 AI 中文字幕
+
+在原生播放器侧栏选择 **AI 字幕**，或打开 **字幕 → 生成中文字幕…**。面板分为「生成字幕」和「模型管理」，不是另开网页。
+
+1. 先在「模型管理」阅读模型许可说明，点击「下载并准备模型」。页面逐项显示下载大小、完成量和进度，并显示实际下载速度与对应阶段的预计剩余时间。
+2. 下载可以暂停；下次点「继续下载和准备」会复用已下载部分。下载完整但尚未校验的文件会进入校验，不会直接显示就绪，也不会无故重新下载全部权重。关闭面板不会取消后台任务。
+3. 打开本地视频，在「生成字幕」选择原音频语言：自动识别、普通话、粤语、英语、日语或韩语，然后点击「生成字幕」。结果为简体中文字幕。
+4. 默认在原视频同级目录生成新的 ASS 和 SRT 文件，绝不覆盖原视频或已有字幕。原视频仍在同一播放会话时，完成后会自动选中新生成的 ASS 字幕；已经换片或重新加载时不会误加载到其他视频。也可点击「在 Finder 中显示结果」。
+
+固定使用质量优先的完整模型组，不提供降档或量化模型选择：
+
+| 环节 | 固定模型 |
+| --- | --- |
+| 语音识别 | 官方 Qwen3-ASR 1.7B BF16 |
+| 时间轴对齐 | 官方 Qwen3-ForcedAligner 0.6B BF16 |
+| 翻译为中文 | Hy-MT2 30B-A3B BF16 |
+
+锁定的三组模型文件合计约 **66 GB**，另需独立 AI 运行环境、下载校验与任务临时文件空间。长视频的分析音频及可选烧录视频还会额外占用磁盘。运行时和模型存放在 `~/Library/Application Support/io.github.SeanLi-Coder.ChengYingPlayer/SubtitleTools`，不放进源码仓库。
+
+AI 字幕要求 **Apple Silicon、macOS 14 或更新版本，以及至少 96 GiB 统一内存**；建议使用 128 GB 统一内存机型，例如 M4 Max 128 GB。内存不足时允许预下载固定模型，但会阻止字幕生成并说明原因，不会偷偷切换低档模型。普通播放器和视频工具仍遵循下方原有系统要求。
+
+默认不勾选「同时生成烧录字幕的新视频」：外挂字幕完全不改变原片画质和音质。勾选后会另外生成 **无损 FFV1 MKV**，复制原有音轨，文件可能非常大；遇到当前无法安全烧录的 HDR、旋转元数据等素材，会保留已经生成的外挂字幕并提示烧录问题，不会悄悄降低视频规格。
+
+模型许可与应用源码许可是不同的：Qwen 模型采用 [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0)；Hy-MT2 使用 [Tencent Hy Community License](https://huggingface.co/tencent/Hy-MT2-30B-A3B/blob/main/LICENSE.txt)，包含用途、地区等限制，不能因为模型页面标签而将其视为 Apache 2.0。下载前请阅读并遵守相应条款。模型权重不随本仓库或源码 Release 分发。
+
 ## 本地与隐私
 
-- 上述视频处理均在 Mac 本地运行，媒体文件不会上传到项目维护者的服务器。
-- 项目不收集视频内容，也不内置 AI 超分模型或模型下载器。
+- 上述视频和 AI 字幕处理均在 Mac 本地运行，不会把视频、提取音频或识别结果上传到云端推理服务。
+- 项目不收集视频内容，也不包含 AI 超分。只有用户主动准备字幕模型时才下载锁定的模型和独立运行环境；不依赖云端字幕账户。
 - 已移除网络地址打开、在线字幕搜索和插件入口，主 App 不再附带浏览器扩展、插件安装器或网络视频下载器。这是功能精简，不是操作系统级的断网隔离。
 - 当前本仓库不发布可安装二进制；如需使用，请审查并自行从源码构建。
 
@@ -81,6 +106,7 @@ Release 中的 `ChengYingPlayer-<tag>-Release-Source.tar.gz` 是便于审核和�
 
 - Apple Silicon 源码构建目标需要 macOS 12 或更高版本
 - Intel Mac 源码构建的最低部署目标为 macOS 10.15
+- AI 字幕为 Apple Silicon / macOS 14+ 功能，生成任务至少需要 96 GiB 统一内存；普通播放器无需这些模型
 - 从源码构建需要最新公开版 Xcode 和 CPython 3.13.2
 
 ## 从源码构建
@@ -93,6 +119,7 @@ brew install cmake pkg-config
 python3 -m pip install -r Tools/VideoToolsHelper/requirements-build.txt
 ./other/build_media_binaries.sh
 Tools/VideoToolsHelper/build_helper.sh
+Tools/SubtitleToolsHelper/build_helper.sh
 open iina.xcodeproj
 ```
 
@@ -103,7 +130,7 @@ open iina.xcodeproj
 ./other/download_libs.sh --arch x86_64
 ```
 
-媒体工具构建脚本会下载并校验固定版本的 FFmpeg、x264 和 x265 源码，再由源码生成 App 内置的 `ffmpeg`、`ffprobe`。脚本默认将 Apple Silicon 的最低系统版本固定为 macOS 12.0、Intel 固定为 macOS 10.15；可以通过 `MACOSX_DEPLOYMENT_TARGET` 显式提高目标版本，但不能低于对应架构的默认值，构建结束后还会检查实际 Mach-O 最低版本。helper 使用固定版本的 CPython 与 PyInstaller 构建，因此最终用户无需安装 Homebrew、Python 或 FFmpeg。Intel 构建还需要 `brew install nasm`。随后在 Xcode 中选择应用 target 并构建。用于公开分发的构建还需要配置自己的 Developer ID、签名、notarization 和更新渠道；不得继续使用上游项目的签名身份或更新地址。
+媒体工具构建脚本会下载并校验固定版本的 FFmpeg、x264、x265，以及 libass 和其字幕渲染依赖源码，再由源码生成 App 内置的 `ffmpeg`、`ffprobe`。脚本默认将 Apple Silicon 的最低系统版本固定为 macOS 12.0、Intel 固定为 macOS 10.15；可以通过 `MACOSX_DEPLOYMENT_TARGET` 显式提高目标版本，但不能低于对应架构的默认值，构建结束后还会检查实际 Mach-O 最低版本。两个 helper 使用固定版本的 CPython 与 PyInstaller 构建；AI 字幕另在用户主动准备模型时建立校验锁定的独立运行环境，因此最终用户无需安装 Homebrew、系统 Python 或 FFmpeg。Intel 构建还需要 `brew install nasm`，但不支持 AI 字幕推理。随后在 Xcode 中选择应用 target 并构建。用于公开分发的构建还需要配置自己的 Developer ID、签名、notarization 和更新渠道；不得继续使用上游项目的签名身份或更新地址。
 
 每个带标签的源码 Release 都附带由同一提交生成的 `Release-Source.tar.gz`、SHA-256 校验文件和独立的第三方源码清单。归档包含项目源码、构建脚本以及经过 SHA-256 校验的 FFmpeg、x264、x265、CPython、PyInstaller 和 helper 构建依赖源码包。它用于该源码版本的重建与审核，不宣称为未发布播放二进制的完整对应源码。具体版本、校验值与许可证见 [`other/third_party_sources.sh`](other/third_party_sources.sh)、[`NOTICE.md`](NOTICE.md) 和 [`Legal/THIRD_PARTY_NOTICES.md`](Legal/THIRD_PARTY_NOTICES.md)。
 
@@ -118,6 +145,15 @@ open iina.xcodeproj
 - 行为变更附带相应测试，媒体处理功能覆盖取消、失败、磁盘空间不足和输出文件重名等情况。
 
 在 Mac 上执行 `./Tools/VideoToolsTests/run.sh` 可运行原生播放与打点回归检查；只需 Xcode Command Line Tools。检查直接编译真实的工具界面和播放器桥接代码，使用模拟播放器验证按钮、区间预览、打点精度、刷新定时器与中文布局，并覆盖固定快捷键解析、循环边界策略和累计旋转队列。完整 App 构建、真实 mpv 循环边界冒烟检查和媒体处理测试由 GitHub Actions 继续验证。
+
+AI 字幕的原生界面与离线 helper 回归测试：
+
+```console
+bash Tools/SubtitleToolsTests/run.sh
+python3 -m unittest discover -s Tools/SubtitleToolsHelper/tests
+```
+
+原生检查编译真实 AppKit 界面、共享任务服务及 IPC 客户端，覆盖中英文 340 点侧栏、下载/校验/暂停状态、任务互斥、输出路径验证和字幕自动加载的媒体会话隔离。离线 helper 检查不下载大模型；模拟测试通过不等于已经在目标 Mac 上完成全模型性能或翻译质量验收。模型与运行环境版本、文件大小、SHA-256 锁定记录见 [`Tools/SubtitleToolsHelper/assets.json`](Tools/SubtitleToolsHelper/assets.json)。
 
 ## 开源许可与版权
 

@@ -9,6 +9,13 @@ HELPER_PYTHON="${HELPER_PYTHON:-python3}"
 TARGET_ARCH="${HELPER_TARGET_ARCH:-}"
 CODESIGN_IDENTITY="${HELPER_CODESIGN_IDENTITY:-}"
 REQUIRE_SIGNING="${HELPER_REQUIRE_SIGNING:-0}"
+HELPER_KIND="${HELPER_KIND:-video}"
+case "$HELPER_KIND" in
+  video) HELPER_SOURCE_DIR="$SCRIPT_DIR" ;;
+  subtitle) HELPER_SOURCE_DIR="$REPOSITORY_ROOT/Tools/SubtitleToolsHelper" ;;
+  *) echo "Unsupported helper kind: $HELPER_KIND" >&2; exit 2 ;;
+esac
+HELPER_NAME="chengying-$HELPER_KIND-tools-helper"
 
 # shellcheck source=other/third_party_sources.sh
 source "$REPOSITORY_ROOT/other/third_party_sources.sh"
@@ -50,7 +57,7 @@ fi
 mkdir -p "$OUTPUT_DIR"
 WORK_DIR="$(mktemp -d "$OUTPUT_DIR/.chengying-helper-build.XXXXXX")"
 DIST_DIR="$WORK_DIR/dist"
-PARTIAL_PATH="$OUTPUT_DIR/.chengying-video-tools-helper.partial-$$"
+PARTIAL_PATH="$OUTPUT_DIR/.$HELPER_NAME.partial-$$"
 
 cleanup() {
   rm -rf "$WORK_DIR"
@@ -67,11 +74,20 @@ PYINSTALLER_ARGS=(
   --clean
   --noconfirm
   --onefile
-  --name chengying-video-tools-helper
+  --name "$HELPER_NAME"
   --distpath "$DIST_DIR"
   --workpath "$WORK_DIR/work"
   --specpath "$WORK_DIR/spec"
 )
+
+if [[ "$HELPER_KIND" == "subtitle" ]]; then
+  PYINSTALLER_ARGS+=(
+    --add-data "$HELPER_SOURCE_DIR/assets.json:."
+  )
+  for worker_source in "$HELPER_SOURCE_DIR"/subtitle_worker/*.py; do
+    PYINSTALLER_ARGS+=(--add-data "$worker_source:subtitle_worker")
+  done
+fi
 
 if [[ -n "$TARGET_ARCH" ]]; then
   PYINSTALLER_ARGS+=(--target-arch "$TARGET_ARCH")
@@ -83,10 +99,10 @@ fi
 
 "$HELPER_PYTHON" -m PyInstaller \
   "${PYINSTALLER_ARGS[@]}" \
-  "$SCRIPT_DIR/helper.py"
+  "$HELPER_SOURCE_DIR/helper.py"
 
-BUILT_HELPER="$DIST_DIR/chengying-video-tools-helper"
-HELPER_PATH="$OUTPUT_DIR/chengying-video-tools-helper"
+BUILT_HELPER="$DIST_DIR/$HELPER_NAME"
+HELPER_PATH="$OUTPUT_DIR/$HELPER_NAME"
 if [[ ! -x "$BUILT_HELPER" ]]; then
   echo "Helper build did not produce an executable: $BUILT_HELPER" >&2
   exit 3
@@ -109,14 +125,24 @@ codesign --verify --strict "$BUILT_HELPER"
 BUNDLED_FFMPEG="$OUTPUT_DIR/ffmpeg"
 BUNDLED_FFPROBE="$OUTPUT_DIR/ffprobe"
 if [[ -x "$BUNDLED_FFMPEG" && -x "$BUNDLED_FFPROBE" ]]; then
+  SMOKE_ARGS=()
+  SMOKE_COMMAND=ping
+  SMOKE_EVENT=pong
+  if [[ "$HELPER_KIND" == "subtitle" ]]; then
+    SMOKE_ARGS+=(--data-dir "$WORK_DIR/smoke-data")
+    SMOKE_COMMAND=status
+    SMOKE_EVENT=status
+  fi
   SMOKE_OUTPUT="$({
-    printf '%s\n' '{"id":"build-ping","command":"ping"}'
+    printf '{"id":"build-ping","command":"%s"}\n' "$SMOKE_COMMAND"
     printf '%s\n' '{"id":"build-shutdown","command":"shutdown"}'
   } | "$BUILT_HELPER" \
     --ffmpeg "$BUNDLED_FFMPEG" \
     --ffprobe "$BUNDLED_FFPROBE" \
+    "${SMOKE_ARGS[@]}" \
     --stdio)"
-  if [[ "$SMOKE_OUTPUT" != *'"type":"ready"'* || "$SMOKE_OUTPUT" != *'"type":"pong"'* ]]; then
+  if ! grep -Eq '"type"[[:space:]]*:[[:space:]]*"ready"' <<<"$SMOKE_OUTPUT" || \
+     ! grep -Eq "\"type\"[[:space:]]*:[[:space:]]*\"$SMOKE_EVENT\"" <<<"$SMOKE_OUTPUT"; then
     echo "Frozen helper smoke test failed." >&2
     exit 5
   fi

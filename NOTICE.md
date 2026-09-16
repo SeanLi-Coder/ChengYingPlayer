@@ -43,7 +43,7 @@ See [`LICENSE`](LICENSE) for the controlling terms. If this summary and GPLv3 di
 
 ## Third-party components
 
-The upstream application includes or depends on third-party software. In addition, local and CI application builds bundle three local video-tool executables. The following list is not a substitute for the complete component licenses:
+The upstream application includes or depends on third-party software. In addition, local and CI application builds bundle four local media-tool executables. The following list is not a substitute for the complete component licenses:
 
 | Component | Copyright or project attribution | License notice |
 | --- | --- | --- |
@@ -60,6 +60,8 @@ The upstream application includes or depends on third-party software. In additio
 | Sparkle | Copyright © its named contributors | MIT License |
 
 Exact upstream application notices are bundled in [`iina/Credits.rtf`](iina/Credits.rtf). Exact notices and source details for the added video-tool executables are recorded in [`Legal/THIRD_PARTY_NOTICES.md`](Legal/THIRD_PARTY_NOTICES.md) and [`other/third_party_sources.sh`](other/third_party_sources.sh).
+
+The subtitle feature adapts the repository owner's earlier `subtitle_add` / 译幕 workflow. Its optional Qwen3 and Hy-MT2 weights and isolated AI runtime are downloaded directly from their official upstreams only at the user's request; they are not relicensed as GPLv3 or included in a source release. In particular, Hy-MT2 uses the Tencent HY Community License, not Apache-2.0. Exact asset locks and additional FreeType, HarfBuzz, FriBidi, libunibreak, and libass notices are documented in `Legal/THIRD_PARTY_NOTICES.md`.
 
 ## Current source-only release policy
 

@@ -10,6 +10,8 @@ ARCHITECTURE="${ARCHS:-$(uname -m)}"
 
 # shellcheck source=other/third_party_sources.sh
 source "$SCRIPT_DIR/third_party_sources.sh"
+# shellcheck source=other/build_subtitle_libraries.sh
+source "$SCRIPT_DIR/build_subtitle_libraries.sh"
 
 case "$ARCHITECTURE" in
   arm64)
@@ -75,6 +77,7 @@ X264_SOURCE_DIR="$WORK_DIR/x264-$X264_COMMIT"
 X265_SOURCE_DIR="$WORK_DIR/x265_$X265_VERSION"
 X264_PREFIX="$WORK_DIR/x264-install"
 X265_PREFIX="$WORK_DIR/x265-install"
+SUBTITLE_PREFIX="$WORK_DIR/subtitle-install"
 INSTALL_PREFIX="$WORK_DIR/ffmpeg-install"
 
 cleanup() {
@@ -88,6 +91,9 @@ tar -xf "$FFMPEG_ARCHIVE" -C "$WORK_DIR"
 tar -xf "$X264_ARCHIVE" -C "$WORK_DIR"
 tar -xf "$X265_ARCHIVE" -C "$WORK_DIR"
 mkdir -p "$OUTPUT_DIR"
+
+echo "Building static subtitle rendering libraries..."
+build_subtitle_libraries "$SUBTITLE_PREFIX"
 
 echo "Building x264 $X264_VERSION ($X264_COMMIT)..."
 cd "$X264_SOURCE_DIR"
@@ -148,7 +154,10 @@ libtool -static -o "$WORK_DIR/x265-8bit/libx265.a" \
   "$WORK_DIR/x265-8bit/libx265_main12.a"
 cmake --install "$WORK_DIR/x265-8bit"
 
-export PKG_CONFIG_PATH="$X264_PREFIX/lib/pkgconfig:$X265_PREFIX/lib/pkgconfig"
+# The subtitle subshell intentionally cannot leak its isolated lookup paths.
+# shellcheck disable=SC2031
+export PKG_CONFIG_PATH="$X264_PREFIX/lib/pkgconfig:$X265_PREFIX/lib/pkgconfig:$SUBTITLE_PREFIX/lib/pkgconfig"
+# shellcheck disable=SC2031
 export PKG_CONFIG_LIBDIR="$PKG_CONFIG_PATH"
 
 echo "Building FFmpeg $FFMPEG_VERSION..."
@@ -159,12 +168,13 @@ cd "$FFMPEG_SOURCE_DIR"
   --target-os=darwin \
   --cc=clang \
   --pkg-config-flags=--static \
-  --extra-cflags="$TARGET_CFLAGS -I$X264_PREFIX/include -I$X265_PREFIX/include" \
-  --extra-ldflags="$TARGET_LDFLAGS -L$X264_PREFIX/lib -L$X265_PREFIX/lib" \
+  --extra-cflags="$TARGET_CFLAGS -I$X264_PREFIX/include -I$X265_PREFIX/include -I$SUBTITLE_PREFIX/include" \
+  --extra-ldflags="$TARGET_LDFLAGS -L$X264_PREFIX/lib -L$X265_PREFIX/lib -L$SUBTITLE_PREFIX/lib" \
   --enable-gpl \
   --enable-version3 \
   --enable-libx264 \
   --enable-libx265 \
+  --enable-libass \
   --enable-videotoolbox \
   --enable-audiotoolbox \
   --enable-zlib \
@@ -227,22 +237,22 @@ done
 
 ENCODERS="$("$OUTPUT_DIR/ffmpeg" -hide_banner -encoders 2>&1)"
 for encoder in libx264 libx265 prores_ks ffv1 alac png exr; do
-  if ! grep -q "[[:space:]]$encoder[[:space:]]" <<<"$ENCODERS"; then
+  if ! grep -q "[[:space:]]${encoder}[[:space:]]" <<<"$ENCODERS"; then
     echo "Required FFmpeg encoder is unavailable: $encoder" >&2
     exit 1
   fi
 done
 
 FILTERS="$("$OUTPUT_DIR/ffmpeg" -hide_banner -filters 2>&1)"
-for filter_name in transpose trim setpts hflip vflip; do
-  if ! grep -q "[[:space:]]$filter_name[[:space:]]" <<<"$FILTERS"; then
+for filter_name in transpose trim setpts hflip vflip ass subtitles; do
+  if ! grep -q "[[:space:]]${filter_name}[[:space:]]" <<<"$FILTERS"; then
     echo "Required FFmpeg filter is unavailable: $filter_name" >&2
     exit 1
   fi
 done
 
 BUILD_CONFIGURATION="$("$OUTPUT_DIR/ffmpeg" -hide_banner -version 2>&1)"
-for option in --enable-gpl --enable-version3 --enable-libx264 --enable-libx265; do
+for option in --enable-gpl --enable-version3 --enable-libx264 --enable-libx265 --enable-libass; do
   if ! grep -q -- "$option" <<<"$BUILD_CONFIGURATION"; then
     echo "Required FFmpeg license/build option is missing: $option" >&2
     exit 1

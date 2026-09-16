@@ -1,6 +1,6 @@
 # Third-party notices for bundled video tools
 
-A locally built ChengYingPlayer application contains separate `ffmpeg`, `ffprobe`, and `chengying-video-tools-helper` executables. Exact media-tool source inputs and matching source distributions for the helper toolchain are fixed in [`other/third_party_sources.sh`](../other/third_party_sources.sh); exact Python build-wheel versions and hashes are fixed in [`Tools/VideoToolsHelper/requirements-build.txt`](../Tools/VideoToolsHelper/requirements-build.txt). Local and CI builds verify the applicable downloads by SHA-256. The project currently publishes source-only releases and does not distribute these executables.
+A locally built ChengYingPlayer application contains separate `ffmpeg`, `ffprobe`, `chengying-video-tools-helper`, and `chengying-subtitle-tools-helper` executables. Exact media-tool source inputs and matching source distributions for the helper toolchain are fixed in [`other/third_party_sources.sh`](../other/third_party_sources.sh); exact Python build-wheel versions and hashes are fixed in [`Tools/VideoToolsHelper/requirements-build.txt`](../Tools/VideoToolsHelper/requirements-build.txt). Local and CI builds verify the applicable downloads by SHA-256. The project currently publishes source-only releases and does not distribute these executables.
 
 ## FFmpeg video tools
 
@@ -11,14 +11,21 @@ The bundled `ffmpeg` and `ffprobe` executables are built from the following sour
 | FFmpeg | 9.0.1 | GPLv3-or-later build (`--enable-gpl --enable-version3`) | <https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz> |
 | x264 | r3222, commit `b35605ace3ddf7c1a5d67a2eb553f034aef41d55` | GPLv2-or-later | <https://code.videolan.org/videolan/x264/-/tree/b35605ace3ddf7c1a5d67a2eb553f034aef41d55> |
 | x265 | 4.3 | GPLv2-or-later | <https://github.com/Multicorewareinc/x265/releases/tag/4.3> |
+| FreeType | 2.14.3 | FreeType License (FTL); GPLv2 alternative also reproduced | <https://freetype.org/> |
+| HarfBuzz | 14.4.0 | MIT-style notices in `COPYING` | <https://github.com/harfbuzz/harfbuzz/releases/tag/14.4.0> |
+| FriBidi | 1.0.16 | LGPLv2.1-or-later | <https://github.com/fribidi/fribidi/releases/tag/v1.0.16> |
+| libunibreak | 8.0 | zlib-style license | <https://github.com/adah1972/libunibreak/releases/tag/libunibreak_8_0> |
+| libass | 0.17.5 | ISC | <https://github.com/libass/libass/releases/tag/0.17.5> |
 
 x264 and x265 are statically linked into the FFmpeg executables. Because both codec libraries allow use under later GPL versions and this FFmpeg configuration enables GPLv3 components, those executables are conveyed under GPLv3-or-later. The application as a whole remains GPLv3 under the repository [`LICENSE`](../LICENSE).
 
 A built application includes the applicable FFmpeg, x264, and x265 license texts in `Contents/Resources/Legal`. The source-only release includes the exact verified source archives and build scripts used to recreate these added executables.
 
+Subtitle rendering additionally links the five font/shaping libraries above statically, using macOS CoreText for font discovery instead of an external Fontconfig installation. Their notices are also installed in `Contents/Resources/Legal`, and their pinned source archives are included with tagged source releases. Portions of this software are copyright © The FreeType Project (<https://freetype.org/>). All rights reserved.
+
 ## Frozen local helper
 
-The `chengying-video-tools-helper` executable contains the project's Python source plus a frozen Python runtime produced with:
+Both local helper executables contain the project's Python source plus a frozen Python runtime produced with:
 
 | Component | Exact version | License | Source |
 | --- | --- | --- | --- |
@@ -30,6 +37,20 @@ The PyInstaller Bootloader Exception permits the compiled bootloader and related
 The PyInstaller build environment also pins `altgraph` 0.17.5 (MIT), `macholib` 1.16.4 (MIT), `packaging` 26.3 (Apache-2.0 OR BSD-2-Clause), `pyinstaller-hooks-contrib` 2026.7 (Apache-2.0 and GPLv2 notices), and `setuptools` 84.0.0 (MIT). These packages are build tools rather than application features; their versions and wheel hashes are fixed in [`Tools/VideoToolsHelper/requirements-build.txt`](../Tools/VideoToolsHelper/requirements-build.txt).
 
 A built application reproduces the complete CPython and PyInstaller license files, the notices for PyInstaller's embedded `waflib` and `zlib` bootloader components, and the primary notices for every pinned helper build dependency in `Contents/Resources/Legal`. The release source archive includes the exact source distributions used by the source build process.
+
+## Optional, separately downloaded subtitle assets
+
+The subtitle supervisor contains no neural-network weights or PyTorch runtime. At the user's request it downloads fixed official artifacts identified by immutable revisions, exact lengths, and SHA-256 hashes in [`Tools/SubtitleToolsHelper/assets.json`](../Tools/SubtitleToolsHelper/assets.json). These assets are not included in the repository or its source releases, and their upstream licenses apply independently of this application's GPLv3 source license.
+
+| Model | Official repository | License |
+| --- | --- | --- |
+| Qwen3-ASR 1.7B (full BF16) | <https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf> | Apache-2.0 |
+| Qwen3-ForcedAligner 0.6B (full BF16) | <https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B-hf> | Apache-2.0 |
+| Hy-MT2 30B-A3B (full BF16) | <https://huggingface.co/tencent/Hy-MT2-30B-A3B> | Tencent HY Community License, **not Apache-2.0**; see the repository's license and applicable use restrictions |
+
+The optional isolated runtime uses Astral's CPython 3.13.15 standalone build and pinned PyPI wheels. Model license files are downloaded where provided in the official snapshots; runtime package notices remain in their installed distributions. The lock records the reviewed model licenses and links, including Qwen's Apache-2.0 notice, and the model manager links to those licenses before download. Redistribution of these external assets requires a separate review of their actual license terms and corresponding-source obligations; their availability for download is not a blanket redistribution permission. Runtime installation occurs offline from the verified wheelhouse, and inference uses only local model files without remote Python code.
+
+Subtitle segmentation and translation handling adapt the repository owner's earlier [subtitle_add / 译幕](https://github.com/SeanLi-Coder/subtitle_add) workflow. The new native interface, resumable asset manager, isolated runtime, and local worker are distributed as source under this project's GPLv3 license.
 
 ## Integrity and source availability
 

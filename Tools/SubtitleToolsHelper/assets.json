@@ -1,0 +1,1054 @@
+{
+  "schema_version": 1,
+  "runtime": {
+    "id": "chengying-subtitles-macos14-arm64-py313-v1",
+    "python_executable": "python/bin/python3",
+    "archive": {
+      "id": "runtime/python",
+      "path": "downloads/python.tar.gz",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-aarch64-apple-darwin-install_only.tar.gz",
+      "size": 25293188,
+      "sha256": "b9054a9d3d54f4cb5573d44907fddb29874b08909bde73f29f2868cf872223ee"
+    },
+    "wheels": [
+      {
+        "id": "wheel/torch",
+        "path": "wheels/torch-2.14.0-cp313-cp313-macosx_14_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/ca/40/0db773452c2a62b37761d3f418acf933d381f9e87077036fb57c2a386c37/torch-2.14.0-cp313-cp313-macosx_14_0_arm64.whl",
+        "size": 127311393,
+        "sha256": "9d4b1022a5d9b71282ec67ad0d9e7235870096b8a246dc1c32d6ea1fc83dc998"
+      },
+      {
+        "id": "wheel/transformers",
+        "path": "wheels/transformers-5.17.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/e8/d0/c502b60d684adbd98a8dc7d5bb866842772b816ac4354e4608be240041ae/transformers-5.17.0-py3-none-any.whl",
+        "size": 12295140,
+        "sha256": "78ec1ce21579b38dfb83950a0658cd119f87212a2fcfdff478096ce9d6c03801"
+      },
+      {
+        "id": "wheel/nagisa",
+        "path": "wheels/nagisa-0.3.0-cp313-cp313-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/da/df/d0a142e09ae1b50f4636dd8265a8288eb3a60d4d0627aca3e3c122f08d6a/nagisa-0.3.0-cp313-cp313-macosx_11_0_arm64.whl",
+        "size": 21538404,
+        "sha256": "5559f7024be79ba09e106fea57768bb329de5de17e545c417b3172757bb58365"
+      },
+      {
+        "id": "wheel/dyNET38",
+        "path": "wheels/dynet38-2.2-cp313-cp313-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/ce/14/cf6d09c249035ef9166ea772a072900d8012a1c061102bb19eaed0a612bf/dynet38-2.2-cp313-cp313-macosx_11_0_arm64.whl",
+        "size": 2593828,
+        "sha256": "3418be619ad5a531154745336a35df2de226f084f4ecc90911d4fda4c24075e1"
+      },
+      {
+        "id": "wheel/soynlp",
+        "path": "wheels/soynlp-0.0.493-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/7e/50/6913dc52a86a6b189419e59f9eef1b8d599cffb6f44f7bb91854165fc603/soynlp-0.0.493-py3-none-any.whl",
+        "size": 416753,
+        "sha256": "2aed0ced1f0f74f7bdd0bdc24a979c5cb9ee4a28393642db52a83d174ed65b7a"
+      },
+      {
+        "id": "wheel/opencc-python-reimplemented",
+        "path": "wheels/opencc_python_reimplemented-0.1.7-py2.py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/30/6b/055b7806f320cc8f2cdf23c5f70221c0dc1683fca9ffaf76dfc2ad4b91b6/opencc_python_reimplemented-0.1.7-py2.py3-none-any.whl",
+        "size": 481813,
+        "sha256": "41b3b92943c7bed291f448e9c7fad4b577c8c2eae30fcfe5a74edf8818493aa6"
+      },
+      {
+        "id": "wheel/accelerate",
+        "path": "wheels/accelerate-1.15.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/8a/4c/34f0450479d01195027260da68d8a3880683f1640c3ca5adf64acb3185f1/accelerate-1.15.0-py3-none-any.whl",
+        "size": 394295,
+        "sha256": "97eacca0b73e45cb867dbf8c5d5d4dc32219544300e0c8992c7334dc2ef33cec"
+      },
+      {
+        "id": "wheel/soundfile",
+        "path": "wheels/soundfile-0.14.0-py2.py3-none-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/63/7a/dfdd6f8c748988427119f75eb860a3cedd858d1aea1fe28f39ad8559ef22/soundfile-0.14.0-py2.py3-none-macosx_11_0_arm64.whl",
+        "size": 1103726,
+        "sha256": "d828d35a059626da52f1415b5faee610aeab393319cb3fc4a9aef47b619fc14c"
+      },
+      {
+        "id": "wheel/librosa",
+        "path": "wheels/librosa-1.0.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/96/14/0b2e4cc8017796dc8f69de740708601832c1e8d5377166eedb4db0a92264/librosa-1.0.0-py3-none-any.whl",
+        "size": 294628,
+        "sha256": "5910a6c0e1b2e494b92758c1615a7acbd0515a2315e138927ba2982f2af88857"
+      },
+      {
+        "id": "wheel/cffi",
+        "path": "wheels/cffi-2.1.1-cp313-cp313-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/55/41/4c7042f317b9217502988f0873af87e16ad606dc20f84e546e3e6ce9764c/cffi-2.1.1-cp313-cp313-macosx_11_0_arm64.whl",
+        "size": 184764,
+        "sha256": "19ee6127ee34de7d83ce3d371ebc5ed91addbdcc39f9ab15ce4eb35a4e534971"
+      },
+      {
+        "id": "wheel/decorator",
+        "path": "wheels/decorator-5.3.1-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/05/7f/798705f5296a58ca505d600456748d1be48078eac8a7050d8a98bc9edb89/decorator-5.3.1-py3-none-any.whl",
+        "size": 10365,
+        "sha256": "f47fe6fdbd2edd623ecfe36875d37aba411624e2670dd395dddae1358689bb3c"
+      },
+      {
+        "id": "wheel/fsspec",
+        "path": "wheels/fsspec-2026.7.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/fd/3c/6a2bf344106328fd04963664a60b9bb6496fc25df8e962fcdc1367285fb9/fsspec-2026.7.0-py3-none-any.whl",
+        "size": 206583,
+        "sha256": "b57ddbafedfaef7018c1ecab32aa200a9d7ca26b77965f64e48b70061249d279"
+      },
+      {
+        "id": "wheel/huggingface_hub",
+        "path": "wheels/huggingface_hub-1.31.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/c3/7f/3f886a625043b77312b80da2f2bf00b5ecbf5a73061af1aa0259cd258c9d/huggingface_hub-1.31.0-py3-none-any.whl",
+        "size": 798313,
+        "sha256": "9dbb6a503cbe2494ea666695207e7262d410659e09134059deb83e5480864667"
+      },
+      {
+        "id": "wheel/filelock",
+        "path": "wheels/filelock-3.32.7-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/15/df/31098c5aeb4d966b553641472bd55fcf5fdfac953549894b8a765ba44e91/filelock-3.32.7-py3-none-any.whl",
+        "size": 100157,
+        "sha256": "65ff0d0190ea42038b32bda4b77834fb05be2cad4c5b9b01aa4dfb3614536e52"
+      },
+      {
+        "id": "wheel/joblib",
+        "path": "wheels/joblib-1.6.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl",
+        "size": 306115,
+        "sha256": "3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba"
+      },
+      {
+        "id": "wheel/lazy-loader",
+        "path": "wheels/lazy_loader-0.5-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/8a/a1/8d812e53a5da1687abb10445275d41a8b13adb781bbf7196ddbcf8d88505/lazy_loader-0.5-py3-none-any.whl",
+        "size": 8044,
+        "sha256": "ab0ea149e9c554d4ffeeb21105ac60bed7f3b4fd69b1d2360a4add51b170b005"
+      },
+      {
+        "id": "wheel/msgpack",
+        "path": "wheels/msgpack-1.2.2-cp313-cp313-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/33/54/10c6c16ddba8a5112e3680176b838e3694e4aad7284f9daa6d6d70d98817/msgpack-1.2.2-cp313-cp313-macosx_11_0_arm64.whl",
+        "size": 83734,
+        "sha256": "1e8cdd1f3e7cc52c751092a9bf740e81e6919ab109cd376ae2d965dad0bbae34"
+      },
+      {
+        "id": "wheel/networkx",
+        "path": "wheels/networkx-3.6.1-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl",
+        "size": 2068504,
+        "sha256": "d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762"
+      },
+      {
+        "id": "wheel/numba",
+        "path": "wheels/numba-0.67.0-cp313-cp313-macosx_12_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/49/dd/bd9fe772f6c84597b76cac229b3f2890f01a2c64fd70e48ceaae10dd65cb/numba-0.67.0-cp313-cp313-macosx_12_0_arm64.whl",
+        "size": 2744872,
+        "sha256": "77e1c7173fee57a0d84e006c7e70346689d6cb3e7db503489bae58646b4eff7b"
+      },
+      {
+        "id": "wheel/numpy",
+        "path": "wheels/numpy-2.5.3-cp313-cp313-macosx_14_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/ab/2a/98282aa5b8f58b1157d440bb6282eed47e3632a5de53a714fbab17e659fe/numpy-2.5.3-cp313-cp313-macosx_14_0_arm64.whl",
+        "size": 5439695,
+        "sha256": "f9a2353b37a1a9e78fd82b27ad7e2a32a2d036604d18f02b05e3136c62ca3b09"
+      },
+      {
+        "id": "wheel/packaging",
+        "path": "wheels/packaging-26.3-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl",
+        "size": 129956,
+        "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"
+      },
+      {
+        "id": "wheel/pooch",
+        "path": "wheels/pooch-1.9.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/2a/2d/d4bf65e47cea8ff2c794a600c4fd1273a7902f268757c531e0ee9f18aa58/pooch-1.9.0-py3-none-any.whl",
+        "size": 67175,
+        "sha256": "f265597baa9f760d25ceb29d0beb8186c243d6607b0f60b83ecf14078dbc703b"
+      },
+      {
+        "id": "wheel/psutil",
+        "path": "wheels/psutil-7.2.2-cp36-abi3-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/80/c4/f5af4c1ca8c1eeb2e92ccca14ce8effdeec651d5ab6053c589b074eda6e1/psutil-7.2.2-cp36-abi3-macosx_11_0_arm64.whl",
+        "size": 129859,
+        "sha256": "1a7b04c10f32cc88ab39cbf606e117fd74721c831c98a27dc04578deb0c16979"
+      },
+      {
+        "id": "wheel/PyYAML",
+        "path": "wheels/pyyaml-6.0.3-cp313-cp313-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/b1/16/95309993f1d3748cd644e02e38b75d50cbc0d9561d21f390a76242ce073f/pyyaml-6.0.3-cp313-cp313-macosx_11_0_arm64.whl",
+        "size": 173252,
+        "sha256": "2283a07e2c21a2aa78d9c4442724ec1eb15f5e42a723b99cb3d822d48f5f7ad1"
+      },
+      {
+        "id": "wheel/regex",
+        "path": "wheels/regex-2026.9.10-cp313-cp313-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/fa/68/241f88458b17c46ed2f80147a60a03b2ada7fb815c23b6bc76c298abb0a5/regex-2026.9.10-cp313-cp313-macosx_11_0_arm64.whl",
+        "size": 291741,
+        "sha256": "d8c668af8f7bdb1d18739c27d30cd9f4b371495a883f75a002fb7a39d740fecd"
+      },
+      {
+        "id": "wheel/safetensors",
+        "path": "wheels/safetensors-0.8.0-cp310-abi3-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/f5/b1/fa7c600e7dceae12e9606c7578cbc9ff1e1ed55844883ee5c92205e86226/safetensors-0.8.0-cp310-abi3-macosx_11_0_arm64.whl",
+        "size": 484562,
+        "sha256": "c80201d22cbf405b80647a60ada77bba06c8fba2da2743ba1e89cdcc39a81f25"
+      },
+      {
+        "id": "wheel/scikit-learn",
+        "path": "wheels/scikit_learn-1.9.1-cp313-cp313-macosx_12_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/2f/81/3c6392c03665d2899457a76e535a9a6f597dddddf3220fd2e1d790da88c5/scikit_learn-1.9.1-cp313-cp313-macosx_12_0_arm64.whl",
+        "size": 8262364,
+        "sha256": "61cd968ab831a76d0ecbaf0347ab2270268716da28f94fd022497e3d6f205f13"
+      },
+      {
+        "id": "wheel/scipy",
+        "path": "wheels/scipy-1.18.1-cp313-cp313-macosx_14_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/9a/d7/21d890274f75ea37a8209d5519e72da3da90302e3b9fb8397a0918386a62/scipy-1.18.1-cp313-cp313-macosx_14_0_arm64.whl",
+        "size": 20456846,
+        "sha256": "ea324d9dd34c38bfb9bec8ca4d1b407db97dbb74029f566b8e322b1b6fe56fe6"
+      },
+      {
+        "id": "wheel/setuptools",
+        "path": "wheels/setuptools-84.0.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/95/9c/c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/setuptools-84.0.0-py3-none-any.whl",
+        "size": 818216,
+        "sha256": "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670"
+      },
+      {
+        "id": "wheel/soxr",
+        "path": "wheels/soxr-1.1.0-cp312-abi3-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/03/dc/200013a74641f8774664bbcd2346c695c05c2e300ea792adcb40a293eed0/soxr-1.1.0-cp312-abi3-macosx_11_0_arm64.whl",
+        "size": 165457,
+        "sha256": "d6a7ad82b8d5f3fcc04b1d2ca055562b96af571e1d4fa7c6c61d0fb509ac43b4"
+      },
+      {
+        "id": "wheel/sympy",
+        "path": "wheels/sympy-1.14.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl",
+        "size": 6299353,
+        "sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"
+      },
+      {
+        "id": "wheel/tokenizers",
+        "path": "wheels/tokenizers-0.23.2-cp310-abi3-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/67/49/22da045a91732384d3a3771816bf188dc5a1f702c32e635afa7c679c0bef/tokenizers-0.23.2-cp310-abi3-macosx_11_0_arm64.whl",
+        "size": 3101593,
+        "sha256": "986670e43691469dcee610ea0f846f91a8f84e91fc6f7a48d4c064414c0ec2bf"
+      },
+      {
+        "id": "wheel/tqdm",
+        "path": "wheels/tqdm-4.70.1-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl",
+        "size": 80199,
+        "sha256": "c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73"
+      },
+      {
+        "id": "wheel/typing_extensions",
+        "path": "wheels/typing_extensions-4.16.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+        "size": 45571,
+        "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+      },
+      {
+        "id": "wheel/Cython",
+        "path": "wheels/cython-3.3.0-cp313-cp313-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/2f/cc/abc977cf683140e372714acea42164ecfc5cd3d3984ed025860e6d830ee4/cython-3.3.0-cp313-cp313-macosx_11_0_arm64.whl",
+        "size": 3134892,
+        "sha256": "03056533fe4fdbc4f1d34a39178f9a4937ff35196f8bcdde2a67b5b5809c61fe"
+      },
+      {
+        "id": "wheel/Jinja2",
+        "path": "wheels/jinja2-3.1.6-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl",
+        "size": 134899,
+        "sha256": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67"
+      },
+      {
+        "id": "wheel/six",
+        "path": "wheels/six-1.17.0-py2.py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl",
+        "size": 11050,
+        "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"
+      },
+      {
+        "id": "wheel/typer",
+        "path": "wheels/typer-0.27.2-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/dc/bf/205d0004930ede8f542fb58f601526fccf4ae7626075ca1e6c4de5d3d652/typer-0.27.2-py3-none-any.whl",
+        "size": 123130,
+        "sha256": "b3a5fc4342d5fc8fda8fc3010b1cf117e9249aab7fae800c2eff62fd3842d97d"
+      },
+      {
+        "id": "wheel/annotated-doc",
+        "path": "wheels/annotated_doc-0.0.5-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl",
+        "size": 5302,
+        "sha256": "117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101"
+      },
+      {
+        "id": "wheel/click",
+        "path": "wheels/click-8.5.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/58/50/6c0d534c5f134586a8e1ba4e330569e32f057e33372ae556463212fb4cd3/click-8.5.0-py3-none-any.whl",
+        "size": 125251,
+        "sha256": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360"
+      },
+      {
+        "id": "wheel/cloudpickle",
+        "path": "wheels/cloudpickle-3.1.2-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl",
+        "size": 22228,
+        "sha256": "9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a"
+      },
+      {
+        "id": "wheel/hf-xet",
+        "path": "wheels/hf_xet-1.6.0-cp38-abi3-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/4b/69/55b8dcf636142ae660fec1869fcac14c4da2e8412e14d6eee1523be77e9f/hf_xet-1.6.0-cp38-abi3-macosx_11_0_arm64.whl",
+        "size": 3876287,
+        "sha256": "f0906082d9932ae0c0057fa194041c22b4e2cdb46b2592ef3b91f020d62a081a"
+      },
+      {
+        "id": "wheel/httpx",
+        "path": "wheels/httpx-0.28.1-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl",
+        "size": 73517,
+        "sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad"
+      },
+      {
+        "id": "wheel/httpcore",
+        "path": "wheels/httpcore-1.0.9-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl",
+        "size": 78784,
+        "sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55"
+      },
+      {
+        "id": "wheel/llvmlite",
+        "path": "wheels/llvmlite-0.49.0-cp313-cp313-macosx_12_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/7d/85/0b536a3c59f2636d9dd51dda832b6c1d0ffec37608429dedf128664918f1/llvmlite-0.49.0-cp313-cp313-macosx_12_0_arm64.whl",
+        "size": 40479230,
+        "sha256": "039fa4054a06f537fb39248d4472284ca96be311a142ec09e69f95630ab469cc"
+      },
+      {
+        "id": "wheel/MarkupSafe",
+        "path": "wheels/markupsafe-3.0.3-cp313-cp313-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/9c/d9/5f7756922cdd676869eca1c4e3c0cd0df60ed30199ffd775e319089cb3ed/markupsafe-3.0.3-cp313-cp313-macosx_11_0_arm64.whl",
+        "size": 12029,
+        "sha256": "116bb52f642a37c115f517494ea5feb03889e04df47eeff5b130b1808ce7c219"
+      },
+      {
+        "id": "wheel/mpmath",
+        "path": "wheels/mpmath-1.3.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl",
+        "size": 536198,
+        "sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"
+      },
+      {
+        "id": "wheel/narwhals",
+        "path": "wheels/narwhals-2.26.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/40/b5/1b84b2c784db76d69442334bc8b8748c840f13ca53be086f4f250ad4a0bc/narwhals-2.26.0-py3-none-any.whl",
+        "size": 474034,
+        "sha256": "29326d74f107c347fd1009bd58e38d9f7c7c5b51e6de97bc93dbc325d9038b54"
+      },
+      {
+        "id": "wheel/platformdirs",
+        "path": "wheels/platformdirs-4.11.9-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/f3/94/803ba86705257d7eedddac4b02eb88a7483b1600e9200c1fefc6f1a9a3ff/platformdirs-4.11.9-py3-none-any.whl",
+        "size": 24472,
+        "sha256": "0a3958f58a9e30321eaef0a424dd0b77cce242886b36b8aa992f9731ef2d59c1"
+      },
+      {
+        "id": "wheel/requests",
+        "path": "wheels/requests-2.34.2-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl",
+        "size": 73075,
+        "sha256": "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0"
+      },
+      {
+        "id": "wheel/rich",
+        "path": "wheels/rich-15.0.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl",
+        "size": 310654,
+        "sha256": "33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb"
+      },
+      {
+        "id": "wheel/shellingham",
+        "path": "wheels/shellingham-1.5.4-py2.py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl",
+        "size": 9755,
+        "sha256": "7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686"
+      },
+      {
+        "id": "wheel/threadpoolctl",
+        "path": "wheels/threadpoolctl-3.7.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl",
+        "size": 26362,
+        "sha256": "cd8b60b5641b45c67bbf73c64c843235fc2d8a480c87389f52f5dbee893b86be"
+      },
+      {
+        "id": "wheel/pycparser",
+        "path": "wheels/pycparser-3.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl",
+        "size": 48172,
+        "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"
+      },
+      {
+        "id": "wheel/certifi",
+        "path": "wheels/certifi-2026.7.22-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl",
+        "size": 136983,
+        "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775"
+      },
+      {
+        "id": "wheel/charset-normalizer",
+        "path": "wheels/charset_normalizer-3.5.1-cp313-cp313-macosx_10_13_universal2.whl",
+        "url": "https://files.pythonhosted.org/packages/a4/a0/562247944386f7d4ef94467e84876600cc1e0f1b93239aaa9213d2bc3cbd/charset_normalizer-3.5.1-cp313-cp313-macosx_10_13_universal2.whl",
+        "size": 340473,
+        "sha256": "e90251c0c7bdd54a100a0dce3c07b7e637278c93af29dbf78ebb89a58c4bac7d"
+      },
+      {
+        "id": "wheel/idna",
+        "path": "wheels/idna-3.19-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/57/b0/0e52c878c53f245edd3a11020f20979b3f490f245af532c7cae3027754b5/idna-3.19-py3-none-any.whl",
+        "size": 68550,
+        "sha256": "815e7be7a7806d54abb586dc943addc79e8b2ee16915059658cbeff4b1b43bf4"
+      },
+      {
+        "id": "wheel/markdown-it-py",
+        "path": "wheels/markdown_it_py-4.2.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl",
+        "size": 91687,
+        "sha256": "9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a"
+      },
+      {
+        "id": "wheel/Pygments",
+        "path": "wheels/pygments-2.21.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl",
+        "size": 1250147,
+        "sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9"
+      },
+      {
+        "id": "wheel/urllib3",
+        "path": "wheels/urllib3-2.8.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl",
+        "size": 135717,
+        "sha256": "0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3"
+      },
+      {
+        "id": "wheel/anyio",
+        "path": "wheels/anyio-4.15.1-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/12/b8/4bd346e22b28902df4d651910f5242c28d84e4a5c2435ca5c3f797ed7e2e/anyio-4.15.1-py3-none-any.whl",
+        "size": 132079,
+        "sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101"
+      },
+      {
+        "id": "wheel/h11",
+        "path": "wheels/h11-0.16.0-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl",
+        "size": 37515,
+        "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"
+      },
+      {
+        "id": "wheel/mdurl",
+        "path": "wheels/mdurl-0.1.2-py3-none-any.whl",
+        "url": "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl",
+        "size": 9979,
+        "sha256": "84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"
+      }
+    ],
+    "requirements": [
+      "torch==2.14.0 --hash=sha256:9d4b1022a5d9b71282ec67ad0d9e7235870096b8a246dc1c32d6ea1fc83dc998",
+      "transformers==5.17.0 --hash=sha256:78ec1ce21579b38dfb83950a0658cd119f87212a2fcfdff478096ce9d6c03801",
+      "nagisa==0.3.0 --hash=sha256:5559f7024be79ba09e106fea57768bb329de5de17e545c417b3172757bb58365",
+      "dyNET38==2.2 --hash=sha256:3418be619ad5a531154745336a35df2de226f084f4ecc90911d4fda4c24075e1",
+      "soynlp==0.0.493 --hash=sha256:2aed0ced1f0f74f7bdd0bdc24a979c5cb9ee4a28393642db52a83d174ed65b7a",
+      "opencc-python-reimplemented==0.1.7 --hash=sha256:41b3b92943c7bed291f448e9c7fad4b577c8c2eae30fcfe5a74edf8818493aa6",
+      "accelerate==1.15.0 --hash=sha256:97eacca0b73e45cb867dbf8c5d5d4dc32219544300e0c8992c7334dc2ef33cec",
+      "soundfile==0.14.0 --hash=sha256:d828d35a059626da52f1415b5faee610aeab393319cb3fc4a9aef47b619fc14c",
+      "librosa==1.0.0 --hash=sha256:5910a6c0e1b2e494b92758c1615a7acbd0515a2315e138927ba2982f2af88857",
+      "cffi==2.1.1 --hash=sha256:19ee6127ee34de7d83ce3d371ebc5ed91addbdcc39f9ab15ce4eb35a4e534971",
+      "decorator==5.3.1 --hash=sha256:f47fe6fdbd2edd623ecfe36875d37aba411624e2670dd395dddae1358689bb3c",
+      "fsspec==2026.7.0 --hash=sha256:b57ddbafedfaef7018c1ecab32aa200a9d7ca26b77965f64e48b70061249d279",
+      "huggingface_hub==1.31.0 --hash=sha256:9dbb6a503cbe2494ea666695207e7262d410659e09134059deb83e5480864667",
+      "filelock==3.32.7 --hash=sha256:65ff0d0190ea42038b32bda4b77834fb05be2cad4c5b9b01aa4dfb3614536e52",
+      "joblib==1.6.0 --hash=sha256:3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba",
+      "lazy-loader==0.5 --hash=sha256:ab0ea149e9c554d4ffeeb21105ac60bed7f3b4fd69b1d2360a4add51b170b005",
+      "msgpack==1.2.2 --hash=sha256:1e8cdd1f3e7cc52c751092a9bf740e81e6919ab109cd376ae2d965dad0bbae34",
+      "networkx==3.6.1 --hash=sha256:d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762",
+      "numba==0.67.0 --hash=sha256:77e1c7173fee57a0d84e006c7e70346689d6cb3e7db503489bae58646b4eff7b",
+      "numpy==2.5.3 --hash=sha256:f9a2353b37a1a9e78fd82b27ad7e2a32a2d036604d18f02b05e3136c62ca3b09",
+      "packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+      "pooch==1.9.0 --hash=sha256:f265597baa9f760d25ceb29d0beb8186c243d6607b0f60b83ecf14078dbc703b",
+      "psutil==7.2.2 --hash=sha256:1a7b04c10f32cc88ab39cbf606e117fd74721c831c98a27dc04578deb0c16979",
+      "PyYAML==6.0.3 --hash=sha256:2283a07e2c21a2aa78d9c4442724ec1eb15f5e42a723b99cb3d822d48f5f7ad1",
+      "regex==2026.9.10 --hash=sha256:d8c668af8f7bdb1d18739c27d30cd9f4b371495a883f75a002fb7a39d740fecd",
+      "safetensors==0.8.0 --hash=sha256:c80201d22cbf405b80647a60ada77bba06c8fba2da2743ba1e89cdcc39a81f25",
+      "scikit-learn==1.9.1 --hash=sha256:61cd968ab831a76d0ecbaf0347ab2270268716da28f94fd022497e3d6f205f13",
+      "scipy==1.18.1 --hash=sha256:ea324d9dd34c38bfb9bec8ca4d1b407db97dbb74029f566b8e322b1b6fe56fe6",
+      "setuptools==84.0.0 --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670",
+      "soxr==1.1.0 --hash=sha256:d6a7ad82b8d5f3fcc04b1d2ca055562b96af571e1d4fa7c6c61d0fb509ac43b4",
+      "sympy==1.14.0 --hash=sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5",
+      "tokenizers==0.23.2 --hash=sha256:986670e43691469dcee610ea0f846f91a8f84e91fc6f7a48d4c064414c0ec2bf",
+      "tqdm==4.70.1 --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73",
+      "typing_extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "Cython==3.3.0 --hash=sha256:03056533fe4fdbc4f1d34a39178f9a4937ff35196f8bcdde2a67b5b5809c61fe",
+      "Jinja2==3.1.6 --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+      "six==1.17.0 --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+      "typer==0.27.2 --hash=sha256:b3a5fc4342d5fc8fda8fc3010b1cf117e9249aab7fae800c2eff62fd3842d97d",
+      "annotated-doc==0.0.5 --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101",
+      "click==8.5.0 --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
+      "cloudpickle==3.1.2 --hash=sha256:9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a",
+      "hf-xet==1.6.0 --hash=sha256:f0906082d9932ae0c0057fa194041c22b4e2cdb46b2592ef3b91f020d62a081a",
+      "httpx==0.28.1 --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
+      "httpcore==1.0.9 --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
+      "llvmlite==0.49.0 --hash=sha256:039fa4054a06f537fb39248d4472284ca96be311a142ec09e69f95630ab469cc",
+      "MarkupSafe==3.0.3 --hash=sha256:116bb52f642a37c115f517494ea5feb03889e04df47eeff5b130b1808ce7c219",
+      "mpmath==1.3.0 --hash=sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c",
+      "narwhals==2.26.0 --hash=sha256:29326d74f107c347fd1009bd58e38d9f7c7c5b51e6de97bc93dbc325d9038b54",
+      "platformdirs==4.11.9 --hash=sha256:0a3958f58a9e30321eaef0a424dd0b77cce242886b36b8aa992f9731ef2d59c1",
+      "requests==2.34.2 --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0",
+      "rich==15.0.0 --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb",
+      "shellingham==1.5.4 --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686",
+      "threadpoolctl==3.7.0 --hash=sha256:cd8b60b5641b45c67bbf73c64c843235fc2d8a480c87389f52f5dbee893b86be",
+      "pycparser==3.0 --hash=sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992",
+      "certifi==2026.7.22 --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775",
+      "charset-normalizer==3.5.1 --hash=sha256:e90251c0c7bdd54a100a0dce3c07b7e637278c93af29dbf78ebb89a58c4bac7d",
+      "idna==3.19 --hash=sha256:815e7be7a7806d54abb586dc943addc79e8b2ee16915059658cbeff4b1b43bf4",
+      "markdown-it-py==4.2.0 --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a",
+      "Pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
+      "urllib3==2.8.0 --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3",
+      "anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
+      "h11==0.16.0 --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+      "mdurl==0.1.2 --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"
+    ]
+  },
+  "models": [
+    {
+      "id": "asr",
+      "name": "Qwen3-ASR 1.7B BF16",
+      "repository": "Qwen/Qwen3-ASR-1.7B-hf",
+      "revision": "bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
+      "directory": "models/asr",
+      "license": "apache-2.0",
+      "artifacts": [
+        {
+          "id": "asr/chat_template.jinja",
+          "path": "models/asr/chat_template.jinja",
+          "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf/resolve/bcd2b5b7f32b480ab5790554cfa8347f246a14f3/chat_template.jinja",
+          "size": 1434,
+          "sha256": "f50e6b694fbf4a683206e37869990d68333fe95d285730f084c838a34b0d98c2"
+        },
+        {
+          "id": "asr/config.json",
+          "path": "models/asr/config.json",
+          "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf/resolve/bcd2b5b7f32b480ab5790554cfa8347f246a14f3/config.json",
+          "size": 2399,
+          "sha256": "117ac8e63e2af7cae3665e5a632d6eb03f5f384915519ceb6403c15ec6533f63"
+        },
+        {
+          "id": "asr/generation_config.json",
+          "path": "models/asr/generation_config.json",
+          "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf/resolve/bcd2b5b7f32b480ab5790554cfa8347f246a14f3/generation_config.json",
+          "size": 165,
+          "sha256": "9939fc9388b79bd70757f938b87381e817173d6a6158f5af6506c0b73e775c3c"
+        },
+        {
+          "id": "asr/model.safetensors",
+          "path": "models/asr/model.safetensors",
+          "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf/resolve/bcd2b5b7f32b480ab5790554cfa8347f246a14f3/model.safetensors",
+          "size": 4076193080,
+          "sha256": "2db53c7d81bd9b8cbc6a074e89be2c968a0d373fb4ee68bb1b1e14f7042dfee1"
+        },
+        {
+          "id": "asr/processor_config.json",
+          "path": "models/asr/processor_config.json",
+          "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf/resolve/bcd2b5b7f32b480ab5790554cfa8347f246a14f3/processor_config.json",
+          "size": 487,
+          "sha256": "bc0b230081b44e629dd5b9045b78495615c1831b4b9f4cffe97bd37e82a6156a"
+        },
+        {
+          "id": "asr/tokenizer.json",
+          "path": "models/asr/tokenizer.json",
+          "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf/resolve/bcd2b5b7f32b480ab5790554cfa8347f246a14f3/tokenizer.json",
+          "size": 11429653,
+          "sha256": "fe1fad59be22a41ee293363fcf95fdedbc7c93f3b49270b1d2e18bd1399a7a05"
+        },
+        {
+          "id": "asr/tokenizer_config.json",
+          "path": "models/asr/tokenizer_config.json",
+          "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf/resolve/bcd2b5b7f32b480ab5790554cfa8347f246a14f3/tokenizer_config.json",
+          "size": 998,
+          "sha256": "945e980986de2ca7768f3326bfdbb4fbea3406f972b8ae0be233089f2b253c11"
+        }
+      ],
+      "license_url": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "id": "aligner",
+      "name": "Qwen3-ForcedAligner 0.6B BF16",
+      "repository": "Qwen/Qwen3-ForcedAligner-0.6B-hf",
+      "revision": "c07281df297b9905d24a508279258cccf987a064",
+      "directory": "models/aligner",
+      "license": "apache-2.0",
+      "artifacts": [
+        {
+          "id": "aligner/chat_template.jinja",
+          "path": "models/aligner/chat_template.jinja",
+          "url": "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B-hf/resolve/c07281df297b9905d24a508279258cccf987a064/chat_template.jinja",
+          "size": 551,
+          "sha256": "59b5ae119bda7c00089bba5f49af775791ea67c7aeb7d2b828cddda9463121bf"
+        },
+        {
+          "id": "aligner/config.json",
+          "path": "models/aligner/config.json",
+          "url": "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B-hf/resolve/c07281df297b9905d24a508279258cccf987a064/config.json",
+          "size": 248029,
+          "sha256": "82ac390b36a8f80c5a0c4e202367debd149e5d8c30abe4cf5eed439101b1c5ce"
+        },
+        {
+          "id": "aligner/model.safetensors",
+          "path": "models/aligner/model.safetensors",
+          "url": "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B-hf/resolve/c07281df297b9905d24a508279258cccf987a064/model.safetensors",
+          "size": 1835545960,
+          "sha256": "00568245ceca5af1991d28562a75fe1ddc9bfeb041c27fda66947ea05c47fb86"
+        },
+        {
+          "id": "aligner/processor_config.json",
+          "path": "models/aligner/processor_config.json",
+          "url": "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B-hf/resolve/c07281df297b9905d24a508279258cccf987a064/processor_config.json",
+          "size": 487,
+          "sha256": "bc0b230081b44e629dd5b9045b78495615c1831b4b9f4cffe97bd37e82a6156a"
+        },
+        {
+          "id": "aligner/tokenizer.json",
+          "path": "models/aligner/tokenizer.json",
+          "url": "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B-hf/resolve/c07281df297b9905d24a508279258cccf987a064/tokenizer.json",
+          "size": 11429842,
+          "sha256": "cadfb9cbd9ff8f4e309075ec6a71b063295ff796afb4b5dbc0fd2873fbb301f2"
+        },
+        {
+          "id": "aligner/tokenizer_config.json",
+          "path": "models/aligner/tokenizer_config.json",
+          "url": "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B-hf/resolve/c07281df297b9905d24a508279258cccf987a064/tokenizer_config.json",
+          "size": 998,
+          "sha256": "945e980986de2ca7768f3326bfdbb4fbea3406f972b8ae0be233089f2b253c11"
+        }
+      ],
+      "license_url": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "id": "translator",
+      "name": "Hy-MT2 30B-A3B BF16",
+      "repository": "tencent/Hy-MT2-30B-A3B",
+      "revision": "d3ead4dba61c09aac60a261a96ad1df3e705febb",
+      "directory": "models/translator",
+      "license": "Tencent HY Community License",
+      "artifacts": [
+        {
+          "id": "translator/LICENSE.txt",
+          "path": "models/translator/LICENSE.txt",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/LICENSE.txt",
+          "size": 11635,
+          "sha256": "c739a55bdf480d9fc8a2fe3f60e84363cc9a8a8d7fbb7c7ac6aa715c127ead47"
+        },
+        {
+          "id": "translator/chat_template.jinja",
+          "path": "models/translator/chat_template.jinja",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/chat_template.jinja",
+          "size": 11259,
+          "sha256": "53e11a67caa40e918de4930d836829024973da39b357cec4f4bf5aa2da96717f"
+        },
+        {
+          "id": "translator/config.json",
+          "path": "models/translator/config.json",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/config.json",
+          "size": 1127,
+          "sha256": "a89b1e461fffb2e9a93138e2ada37f98b7fba77fe2159f73ffd8419dc5a5d3ff"
+        },
+        {
+          "id": "translator/model-00000-of-00051.safetensors",
+          "path": "models/translator/model-00000-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00000-of-00051.safetensors",
+          "size": 1208006264,
+          "sha256": "793bf864a477891623566cee895f0127352a1429a1b9de53e5f15729abd24da7"
+        },
+        {
+          "id": "translator/model-00001-of-00051.safetensors",
+          "path": "models/translator/model-00001-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00001-of-00051.safetensors",
+          "size": 1208006264,
+          "sha256": "9dc3d6079429a49b60666ca2a154e30efc9ea07a513d6e37bc004dd7bb2934a5"
+        },
+        {
+          "id": "translator/model-00002-of-00051.safetensors",
+          "path": "models/translator/model-00002-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00002-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "c83e7907b71d0674a3bb45b65b9d972efe5a5d6005bcbe615905cd110b991787"
+        },
+        {
+          "id": "translator/model-00003-of-00051.safetensors",
+          "path": "models/translator/model-00003-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00003-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "a1bae45d3b62a63dc068f3133ec5beb3c9913e6dee5660d97796f9cfac43c7f0"
+        },
+        {
+          "id": "translator/model-00004-of-00051.safetensors",
+          "path": "models/translator/model-00004-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00004-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "363978d8b203b4070bc1d3fe9aeda910898c667982cb79a06a13e140cd5c4c73"
+        },
+        {
+          "id": "translator/model-00005-of-00051.safetensors",
+          "path": "models/translator/model-00005-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00005-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "ace002c376432bd6d3bcec5b1844b8318397c5846d7c7e04d28b9edf0eb28498"
+        },
+        {
+          "id": "translator/model-00006-of-00051.safetensors",
+          "path": "models/translator/model-00006-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00006-of-00051.safetensors",
+          "size": 1022335384,
+          "sha256": "b0e97f7f688e3e4ab08b7efba38d76116ef7704ad427de874fdab18130813a0f"
+        },
+        {
+          "id": "translator/model-00007-of-00051.safetensors",
+          "path": "models/translator/model-00007-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00007-of-00051.safetensors",
+          "size": 1208006264,
+          "sha256": "1f31994e207c38967e0799a5e392054ab17f43632780c9e4621dff67b002eb5e"
+        },
+        {
+          "id": "translator/model-00008-of-00051.safetensors",
+          "path": "models/translator/model-00008-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00008-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "c5abdbbc0eceb990ec404484a2c649952089abfc6a8d0e17b562dd66b2db99a7"
+        },
+        {
+          "id": "translator/model-00009-of-00051.safetensors",
+          "path": "models/translator/model-00009-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00009-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "3f3829f1cf8b844bc79ccfff1cce305cfd0006c1d9f830ecdc90a857d5c0a224"
+        },
+        {
+          "id": "translator/model-00010-of-00051.safetensors",
+          "path": "models/translator/model-00010-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00010-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "01048840c438b209dd0e469efcb1ad0b85b33e89a82cec68361a92d0f2ceee49"
+        },
+        {
+          "id": "translator/model-00011-of-00051.safetensors",
+          "path": "models/translator/model-00011-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00011-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "f748b17cd7fc520bcb857c440dc88edcbd73c326abca3816c1ce65d68132ad31"
+        },
+        {
+          "id": "translator/model-00012-of-00051.safetensors",
+          "path": "models/translator/model-00012-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00012-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "fc9aa360c12c6877a228a5616672f581144f65fbd602f8ef3bebe2654b7cf8d5"
+        },
+        {
+          "id": "translator/model-00013-of-00051.safetensors",
+          "path": "models/translator/model-00013-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00013-of-00051.safetensors",
+          "size": 197135040,
+          "sha256": "57da846a4836ce88c524db035921b77587d283a7183dfde30d0a428ed8ad044b"
+        },
+        {
+          "id": "translator/model-00014-of-00051.safetensors",
+          "path": "models/translator/model-00014-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00014-of-00051.safetensors",
+          "size": 1208006264,
+          "sha256": "9689b63963b0f586d907735aeb4f9ca412bf6a7619fdaf34c7ee0766cd09b789"
+        },
+        {
+          "id": "translator/model-00015-of-00051.safetensors",
+          "path": "models/translator/model-00015-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00015-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "f6599b3d7cd033b0c92531cecd0860303df9f664bf3888883469558d9d69eb26"
+        },
+        {
+          "id": "translator/model-00016-of-00051.safetensors",
+          "path": "models/translator/model-00016-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00016-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "067902b68230b5ac941ad68aa84366a4d3f2a1b537a23744b89a1f0509631397"
+        },
+        {
+          "id": "translator/model-00017-of-00051.safetensors",
+          "path": "models/translator/model-00017-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00017-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "fbaf386189ed02223e0de84f4ec43f78b3cc6095ffcdc14dcdb1bd559cf62718"
+        },
+        {
+          "id": "translator/model-00018-of-00051.safetensors",
+          "path": "models/translator/model-00018-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00018-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "a71fe5562184290e89a1deabf0618621de788feb6ddc68ab1373960b9e54ee23"
+        },
+        {
+          "id": "translator/model-00019-of-00051.safetensors",
+          "path": "models/translator/model-00019-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00019-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "58c804ba58acfad14e166cb3b9c19c418ee0ccc512b1f4bf36da1d8e5506fbfe"
+        },
+        {
+          "id": "translator/model-00020-of-00051.safetensors",
+          "path": "models/translator/model-00020-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00020-of-00051.safetensors",
+          "size": 1208006264,
+          "sha256": "9684324fa3f4fbbfa5368ead1b61018d8ce9954ec05c389c29f75cac76d34e9b"
+        },
+        {
+          "id": "translator/model-00021-of-00051.safetensors",
+          "path": "models/translator/model-00021-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00021-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "46bb25f496f168fc37aaf8c312d1bb8697a6e5aa23716c4808db1c8e6a540be0"
+        },
+        {
+          "id": "translator/model-00022-of-00051.safetensors",
+          "path": "models/translator/model-00022-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00022-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "9c51289c6c8ed4042204bbac67e8fb7bd4133fcb2e67b29ffa2c001ef9f87c6a"
+        },
+        {
+          "id": "translator/model-00023-of-00051.safetensors",
+          "path": "models/translator/model-00023-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00023-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "dc6dabec7c5b801c074cf259adf524f9b352876048fac968b74914dffede51d9"
+        },
+        {
+          "id": "translator/model-00024-of-00051.safetensors",
+          "path": "models/translator/model-00024-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00024-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "36c957c0611716bbbb050bfb303d59b11b2e47f2aaa10c8877d11797f271c57b"
+        },
+        {
+          "id": "translator/model-00025-of-00051.safetensors",
+          "path": "models/translator/model-00025-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00025-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "44c31661f31fbd56fd3decbaadf75e19fa44c45c95540a5f1d9a0819b65c7d26"
+        },
+        {
+          "id": "translator/model-00026-of-00051.safetensors",
+          "path": "models/translator/model-00026-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00026-of-00051.safetensors",
+          "size": 1208006264,
+          "sha256": "89f78fba418967a7cb520ac42d92706cfe8f31d4da5ad9e589ad68f959868506"
+        },
+        {
+          "id": "translator/model-00027-of-00051.safetensors",
+          "path": "models/translator/model-00027-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00027-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "ff2984fa0532c42c6f6998a4481019a9cf604e1526403f4944eb90ccf2edf60e"
+        },
+        {
+          "id": "translator/model-00028-of-00051.safetensors",
+          "path": "models/translator/model-00028-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00028-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "949bb1abd62f0c60a291b8844eb6fa388b27649da6a8d2b15ed06972b5232b31"
+        },
+        {
+          "id": "translator/model-00029-of-00051.safetensors",
+          "path": "models/translator/model-00029-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00029-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "c6e507472e75af43e2a1cdf308216b4b652600dd65c819839ee6e22c03578691"
+        },
+        {
+          "id": "translator/model-00030-of-00051.safetensors",
+          "path": "models/translator/model-00030-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00030-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "f1117e0aff6be158b9b17f7e84bff38c1bb0f909441700e30f28abbbbe5cde89"
+        },
+        {
+          "id": "translator/model-00031-of-00051.safetensors",
+          "path": "models/translator/model-00031-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00031-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "4b78b046f61b4a877a180aaf1db442a2ba250f77eaa1a615a103355c7bafe1f4"
+        },
+        {
+          "id": "translator/model-00032-of-00051.safetensors",
+          "path": "models/translator/model-00032-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00032-of-00051.safetensors",
+          "size": 1208006264,
+          "sha256": "74c124ae60be41cd82f2bb238d64fb436bb599b145c904d32c62b82cacd2315d"
+        },
+        {
+          "id": "translator/model-00033-of-00051.safetensors",
+          "path": "models/translator/model-00033-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00033-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "f40965ad05fde8116c37bdadb2005a778e797b696858391aceac027fc69fc369"
+        },
+        {
+          "id": "translator/model-00034-of-00051.safetensors",
+          "path": "models/translator/model-00034-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00034-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "006850bd2c92a7522a2e990e4cff9e8d899a202cdce0ce1ac5de234c2b9ca4ae"
+        },
+        {
+          "id": "translator/model-00035-of-00051.safetensors",
+          "path": "models/translator/model-00035-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00035-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "bdb5ac8c7f2a12ec4857949aad6c30c778c45788de62fceb937f53135d19c1d3"
+        },
+        {
+          "id": "translator/model-00036-of-00051.safetensors",
+          "path": "models/translator/model-00036-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00036-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "ab1be4691361c8b5d047746df645f7a602365d0fec1159d8792d56cec760cf70"
+        },
+        {
+          "id": "translator/model-00037-of-00051.safetensors",
+          "path": "models/translator/model-00037-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00037-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "7ce09cf8bb8dc43d188a5aadae26f45ba8d8f6c28d6c8bbc1ee49ba331ed442f"
+        },
+        {
+          "id": "translator/model-00038-of-00051.safetensors",
+          "path": "models/translator/model-00038-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00038-of-00051.safetensors",
+          "size": 1208006264,
+          "sha256": "daceff3b9015d1e8f60a11f67b523e4723f28256c20c3b081b377daca79f5e4a"
+        },
+        {
+          "id": "translator/model-00039-of-00051.safetensors",
+          "path": "models/translator/model-00039-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00039-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "7bc2f3b59fcc65f297cfa5f4e532a6f60923d5ccd65e1cfd74487e3aa47e2f29"
+        },
+        {
+          "id": "translator/model-00040-of-00051.safetensors",
+          "path": "models/translator/model-00040-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00040-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "4155e48a4dbc31764d58769bd175ed782808a62342e8985005bb96cd190ebbfa"
+        },
+        {
+          "id": "translator/model-00041-of-00051.safetensors",
+          "path": "models/translator/model-00041-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00041-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "a25103d246664f67e4b684131196983e45c0fadccd689e605b2e7967802d2a85"
+        },
+        {
+          "id": "translator/model-00042-of-00051.safetensors",
+          "path": "models/translator/model-00042-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00042-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "7634740a920474fd41eeea5f172070109dcfd54ba56e96c32be7cd71fa43a658"
+        },
+        {
+          "id": "translator/model-00043-of-00051.safetensors",
+          "path": "models/translator/model-00043-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00043-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "704a4eb87ed88aa8a4202fff023a95fecc65c4b6ac8d5bfd3f68b9e904883c13"
+        },
+        {
+          "id": "translator/model-00044-of-00051.safetensors",
+          "path": "models/translator/model-00044-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00044-of-00051.safetensors",
+          "size": 1208006264,
+          "sha256": "80ffd3747d16b0eac9e1bdbe1bb04d57673dd09efc0e667c030158b4381af6f5"
+        },
+        {
+          "id": "translator/model-00045-of-00051.safetensors",
+          "path": "models/translator/model-00045-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00045-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "c550af73fb8c708ee20076f524e0e5ad4e7f325b30b242d775dce570b7600027"
+        },
+        {
+          "id": "translator/model-00046-of-00051.safetensors",
+          "path": "models/translator/model-00046-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00046-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "2912a04d06d2c365a033fb22e9af8a895fa9d95172622ec3edaafa0db7a4b7fc"
+        },
+        {
+          "id": "translator/model-00047-of-00051.safetensors",
+          "path": "models/translator/model-00047-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00047-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "cff4353e83b0bc2e4393b45dbe47ca491bc3356f1e61b8005b5f8445eba13ffb"
+        },
+        {
+          "id": "translator/model-00048-of-00051.safetensors",
+          "path": "models/translator/model-00048-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00048-of-00051.safetensors",
+          "size": 1208006648,
+          "sha256": "75e2762c1eefb0c3280d5fc63c89ef1dbf136005b1ef6ffe3755b9ec6de8d0ed"
+        },
+        {
+          "id": "translator/model-00049-of-00051.safetensors",
+          "path": "models/translator/model-00049-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00049-of-00051.safetensors",
+          "size": 1072708800,
+          "sha256": "7663117d2f33ae8956bb4cbfbf4bf5df2875109adc8f462ec8c7454b3d29d640"
+        },
+        {
+          "id": "translator/model-00050-of-00051.safetensors",
+          "path": "models/translator/model-00050-of-00051.safetensors",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model-00050-of-00051.safetensors",
+          "size": 1063256608,
+          "sha256": "cb7b37c7b79a80968b05da100353f23fef67b71d82c440e201b07199cd8d91d1"
+        },
+        {
+          "id": "translator/model.safetensors.index.json",
+          "path": "models/translator/model.safetensors.index.json",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/model.safetensors.index.json",
+          "size": 1607405,
+          "sha256": "c1ec317762cef521f07236d5b81ee02a01c9dd728571e5f9480cc29d3ac63e29"
+        },
+        {
+          "id": "translator/special_tokens_map.json",
+          "path": "models/translator/special_tokens_map.json",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/special_tokens_map.json",
+          "size": 468,
+          "sha256": "687791a9ade35069d6ffdd61eb1863839baf1e5ce235d5d48ff61b40dcb72f1a"
+        },
+        {
+          "id": "translator/tokenizer.json",
+          "path": "models/translator/tokenizer.json",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/tokenizer.json",
+          "size": 9527108,
+          "sha256": "ad96ef9f641b79bb63807bea87cecf1dd0534325b463dad44cccbb3d0c571db7"
+        },
+        {
+          "id": "translator/tokenizer_config.json",
+          "path": "models/translator/tokenizer_config.json",
+          "url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/resolve/d3ead4dba61c09aac60a261a96ad1df3e705febb/tokenizer_config.json",
+          "size": 165617,
+          "sha256": "3b5adc69f617f4999e636a53f0024aaded19d0b1830d2c8b4ac43b7af044fd7f"
+        }
+      ],
+      "license_url": "https://huggingface.co/tencent/Hy-MT2-30B-A3B/blob/d3ead4dba61c09aac60a261a96ad1df3e705febb/LICENSE.txt"
+    }
+  ]
+}

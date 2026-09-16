@@ -43,9 +43,10 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     case audio
     case sub
     case tools
+    case aiSubtitles
 
     init(buttonTag: Int) {
-      self = [.video, .audio, .sub, .tools][at: buttonTag] ?? .video
+      self = [.video, .audio, .sub, .tools, .aiSubtitles][at: buttonTag] ?? .video
     }
 
     init?(name: String) {
@@ -58,6 +59,8 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
         self = .sub
       case "tools":
         self = .tools
+      case "ai-subtitles":
+        self = .aiSubtitles
       default:
         self = .video
       }
@@ -69,6 +72,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
       case .audio: return 1
       case .sub: return 2
       case .tools: return 3
+      case .aiSubtitles: return 4
       }
     }
 
@@ -78,6 +82,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
       case .audio: return "audio"
       case .sub: return "sub"
       case .tools: return "tools"
+      case .aiSubtitles: return "ai-subtitles"
       }
     }
   }
@@ -113,6 +118,8 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
 
   private var toolsTabBtn: NSButton?
   private var videoToolsViewController: VideoToolsViewController?
+  private var subtitleToolsTabBtn: NSButton?
+  private var subtitleToolsViewController: SubtitleToolsViewController?
 
   @discardableResult
   func performVideoToolsShortcut(_ action: VideoToolsShortcuts.Action) -> Bool {
@@ -243,6 +250,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
       item.view = view
     }
     setupVideoToolsTab()
+    setupSubtitleToolsTab()
 
     withAllTableViews { (view, _) in
       view.delegate = self
@@ -581,7 +589,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
 
   private func updateTabActiveStatus() {
     let currentTag = currentTab.buttonTag
-    [videoTabBtn, audioTabBtn, subTabBtn, toolsTabBtn].compactMap { $0 }.forEach { btn in
+    [videoTabBtn, audioTabBtn, subTabBtn, toolsTabBtn, subtitleToolsTabBtn].compactMap { $0 }.forEach { btn in
       let isActive = currentTag == btn.tag
       btn.contentTintColor = isActive ? .sidebarTabTintActive : .sidebarTabTint
     }
@@ -604,6 +612,8 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
       updateSubTabControl()
     case .tools:
       videoToolsViewController?.refreshCurrentMedia()
+    case .aiSubtitles:
+      subtitleToolsViewController?.refreshCurrentMedia()
     }
   }
 
@@ -641,6 +651,35 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     buttonStack.addArrangedSubview(button)
     button.heightAnchor.constraint(equalTo: buttonStack.heightAnchor).isActive = true
     toolsTabBtn = button
+  }
+
+  private func setupSubtitleToolsTab() {
+    guard subtitleToolsViewController == nil,
+          let buttonStack = videoTabBtn.superview as? NSStackView else { return }
+    let controller = SubtitleToolsViewController(player: player)
+    addChild(controller)
+    subtitleToolsViewController = controller
+    let item = NSTabViewItem(identifier: TabViewType.aiSubtitles.name)
+    item.label = subtitleToolsString("sidebar.tab")
+    item.view = controller.view
+    tabView.addTabViewItem(item)
+
+    let button = NSButton(title: item.label, target: self, action: #selector(tabBtnAction(_:)))
+    button.tag = TabViewType.aiSubtitles.buttonTag
+    button.bezelStyle = .shadowlessSquare
+    button.setButtonType(.momentaryPushIn)
+    button.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.setAccessibilityLabel(subtitleToolsString("title"))
+    buttonStack.addArrangedSubview(button)
+    button.heightAnchor.constraint(equalTo: buttonStack.heightAnchor).isActive = true
+    subtitleToolsTabBtn = button
+    // Five tabs share a narrow sidebar; labels avoid icon-induced clipping.
+    buttonStack.spacing = 2
+    [videoTabBtn, audioTabBtn, subTabBtn, toolsTabBtn, subtitleToolsTabBtn].compactMap { $0 }.forEach {
+      $0.imagePosition = .noImage
+      $0.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+    }
   }
 
   func setHdrAvailability(to available: Bool) {

@@ -123,6 +123,7 @@ class MenuController: NSObject, NSMenuDelegate {
   @IBOutlet weak var videoMenu: NSMenu!
   @IBOutlet weak var quickSettingsVideo: NSMenuItem!
   private var videoToolsMenuItem: NSMenuItem?
+  private var subtitleToolsMenuItem: NSMenuItem?
   @IBOutlet weak var cycleVideoTracks: NSMenuItem!
   @IBOutlet weak var videoTrack: NSMenuItem!
   @IBOutlet weak var videoTrackMenu: NSMenu!
@@ -367,6 +368,14 @@ class MenuController: NSObject, NSMenuDelegate {
 
     subMenu.delegate = self
     quickSettingsSub.action = #selector(MainWindowController.menuShowSubQuickSettings(_:))
+    if subtitleToolsMenuItem == nil, let menu = quickSettingsSub.menu {
+      let item = NSMenuItem(title: subtitleToolsString("menu.show"),
+                            action: #selector(AppDelegate.menuShowSubtitleTools(_:)),
+                            keyEquivalent: "")
+      item.target = NSApp.delegate
+      menu.insertItem(item, at: menu.index(of: quickSettingsSub) + 1)
+      subtitleToolsMenuItem = item
+    }
     loadExternalSub.action = #selector(MainMenuActionHandler.menuLoadExternalSub(_:))
     subTrackMenu.delegate = self
     hideSubtitles.action = #selector(MainMenuActionHandler.menuToggleSubVisibility(_:))
