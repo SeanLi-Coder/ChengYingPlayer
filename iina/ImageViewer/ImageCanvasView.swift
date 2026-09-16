@@ -9,6 +9,7 @@ final class ImageCanvasView: NSView {
   var onZoomChanged: ((CGFloat) -> Void)?
   var onNavigate: ((Int) -> Void)?
   var onToggleAnimation: (() -> Void)?
+  var onToggleSlideshow: (() -> Void)?
   var onDropURLs: (([URL]) -> Void)?
   private var dragOrigin = CGPoint.zero
   private var dragOffset = CGPoint.zero
@@ -181,6 +182,7 @@ final class ImageCanvasView: NSView {
       case "-": setZoom(zoom / 1.25)
       case "0": fitToWindow()
       case "1": actualSize()
+      case "s", "S": onToggleSlideshow?()
       default: super.keyDown(with: event)
       }
     }

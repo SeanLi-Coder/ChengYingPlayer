@@ -33,7 +33,8 @@ Release 中的 `ChengYingPlayer-<tag>-Release-Source.tar.gz` 是便于审核和�
 通过「打开文件」、Finder 双击、拖放、欢迎页最近文件或下载中心的「查看」打开图片。图片进入独立的原生窗口，不经过视频播放引擎；打开单张图片会列出同目录图片，显式多选保持选定顺序。混合文件夹的图片与视频分别进入各自窗口，GIF 不再混入视频播放列表。
 
 - 缩放：工具栏放大 / 缩小、适应窗口、100%；触控板捏合、鼠标滚轮缩放、拖动画面、双击切换适应 / 原尺寸。100% 是一张图片像素对应一颗显示器物理像素，兼容 Retina。
-- 浏览：左右方向键切换图片；侧栏展示 Finder 颜色标签，可按名称、大小、修改日期、创建日期排序及刷新。
+- 浏览：打开单张图片后，右侧默认展示同目录图片列表、文件夹名称和图片总数；每行同时显示文件名、Finder 颜色标签 / 自定义标签、大小和日期。默认按名称排序，也可按大小、修改日期、创建日期升序 / 降序排列；重新激活窗口或点击「刷新」会更新目录与标签。
+- 幻灯片：点击「播放幻灯片」或在画面上按 `S`，按当前列表顺序自动切图；默认每张 **5 秒**、循环播放，可取消循环以在末尾停止。直接输入秒数后回车，或用加减按钮 / 滑块调节 **0.5–120 秒**，播放中立即生效并记住设置；可点「全屏」观看。图片完成解码后才开始计时，动图仍独立播放；手动切图重新计时，最小化暂停、恢复后继续，转换图片时停止幻灯片。无法读取的图片会提示并跳过，整轮均失败则停止。
 - 动图：GIF、APNG、animated WebP 可播放 / 暂停、逐帧查看；保留不同帧时长和有限 / 无限循环。TIFF / PDF 多页不会被误判为动画。动画按需后台解码，不一次把所有帧装入内存。
 - 转换：JPEG、PNG、GIF、APNG、TIFF、BMP、HEIC、AVIF、WebP。界面只显示当前系统实际可用的编码器；WebP 使用内置的固定版本开源编码器。默认输出到原图同级目录，自动生成 `原名_converted.ext`，重名自动递增，不覆盖原文件。
 - GIF / APNG / WebP 之间支持保留整段动画；转静态格式前明确确认仅导出当前帧。TIFF 支持保留多页。导出重新读取原始像素，不使用界面缩略图，保留方向和支持范围内的色彩配置。
@@ -198,7 +199,7 @@ open iina.xcodeproj
 
 ## 参与开发
 
-图片专项检查：`bash Tools/ImageViewerTests/run.sh`、`bash Tools/ImageViewerUITests/run.sh`、`bash Tools/ImageRoutingTests/run.sh`。先运行 `bash other/build_image_codec.sh` 再运行 `bash Tools/ImageCodecHelper/run.sh`，可测试真实 WebP 像素、动画时序、透明度、ICC、安全限制与取消。测试只生成临时素材，不读取个人相册。完整 App 仍由 CI 构建和签名验证，源码发布限制不变。
+图片专项检查：`bash Tools/ImageViewerTests/run.sh`、`bash Tools/ImageViewerUITests/run.sh`、`bash Tools/ImageRoutingTests/run.sh`、`bash Tools/ImageSlideshowTests/run.sh`、`bash Tools/ImageSlideshowUITests/run.sh`。幻灯片覆盖实际 AppKit 控件、Finder 多色标签、排序、慢图 / 坏图 / 动图、动态间隔、最小化恢复与转换隔离，并使用临时偏好域。先运行 `bash other/build_image_codec.sh` 再运行 `bash Tools/ImageCodecHelper/run.sh`，可测试真实 WebP 像素、动画时序、透明度、ICC、安全限制与取消。测试只生成临时素材，不读取个人相册。完整 App 仍由 CI 构建和签名验证，源码发布限制不变。
 
 欢迎提交中文界面、播放兼容性、剪辑准确性、逐帧导出、旋转处理、可访问性和稳定性方面的改进。提交前请确认：
 

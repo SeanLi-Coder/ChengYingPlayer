@@ -64,7 +64,10 @@ struct RealImageViewerSmoke {
     write(gif, type: "com.compuserve.gif", images: [red, green, blue], animation: true)
     write(pages, type: "public.tiff", images: [red, blue])
     let originalBytes = try Data(contentsOf: gif)
-    let viewer = ImageViewerWindowController(urls: [still, gif, pages])
+    let preferenceDomain = "io.chengying.tests.real-image-ui.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: preferenceDomain)!
+    defer { defaults.removePersistentDomain(forName: preferenceDomain) }
+    let viewer = ImageViewerWindowController(urls: [still, gif, pages], defaults: defaults)
     viewer.showWindow(nil)
     viewer.window?.makeKeyAndOrderFront(nil)
     NSApp.activate(ignoringOtherApps: true)
@@ -124,6 +127,24 @@ struct RealImageViewerSmoke {
     }
     viewer.previousFrameButton.performClick(nil)
     waitFor("TIFF still navigates after current-page conversion") { viewer.frameIndex == 0 }
+
+    // The slideshow must also work with actual ImageIO still, animated, and multi-page files.
+    viewer.open(urls: [still, gif, pages])
+    waitFor("Real slideshow is ready with all selected files") {
+      viewer.slideshowButton.isEnabled && viewer.canvas.image != nil && viewer.selectedURL == still
+    }
+    viewer.setSlideshowInterval(0.5)
+    viewer.loopSlideshowButton.state = .off
+    NSApp.sendAction(viewer.slideshowButton.action!, to: viewer.slideshowButton.target, from: viewer.slideshowButton)
+    expect(viewer.isSlideshowRunning, "Real slideshow starts")
+    waitFor("Real slideshow reaches the animated GIF") { viewer.selectedURL == gif && viewer.isAnimating }
+    waitFor("GIF frames do not defer the real slideshow indefinitely") {
+      viewer.selectedURL == pages && viewer.canvas.image != nil
+    }
+    waitFor("Real nonlooping slideshow stops at the last image") { !viewer.isSlideshowRunning }
+    expect(viewer.selectedURL == pages && viewer.frameIndex == 0, "Slideshow advances files, not TIFF pages")
+    let afterSlideshow = try Data(contentsOf: gif)
+    expect(afterSlideshow == originalBytes, "Slideshow does not modify the original animated file")
     viewer.cancelAndClose()
     expect(viewer.window?.isVisible == false && viewer.canvas.image == nil, "Real viewer closes cleanly")
     print("Real image viewer smoke checks passed: \(checks)")

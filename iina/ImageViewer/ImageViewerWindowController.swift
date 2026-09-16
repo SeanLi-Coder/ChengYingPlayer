@@ -31,6 +31,13 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   let viewOutputButton = NSButton(title: "查看结果", target: nil, action: nil)
   let progressIndicator = NSProgressIndicator()
   let sortPicker = NSPopUpButton(frame: .zero, pullsDown: false)
+  let folderLabel = NSTextField(labelWithString: "当前文件夹")
+  let slideshowButton = NSButton(title: "播放幻灯片", target: nil, action: nil)
+  let intervalField = NSTextField(string: "5")
+  let intervalSlider = NSSlider(value: log(5), minValue: log(0.5), maxValue: log(120), target: nil, action: nil)
+  let intervalStepper = NSStepper()
+  let loopSlideshowButton = NSButton(checkboxWithTitle: "循环播放", target: nil, action: nil)
+  private let fullscreenButton = NSButton(title: "全屏", target: nil, action: nil)
   private let directionButton = NSButton(title: "↑", target: nil, action: nil)
   private let titleLabel = NSTextField(labelWithString: "图片")
   private let infoLabel = NSTextField(labelWithString: "")
@@ -61,6 +68,16 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private var framePending = false
   private var formats: [ImageConversionFormat] = []
   private var wasAnimatingBeforeMiniaturize = false
+  private var wasSlideshowRunningBeforeMiniaturize = false
+  private var slideshow = ImageSlideshowPolicy()
+  private var slideshowTimer: Timer?
+  private var isListing = false
+  private let defaults: UserDefaults
+  private static let intervalPreference = "ChengYing.ImageSlideshow.Interval"
+  private static let loopPreference = "ChengYing.ImageSlideshow.Loop"
+  var isSlideshowRunning: Bool { slideshow.isRunning }
+  var slideshowInterval: TimeInterval { slideshow.interval }
+  private let listQueue = DispatchQueue(label: "io.chengying.image.list", qos: .userInitiated)
   private let decodeQueue = DispatchQueue(label: "io.chengying.image.decode", qos: .userInitiated)
   private let conversionQueue = DispatchQueue(label: "io.chengying.image.convert", qos: .userInitiated)
   // Everything below is confined to decodeQueue.
@@ -70,8 +87,12 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private var cachedOrder: [Int] = []
   private let maximumFrameBytes = 64 * 1024 * 1024
 
-  init(urls: [URL]) {
+  init(urls: [URL], defaults: UserDefaults = .standard) {
+    self.defaults = defaults
     super.init(window: nil)
+    if let saved = defaults.object(forKey: Self.intervalPreference) as? NSNumber {
+      slideshow.setInterval(saved.doubleValue, now: CACurrentMediaTime())
+    }
     loadWindow()
     loadFormats()
     open(urls: urls)
@@ -113,11 +134,14 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     directionButton.target = self
     directionButton.action = #selector(reverseSort)
     let sidebarHeading = stack([sortPicker, directionButton, button("刷新", #selector(refreshList))])
+    folderLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+    folderLabel.lineBreakMode = .byTruncatingMiddle
+    folderLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("image"))
     column.resizingMask = .autoresizingMask
     tableView.addTableColumn(column)
     tableView.headerView = nil
-    tableView.rowHeight = 58
+    tableView.rowHeight = 68
     tableView.intercellSpacing = NSSize(width: 0, height: 2)
     tableView.dataSource = self
     tableView.delegate = self
@@ -127,8 +151,9 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     scroll.documentView = tableView
     scroll.hasVerticalScroller = true
     scroll.borderType = .noBorder
-    let sidebar = stack([sidebarHeading, scroll], vertical: true, spacing: 8)
+    let sidebar = stack([folderLabel, sidebarHeading, scroll], vertical: true, spacing: 8)
     sidebar.widthAnchor.constraint(equalToConstant: 248).isActive = true
+    folderLabel.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
     sidebarHeading.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
     scroll.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
     canvas.translatesAutoresizingMaskIntoConstraints = false
@@ -148,6 +173,41 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     previousFrameButton.action = #selector(previousFrame)
     nextFrameButton.action = #selector(nextFrame)
     animationButton.action = #selector(toggleAnimation)
+    slideshowButton.target = self
+    slideshowButton.action = #selector(toggleSlideshow)
+    slideshowButton.bezelStyle = .rounded
+    slideshowButton.toolTip = "按当前列表顺序自动切换图片（S）；动图仍按自己的帧时长播放。"
+    intervalField.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+    intervalField.alignment = .right
+    intervalField.target = self
+    intervalField.action = #selector(intervalTextChanged)
+    intervalField.setAccessibilityLabel("幻灯片每张停留秒数")
+    intervalField.toolTip = "0.5–120 秒；输入后按回车生效，播放中也可调整。"
+    intervalField.widthAnchor.constraint(equalToConstant: 52).isActive = true
+    intervalStepper.minValue = 0.5
+    intervalStepper.maxValue = 120
+    intervalStepper.increment = 0.5
+    intervalStepper.valueWraps = false
+    intervalStepper.target = self
+    intervalStepper.action = #selector(intervalStepChanged)
+    intervalStepper.setAccessibilityLabel("增减幻灯片秒数")
+    intervalSlider.target = self
+    intervalSlider.action = #selector(intervalSliderChanged)
+    intervalSlider.isContinuous = true
+    intervalSlider.setAccessibilityLabel("调整幻灯片停留时间")
+    intervalSlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 100).isActive = true
+    intervalSlider.widthAnchor.constraint(lessThanOrEqualToConstant: 230).isActive = true
+    intervalSlider.toolTip = "拖动立即调整；每张图片完全显示后才开始计时。"
+    loopSlideshowButton.state = (defaults.object(forKey: Self.loopPreference) as? NSNumber)?.boolValue == false ? .off : .on
+    loopSlideshowButton.target = self
+    loopSlideshowButton.action = #selector(loopSlideshowChanged)
+    fullscreenButton.target = self
+    fullscreenButton.action = #selector(toggleImageFullscreen)
+    fullscreenButton.bezelStyle = .rounded
+    let slideshowBar = stack([slideshowButton, NSTextField(labelWithString: "每张"), intervalField,
+                               NSTextField(labelWithString: "秒"), intervalStepper, intervalSlider,
+                               loopSlideshowButton, spacer(), fullscreenButton])
+    updateIntervalControls()
     convertButton.action = #selector(confirmConversion)
     cancelButton.action = #selector(cancelConversion)
     revealButton.action = #selector(revealOutput)
@@ -167,10 +227,11 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       "原图不覆盖，保存到同级目录。跨格式可能改变位深、HDR、色彩并移除 EXIF / GPS。JXL、PSD、RAW 等仅供读取；可转换格式取决于系统与内置编码器。")
     note.font = .systemFont(ofSize: 10)
     note.textColor = .secondaryLabelColor
-    let footer = stack([navigation, conversion, statusLabel, note], vertical: true, spacing: 8)
+    let footer = stack([navigation, slideshowBar, conversion, statusLabel, note], vertical: true, spacing: 8)
     footer.alignment = .leading
     content.addSubview(footer)
     navigation.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
+    slideshowBar.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
     conversion.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
     statusLabel.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
     note.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
@@ -192,6 +253,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     }
     canvas.onNavigate = { [weak self] offset in self?.navigate(offset) }
     canvas.onToggleAnimation = { [weak self] in self?.toggleAnimation() }
+    canvas.onToggleSlideshow = { [weak self] in self?.toggleSlideshow() }
     canvas.onDropURLs = { urls in _ = PlayerCore.openURLs(urls) }
     updateControls()
     window.center()
@@ -218,6 +280,8 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
 
   func open(urls: [URL]) {
     closed = false
+    stopSlideshow()
+    wasAnimatingBeforeMiniaturize = false
     let accepted = urls.filter { $0.isFileURL && ImageFileSupport.isImageURL($0) }
     guard let first = accepted.first else { return }
     directoryURL = accepted.count == 1 ? first.deletingLastPathComponent() : nil
@@ -230,17 +294,19 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     listToken = ImageCancellationToken()
     let token = listToken
     let generation = listGeneration
+    isListing = true
     files = accepted.map { PlaylistFileMetadata(url: $0) }
     tableView.reloadData()
     load(first)
-    decodeQueue.async { [weak self] in
+    listQueue.async { [weak self] in
       guard !token.isCancelled else { return }
       let candidates: [URL]
       if accepted.count == 1 {
         candidates = ((try? FileManager.default.contentsOfDirectory(
           at: first.deletingLastPathComponent(), includingPropertiesForKeys: [.isRegularFileKey],
           options: [.skipsHiddenFiles])) ?? []).filter {
-            ImageFileSupport.isImageURL($0) && ((try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true)
+            !token.isCancelled && ImageFileSupport.isImageURL($0) &&
+              ((try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true)
           }
       } else { candidates = accepted }
       guard !token.isCancelled else { return }
@@ -262,6 +328,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       }
       DispatchQueue.main.async { [weak self] in
         guard let self, !self.closed, self.listGeneration == generation else { return }
+        self.isListing = false
         self.files = metadata
         if self.sortRequested { self.applySort(); return }
         self.tableView.reloadData()
@@ -272,6 +339,9 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   private func load(_ url: URL) {
+    slideshowTimer?.invalidate()
+    slideshowTimer = nil
+    slideshow.imageWillLoad()
     stopAnimation()
     sourceToken.cancel()
     sourceToken = ImageCancellationToken()
@@ -321,6 +391,10 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
           if !self.isBusy { self.statusLabel.stringValue = "滚轮 / 双指缩放 · 拖动平移 · ← → 切换 · 0 适应 · 1 原始像素" }
           self.updateControls()
           if info.isAnimated { self.startAnimation() }
+          if self.slideshow.isRunning {
+            self.slideshow.imageDidDisplay(now: CACurrentMediaTime())
+            self.scheduleSlideshow()
+          }
         }
       } catch {
         DispatchQueue.main.async { [weak self] in
@@ -329,6 +403,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
           self.infoLabel.stringValue = "无法打开图片"
           self.statusLabel.stringValue = error.localizedDescription
           self.updateControls()
+          self.handleSlideshowFailure(url: url)
         }
       }
     }
@@ -449,7 +524,112 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     progressIndicator.isHidden = !isBusy
     revealButton.isHidden = isBusy || lastOutputURL == nil
     viewOutputButton.isHidden = isBusy || lastOutputURL == nil
+    slideshowButton.title = slideshow.isRunning ? "暂停幻灯片" : "播放幻灯片"
+    slideshowButton.isEnabled = !closed && !isBusy && (slideshow.isRunning || (!isListing && files.count > 1))
+    let folder = directoryURL?.lastPathComponent
+    folderLabel.stringValue = "\(folder.map { "当前文件夹：\($0)" } ?? "已选图片") · \(isListing ? "读取中…" : "\(files.count) 张")"
+    folderLabel.toolTip = directoryURL?.path ?? "仅浏览显式选择的图片；打开单张图片会自动列出同目录图片。"
   }
+
+  // Slideshow deadlines are independent of an animated image's per-frame timer.
+  @objc private func toggleSlideshow() {
+    if slideshow.isRunning || wasSlideshowRunningBeforeMiniaturize { stopSlideshow(); return }
+    guard !closed, !isBusy, !isListing, files.count > 1, window?.attachedSheet == nil,
+          window?.isMiniaturized != true else { return }
+    slideshow.start(now: CACurrentMediaTime(), imageIsReady: details != nil && canvas.image != nil)
+    updateControls()
+    if details == nil && !framePending, let selectedURL { load(selectedURL) }
+    else { scheduleSlideshow() }
+  }
+
+  private func stopSlideshow() {
+    slideshowTimer?.invalidate()
+    slideshowTimer = nil
+    slideshow.stop()
+    wasSlideshowRunningBeforeMiniaturize = false
+    updateControls()
+  }
+
+  private func scheduleSlideshow() {
+    slideshowTimer?.invalidate()
+    slideshowTimer = nil
+    guard slideshow.isRunning, !closed, !isBusy, window?.isMiniaturized != true else { return }
+    guard window?.attachedSheet == nil else { stopSlideshow(); return }
+    guard let deadline = slideshow.deadline else { return }
+    let generation = sourceGeneration
+    let timer = Timer(timeInterval: max(0.001, deadline - CACurrentMediaTime()), repeats: false) { [weak self] _ in
+      guard let self, !self.closed, self.sourceGeneration == generation, self.slideshow.isRunning else { return }
+      if self.window?.attachedSheet != nil { self.stopSlideshow(); return }
+      if self.slideshow.consumeAdvance(now: CACurrentMediaTime()) { self.advanceSlideshow() }
+      else { self.scheduleSlideshow() }
+    }
+    slideshowTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
+  }
+
+  private func advanceSlideshow() {
+    guard slideshow.isRunning, !closed, !isBusy, window?.isMiniaturized != true else { return }
+    guard window?.attachedSheet == nil else { stopSlideshow(); return }
+    guard files.count > 1 else { stopSlideshow(); return }
+    guard let current = files.firstIndex(where: { $0.url == selectedURL }),
+          let next = ImageSlideshowPolicy.nextIndex(current: current, count: files.count,
+                                                    loops: loopSlideshowButton.state == .on) else {
+      stopSlideshow()
+      statusLabel.stringValue = "幻灯片已播放到列表末尾。"
+      return
+    }
+    load(files[next].url)
+  }
+
+  private func handleSlideshowFailure(url: URL) {
+    guard slideshow.isRunning else { return }
+    guard slideshow.recordFailure(of: url, among: files.map(\.url)) else {
+      stopSlideshow()
+      statusLabel.stringValue = "当前列表中的图片均无法读取，幻灯片已停止。请检查文件或更新系统。"
+      return
+    }
+    statusLabel.stringValue = "无法读取 \(url.lastPathComponent)，即将跳过。"
+    let generation = sourceGeneration
+    slideshowTimer?.invalidate()
+    let timer = Timer(timeInterval: 0.75, repeats: false) { [weak self] _ in
+      guard let self, self.sourceGeneration == generation else { return }
+      self.advanceSlideshow()
+    }
+    slideshowTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
+  }
+
+  func setSlideshowInterval(_ value: TimeInterval) {
+    guard slideshow.setInterval(value, now: CACurrentMediaTime()) else {
+      updateIntervalControls()
+      statusLabel.stringValue = "请输入 0.5–120 秒内的有效数字。"
+      return
+    }
+    defaults.set(slideshow.interval, forKey: Self.intervalPreference)
+    updateIntervalControls()
+    // Failed-image skipping has no slideshow deadline; keep that separate timer.
+    if slideshow.deadline != nil { scheduleSlideshow() }
+  }
+
+  private func updateIntervalControls() {
+    intervalField.stringValue = String(format: "%g", slideshow.interval)
+    intervalStepper.doubleValue = slideshow.interval
+    intervalSlider.doubleValue = log(slideshow.interval)
+    intervalSlider.setAccessibilityValue("\(intervalField.stringValue) 秒")
+  }
+
+  @objc private func intervalTextChanged() {
+    let text = intervalField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    setSlideshowInterval(Double(text.replacingOccurrences(of: ",", with: ".")) ?? .nan)
+  }
+  @objc private func intervalStepChanged() { setSlideshowInterval(intervalStepper.doubleValue) }
+  @objc private func intervalSliderChanged() {
+    setSlideshowInterval((exp(intervalSlider.doubleValue) * 2).rounded() / 2)
+  }
+  @objc private func loopSlideshowChanged() {
+    defaults.set(loopSlideshowButton.state == .on, forKey: Self.loopPreference)
+  }
+  @objc private func toggleImageFullscreen() { window?.toggleFullScreen(nil) }
 
   private func loadFormats() {
     conversionQueue.async { [weak self] in
@@ -471,8 +651,8 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
   @objc private func previousImage() { navigate(-1) }
   @objc private func nextImage() { navigate(1) }
-  @objc private func previousFrame() { stopAnimation(); completedLoops = 0; requestFrame(frameIndex - 1) }
-  @objc private func nextFrame() { stopAnimation(); completedLoops = 0; requestFrame(frameIndex + 1) }
+  @objc private func previousFrame() { stopSlideshow(); stopAnimation(); completedLoops = 0; requestFrame(frameIndex - 1) }
+  @objc private func nextFrame() { stopSlideshow(); stopAnimation(); completedLoops = 0; requestFrame(frameIndex + 1) }
   @objc private func toggleAnimation() { if isAnimating { stopAnimation() } else { startAnimation() } }
   @objc private func zoomIn() { canvas.setZoom(canvas.zoom * 1.25) }
   @objc private func zoomOut() { canvas.setZoom(canvas.zoom / 1.25) }
@@ -488,21 +668,33 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     files = PlaylistFileMetadata.sortedIndices(for: files, by: key, ascending: ascending).map { files[$0] }
     tableView.reloadData()
     selectCurrentRow()
+    if files.count < 2 { stopSlideshow() }
     updateControls()
+    if slideshow.isRunning && details != nil && canvas.image != nil {
+      slideshow.imageDidDisplay(now: CACurrentMediaTime())
+      scheduleSlideshow()
+    }
   }
   @objc private func refreshList() {
+    guard !closed else { return }
+    listToken.cancel()
+    listToken = ImageCancellationToken()
+    listGeneration = UUID()
     let generation = listGeneration
     let urls = files.map(\.url)
     let directory = directoryURL
     let preferredURL = selectedURL
     let token = listToken
-    decodeQueue.async { [weak self] in
+    isListing = true
+    updateControls()
+    listQueue.async { [weak self] in
       guard !token.isCancelled else { return }
       var candidates = urls
       if let directory {
         candidates = ((try? FileManager.default.contentsOfDirectory(
           at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])) ?? urls).filter {
-            ImageFileSupport.isImageURL($0) && ((try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true)
+            !token.isCancelled && ImageFileSupport.isImageURL($0) &&
+              ((try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true)
           }
         let preferredIdentity = preferredURL?.standardizedFileURL.resolvingSymlinksInPath()
         var identities = Set<URL>()
@@ -522,6 +714,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       guard !token.isCancelled else { return }
       DispatchQueue.main.async { [weak self] in
         guard let self, !self.closed, self.listGeneration == generation else { return }
+        self.isListing = false
         if directory != nil {
           self.files = metadata
           self.applySort()
@@ -529,8 +722,10 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
         }
         let byURL = Dictionary(metadata.map { ($0.url, $0) }, uniquingKeysWith: { first, _ in first })
         self.files = self.files.map { byURL[$0.url] ?? $0 }
+        if self.sortRequested { self.applySort(); return }
         self.tableView.reloadData()
         self.selectCurrentRow()
+        self.updateControls()
       }
     }
   }
@@ -565,26 +760,37 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       value.append(NSAttributedString(string: "● ", attributes: [.foregroundColor: colors[tag.colorIndex]]))
       value.append(NSAttributedString(string: "\(tag.name)  ", attributes: [.foregroundColor: NSColor.secondaryLabelColor]))
     }
-    if file.tags.isEmpty, let size = file.fileSize {
-      value.append(NSAttributedString(string: ByteCountFormatter.string(fromByteCount: size, countStyle: .file),
-                                     attributes: [.foregroundColor: NSColor.secondaryLabelColor]))
+    if file.tags.isEmpty {
+      value.append(NSAttributedString(string: "无 Finder 标签", attributes: [.foregroundColor: NSColor.tertiaryLabelColor]))
     }
     tags.attributedStringValue = value
-    let column = stack([name, tags], vertical: true, spacing: 4)
+    let size = file.fileSize.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "大小未知"
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd HH:mm"
+    let modified = file.modificationDate.map(formatter.string) ?? "未知"
+    let created = file.creationDate.map(formatter.string) ?? "未知"
+    let showCreated = sortPicker.indexOfSelectedItem == 3
+    let metadata = NSTextField(labelWithString: "\(size) · \(showCreated ? "创建" : "修改") \(showCreated ? created : modified)")
+    metadata.font = .systemFont(ofSize: 10)
+    metadata.textColor = .secondaryLabelColor
+    metadata.lineBreakMode = .byTruncatingTail
+    let column = stack([name, tags, metadata], vertical: true, spacing: 3)
     cell.addSubview(column)
     cell.textField = name
-    cell.toolTip = ([file.name] + file.tags.map(\.name)).joined(separator: "\n")
+    cell.toolTip = ([file.name, size, "修改：\(modified)", "创建：\(created)"] + file.tags.map(\.name)).joined(separator: "\n")
     NSLayoutConstraint.activate([
       column.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 6),
       column.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
       column.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
       name.widthAnchor.constraint(equalTo: column.widthAnchor), tags.widthAnchor.constraint(equalTo: column.widthAnchor),
+      metadata.widthAnchor.constraint(equalTo: column.widthAnchor),
     ])
     return cell
   }
 
   @objc private func confirmConversion() {
     guard !isBusy, let url = selectedURL, let details, formats.indices.contains(formatPicker.indexOfSelectedItem), let window else { return }
+    stopSlideshow()
     let format = formats[formatPicker.indexOfSelectedItem]
     let canPreserve = format == .tiff || (details.isAnimated && format.supportsAnimation)
     let currentOnly = details.frameCount > 1 && !canPreserve
@@ -609,6 +815,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
 
   func beginConversion(url: URL, format: ImageConversionFormat, frameIndex: Int?) {
     guard !isBusy, !closed else { return }
+    stopSlideshow()
     let token = ImageCancellationToken()
     conversionToken = token
     lastOutputURL = nil
@@ -663,6 +870,9 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private func tearDown() {
     guard !closed else { return }
     closed = true
+    stopSlideshow()
+    wasAnimatingBeforeMiniaturize = false
+    isListing = false
     stopAnimation()
     sourceGeneration = UUID()
     frameGeneration = UUID()
@@ -687,12 +897,24 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
   func windowWillClose(_ notification: Notification) { tearDown() }
   func windowDidMiniaturize(_ notification: Notification) {
+    let wasRunning = slideshow.isRunning
+    stopSlideshow()
+    wasSlideshowRunningBeforeMiniaturize = wasRunning
     wasAnimatingBeforeMiniaturize = isAnimating
     stopAnimation()
   }
   func windowDidDeminiaturize(_ notification: Notification) {
     if wasAnimatingBeforeMiniaturize { startAnimation() }
     wasAnimatingBeforeMiniaturize = false
+    if wasSlideshowRunningBeforeMiniaturize {
+      wasSlideshowRunningBeforeMiniaturize = false
+      slideshow.start(now: CACurrentMediaTime(), imageIsReady: details != nil && canvas.image != nil)
+      if details == nil && !framePending, let selectedURL { load(selectedURL) }
+      else { scheduleSlideshow() }
+      updateControls()
+    }
   }
+  func windowDidEnterFullScreen(_ notification: Notification) { fullscreenButton.title = "退出全屏" }
+  func windowDidExitFullScreen(_ notification: Notification) { fullscreenButton.title = "全屏" }
   func windowDidBecomeKey(_ notification: Notification) { refreshList() }
 }

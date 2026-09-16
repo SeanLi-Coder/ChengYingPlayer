@@ -88,6 +88,8 @@ jobs:
           bash Tools/ImageViewerTests/run.sh
           bash Tools/ImageViewerUITests/run.sh
           bash Tools/ImageRoutingTests/run.sh
+          bash Tools/ImageSlideshowTests/run.sh
+          bash Tools/ImageSlideshowUITests/run.sh
 
       - name: Test local subtitle tools
         run: |

@@ -41,7 +41,10 @@ defer { try? FileManager.default.removeItem(at: root) }
 let names = ["10.png", "2.png", "finite.gif", "pages.tiff", "slow.png"]
 for name in names { try Data([0]).write(to: root.appendingPathComponent(name)) }
 let url = root.appendingPathComponent("2.png")
-let viewer = ImageViewerWindowController(urls: [url])
+let preferenceDomain = "io.chengying.tests.image-ui.\(UUID().uuidString)"
+let defaults = UserDefaults(suiteName: preferenceDomain)!
+defer { defaults.removePersistentDomain(forName: preferenceDomain) }
+let viewer = ImageViewerWindowController(urls: [url], defaults: defaults)
 viewer.showWindow(nil)
 viewer.window?.makeKeyAndOrderFront(nil)
 NSApp.activate(ignoringOtherApps: true)
