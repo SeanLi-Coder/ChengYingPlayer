@@ -10,7 +10,7 @@ import Cocoa
 import MediaPlayer
 import Sparkle
 
-let IINA_ENABLE_PLUGIN_SYSTEM = true
+let IINA_ENABLE_PLUGIN_SYSTEM = false
 
 /** Max time interval for repeated `application(_:openFile:)` calls. */
 fileprivate let OpenFileRepeatTime = TimeInterval(0.2)
@@ -57,7 +57,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
   // Windows
 
-  lazy var openURLWindow: OpenURLWindowController = OpenURLWindowController()
   lazy var aboutWindow: AboutWindowController = AboutWindowController()
   lazy var fontPicker: FontPickerWindowController = FontPickerWindowController()
   lazy var inspector: InspectorWindowController = InspectorWindowController()
@@ -76,22 +75,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   }()
 
   lazy var preferenceWindowController: PreferenceWindowController = {
-    var list: [NSViewController & PreferenceWindowEmbeddable] = [
+    let list: [NSViewController & PreferenceWindowEmbeddable] = [
       PrefGeneralViewController(),
       PrefUIViewController(),
       PrefCodecViewController(),
       PrefSubViewController(),
-      PrefNetworkViewController(),
       PrefControlViewController(),
       PrefKeyBindingViewController(),
-      PrefAdvancedViewController(),
-      // PrefPluginViewController(),
       PrefUtilsViewController(),
     ]
-
-    if IINA_ENABLE_PLUGIN_SYSTEM {
-      list.insert(PrefPluginViewController(), at: 8)
-    }
     return PreferenceWindowController(viewControllers: list)
   }()
 
@@ -257,41 +249,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     // Hide Window > "Enter Full Screen" menu item, because this is already present in the Video menu
     UserDefaults.standard.set(false, forKey: "NSFullScreenMenuItemEverywhere")
 
-    // Install plugins
-    if FirstRunManager.isFirstRun(for: .init("installedDefaultPlugins")) {
-      var hasError = false
-      Logger.log("Installing default plugins")
-      if let pluginPath = Bundle.main.resourcePath?.appending("/plugins"),
-         FileManager.default.fileExists(atPath: pluginPath),
-         let contents = try? FileManager.default.contentsOfDirectory(atPath: pluginPath) {
-        contents.filter { $0.hasSuffix(".iinaplgz") }
-          .forEach {
-            do {
-              let path = pluginPath.appending("/\($0)")
-              let plugin = try JavascriptPlugin.create(fromPackageURL: URL(fileURLWithPath: path))
-              if JavascriptPlugin.plugins.contains(where: { $0.identifier == plugin.identifier }) {
-                Logger.log("Skipped \(plugin.identifier), already installed")
-                return
-              }
-              plugin.normalizePath()
-              JavascriptPlugin.plugins.append(plugin)
-              plugin.enabled = true
-              Logger.log("Installed \(plugin.identifier)")
-            } catch let error {
-              hasError = true
-              Logger.log(error.localizedDescription, level: .error)
-            }
-          }
-      } else {
-        hasError = true
-        Logger.log("Cannot find default plugins", level: .error)
-      }
-
-      if hasError {
-        FirstRunManager.unsetFirstRun(for: .init("installedDefaultPlugins"))
-      }
-    }
-
     // handle arguments
     let arguments = ProcessInfo.processInfo.arguments.dropFirst()
     guard arguments.count > 0 else { return }
@@ -365,8 +322,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     // other initializations at App level
     NSApp.isAutomaticCustomizeTouchBarMenuItemEnabled = false
     NSWindow.allowsAutomaticWindowTabbing = false
-
-    JavascriptPlugin.loadGlobalInstances()
 
     let mpv = PlayerCore.active.mpv!
     Logger.log("Configuration when building mpv: \(mpv.getString(MPVProperty.mpvConfiguration)!)", level: .verbose)
@@ -760,14 +715,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
       shouldIgnoreOpenFile = false
       return
     }
-    let urls = pendingFilesForOpenFile.map { URL(fileURLWithPath: $0) }
+    let urls = pendingFilesForOpenFile
+      .map { URL(fileURLWithPath: $0) }
+      .filter { $0.pathExtension.lowercased() != "iinaplgz" }
     pendingFilesForOpenFile.removeAll()
-
-    // if installing a plugin package
-    if let pluginPackageURL = urls.first(where: { $0.pathExtension == "iinaplgz" }) {
-      preferenceWindowController.performAction(.installPlugin(url: pluginPackageURL))
-      return
-    }
 
     // open pending files
     if PlayerCore.openURLs(urls) == 0 {
@@ -961,13 +912,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     return "scheme=chengying action=\(action) parameters=\(components.queryItems?.count ?? 0)"
   }
 
-  @IBAction func openURL(_ sender: AnyObject) {
-    Logger.log("Menu - Open URL")
-    openURLWindow.isAlternativeAction = sender.tag == AlternativeMenuItemTag
-    openURLWindow.showWindow(nil)
-    openURLWindow.resetWindowState()
-  }
-
   @IBAction func menuNewWindow(_ sender: Any) {
     PlayerCore.newPlayerCore.initialWindow.showWindow(nil)
   }
@@ -990,6 +934,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   }
 
   @objc func showPluginPreferences(_ sender: NSMenuItem) {
+    guard IINA_ENABLE_PLUGIN_SYSTEM else { return }
     preferenceWindowController.openPreferenceView(withNibName: "PrefPluginViewController")
   }
 

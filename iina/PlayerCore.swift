@@ -368,6 +368,10 @@ class PlayerCore: NSObject {
       log("empty file path or url", level: .error)
       return
     }
+    guard url.isFileURL else {
+      log("Ignoring a remote media URL in the local player", level: .warning)
+      return
+    }
     guard info.state != .stopping else {
       // The mpv core is currently processing an asynchronous stop command. To avoid the complexity
       // of coordinating two mpv commands executing at the same time, wait until the stop command
@@ -378,24 +382,12 @@ class PlayerCore: NSObject {
       pendingUrl = url
       return
     }
-    let isNetwork = !url.isFileURL || url.pathExtension.starts(with: "m3u")
-    if isNetwork, info.state != .idle, let currentWindow {
-      // Replace the player window with the loading window. Closing the player window will result in
-      // an asynchronous stop command being sent to mpv. As described above, delay sending the
-      // loadfile command until the stop command finishes.
-      log("Closing window before opening: \(Utility.mediaLogSummary(url))")
-      pendingAutoLoad = shouldAutoLoad
-      pendingUrl = url
-      currentWindow.close()
-      return
-    }
     log("Open URL: \(Utility.mediaLogSummary(url))")
     if shouldAutoLoad {
       info.shouldAutoLoadFiles = true
     }
     info.hdrEnabled = Preference.bool(for: .enableHdrSupport)
-    let path = url.isFileURL ? url.path : url.absoluteString
-    openMainWindow(path: path, url: url, isNetwork: isNetwork)
+    openMainWindow(path: url.path, url: url, isNetwork: false)
   }
 
   /**
@@ -408,6 +400,10 @@ class PlayerCore: NSObject {
   @discardableResult
   func openURLs(_ urls: [URL], shouldAutoLoad autoLoad: Bool = true) -> Int? {
     guard !urls.isEmpty else { return 0 }
+    guard urls.allSatisfy(\.isFileURL) else {
+      Utility.showAlert("local_media_only", style: .informational)
+      return nil
+    }
     let urls = Utility.resolveURLs(urls)
 
     // Handle folder URL (to support mpv shuffle, etc), BD folders and m3u / m3u8 files first.
@@ -517,10 +513,6 @@ class PlayerCore: NSObject {
     info.videoPosition = nil
     info.videoTracks = []
     info.videoWidth = nil
-    if isNetwork {
-      AppDelegate.shared.openURLWindow.showLoadingScreen(playerCore: self)
-    }
-
     let _ = mainWindow.window
     mainWindow.pendingShow = true
     miniPlayer.pendingShow = true
@@ -607,21 +599,6 @@ class PlayerCore: NSObject {
   }
 
   func startMPV() {
-    // set path for youtube-dl
-    let oldPath = String(cString: getenv("PATH")!)
-    var path = Utility.exeDirURL.path + ":" + oldPath
-    if let customYtdlPath = Preference.string(for: .ytdlSearchPath), !customYtdlPath.isEmpty {
-      path = customYtdlPath + ":" + path
-    }
-    setenv("PATH", path, 1)
-    log("Configured executable search path")
-
-    // set http proxy
-    if let proxy = Preference.string(for: .httpProxy), !proxy.isEmpty {
-      setenv("http_proxy", "http://" + proxy, 1)
-      log("Configured http_proxy")
-    }
-
     mpv.mpvInit()
     events.emit(.mpvInitialized)
 
@@ -1356,6 +1333,7 @@ class PlayerCore: NSObject {
   }
 
   func loadExternalVideoFile(_ url: URL) {
+    guard url.isFileURL else { return }
     mpv.command(.videoAdd, args: [url.path], checkError: false) { code in
       if code < 0 {
         self.log("Unsupported video: \(Utility.mediaLogSummary(url))", level: .error)
@@ -1367,6 +1345,7 @@ class PlayerCore: NSObject {
   }
 
   func loadExternalAudioFile(_ url: URL) {
+    guard url.isFileURL else { return }
     mpv.command(.audioAdd, args: [url.path], checkError: false) { code in
       if code < 0 {
         self.log("Unsupported audio: \(Utility.mediaLogSummary(url))", level: .error)
@@ -1397,6 +1376,7 @@ class PlayerCore: NSObject {
   }
 
   func loadExternalSubFile(_ url: URL, delay: Bool = false) {
+    guard url.isFileURL else { return }
     var track: MPVTrack?
     info.$subTracks.withLock { track = $0.first(where: { $0.externalFilename == url.path }) }
     if let track = track {
@@ -1451,6 +1431,7 @@ class PlayerCore: NSObject {
   }
 
   func appendToPlaylist(_ path: String, silent: Bool = false) {
+    guard Utility.isLocalMediaPath(path) else { return }
     mpv.playlistAppend(path)
     if !silent {
       postNotification(.iinaPlaylistChanged)
@@ -1484,6 +1465,8 @@ class PlayerCore: NSObject {
   }
 
   func addToPlaylist(paths: [String], at index: Int = -1) {
+    let paths = paths.filter(Utility.isLocalMediaPath)
+    guard !paths.isEmpty else { return }
     getPlaylist()
     for path in paths {
       mpv.playlistAppend(path)
@@ -2055,7 +2038,6 @@ class PlayerCore: NSObject {
           try checkTicket(currentTicket)
           setTrack(1, forType: .sub)
         }
-        autoSearchOnlineSub()
       } catch TicketExpiredError.ticketExpired {
         log("Background task stopping due to ticket expiration")
       } catch let err {
@@ -2230,11 +2212,7 @@ class PlayerCore: NSObject {
     if receivedEndFileWhileLoading && info.state == .starting {
       DispatchQueue.main.async { [unowned self] in
         currentController.close()
-        if AppDelegate.shared.openURLWindow.window?.isVisible == true {
-          AppDelegate.shared.openURLWindow.failedToLoadURL()
-        } else {
-          Utility.showAlert("error_open")
-        }
+        Utility.showAlert("error_open")
       }
       info.currentURL = nil
       info.isNetworkResource = false
@@ -2451,19 +2429,6 @@ class PlayerCore: NSObject {
     }
   }
 
-  private func autoSearchOnlineSub() {
-    Thread.sleep(forTimeInterval: 0.5)
-    if Preference.bool(for: .autoSearchOnlineSub) && !info.isNetworkResource &&
-      (info.videoDuration?.second ?? 0.0) >= Preference.double(for: .autoSearchThreshold) * 60 {
-      info.$subTracks.withLock {
-        if $0.isEmpty {
-          DispatchQueue.main.async {
-            self.mainWindow.menuActionHandler.menuFindOnlineSub(.dummy)
-          }
-        }
-      }
-    }
-  }
   /**
    Add files in the same folder to playlist.
    It basically follows the following steps:
@@ -2592,7 +2557,6 @@ class PlayerCore: NSObject {
     if currentController.pendingShow {
       currentController.pendingShow = false
       currentController.showWindow(self)
-      AppDelegate.shared.openURLWindow.close()
     }
     if info.state == .loaded {
       // If the media was loaded manually then playback was paused to avoid audio starting to play

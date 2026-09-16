@@ -1038,10 +1038,6 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     }
   }
 
-  @IBAction func searchOnlineAction(_ sender: AnyObject) {
-    mainWindow.menuActionHandler.menuFindOnlineSub(.dummy)
-  }
-
   @IBAction func subSegmentedControlAction(_ sender: NSSegmentedControl) {
     updateSubTabControl()
   }

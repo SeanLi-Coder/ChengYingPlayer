@@ -9,10 +9,8 @@
         <customObject id="-2" userLabel="File's Owner" customClass="PrefSubViewController" customModule="IINA" customModuleProvider="target">
             <connections>
                 <outlet property="defaultEncodingList" destination="1L9-wU-gfj" id="gr1-nf-b8w"/>
-                <outlet property="loginIndicator" destination="JPS-9i-fOz" id="PB4-bH-A2U"/>
                 <outlet property="sectionASSView" destination="ATO-g6-mEy" id="GI1-TI-Lxk"/>
                 <outlet property="sectionAutoLoadView" destination="n8c-of-fDQ" id="mfV-VI-7Ob"/>
-                <outlet property="sectionOnlineSubView" destination="y44-Ej-vIC" id="9us-U7-OyI"/>
                 <outlet property="sectionOtherView" destination="Iur-Ka-beI" id="PBO-Op-ouf"/>
                 <outlet property="sectionPositionView" destination="ZpT-fB-Daq" id="uop-Q7-Fgz"/>
                 <outlet property="sectionTextSubView" destination="ffZ-rE-7Zz" id="DJo-Jw-5nf"/>
@@ -25,8 +23,6 @@
                 <outlet property="subOverrideLevelSlider" destination="7UX-IL-hdk" id="fem-nv-O1m"/>
                 <outlet property="subOverrideLevelText" destination="FR3-Ar-5Dw" id="BSP-zH-sos"/>
                 <outlet property="subShadowColorWell" destination="Gtc-ii-hE0" id="hh5-ON-mLf"/>
-                <outlet property="subSourcePopUpButton" destination="UHS-ce-8t5" id="zmW-Jx-JMg"/>
-                <outlet property="subSourceStackView" destination="bSz-xd-6o2" id="UOh-XZ-MhE"/>
                 <outlet property="view" destination="Hz6-mo-xeY" id="0bl-1N-x8E"/>
             </connections>
         </customObject>
@@ -219,238 +215,6 @@
                 <constraint firstItem="Tej-f2-5d5" firstAttribute="leading" secondItem="n8c-of-fDQ" secondAttribute="leading" id="xHQ-K2-9l0"/>
             </constraints>
             <point key="canvasLocation" x="-782" y="-260"/>
-        </customView>
-        <customView translatesAutoresizingMaskIntoConstraints="NO" id="y44-Ej-vIC" userLabel="Prefs &gt; Subtitle &gt; Online Subtitles">
-            <rect key="frame" x="0.0" y="0.0" width="480" height="166"/>
-            <subviews>
-                <textField identifier="SectionTitleOnlineSub" focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="NlE-eQ-ofV">
-                    <rect key="frame" x="-2" y="142" width="112" height="16"/>
-                    <textFieldCell key="cell" sendsActionOnEndEditing="YES" alignment="left" title="Online Subtitles:" id="0fB-es-DmV">
-                        <font key="font" metaFont="systemBold"/>
-                        <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
-                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                    </textFieldCell>
-                </textField>
-                <stackView distribution="fillEqually" orientation="vertical" alignment="leading" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="bSz-xd-6o2">
-                    <rect key="frame" x="120" y="74" width="360" height="87"/>
-                    <subviews>
-                        <customView translatesAutoresizingMaskIntoConstraints="NO" id="S8h-wJ-vNN">
-                            <rect key="frame" x="0.0" y="64" width="360" height="23"/>
-                            <subviews>
-                                <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="p4E-J3-eff">
-                                    <rect key="frame" x="-2" y="4" width="156" height="16"/>
-                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Download subtitles from:" id="TPK-CJ-HX7">
-                                        <font key="font" metaFont="system"/>
-                                        <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
-                                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                                    </textFieldCell>
-                                </textField>
-                                <popUpButton verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="UHS-ce-8t5">
-                                    <rect key="frame" x="157" y="-4" width="167" height="26"/>
-                                    <popUpButtonCell key="cell" type="push" bezelStyle="rounded" alignment="left" lineBreakMode="truncatingTail" borderStyle="borderAndBezel" imageScaling="proportionallyDown" inset="2" id="XkP-fD-qDc">
-                                        <behavior key="behavior" lightByBackground="YES" lightByGray="YES"/>
-                                        <font key="font" metaFont="message"/>
-                                        <menu key="menu" id="fNm-dm-q55"/>
-                                    </popUpButtonCell>
-                                    <constraints>
-                                        <constraint firstAttribute="height" constant="21" id="6er-PT-s9c"/>
-                                        <constraint firstAttribute="width" relation="greaterThanOrEqual" constant="160" id="jeq-2f-ivK"/>
-                                    </constraints>
-                                    <connections>
-                                        <action selector="onlineSubSourceAction:" target="-2" id="MCn-TQ-TEj"/>
-                                        <binding destination="5Up-Ab-aAm" name="selectedObject" keyPath="values.onlineSubProvider" id="UPw-5l-t21"/>
-                                    </connections>
-                                </popUpButton>
-                            </subviews>
-                            <constraints>
-                                <constraint firstItem="UHS-ce-8t5" firstAttribute="top" secondItem="S8h-wJ-vNN" secondAttribute="top" constant="2" id="ACk-AK-j5b"/>
-                                <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="UHS-ce-8t5" secondAttribute="trailing" id="UPG-b7-fKe"/>
-                                <constraint firstAttribute="bottom" secondItem="UHS-ce-8t5" secondAttribute="bottom" id="W1o-uh-IYh"/>
-                                <constraint firstItem="UHS-ce-8t5" firstAttribute="firstBaseline" secondItem="p4E-J3-eff" secondAttribute="firstBaseline" id="YOH-uR-j8V"/>
-                                <constraint firstItem="UHS-ce-8t5" firstAttribute="leading" secondItem="p4E-J3-eff" secondAttribute="trailing" constant="8" id="mZj-RC-40f"/>
-                                <constraint firstItem="p4E-J3-eff" firstAttribute="leading" secondItem="S8h-wJ-vNN" secondAttribute="leading" id="pB7-lb-Zsy"/>
-                            </constraints>
-                        </customView>
-                        <customView translatesAutoresizingMaskIntoConstraints="NO" id="C38-iH-EaR">
-                            <rect key="frame" x="0.0" y="32" width="360" height="24"/>
-                            <subviews>
-                                <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="3Le-C6-vNr">
-                                    <rect key="frame" x="24" y="4" width="147" height="16"/>
-                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="OpenSubtitles account:" id="Iax-cc-YIO">
-                                        <font key="font" metaFont="system"/>
-                                        <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
-                                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                                    </textFieldCell>
-                                </textField>
-                                <progressIndicator wantsLayer="YES" horizontalHuggingPriority="750" verticalHuggingPriority="750" maxValue="100" bezeled="NO" indeterminate="YES" controlSize="small" style="spinning" translatesAutoresizingMaskIntoConstraints="NO" id="JPS-9i-fOz">
-                                    <rect key="frame" x="309" y="3" width="16" height="16"/>
-                                </progressIndicator>
-                                <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="7Mg-Vi-hfK">
-                                    <rect key="frame" x="175" y="4" width="75" height="14"/>
-                                    <textFieldCell key="cell" controlSize="small" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Not logged in" id="cov-Uy-wnc">
-                                        <font key="font" metaFont="message" size="11"/>
-                                        <color key="textColor" name="disabledControlTextColor" catalog="System" colorSpace="catalog"/>
-                                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                                    </textFieldCell>
-                                    <connections>
-                                        <binding destination="5Up-Ab-aAm" name="value" keyPath="values.openSubUsername" id="RUT-el-Z0e">
-                                            <dictionary key="options">
-                                                <string key="NSValueTransformerName">OpenSubAccountNameTransformer</string>
-                                            </dictionary>
-                                        </binding>
-                                    </connections>
-                                </textField>
-                                <button horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="dsK-Rb-mz5">
-                                    <rect key="frame" x="-1" y="-3" width="25" height="26"/>
-                                    <buttonCell key="cell" type="help" bezelStyle="helpButton" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="WRa-Tl-Ey5">
-                                        <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                        <font key="font" metaFont="system"/>
-                                    </buttonCell>
-                                    <constraints>
-                                        <constraint firstAttribute="height" constant="21" id="DK8-n1-2bK"/>
-                                    </constraints>
-                                    <connections>
-                                        <action selector="openSubHelpBtnAction:" target="-2" id="oJP-es-F9v"/>
-                                    </connections>
-                                </button>
-                                <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Fcc-I5-Ri2">
-                                    <rect key="frame" x="256" y="1" width="45" height="19"/>
-                                    <buttonCell key="cell" type="roundRect" title="Login" bezelStyle="roundedRect" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="WHk-sk-gmK">
-                                        <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                        <font key="font" metaFont="cellTitle"/>
-                                    </buttonCell>
-                                    <connections>
-                                        <action selector="openSubLoginAction:" target="-2" id="Ltg-N7-kwi"/>
-                                        <binding destination="5Up-Ab-aAm" name="title" keyPath="values.openSubUsername" id="ko0-5a-OOt">
-                                            <dictionary key="options">
-                                                <string key="NSValueTransformerName">LoginButtonTitleTransformer</string>
-                                            </dictionary>
-                                        </binding>
-                                    </connections>
-                                </button>
-                            </subviews>
-                            <constraints>
-                                <constraint firstItem="JPS-9i-fOz" firstAttribute="leading" secondItem="Fcc-I5-Ri2" secondAttribute="trailing" constant="8" id="5qR-tt-Vz4"/>
-                                <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="JPS-9i-fOz" secondAttribute="trailing" id="D57-Jw-Hxo"/>
-                                <constraint firstItem="Fcc-I5-Ri2" firstAttribute="baseline" secondItem="7Mg-Vi-hfK" secondAttribute="baseline" id="EMy-KQ-CUk"/>
-                                <constraint firstItem="dsK-Rb-mz5" firstAttribute="leading" secondItem="C38-iH-EaR" secondAttribute="leading" constant="2" id="JmE-S0-GHm"/>
-                                <constraint firstItem="7Mg-Vi-hfK" firstAttribute="leading" secondItem="3Le-C6-vNr" secondAttribute="trailing" constant="8" id="QwB-yK-kKt"/>
-                                <constraint firstItem="Fcc-I5-Ri2" firstAttribute="leading" secondItem="7Mg-Vi-hfK" secondAttribute="trailing" constant="8" id="Txl-iL-MWp"/>
-                                <constraint firstItem="JPS-9i-fOz" firstAttribute="centerY" secondItem="Fcc-I5-Ri2" secondAttribute="centerY" id="VvL-xH-LmY"/>
-                                <constraint firstAttribute="bottom" secondItem="dsK-Rb-mz5" secondAttribute="bottom" constant="1" id="Was-R5-PDk"/>
-                                <constraint firstItem="7Mg-Vi-hfK" firstAttribute="baseline" secondItem="3Le-C6-vNr" secondAttribute="baseline" id="hx2-nA-jTL"/>
-                                <constraint firstItem="3Le-C6-vNr" firstAttribute="baseline" secondItem="dsK-Rb-mz5" secondAttribute="baseline" id="k7q-ax-csW"/>
-                                <constraint firstItem="3Le-C6-vNr" firstAttribute="leading" secondItem="dsK-Rb-mz5" secondAttribute="trailing" constant="4" id="ktJ-Gd-Xtz"/>
-                                <constraint firstItem="dsK-Rb-mz5" firstAttribute="top" secondItem="C38-iH-EaR" secondAttribute="top" constant="2" id="qst-PD-E1d"/>
-                            </constraints>
-                        </customView>
-                        <customView translatesAutoresizingMaskIntoConstraints="NO" id="3Sa-mf-YQ3">
-                            <rect key="frame" x="0.0" y="0.0" width="360" height="24"/>
-                            <subviews>
-                                <textField focusRingType="none" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="FrB-U7-atb">
-                                    <rect key="frame" x="131" y="1" width="229" height="21"/>
-                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" drawsBackground="YES" id="DaP-6c-nfz">
-                                        <font key="font" metaFont="system"/>
-                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
-                                        <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
-                                    </textFieldCell>
-                                    <connections>
-                                        <binding destination="5Up-Ab-aAm" name="value" keyPath="values.assrtToken" id="Eht-9h-giW">
-                                            <dictionary key="options">
-                                                <bool key="NSContinuouslyUpdatesValue" value="YES"/>
-                                            </dictionary>
-                                        </binding>
-                                    </connections>
-                                </textField>
-                                <button horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="b7J-VO-Tgn">
-                                    <rect key="frame" x="-1" y="-3" width="25" height="26"/>
-                                    <buttonCell key="cell" type="help" bezelStyle="helpButton" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="bdd-dJ-9YE">
-                                        <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                        <font key="font" metaFont="system"/>
-                                    </buttonCell>
-                                    <constraints>
-                                        <constraint firstAttribute="height" constant="21" id="QAL-8S-ztf"/>
-                                    </constraints>
-                                    <connections>
-                                        <action selector="assrtHelpBtnAction:" target="-2" id="OJI-OW-phz"/>
-                                    </connections>
-                                </button>
-                                <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="bgS-sJ-Egb">
-                                    <rect key="frame" x="24" y="4" width="101" height="16"/>
-                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Assrt API token:" id="0aU-O1-R6G">
-                                        <font key="font" metaFont="system"/>
-                                        <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
-                                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                                    </textFieldCell>
-                                </textField>
-                            </subviews>
-                            <constraints>
-                                <constraint firstItem="bgS-sJ-Egb" firstAttribute="baseline" secondItem="b7J-VO-Tgn" secondAttribute="baseline" id="2j6-Di-U10"/>
-                                <constraint firstItem="b7J-VO-Tgn" firstAttribute="top" secondItem="3Sa-mf-YQ3" secondAttribute="top" constant="2" id="4rh-dd-teE"/>
-                                <constraint firstAttribute="bottom" secondItem="b7J-VO-Tgn" secondAttribute="bottom" constant="1" id="Kwf-Kp-zTf"/>
-                                <constraint firstAttribute="trailing" secondItem="FrB-U7-atb" secondAttribute="trailing" id="PmD-Sa-R9O"/>
-                                <constraint firstItem="bgS-sJ-Egb" firstAttribute="leading" secondItem="b7J-VO-Tgn" secondAttribute="trailing" constant="4" id="SYR-wJ-Bme"/>
-                                <constraint firstItem="b7J-VO-Tgn" firstAttribute="leading" secondItem="3Sa-mf-YQ3" secondAttribute="leading" constant="2" id="TBN-OP-EhO"/>
-                                <constraint firstItem="FrB-U7-atb" firstAttribute="baseline" secondItem="bgS-sJ-Egb" secondAttribute="baseline" id="j4R-si-5eg"/>
-                                <constraint firstItem="FrB-U7-atb" firstAttribute="leading" secondItem="bgS-sJ-Egb" secondAttribute="trailing" constant="8" id="qg9-It-iM3"/>
-                            </constraints>
-                        </customView>
-                    </subviews>
-                    <constraints>
-                        <constraint firstAttribute="trailing" secondItem="C38-iH-EaR" secondAttribute="trailing" id="26y-rW-VBd"/>
-                        <constraint firstItem="3Sa-mf-YQ3" firstAttribute="leading" secondItem="bSz-xd-6o2" secondAttribute="leading" id="CRP-mu-lTc"/>
-                        <constraint firstItem="S8h-wJ-vNN" firstAttribute="leading" secondItem="bSz-xd-6o2" secondAttribute="leading" id="CkY-kH-iYS"/>
-                        <constraint firstAttribute="trailing" secondItem="S8h-wJ-vNN" secondAttribute="trailing" id="N08-fG-KEN"/>
-                        <constraint firstItem="C38-iH-EaR" firstAttribute="leading" secondItem="bSz-xd-6o2" secondAttribute="leading" id="YKI-0Z-LBg"/>
-                        <constraint firstAttribute="trailing" secondItem="3Sa-mf-YQ3" secondAttribute="trailing" id="haG-ZU-buo"/>
-                    </constraints>
-                    <visibilityPriorities>
-                        <integer value="1000"/>
-                        <integer value="1000"/>
-                        <integer value="1000"/>
-                    </visibilityPriorities>
-                    <customSpacing>
-                        <real value="3.4028234663852886e+38"/>
-                        <real value="3.4028234663852886e+38"/>
-                        <real value="3.4028234663852886e+38"/>
-                    </customSpacing>
-                </stackView>
-                <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="pN7-Bv-pLw">
-                    <rect key="frame" x="118" y="41" width="248" height="18"/>
-                    <buttonCell key="cell" type="check" title="Search online subtitles automatically" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="C3p-uP-8u8">
-                        <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                        <font key="font" metaFont="system"/>
-                    </buttonCell>
-                    <connections>
-                        <binding destination="5Up-Ab-aAm" name="value" keyPath="values.autoSearchOnlineSub" id="oNc-hL-B8n"/>
-                    </connections>
-                </button>
-                <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" horizontalCompressionResistancePriority="251" translatesAutoresizingMaskIntoConstraints="NO" id="L5b-oD-GdQ">
-                    <rect key="frame" x="118" y="8" width="364" height="28"/>
-                    <textFieldCell key="cell" sendsActionOnEndEditing="YES" id="vYb-qH-XkH">
-                        <font key="font" metaFont="message" size="11"/>
-                        <string key="title">If enabled, ChengYingPlayer will automatically search online subtitles only for videos without loaded subtitles and longer than 20 minutes.</string>
-                        <color key="textColor" name="disabledControlTextColor" catalog="System" colorSpace="catalog"/>
-                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                    </textFieldCell>
-                </textField>
-            </subviews>
-            <constraints>
-                <constraint firstItem="p4E-J3-eff" firstAttribute="firstBaseline" secondItem="NlE-eQ-ofV" secondAttribute="firstBaseline" id="7HY-5k-7l7"/>
-                <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="pN7-Bv-pLw" secondAttribute="trailing" id="Abb-4w-jNq"/>
-                <constraint firstAttribute="bottom" secondItem="L5b-oD-GdQ" secondAttribute="bottom" constant="8" id="HlH-Cw-O9F"/>
-                <constraint firstItem="NlE-eQ-ofV" firstAttribute="trailing" relation="lessThanOrEqual" secondItem="y44-Ej-vIC" secondAttribute="leading" constant="120" id="Ira-dr-djv"/>
-                <constraint firstItem="bSz-xd-6o2" firstAttribute="leading" secondItem="pN7-Bv-pLw" secondAttribute="leading" id="JVJ-O0-Qce"/>
-                <constraint firstItem="L5b-oD-GdQ" firstAttribute="top" secondItem="pN7-Bv-pLw" secondAttribute="bottom" constant="6" id="SfZ-tS-w1E"/>
-                <constraint firstItem="pN7-Bv-pLw" firstAttribute="top" secondItem="bSz-xd-6o2" secondAttribute="bottom" constant="16" id="Uls-Tr-J0I"/>
-                <constraint firstItem="bSz-xd-6o2" firstAttribute="leading" secondItem="L5b-oD-GdQ" secondAttribute="leading" id="VPb-8f-iBh"/>
-                <constraint firstItem="NlE-eQ-ofV" firstAttribute="leading" secondItem="y44-Ej-vIC" secondAttribute="leading" id="gj9-Zi-nys"/>
-                <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="L5b-oD-GdQ" secondAttribute="trailing" id="hab-Vk-i9Q"/>
-                <constraint firstItem="bSz-xd-6o2" firstAttribute="leading" secondItem="y44-Ej-vIC" secondAttribute="leading" constant="120" id="ljC-3f-gyR"/>
-                <constraint firstItem="NlE-eQ-ofV" firstAttribute="top" secondItem="y44-Ej-vIC" secondAttribute="top" constant="8" id="obM-hS-TjF"/>
-                <constraint firstAttribute="trailing" secondItem="bSz-xd-6o2" secondAttribute="trailing" id="rDC-XB-xxo"/>
-            </constraints>
-            <point key="canvasLocation" x="-244" y="247"/>
         </customView>
         <customView translatesAutoresizingMaskIntoConstraints="NO" id="ffZ-rE-7Zz" userLabel="Prefs &gt; Subtitle &gt; Text Subtitles">
             <rect key="frame" x="0.0" y="0.0" width="480" height="319"/>
@@ -1323,7 +1087,7 @@
                 </textField>
                 <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" horizontalCompressionResistancePriority="251" translatesAutoresizingMaskIntoConstraints="NO" id="6zR-BO-yhX">
                     <rect key="frame" x="118" y="32" width="364" height="28"/>
-                    <textFieldCell key="cell" controlSize="small" sendsActionOnEndEditing="YES" title="This option will be stored as ISO 639-2 language code and will works for both mpv and opensubtitles." id="Z2M-dh-eq1">
+                    <textFieldCell key="cell" controlSize="small" sendsActionOnEndEditing="YES" title="Subtitle language preference, stored as ISO 639-2 language codes." id="Z2M-dh-eq1">
                         <font key="font" metaFont="message" size="11"/>
                         <color key="textColor" name="disabledControlTextColor" catalog="System" colorSpace="catalog"/>
                         <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>

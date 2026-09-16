@@ -89,43 +89,14 @@
                                             <constraint firstItem="otz-1h-7O6" firstAttribute="leading" secondItem="ZGi-N7-Zv2" secondAttribute="leading" constant="12" id="zYz-oQ-i9N"/>
                                         </constraints>
                                     </customView>
-                                    <customView identifier="openURL" translatesAutoresizingMaskIntoConstraints="NO" id="hmC-XZ-bFe" customClass="InitialWindowViewActionButton" customModule="IINA" customModuleProvider="target">
-                                        <rect key="frame" x="204" y="311" width="392" height="28"/>
-                                        <subviews>
-                                            <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="6nX-pp-BEb">
-                                                <rect key="frame" x="10" y="6" width="76" height="16"/>
-                                                <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" alignment="left" title="Open URL…" id="FKG-Tz-TCV">
-                                                    <font key="font" metaFont="system"/>
-                                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
-                                                    <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                                                </textFieldCell>
-                                            </textField>
-                                            <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="mAL-UM-I0A">
-                                                <rect key="frame" x="347" y="6" width="39" height="16"/>
-                                                <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" alignment="right" title="⇧⌘O" id="kBV-5X-8Bp">
-                                                    <font key="font" metaFont="system"/>
-                                                    <color key="textColor" name="secondaryLabelColor" catalog="System" colorSpace="catalog"/>
-                                                    <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                                                </textFieldCell>
-                                            </textField>
-                                        </subviews>
-                                        <constraints>
-                                            <constraint firstItem="6nX-pp-BEb" firstAttribute="centerY" secondItem="hmC-XZ-bFe" secondAttribute="centerY" id="JIj-aW-woH"/>
-                                            <constraint firstItem="mAL-UM-I0A" firstAttribute="leading" relation="greaterThanOrEqual" secondItem="6nX-pp-BEb" secondAttribute="trailing" constant="12" id="JpC-gf-SIa"/>
-                                            <constraint firstItem="mAL-UM-I0A" firstAttribute="centerY" secondItem="hmC-XZ-bFe" secondAttribute="centerY" id="Wdo-eQ-vIt"/>
-                                            <constraint firstAttribute="trailing" secondItem="mAL-UM-I0A" secondAttribute="trailing" constant="8" id="iqd-ZU-wCk"/>
-                                            <constraint firstAttribute="height" constant="28" id="kbB-gE-oHT"/>
-                                            <constraint firstItem="6nX-pp-BEb" firstAttribute="leading" secondItem="hmC-XZ-bFe" secondAttribute="leading" constant="12" id="nxY-AK-CRT"/>
-                                        </constraints>
-                                    </customView>
                                     <scrollView borderType="none" autohidesScrollers="YES" horizontalLineScroll="30" horizontalPageScroll="10" verticalLineScroll="30" verticalPageScroll="10" hasHorizontalScroller="NO" usesPredominantAxisScrolling="NO" translatesAutoresizingMaskIntoConstraints="NO" id="igO-NN-NsX">
-                                        <rect key="frame" x="204" y="24" width="392" height="245"/>
+                                        <rect key="frame" x="204" y="24" width="392" height="273"/>
                                         <clipView key="contentView" drawsBackground="NO" id="fmt-32-Icz">
-                                            <rect key="frame" x="0.0" y="0.0" width="392" height="245"/>
+                                            <rect key="frame" x="0.0" y="0.0" width="392" height="273"/>
                                             <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                             <subviews>
                                                 <tableView verticalHuggingPriority="750" allowsExpansionToolTips="YES" columnAutoresizingStyle="lastColumnOnly" tableStyle="fullWidth" columnReordering="NO" columnResizing="NO" multipleSelection="NO" autosaveColumns="NO" rowHeight="28" rowSizeStyle="automatic" viewBased="YES" id="VeK-rB-yjt">
-                                                    <rect key="frame" x="0.0" y="0.0" width="392" height="245"/>
+                                                    <rect key="frame" x="0.0" y="0.0" width="392" height="273"/>
                                                     <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                                     <size key="intercellSpacing" width="3" height="2"/>
                                                     <color key="backgroundColor" white="1" alpha="0.0" colorSpace="deviceWhite"/>
@@ -238,7 +209,7 @@
                                         </connections>
                                     </customView>
                                     <customView translatesAutoresizingMaskIntoConstraints="NO" id="XbN-3R-9zz" customClass="InitialWindowViewActionButton" customModule="IINA" customModuleProvider="target">
-                                        <rect key="frame" x="204" y="277" width="392" height="28"/>
+                                        <rect key="frame" x="204" y="305" width="392" height="28"/>
                                         <subviews>
                                             <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Rqr-FQ-Pb0">
                                                 <rect key="frame" x="30" y="7" width="50" height="15"/>
@@ -292,18 +263,15 @@
                                     <constraint firstItem="8hV-gP-tZA" firstAttribute="top" secondItem="nrn-G9-P2A" secondAttribute="bottom" constant="20" id="1Oa-0T-iZV"/>
                                     <constraint firstItem="nrn-G9-P2A" firstAttribute="leading" secondItem="qTo-HU-gie" secondAttribute="leading" constant="24" id="5PR-Tb-8T7"/>
                                     <constraint firstAttribute="trailing" secondItem="ZGi-N7-Zv2" secondAttribute="trailing" constant="44" id="9ed-4L-5h2"/>
-                                    <constraint firstAttribute="trailing" secondItem="hmC-XZ-bFe" secondAttribute="trailing" constant="44" id="B9z-QH-RTT"/>
-                                    <constraint firstItem="hmC-XZ-bFe" firstAttribute="leading" secondItem="ZGi-N7-Zv2" secondAttribute="leading" id="Hpy-gh-hYn"/>
-                                    <constraint firstItem="XbN-3R-9zz" firstAttribute="top" secondItem="hmC-XZ-bFe" secondAttribute="bottom" constant="6" id="Joj-4o-xDx"/>
+                                    <constraint firstItem="XbN-3R-9zz" firstAttribute="top" secondItem="ZGi-N7-Zv2" secondAttribute="bottom" constant="6" id="Joj-4o-xDx"/>
                                     <constraint firstAttribute="trailing" secondItem="XbN-3R-9zz" secondAttribute="trailing" constant="44" id="KnP-wf-zIN"/>
                                     <constraint firstItem="7SF-fn-3LF" firstAttribute="centerX" secondItem="0eM-hv-Q2Z" secondAttribute="centerX" id="MbE-hX-CPC"/>
                                     <constraint firstItem="0eM-hv-Q2Z" firstAttribute="top" secondItem="8hV-gP-tZA" secondAttribute="bottom" constant="4" id="aNF-5h-ueC"/>
                                     <constraint firstItem="nrn-G9-P2A" firstAttribute="top" secondItem="qTo-HU-gie" secondAttribute="top" constant="32" id="aPX-ij-BCA"/>
-                                    <constraint firstItem="XbN-3R-9zz" firstAttribute="leading" secondItem="hmC-XZ-bFe" secondAttribute="leading" id="aik-OZ-H4h"/>
+                                    <constraint firstItem="XbN-3R-9zz" firstAttribute="leading" secondItem="ZGi-N7-Zv2" secondAttribute="leading" id="aik-OZ-H4h"/>
                                     <constraint firstItem="ZGi-N7-Zv2" firstAttribute="top" secondItem="qTo-HU-gie" secondAttribute="top" constant="32" id="eTE-Jt-iHF"/>
-                                    <constraint firstItem="igO-NN-NsX" firstAttribute="top" secondItem="hmC-XZ-bFe" secondAttribute="bottom" constant="42" id="fUG-aR-h0p"/>
-                                    <constraint firstItem="hmC-XZ-bFe" firstAttribute="top" secondItem="ZGi-N7-Zv2" secondAttribute="bottom" id="k4E-iS-gKl"/>
-                                    <constraint firstItem="igO-NN-NsX" firstAttribute="leading" secondItem="hmC-XZ-bFe" secondAttribute="leading" id="lBk-KQ-3rb"/>
+                                    <constraint firstItem="igO-NN-NsX" firstAttribute="top" secondItem="ZGi-N7-Zv2" secondAttribute="bottom" constant="42" id="fUG-aR-h0p"/>
+                                    <constraint firstItem="igO-NN-NsX" firstAttribute="leading" secondItem="ZGi-N7-Zv2" secondAttribute="leading" id="lBk-KQ-3rb"/>
                                     <constraint firstItem="7SF-fn-3LF" firstAttribute="top" secondItem="0eM-hv-Q2Z" secondAttribute="bottom" constant="15" id="le2-KN-An9"/>
                                     <constraint firstItem="8hV-gP-tZA" firstAttribute="centerX" secondItem="nrn-G9-P2A" secondAttribute="centerX" id="nan-tF-2fo"/>
                                     <constraint firstItem="0eM-hv-Q2Z" firstAttribute="centerX" secondItem="nrn-G9-P2A" secondAttribute="centerX" id="nyF-1L-0hj"/>

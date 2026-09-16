@@ -6,6 +6,8 @@
 
 一款面向 macOS 的中文本地媒体播放器，兼顾日常播放与轻量视频处理。视频处理在本机完成，不包含 AI 超分、AI 模型下载或云端转码。
 
+界面只保留本地播放与视频处理需要的入口：不提供网络地址播放、在线字幕搜索、插件、浏览器扩展和开发调试菜单。字幕加载、播放列表、章节、画中画、播放历史和快捷键设置仍然保留；旧版本保存的插件工具栏按钮会自动隐藏，旧的在线字幕自动搜索和高级 mpv 配置不再执行。
+
 ## 当前发布方式
 
 当前 GitHub Releases **仅发布源码，不提供 App、DMG 或 ZIP 安装包**。CI 会在临时环境中构建并测试应用，但不会上传或发布该应用二进制。
@@ -53,7 +55,7 @@ Release 中的 `ChengYingPlayer-<tag>-Release-Source.tar.gz` 是便于审核和�
 
 - 上述视频处理均在 Mac 本地运行，媒体文件不会上传到项目维护者的服务器。
 - 项目不收集视频内容，也不内置 AI 超分模型或模型下载器。
-- 检查更新、在线字幕、网络媒体和插件等可选联网能力只有在用户主动使用时才会访问相应第三方服务。
+- 已移除网络地址打开、在线字幕搜索和插件入口，主 App 不再附带浏览器扩展、插件安装器或网络视频下载器。这是功能精简，不是操作系统级的断网隔离。
 - 当前本仓库不发布可安装二进制；如需使用，请审查并自行从源码构建。
 
 ## 系统要求
@@ -67,7 +69,7 @@ Release 中的 `ChengYingPlayer-<tag>-Release-Source.tar.gz` 是便于审核和�
 克隆本仓库后，在项目根目录执行：
 
 ```console
-./other/download_libs.sh --skip-plugins
+./other/download_libs.sh
 brew install cmake pkg-config
 python3 -m pip install -r Tools/VideoToolsHelper/requirements-build.txt
 ./other/build_media_binaries.sh
@@ -78,8 +80,8 @@ open iina.xcodeproj
 `download_libs.sh` 默认下载 universal 动态库，也可以只下载指定架构：
 
 ```console
-./other/download_libs.sh --arch arm64 --skip-plugins
-./other/download_libs.sh --arch x86_64 --skip-plugins
+./other/download_libs.sh --arch arm64
+./other/download_libs.sh --arch x86_64
 ```
 
 媒体工具构建脚本会下载并校验固定版本的 FFmpeg、x264 和 x265 源码，再由源码生成 App 内置的 `ffmpeg`、`ffprobe`。脚本默认将 Apple Silicon 的最低系统版本固定为 macOS 12.0、Intel 固定为 macOS 10.15；可以通过 `MACOSX_DEPLOYMENT_TARGET` 显式提高目标版本，但不能低于对应架构的默认值，构建结束后还会检查实际 Mach-O 最低版本。helper 使用固定版本的 CPython 与 PyInstaller 构建，因此最终用户无需安装 Homebrew、Python 或 FFmpeg。Intel 构建还需要 `brew install nasm`。随后在 Xcode 中选择应用 target 并构建。用于公开分发的构建还需要配置自己的 Developer ID、签名、notarization 和更新渠道；不得继续使用上游项目的签名身份或更新地址。

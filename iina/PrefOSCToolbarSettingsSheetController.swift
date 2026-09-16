@@ -34,7 +34,7 @@ class PrefOSCToolbarSettingsSheetController: NSWindowController, PrefOSCToolbarC
     currentItemsView.currentItemsViewDelegate = self
     currentItemsView.initItems(fromItems: PrefUIViewController.oscToolbarButtons)
 
-    let allButtonTypes: [Preference.ToolBarButton] = [.settings, .playlist, .pip, .fullScreen, .musicMode, .subTrack, .screenshot, .plugins]
+    let allButtonTypes: [Preference.ToolBarButton] = [.settings, .playlist, .pip, .fullScreen, .musicMode, .subTrack, .screenshot]
     for type in allButtonTypes {
       let itemViewController = PrefOSCToolbarDraggingItemViewController(buttonType: type)
       itemViewController.availableItemsView = availableItemsView
@@ -124,9 +124,9 @@ class PrefOSCToolbarCurrentItemsView: NSStackView, NSDraggingSource {
   private var dragDestIndex: Int = 0
 
   func initItems(fromItems items: [Preference.ToolBarButton]) {
-    self.items = items
+    self.items = items.filter(\.isAvailable)
     views.forEach { self.removeView($0) }
-    for buttonType in items {
+    for buttonType in self.items {
       let button = PrefOSCToolbarCurrentItem(buttonType: buttonType, superView: self)
       self.addView(button, in: .trailing)
     }
@@ -183,6 +183,7 @@ class PrefOSCToolbarCurrentItemsView: NSStackView, NSDraggingSource {
       // don't accept existing items, don't accept new items when already have 5 icons
       guard let rawButtonType = sender.draggingPasteboard.propertyList(forType: .iinaOSCAvailableToolbarButtonType) as? Int,
         let buttonType = Preference.ToolBarButton(rawValue: rawButtonType),
+        buttonType.isAvailable,
         !items.contains(buttonType),
         items.count < 5 else {
         return []
@@ -208,6 +209,7 @@ class PrefOSCToolbarCurrentItemsView: NSStackView, NSDraggingSource {
       // don't accept existing items, don't accept new items when already have 5 icons
       guard let rawButtonType = sender.draggingPasteboard.propertyList(forType: .iinaOSCAvailableToolbarButtonType) as? Int,
         let buttonType = Preference.ToolBarButton(rawValue: rawButtonType),
+        buttonType.isAvailable,
         !items.contains(buttonType),
         items.count < 5 else {
           return []
@@ -257,6 +259,8 @@ class PrefOSCToolbarCurrentItemsView: NSStackView, NSDraggingSource {
       // dragging available item in; don't accept existing items
       if let rawButtonType = sender.draggingPasteboard.propertyList(forType: .iinaOSCAvailableToolbarButtonType) as? Int,
           let buttonType = Preference.ToolBarButton(rawValue: rawButtonType),
+          buttonType.isAvailable,
+          !items.contains(buttonType),
           items.count < 5,
           dragDestIndex >= 0,
           dragDestIndex <= views.count {

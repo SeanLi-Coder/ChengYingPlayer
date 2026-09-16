@@ -736,6 +736,7 @@ class MainWindowController: PlayerWindowController {
   }
 
   private func setupOSCToolbarButtons(_ buttons: [Preference.ToolBarButton]) {
+    let buttons = buttons.filter(\.isAvailable)
     fragToolbarView.views.forEach { fragToolbarView.removeView($0) }
     for buttonType in buttons {
       let button = NSButton()
@@ -3226,6 +3227,7 @@ class MainWindowController: PlayerWindowController {
   }
 
   func showPluginSidebar(tab: String?, force: Bool = false, hideIfAlreadyShown: Bool = true) {
+    guard IINA_ENABLE_PLUGIN_SYSTEM else { return }
     if !force && sidebarAnimationState == .willShow || sidebarAnimationState == .willHide {
       return  // do not interrupt other actions while it is animating
     }

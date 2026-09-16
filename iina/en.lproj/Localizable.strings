@@ -326,6 +326,7 @@
 "alert.unsupported_video" = "Unsupported external video file.";
 "alert.unsupported_sub" = "Unsupported external subtitle.";
 "alert.unsupported_url" = "Unsupported URL.";
+"alert.local_media_only" = "ChengYing opens local media files. Download the video first, then open the saved file.";
 "alert.wrong_url_format" = "Wrong URL format.";
 
 "alert.error_open" = "Cannot open file or stream!";

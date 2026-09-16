@@ -8,10 +8,12 @@
 
 extension MPVController {
   func playlistInsert(_ path: String, index: Int) {
+    guard Utility.isLocalMediaPath(path) else { return }
     command(.loadfile, args: [path, "insert-at", index.description], level: .verbose)
   }
 
   func playlistAppend(_ path: String) {
+    guard Utility.isLocalMediaPath(path) else { return }
     command(.loadfile, args: [path, "append"], level: .verbose)
   }
 

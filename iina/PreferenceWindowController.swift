@@ -202,23 +202,12 @@ class PreferenceWindowController: NSWindowController {
       navTableSearchFieldSpacingConstraint.constant = 10.0
     }
 
-    var viewMap = [
-      ["general", "PrefGeneralViewController"],
-      ["ui", "PrefUIViewController"],
-      ["subtitle", "PrefSubViewController"],
-      ["network", "PrefNetworkViewController"],
-      ["control", "PrefControlViewController"],
-      ["keybindings", "PrefKeyBindingViewController"],
-      ["video_audio", "PrefCodecViewController"],
-      // ["plugin", "PrefPluginViewController"],
-      ["advanced", "PrefAdvancedViewController"],
-      ["utilities", "PrefUtilsViewController"],
-    ]
-    if IINA_ENABLE_PLUGIN_SYSTEM {
-      viewMap.insert(["plugins", "PrefPluginViewController"], at: 8)
-    }
+    // Index only the preference pages exposed by this build.
     let labelDict = [String: [String: [String]]](
-      uniqueKeysWithValues: viewMap.map { (NSLocalizedString("preference.\($0[0])", comment: ""), self.getLabelDict(inNibNamed: $0[1])) })
+      uniqueKeysWithValues: viewControllers.compactMap { controller in
+        guard let nibName = controller.nibName else { return nil }
+        return (controller.preferenceTabTitle, self.getLabelDict(inNibNamed: nibName))
+      })
 
 #if DEBUG
     // As the following call emits a lot of messages that are only needed when debugging the NIB
@@ -323,9 +312,9 @@ class PreferenceWindowController: NSWindowController {
     return vc
   }
 
-  private func getLabelDict(inNibNamed name: String) -> [String: [String]] {
+  private func getLabelDict(inNibNamed name: NSNib.Name) -> [String: [String]] {
     var objects: NSArray? = NSArray()
-    Bundle.main.loadNibNamed(NSNib.Name(name), owner: nil, topLevelObjects: &objects)
+    Bundle.main.loadNibNamed(name, owner: nil, topLevelObjects: &objects)
     if let topObjects = objects as? [Any] {
       // we assume this nib is a preference view controller, so each section must be a top-level `NSView`.
       return [String: [String]](uniqueKeysWithValues: topObjects.compactMap { view -> (title: String, labels: [String])? in
@@ -417,9 +406,9 @@ class PreferenceWindowController: NSWindowController {
   func performAction(_ action: Action) {
     switch action {
     case .installPlugin(url: let url):
-      let vc = openPreferenceView(withNibName: "PrefPluginViewController") as! PrefPluginViewController
+      guard IINA_ENABLE_PLUGIN_SYSTEM,
+            let vc = openPreferenceView(withNibName: "PrefPluginViewController") as? PrefPluginViewController else { return }
       vc.installPluginAction(localPackageURL: url)
-      // vc.perform(#selector(vc.installPluginAction(localPackageURL:)), with: url, afterDelay: 0.25)
     }
   }
 

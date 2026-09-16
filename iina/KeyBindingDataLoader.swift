@@ -55,14 +55,10 @@ class KeyBindingDataLoader {
     KBI("chapter-panel", type: .iinaCmd),
     KBI.separator(),
     KBI("open-file", type: .iinaCmd),
-    KBI("open-url", type: .iinaCmd),
     KBI("save-playlist", type: .iinaCmd),
     KBI("show-current-file-in-finder", type: .iinaCmd),
     KBI("delete-current-file", type: .iinaCmd),
     KBI("delete-current-file-hard", type: .iinaCmd),
-    KBI.separator(),
-    KBI("find-online-subs", type: .iinaCmd),
-    KBI("save-downloaded-sub", type: .iinaCmd),
     KBI.separator(),
     KBI("write-watch-later-config"),
     KBI("stop"),
@@ -185,4 +181,3 @@ class KeyBindingDataLoader {
   }
 
 }
-

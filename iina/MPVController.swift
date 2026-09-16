@@ -200,14 +200,6 @@ class MPVController: NSObject {
   /// - ToDo: **REMOVE** workaround for FFmpeg not supporting AV1 hardware decoding when upgrading to a FFmpeg version
   ///         that supports it.
   private func adjustCodecWhiteList() {
-    // Allow the user to override this behavior.
-    guard !userOptionsContains(MPVOption.Video.hwdecCodecs) else {
-      log("""
-        Option \(MPVOption.Video.hwdecCodecs) has been set in advanced settings, \
-        will not adjust white list
-        """)
-      return
-    }
     guard let whitelist = getString(MPVOption.Video.hwdecCodecs) else {
       // Internal error. Make certain this method is called after mpv_initialize which sets the
       // default value.
@@ -286,14 +278,6 @@ class MPVController: NSObject {
       log("Running on Apple Silicon, not applying FFmpeg 9599 workaround")
       return
     }
-    // Allow the user to override this behavior.
-    guard !userOptionsContains(MPVOption.Video.hwdecCodecs) else {
-      log("""
-        Option \(MPVOption.Video.hwdecCodecs) has been set in advanced settings, \
-        not applying FFmpeg 9599 workaround
-        """)
-      return
-    }
     guard let whitelist = getString(MPVOption.Video.hwdecCodecs) else {
       // Internal error. Make certain this method is called after mpv_initialize which sets the
       // default value.
@@ -332,15 +316,8 @@ class MPVController: NSObject {
                     level: .verbose)
     }
 
-    // - Advanced
-
-    // disable internal OSD
-    let useMpvOsd = Preference.bool(for: .enableAdvancedSettings) && Preference.bool(for: .useMpvOsd)
-    if !useMpvOsd {
-      chkErr(setOptionString(MPVOption.OSD.osdLevel, "0", level: .verbose))
-    } else {
-      player.displayOSD = false
-    }
+    // Use the player's own on-screen controls.
+    chkErr(setOptionString(MPVOption.OSD.osdLevel, "0", level: .verbose))
 
     // log
     if Logger.enabled {
@@ -538,28 +515,8 @@ class MPVController: NSObject {
     }
     setUserOption(PK.secPrefech, type: .int, forName: MPVOption.Cache.cacheSecs, verboseIfDefault: true)
 
-    setUserOption(PK.userAgent, type: .other, forName: MPVOption.Network.userAgent,
-                  verboseIfDefault: true) { key in
-      let ua = Preference.string(for: key)!
-      return ua.isEmpty ? nil : ua
-    }
-
-    setUserOption(PK.transportRTSPThrough, type: .other, forName: MPVOption.Network.rtspTransport,
-                  verboseIfDefault: true) { key in
-      let v: Preference.RTSPTransportation = Preference.enum(for: .transportRTSPThrough)
-      return v.string
-    }
-
-    setUserOption(PK.ytdlEnabled, type: .other, forName: MPVOption.ProgramBehavior.ytdl,
-                  verboseIfDefault: true) { key in
-      let v = Preference.bool(for: .ytdlEnabled)
-      if JavascriptPlugin.hasYTDL {
-        return "no"
-      }
-      return v ? "yes" : "no"
-    }
-    setUserOption(PK.ytdlRawOptions, type: .string, forName: MPVOption.ProgramBehavior.ytdlRawOptions,
-                  verboseIfDefault: true)
+    // The local player does not load the network-video downloader.
+    chkErr(setOptionString(MPVOption.ProgramBehavior.ytdl, "no", level: .verbose))
     chkErr(setOptionString(MPVOption.ProgramBehavior.resetOnNextFile,
             "\(MPVOption.PlaybackControl.abLoopA),\(MPVOption.PlaybackControl.abLoopB)," +
             "\(MPVOption.PlaybackControl.abLoopCount),\(MPVOption.Video.videoRotate)", level: .verbose))
@@ -568,39 +525,6 @@ class MPVController: NSObject {
                   verboseIfDefault: true) { key in
       Preference.bool(for: key) ? "avfoundation" : "coreaudio"
     }
-
-    // Set user defined conf dir.
-    if Preference.bool(for: .enableAdvancedSettings),
-       Preference.bool(for: .useUserDefinedConfDir),
-       var userConfDir = Preference.string(for: .userDefinedConfDir) {
-      userConfDir = NSString(string: userConfDir).standardizingPath
-      setOptionString("config", "yes")
-      let status = setOptionString(MPVOption.ProgramBehavior.configDir, userConfDir)
-      if status < 0 {
-        Utility.showAlert("extra_option.config_folder", arguments: [userConfDir], disableMenus: true)
-      }
-    }
-
-    // Set user defined options.
-    if Preference.bool(for: .enableAdvancedSettings) {
-      if let userOptions = Preference.value(for: .userOptions) as? [[String]] {
-        if !userOptions.isEmpty {
-          log("Setting \(userOptions.count) user configured mpv option values")
-          userOptions.forEach { op in
-            let status = setOptionString(op[0], op[1])
-            if status < 0 {
-              Utility.showAlert("extra_option.error", arguments:
-                                  [op[0], op[1], status], disableMenus: true)
-            }
-          }
-          log("Set \(userOptions.count) user configured mpv option values")
-        }
-      } else {
-        Utility.showAlert("extra_option.cannot_read", disableMenus: true)
-      }
-    }
-
-    // Load external scripts
 
     // Load keybindings. This is still required for mpv to handle media keys or apple remote.
     let userConfigs = PrefKeyBindingViewController.userConfigs
@@ -634,9 +558,7 @@ class MPVController: NSObject {
 
     // The option watch-later-options is not available until after the mpv instance is initialized.
     // Workaround for mpv issue #14417, watch-later-options missing secondary subtitle delay and sid.
-    // Allow the user to override this workaround by setting this mpv option in advanced settings.
-    if !userOptionsContains(MPVOption.WatchLater.watchLaterOptions),
-       var watchLaterOptions = getString(MPVOption.WatchLater.watchLaterOptions) {
+    if var watchLaterOptions = getString(MPVOption.WatchLater.watchLaterOptions) {
 
       // In mpv 0.38.0 the default value for the watch-later-options property contains the options
       // sid and sub-delay, but not the corresponding options for the secondary subtitle. This
@@ -1832,14 +1754,6 @@ class MPVController: NSObject {
     return "\(components.joined(separator: "/"))/\(alpha)"
   }
 
-  /// Searches the list of user configured `mpv` options and returns `true` if the given option is present.
-  /// - Parameter option: Option to look for.
-  /// - Returns: `true` if the `mpv` option is found, `false` otherwise.
-  private func userOptionsContains(_ option: String) -> Bool {
-    guard Preference.bool(for: .enableAdvancedSettings),
-          let userOptions = Preference.value(for: .userOptions) as? [[String]] else { return false }
-    return userOptions.contains { $0[0] == option }
-  }
 }
 
 fileprivate func mpvGetOpenGLFunc(_ ctx: UnsafeMutableRawPointer?, _ name: UnsafePointer<Int8>?) -> UnsafeMutableRawPointer? {

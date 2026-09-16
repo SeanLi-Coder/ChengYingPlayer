@@ -156,7 +156,6 @@
 		49542978216C34950058F680 /* SafariExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49542977216C34950058F680 /* SafariExtensionHandler.swift */; };
 		49542980216C34950058F680 /* open-in-iina.js in Resources */ = {isa = PBXBuildFile; fileRef = 4954297F216C34950058F680 /* open-in-iina.js */; };
 		49542982216C34950058F680 /* ToolbarItemIcon.pdf in Resources */ = {isa = PBXBuildFile; fileRef = 49542981216C34950058F680 /* ToolbarItemIcon.pdf */; };
-		49542986216C34950058F680 /* OpenInIINA.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 49542973216C34950058F680 /* OpenInIINA.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		496B19921E2968530035AF10 /* PIP.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 496B19911E2968530035AF10 /* PIP.framework */; };
 		51096C0B2CD88BEC00702C31 /* MPVOptionDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51096C0A2CD88BEC00702C31 /* MPVOptionDefaults.swift */; };
 		5111B18B2C8BCEAC00DEC0AC /* TouchBarSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5111B18A2C8BCEAC00DEC0AC /* TouchBarSettings.swift */; };
@@ -168,7 +167,6 @@
 		5125117D2E89B2ED00CDAE9F /* Display.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5125117C2E89B2ED00CDAE9F /* Display.swift */; };
 		512B8FDD2BC2376E00AF41BF /* OutlineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 512B8FDC2BC2376E00AF41BF /* OutlineView.swift */; };
 		513A4FFA29B53F8100A8EA7D /* Atomic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 513A4FF929B53F8100A8EA7D /* Atomic.swift */; };
-		515B5E5A2A579903001FCD49 /* iina-plugin in Copy Executables */ = {isa = PBXBuildFile; fileRef = E38558872A484A2D0083772D /* iina-plugin */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		518376DD2C23DD2300574F00 /* libgcc_s.1.1.dylib in Copy Dylibs */ = {isa = PBXBuildFile; fileRef = 518376D92C23DB1400574F00 /* libgcc_s.1.1.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		518376DE2C23DD2300574F00 /* libstdc++.6.dylib in Copy Dylibs */ = {isa = PBXBuildFile; fileRef = 518376DB2C23DB2F00574F00 /* libstdc++.6.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		51854CDA2A1C489300C40B78 /* FFmpegLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51854CD92A1C489300C40B78 /* FFmpegLogger.swift */; };
@@ -233,7 +231,6 @@
 		845FB0C71D39462E00C011E0 /* ControlBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 845FB0C61D39462E00C011E0 /* ControlBarView.swift */; };
 		8460FBA91D6497490081841B /* PlaylistViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8460FBA71D6497490081841B /* PlaylistViewController.swift */; };
 		846121BD1F35FCA500ABB39C /* DraggingDetect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 846121BC1F35FCA500ABB39C /* DraggingDetect.swift */; };
-		8461BA681E4237C7008BB852 /* youtube-dl in Copy Executables */ = {isa = PBXBuildFile; fileRef = 8461BA671E4237C2008BB852 /* youtube-dl */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		8461C52E1D45FFF6006E91FF /* PlaySliderCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8461C52D1D45FFF6006E91FF /* PlaySliderCell.swift */; };
 		8461C5301D462488006E91FF /* VideoTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8461C52F1D462488006E91FF /* VideoTime.swift */; };
 		846352581EEEE11A0043F0CC /* ThumbnailPeekView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 846352571EEEE11A0043F0CC /* ThumbnailPeekView.swift */; };
@@ -410,13 +407,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		49542984216C34950058F680 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 84EB1ECE1D2F51D3004FA5A1 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 49542972216C34950058F680;
-			remoteInfo = OpenInIINA;
-		};
 		497747ED20D287C1004B243A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 84EB1ECE1D2F51D3004FA5A1 /* Project object */;
@@ -424,27 +414,9 @@
 			remoteGlobalIDString = E3DE8DC91FD8166A0021921C;
 			remoteInfo = "iina-cli";
 		};
-		5180D7782C17DB0D00CC9C1C /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 84EB1ECE1D2F51D3004FA5A1 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = E38558862A484A2D0083772D;
-			remoteInfo = "iina-plugin";
-		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		4954298A216C34960058F680 /* Embed App Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				49542986216C34950058F680 /* OpenInIINA.appex in Embed App Extensions */,
-			);
-			name = "Embed App Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		8461BA631E423423008BB852 /* Copy Executables */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 12;
@@ -452,8 +424,6 @@
 			dstSubfolderSpec = 6;
 			files = (
 				E3DE8DD31FD848BA0021921C /* chengying-cli in Copy Executables */,
-				515B5E5A2A579903001FCD49 /* iina-plugin in Copy Executables */,
-				8461BA681E4237C7008BB852 /* youtube-dl in Copy Executables */,
 			);
 			name = "Copy Executables";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1456,7 +1426,6 @@
 		845FB0C61D39462E00C011E0 /* ControlBarView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ControlBarView.swift; sourceTree = "<group>"; };
 		8460FBA71D6497490081841B /* PlaylistViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PlaylistViewController.swift; sourceTree = "<group>"; };
 		846121BC1F35FCA500ABB39C /* DraggingDetect.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraggingDetect.swift; sourceTree = "<group>"; };
-		8461BA671E4237C2008BB852 /* youtube-dl */ = {isa = PBXFileReference; lastKnownFileType = text; name = "youtube-dl"; path = "deps/executable/youtube-dl"; sourceTree = SOURCE_ROOT; };
 		8461C52D1D45FFF6006E91FF /* PlaySliderCell.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PlaySliderCell.swift; sourceTree = "<group>"; };
 		8461C52F1D462488006E91FF /* VideoTime.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoTime.swift; sourceTree = "<group>"; };
 		846352571EEEE11A0043F0CC /* ThumbnailPeekView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ThumbnailPeekView.swift; sourceTree = "<group>"; };
@@ -2293,7 +2262,6 @@
 		8461BA641E42344D008BB852 /* Executables */ = {
 			isa = PBXGroup;
 			children = (
-				8461BA671E4237C2008BB852 /* youtube-dl */,
 				D4C701102F6A000100000001 /* ffmpeg */,
 				D4C701112F6A000100000002 /* ffprobe */,
 				D4C701122F6A000100000003 /* chengying-video-tools-helper */,
@@ -2872,16 +2840,12 @@
 				84E745DA1DFDE9C600588DED /* Copy Configs */,
 				D4C701202F6A000100000001 /* Copy Video Tools */,
 				8461BA631E423423008BB852 /* Copy Executables */,
-				E3E720A12CD7073D003470BF /* Copy Default Plugins */,
-				4954298A216C34960058F680 /* Embed App Extensions */,
 				51728768291B6F30009E6EC1 /* Write Info.h */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				497747EE20D287C1004B243A /* PBXTargetDependency */,
-				5180D7792C17DB0D00CC9C1C /* PBXTargetDependency */,
-				49542985216C34950058F680 /* PBXTargetDependency */,
 			);
 			name = iina;
 			packageProductDependencies = (
@@ -3124,25 +3088,6 @@
 			shellPath = /bin/bash;
 			shellScript = "echo \"Copy symlinks:\"\n\nfor file in \"${SRCROOT}/deps/lib/\"*.dylib; do\n    if [[ -h \"$file\" ]]; then\n        cp -R $file \"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/$(basename $file)\"\n    fi\ndone\n";
 		};
-		E3E720A12CD7073D003470BF /* Copy Default Plugins */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Copy Default Plugins";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/bash;
-			shellScript = "#!/bin/bash\n\nset -x\n\nSOURCE_DIR=\"${SRCROOT}/deps/plugins/\"\nDEST_DIR=\"$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/plugins\"\n\nif [ -d \"$SOURCE_DIR\" ]; then\n  mkdir -p \"$DEST_DIR\"\n  find \"$SOURCE_DIR\" -name \"*.iinaplgz\" -type f -exec cp {} \"$DEST_DIR/\" \\;\n  echo \"Copied default plugins\"\nelse\n  echo \"Default plugins not found\"\nfi\n";
-		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -3368,20 +3313,10 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		49542985216C34950058F680 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 49542972216C34950058F680 /* OpenInIINA */;
-			targetProxy = 49542984216C34950058F680 /* PBXContainerItemProxy */;
-		};
 		497747EE20D287C1004B243A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = E3DE8DC91FD8166A0021921C /* iina-cli */;
 			targetProxy = 497747ED20D287C1004B243A /* PBXContainerItemProxy */;
-		};
-		5180D7792C17DB0D00CC9C1C /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = E38558862A484A2D0083772D /* iina-plugin */;
-			targetProxy = 5180D7782C17DB0D00CC9C1C /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 

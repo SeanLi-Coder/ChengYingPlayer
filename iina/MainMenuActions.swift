@@ -22,11 +22,6 @@ class MainMenuActionHandler: NSResponder, NSMenuItemValidation {
     fatalError("init(coder:) has not been implemented")
   }
 
-  @objc func menuShowInspector(_ sender: AnyObject) {
-    let inspector = AppDelegate.shared.inspector
-    inspector.showWindow(self)
-  }
-
   @objc func menuSavePlaylist(_ sender: NSMenuItem) {
     Utility.quickSavePanel(title: "Save to playlist", types: ["m3u8"], sheetWindow: player.currentWindow) { (url) in
       if url.isFileURL {
@@ -417,66 +412,6 @@ extension MainMenuActionHandler {
     player.chooseSubFont()
   }
 
-  @objc func menuFindOnlineSub(_ sender: NSMenuItem) {
-    // return if last search is not finished
-    guard let url = player.info.currentURL, !player.isSearchingOnlineSubtitle else { return }
-
-    player.isSearchingOnlineSubtitle = true
-    OnlineSubtitle.search(forFile: url, player: player, providerID: sender.representedObject as? String) { urls in
-      if urls.isEmpty {
-        self.player.sendOSD(.foundSub(0))
-      } else {
-        for url in urls {
-          Logger.log("Saved subtitle to \(url.path)")
-          self.player.loadExternalSubFile(url)
-        }
-        self.player.sendOSD(.downloadedSub(
-          urls.map({ $0.lastPathComponent }).joined(separator: "\n")
-        ))
-      }
-      self.player.isSearchingOnlineSubtitle = false
-    }
-  }
-
-  @objc func saveDownloadedSub(_ sender: NSMenuItem) {
-    let selected = player.info.$subTracks.withLock { $0.filter { $0.id == player.info.sid } }
-    guard selected.count > 0 else {
-      Utility.showAlert("sub.no_selected")
-
-      return
-    }
-    let sub = selected[0]
-    // make sure it's a downloaded sub
-    guard let path = sub.externalFilename, path.contains("/var/") else {
-      Utility.showAlert("sub.no_selected")
-      return
-    }
-    let subURL = URL(fileURLWithPath: path)
-    let subFileName = subURL.lastPathComponent
-    let windowTitle = NSLocalizedString("alert.sub.save_downloaded.title", comment: "Save Downloaded Subtitle")
-    Utility.quickSavePanel(title: windowTitle, filename: subFileName, sheetWindow: player.currentWindow) { (destURL) in
-      do {
-        // The Save panel checks to see if a file already exists and if so asks if it should be
-        // replaced. The quickSavePanel would not have called this code if the user canceled, so if
-        // the destination file already exists move it to the trash.
-        do {
-          try FileManager.default.trashItem(at: destURL, resultingItemURL: nil)
-            Logger.log("Trashed existing subtitle file \(destURL)")
-          } catch CocoaError.fileNoSuchFile {
-            // Expected, ignore error. The Apple Secure Coding Guide in the section Race Conditions
-            // and Secure File Operations recommends attempting an operation and handling errors
-            // gracefully instead of trying to figure out ahead of time whether the operation will
-            // succeed.
-          }
-          try FileManager.default.copyItem(at: subURL, to: destURL)
-          Logger.log("Saved downloaded subtitle to \(destURL.path)")
-          self.player.sendOSD(.savedSub)
-      } catch let error as NSError {
-        Utility.showAlert("error_saving_file", arguments: ["subtitle", error.localizedDescription])
-      }
-    }
-  }
-
   @objc func menuCycleTrack(_ sender: NSMenuItem) {
     switch sender.tag {
     case 0: player.mpv.command(.cycle, args: ["video"])
@@ -496,42 +431,5 @@ extension MainMenuActionHandler {
       break
     }
     return true
-  }
-
-  // MARK: - Plugin
-
-  @objc func showPluginsPanel(_ sender: NSMenuItem) {
-    player.mainWindow.showPluginSidebar(tab: nil)
-  }
-
-  @objc func reloadAllPlugins(_ sender: NSMenuItem) {
-    // Remove the developer tool menu item that retains the plugin instance
-    AppDelegate.shared.menuController.pluginMenu.items
-      .compactMap { $0.submenu }.flatMap { $0.items }
-      .forEach { $0.representedObject = nil }
-    AppDelegate.shared.menuController.pluginMenu.removeAllItems()
-
-    for player in PlayerCore.playerCores {
-      player.clearPlugins()
-    }
-
-    JavascriptPlugin.recreateAllPlugins()
-    JavascriptPlugin.loadGlobalInstances()
-
-    for player in PlayerCore.playerCores {
-      for plugin in JavascriptPlugin.plugins {
-        player.reloadPlugin(plugin, forced: true)
-      }
-      // Try to emit the events that are already emitted.
-      // Of course this is not exhaustive, so users shouldn't rely on this function
-      if player.mainWindow.loaded {
-        player.events.emit(.windowLoaded)
-      }
-      player.events.emit(.mpvInitialized)
-      if player.info.state == .playing {
-        player.events.emit(.fileLoaded)
-        player.events.emit(.fileStarted)
-      }
-    }
   }
 }

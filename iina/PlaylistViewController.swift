@@ -414,18 +414,6 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     }
   }
 
-  @IBAction func addURLAction(_ sender: AnyObject) {
-    Utility.quickPromptPanel("add_url") { url in
-      if Regex.url.matches(url) {
-        self.player.appendToPlaylist(url)
-        self.player.mainWindow.playlistView.reloadData(playlist: true, chapters: false)
-        self.player.sendOSD(.addToPlaylist(1))
-      } else {
-        Utility.showAlert("wrong_url_format")
-      }
-    }
-  }
-
   @IBAction func clearPlaylistBtnAction(_ sender: AnyObject) {
     player.clearPlaylist()
     player.sendOSD(.clearPlaylist)
@@ -863,7 +851,6 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     }
 
     result.addItem(withTitle: NSLocalizedString("pl_menu.add_file", comment: "Add File"), action: #selector(self.addFileAction(_:)))
-    result.addItem(withTitle: NSLocalizedString("pl_menu.add_url", comment: "Add URL"), action: #selector(self.addURLAction(_:)))
     result.addItem(withTitle: NSLocalizedString("pl_menu.clear_playlist", comment: "Clear Playlist"), action: #selector(self.clearPlaylistBtnAction(_:)))
     return result
   }

@@ -91,18 +91,6 @@
                                     <action selector="openFile:" target="Voe-Tx-rLC" id="jeI-mz-AmY"/>
                                 </connections>
                             </menuItem>
-                            <menuItem title="Open URL…" keyEquivalent="O" id="0m7-3r-twH">
-                                <modifierMask key="keyEquivalentModifierMask" shift="YES" command="YES"/>
-                                <connections>
-                                    <action selector="openURL:" target="Voe-Tx-rLC" id="uUI-BF-zJu"/>
-                                </connections>
-                            </menuItem>
-                            <menuItem title="Open URL in New Window…" tag="1" alternate="YES" keyEquivalent="O" id="bfB-bn-KeM">
-                                <modifierMask key="keyEquivalentModifierMask" shift="YES" option="YES" command="YES"/>
-                                <connections>
-                                    <action selector="openURL:" target="Voe-Tx-rLC" id="7MD-t2-mMA"/>
-                                </connections>
-                            </menuItem>
                             <menuItem title="Open Recent" id="tXI-mr-wws">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <menu key="submenu" title="Open Recent" systemMenu="recentDocuments" id="oas-Oc-fiZ">
@@ -556,17 +544,6 @@ CA
                             <menuItem title="Load External Subtitle…" id="k6x-hf-ATi">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                             </menuItem>
-                            <menuItem isSeparatorItem="YES" id="yh3-Pu-MGm"/>
-                            <menuItem title="Find Online Subtitles…" id="Mg3-WB-gjZ">
-                                <modifierMask key="keyEquivalentModifierMask"/>
-                            </menuItem>
-                            <menuItem title="Find Online Subtitles from" id="5dT-kq-WV9">
-                                <modifierMask key="keyEquivalentModifierMask"/>
-                                <menu key="submenu" title="Find Online Subtitles from" id="i0H-bE-bH8"/>
-                            </menuItem>
-                            <menuItem title="Save Downloaded Subtitle…" id="9zk-co-roT">
-                                <modifierMask key="keyEquivalentModifierMask"/>
-                            </menuItem>
                             <menuItem isSeparatorItem="YES" id="58S-lP-UEY"/>
                             <menuItem title="Encoding" id="Pci-OQ-Vni">
                                 <modifierMask key="keyEquivalentModifierMask"/>
@@ -617,10 +594,6 @@ CA
                         </items>
                     </menu>
                 </menuItem>
-                <menuItem title="Plugin" id="fgL-UI-RVf">
-                    <modifierMask key="keyEquivalentModifierMask"/>
-                    <menu key="submenu" title="Plugin" id="Y6q-cI-vfM"/>
-                </menuItem>
                 <menuItem title="Window" id="aUF-d1-5bR">
                     <modifierMask key="keyEquivalentModifierMask"/>
                     <menu key="submenu" title="Window" systemMenu="window" id="Td7-aD-5lo">
@@ -640,14 +613,6 @@ CA
                             <menuItem title="Custom Touch Bar..." hidden="YES" id="ZnF-yX-7jP">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                             </menuItem>
-                            <menuItem isSeparatorItem="YES" id="eu3-7i-yIM"/>
-                            <menuItem title="Inspector" keyEquivalent="i" id="bwz-r0-peR"/>
-                            <menuItem title="Log Viewer" keyEquivalent="l" id="0tJ-RQ-kuW">
-                                <modifierMask key="keyEquivalentModifierMask" control="YES" command="YES"/>
-                                <connections>
-                                    <action selector="showLogWindow:" target="Voe-Tx-rLC" id="2EU-WD-3kO"/>
-                                </connections>
-                            </menuItem>
                             <menuItem isSeparatorItem="YES" id="6qV-kv-e0C"/>
                             <menuItem title="Bring All to Front" id="LE2-aR-0XJ">
                                 <modifierMask key="keyEquivalentModifierMask"/>
@@ -665,12 +630,6 @@ CA
                             <menuItem title="ChengYing Help" keyEquivalent="?" id="FKE-Sm-Kum">
                                 <connections>
                                     <action selector="helpAction:" target="Voe-Tx-rLC" id="aqh-p6-pB4"/>
-                                </connections>
-                            </menuItem>
-                            <menuItem title="Dump Debug Info" id="Mbl-Pv-GuB">
-                                <modifierMask key="keyEquivalentModifierMask"/>
-                                <connections>
-                                    <action selector="dumpDebugInfo:" target="Voe-Tx-rLC" id="54x-yF-LJc"/>
                                 </connections>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="ZO8-wH-FBe"/>
@@ -720,7 +679,6 @@ CA
                 <outlet property="cycleAudioTracks" destination="n8f-ub-Udb" id="Mi8-8E-kaH"/>
                 <outlet property="cycleSubtitles" destination="sgu-dK-IGE" id="pE4-5V-JoV"/>
                 <outlet property="cycleVideoTracks" destination="taT-mP-2Kv" id="NAE-Wh-Fk6"/>
-                <outlet property="debugDump" destination="Mbl-Pv-GuB" id="qL3-tK-3nU"/>
                 <outlet property="decreaseAudioDelay" destination="Lc4-4W-thE" id="rZo-3n-vZW"/>
                 <outlet property="decreaseAudioDelaySlightly" destination="9ee-7i-xs7" id="5MX-I7-8Ky"/>
                 <outlet property="decreaseSubDelay" destination="LsU-Qz-dax" id="5Yw-0e-UyZ"/>
@@ -735,7 +693,6 @@ CA
                 <outlet property="encodingMenu" destination="Pf6-5i-B1E" id="Gat-gG-pkT"/>
                 <outlet property="fileLoop" destination="D1y-kv-85s" id="xSv-oo-UJa"/>
                 <outlet property="fileMenu" destination="bib-Uj-vzu" id="Faa-yo-0DL"/>
-                <outlet property="findOnlineSub" destination="Mg3-WB-gjZ" id="Xft-hW-B9a"/>
                 <outlet property="fitToScreen" destination="SHd-63-Xoh" id="nzE-bA-wmk"/>
                 <outlet property="flip" destination="OIu-H0-Mht" id="fYJ-Fq-hak"/>
                 <outlet property="flipMenu" destination="n90-to-nRT" id="Zpp-Q8-NiJ"/>
@@ -752,7 +709,6 @@ CA
                 <outlet property="increaseTextSize" destination="XHu-Dl-Vq2" id="XXf-48-N36"/>
                 <outlet property="increaseVolume" destination="Wbq-vt-hzX" id="EaU-fj-ClV"/>
                 <outlet property="increaseVolumeSlightly" destination="c6Y-0e-vgf" id="cpM-mR-RCr"/>
-                <outlet property="inspector" destination="bwz-r0-peR" id="dES-1R-XAY"/>
                 <outlet property="jumpTo" destination="2id-wn-xsC" id="wyH-9I-JHJ"/>
                 <outlet property="jumpToBegin" destination="2Ya-3g-1hy" id="atq-PX-lIt"/>
                 <outlet property="loadExternalAudio" destination="3xl-iD-85w" id="e85-xo-lzs"/>
@@ -767,11 +723,8 @@ CA
                 <outlet property="nextMedia" destination="GR6-4V-lRT" id="6sO-cD-UeT"/>
                 <outlet property="normalSize" destination="1UK-8n-QPP" id="rpd-7S-IYd"/>
                 <outlet property="normalSizeRetina" destination="c1x-bx-69F" id="S22-F3-Ks9"/>
-                <outlet property="onlineSubSourceMenu" destination="i0H-bE-bH8" id="u9W-1Y-Jhk"/>
                 <outlet property="open" destination="IAo-SY-fd9" id="fW9-2A-V4F"/>
                 <outlet property="openAlternative" destination="z9W-ga-j3b" id="RRI-7o-x9o"/>
-                <outlet property="openURL" destination="0m7-3r-twH" id="BOj-Zv-hzW"/>
-                <outlet property="openURLAlternative" destination="bfB-bn-KeM" id="I7a-cV-JUC"/>
                 <outlet property="otherKeyBindingsMenu" destination="Yf9-Ns-n9l" id="SVX-M0-MuL"/>
                 <outlet property="pause" destination="UOE-MJ-8ku" id="74t-ZU-dXD"/>
                 <outlet property="pictureInPicture" destination="mND-N8-z6o" id="mrn-ku-bqH"/>
@@ -780,8 +733,6 @@ CA
                 <outlet property="playlistLoop" destination="aSc-P6-fiZ" id="V5V-Wv-Pxk"/>
                 <outlet property="playlistMenu" destination="aXa-aM-Jaq" id="Nkw-YD-NAi"/>
                 <outlet property="playlistPanel" destination="0T7-Nu-SL7" id="kIo-HV-YPh"/>
-                <outlet property="pluginMenu" destination="Y6q-cI-vfM" id="FVO-Du-Prd"/>
-                <outlet property="pluginMenuItem" destination="fgL-UI-RVf" id="ujZ-co-bft"/>
                 <outlet property="previousChapter" destination="pqF-SZ-Ifz" id="91k-3h-xnp"/>
                 <outlet property="previousFrame" destination="oxF-BB-lBy" id="Kx8-vs-jMi"/>
                 <outlet property="previousMedia" destination="oqG-7L-NLD" id="8th-d4-X6L"/>
@@ -792,7 +743,6 @@ CA
                 <outlet property="resetSubDelay" destination="SLr-6g-Mgh" id="8oW-hm-TNq"/>
                 <outlet property="resetTextSize" destination="P1a-ot-P31" id="fJk-GP-GBM"/>
                 <outlet property="rotationMenu" destination="5xN-ZB-VLI" id="YGx-Ae-oMp"/>
-                <outlet property="saveDownloadedSub" destination="9zk-co-roT" id="lGr-mb-oHw"/>
                 <outlet property="savePlaylist" destination="Mjr-lL-oEt" id="ftc-bn-4Qi"/>
                 <outlet property="savedAudioFiltersMenu" destination="vuV-uP-CAD" id="7DB-am-PUD"/>
                 <outlet property="savedVideoFiltersMenu" destination="xhY-fF-oio" id="MDx-8r-ENg"/>
@@ -824,12 +774,6 @@ CA
                     <modifierMask key="keyEquivalentModifierMask"/>
                     <connections>
                         <action selector="openFile:" target="Voe-Tx-rLC" id="Zlo-gp-oIk"/>
-                    </connections>
-                </menuItem>
-                <menuItem title="Open URL…" id="Qwb-26-zjX">
-                    <modifierMask key="keyEquivalentModifierMask"/>
-                    <connections>
-                        <action selector="openURL:" target="Voe-Tx-rLC" id="vSz-YP-8UA"/>
                     </connections>
                 </menuItem>
             </items>

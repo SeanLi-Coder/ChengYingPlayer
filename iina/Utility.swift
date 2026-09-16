@@ -26,6 +26,14 @@ class Utility {
   static let blacklistExt = supportedFileExt[.sub]! + multipleFilePlaylistExt
   static let lut3dExt = ["3dl", "cube", "dat", "m3d"]
 
+  /// Accept paths and file URLs while omitting network media from new playlists.
+  static func isLocalMediaPath(_ path: String) -> Bool {
+    guard !path.isEmpty else { return false }
+    if path.hasPrefix("/") { return true }
+    guard let url = URL(string: path), url.scheme != nil else { return true }
+    return url.isFileURL
+  }
+
   /// File types that are subtitles or can contain subtitles.
   static let containsSubExt = supportedFileExt[.sub]! + supportedFileExt[.video]!
 

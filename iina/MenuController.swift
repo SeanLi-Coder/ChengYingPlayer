@@ -76,15 +76,11 @@ class MenuController: NSObject, NSMenuDelegate {
 
   private var stringForOpen: String!
   private var stringForOpenAlternative: String!
-  private var stringForOpenURL: String!
-  private var stringForOpenURLAlternative: String!
 
   // File
   @IBOutlet weak var fileMenu: NSMenu!
   @IBOutlet weak var open: NSMenuItem!
   @IBOutlet weak var openAlternative: NSMenuItem!
-  @IBOutlet weak var openURL: NSMenuItem!
-  @IBOutlet weak var openURLAlternative: NSMenuItem!
   @IBOutlet weak var savePlaylist: NSMenuItem!
   @IBOutlet weak var showCurrentFileInFinder: NSMenuItem!
   @IBOutlet weak var deleteCurrentFile: NSMenuItem!
@@ -191,18 +187,9 @@ class MenuController: NSObject, NSMenuDelegate {
   @IBOutlet weak var resetSubDelay: NSMenuItem!
   @IBOutlet weak var encodingMenu: NSMenu!
   @IBOutlet weak var subFont: NSMenuItem!
-  @IBOutlet weak var findOnlineSub: NSMenuItem!
-  @IBOutlet weak var onlineSubSourceMenu: NSMenu!
-  @IBOutlet weak var saveDownloadedSub: NSMenuItem!
-  // Plugin
-  @IBOutlet weak var pluginMenu: NSMenu!
-  @IBOutlet weak var pluginMenuItem: NSMenuItem!
   // Window
   @IBOutlet weak var customTouchBar: NSMenuItem!
-  @IBOutlet weak var inspector: NSMenuItem!
   @IBOutlet weak var miniPlayer: NSMenuItem!
-
-  @IBOutlet weak var debugDump: NSMenuItem!
 
   /// If `true` then all menu items are disabled.
   private var isDisabled = false
@@ -220,9 +207,7 @@ class MenuController: NSObject, NSMenuDelegate {
     fileMenu.delegate = self
 
     stringForOpen = open.title
-    stringForOpenURL = openURL.title
     stringForOpenAlternative = openAlternative.title
-    stringForOpenURLAlternative = openURLAlternative.title
 
     savePlaylist.action = #selector(MainMenuActionHandler.menuSavePlaylist(_:))
     showCurrentFileInFinder.action = #selector(MainMenuActionHandler.menuShowCurrentFileInFinder(_:))
@@ -388,11 +373,6 @@ class MenuController: NSObject, NSMenuDelegate {
     hideSecondSubtitles.action = #selector(MainMenuActionHandler.menuToggleSecondSubVisibility(_:))
     secondSubTrackMenu.delegate = self
 
-    findOnlineSub.action = #selector(MainMenuActionHandler.menuFindOnlineSub(_:))
-    saveDownloadedSub.action = #selector(MainMenuActionHandler.saveDownloadedSub(_:))
-
-    onlineSubSourceMenu.delegate = self
-
     // - text size
     [increaseTextSize, decreaseTextSize, resetTextSize].forEach {
       $0.action = #selector(MainMenuActionHandler.menuChangeSubScale(_:))
@@ -414,26 +394,11 @@ class MenuController: NSObject, NSMenuDelegate {
     // Separate Auto from other encoding types
     encodingMenu.insertItem(NSMenuItem.separator(), at: 1)
 
-    // Plugin
-
-    if IINA_ENABLE_PLUGIN_SYSTEM {
-      pluginMenu.delegate = self
-      pluginMenu.autoenablesItems = false
-    } else {
-      pluginMenuItem.isHidden = true
-    }
-
     // Window
 
     customTouchBar.action = #selector(NSApplication.toggleTouchBarCustomizationPalette(_:))
 
-    inspector.action = #selector(MainMenuActionHandler.menuShowInspector(_:))
     miniPlayer.action = #selector(MainWindowController.menuSwitchToMiniPlayer(_:))
-
-    // Debug
-
-    debugDump.isAlternate = true
-    debugDump.keyEquivalentModifierMask = .option
   }
 
   // MARK: - Update Menus
@@ -586,15 +551,6 @@ class MenuController: NSObject, NSMenuDelegate {
         encodingMenu.item(withTitle: encoding.title)?.state = .on
       }
     }
-
-    let providerID = Preference.string(for: .onlineSubProvider) ?? OnlineSubtitle.Providers.openSub.id
-    let providerName = OnlineSubtitle.Providers.nameForID(providerID)
-    findOnlineSub.title = String(format: Constants.String.findOnlineSubtitles, providerName)
-  }
-
-  private func updateOnlineSubSourceMenu() {
-    OnlineSubtitle.populateMenu(onlineSubSourceMenu,
-                                action: #selector(MainMenuActionHandler.menuFindOnlineSub(_:)))
   }
 
   func updateSavedFiltersMenu(type: String) {
@@ -610,114 +566,7 @@ class MenuController: NSObject, NSMenuDelegate {
   }
 
   func updatePluginMenu() {
-    let isDisplayingPluginsPanel = PlayerCore.active.mainWindow.sideBarStatus == .plugins
-    pluginMenu.removeAllItems()
-    pluginMenu.addItem(withTitle: Constants.String.managePlugins, action: #selector(AppDelegate.showPluginPreferences(_:)), keyEquivalent: "")
-    pluginMenu.addItem(withTitle: isDisplayingPluginsPanel ? Constants.String.hidePluginsPanel : Constants.String.showPluginsPanel, action: #selector(MainMenuActionHandler.showPluginsPanel(_:)), keyEquivalent: "")
-    pluginMenu.addItem(.separator())
-
-    let developerTool = NSMenuItem()
-    developerTool.title = NSLocalizedString("menu.developer_tool", comment: "Developer Tool")
-    developerTool.submenu = NSMenu()
-
-    var errorList: [(String, String)] = []
-    for (index, instance) in PlayerCore.active.plugins.enumerated() {
-      var counter = 0
-      var rootMenu: NSMenu! = pluginMenu
-      let menuItems = (instance.plugin.globalInstance?.menuItems ?? []) + instance.menuItems
-
-      if !menuItems.isEmpty {
-        if index != 0 {
-          pluginMenu.addItem(.separator())
-        }
-
-        if #available(macOS 14.0, *) {
-          pluginMenu.addItem(.sectionHeader(title: instance.plugin.name))
-        } else {
-          pluginMenu.addItem(withTitle: instance.plugin.name, enabled: false)
-        }
-
-        for item in menuItems {
-          if counter == 5 {
-            Logger.log("Please avoid adding too much first-level menu items. IINA will only display the first 5 of them.",
-                       level: .warning, subsystem: instance.subsystem)
-            let moreItem = NSMenuItem()
-            moreItem.title = NSLocalizedString("menu.more_plugin", comment: "More…")
-            rootMenu = NSMenu()
-            moreItem.submenu = rootMenu
-            pluginMenu.addItem(moreItem)
-          }
-          add(menuItemDef: item, to: rootMenu, for: instance, errorList: &errorList)
-          counter += 1
-        }
-      }
-
-      if #available(macOS 12.0, *) {
-        let devToolItem = NSMenuItem()
-        devToolItem.title = instance.plugin.name
-        developerTool.submenu?.addItem(
-          menuItem(forPluginInstance: instance, tag: JavasctiptDevTool.JSMenuItemInstance))
-        if let globalInst = instance.plugin.globalInstance {
-          developerTool.submenu?.addItem(
-            menuItem(forPluginInstance: globalInst, tag: JavasctiptDevTool.JSMenuItemInstance))
-        }
-      }
-    }
-
-    if errorList.count > 0 {
-      let item = NSMenuItem(title: NSLocalizedString("menu.conflicting_shortcuts", comment: "Conflicting key shortcuts…"), action: nil, keyEquivalent: "")
-      if #available(macOS 14.0, *) {
-        item.badge = NSMenuItemBadge.alerts(count: errorList.count)
-      }
-      pluginMenu.insertItem(item, at: 0)
-    }
-
-    pluginMenu.addItem(.separator())
-    if #available(macOS 12.0, *) {
-      pluginMenu.addItem(developerTool)
-    }
-    pluginMenu.addItem(withTitle: NSLocalizedString("menu.reload_plugins", comment: "Reload All Plugins"), action: #selector(MainMenuActionHandler.reloadAllPlugins(_:)), keyEquivalent: "")
-  }
-
-  @discardableResult
-  private func add(menuItemDef item: JavascriptPluginMenuItem,
-                   to menu: NSMenu,
-                   for plugin: JavascriptPluginInstance,
-                   errorList: inout [(String, String)]) -> NSMenuItem {
-    if (item.isSeparator) {
-      let item = NSMenuItem.separator()
-      menu.addItem(item)
-      return item
-    }
-
-    let menuItem: NSMenuItem
-    if item.action == nil {
-      menuItem = menu.addItem(withTitle: item.title, action: nil, target: plugin, obj: item)
-    } else {
-      menuItem = menu.addItem(withTitle: item.title,
-                              action: #selector(plugin.menuItemAction(_:)),
-                              target: plugin,
-                              obj: item)
-    }
-
-    menuItem.isEnabled = item.enabled
-    menuItem.state = item.selected ? .on : .off
-    if let key = item.keyBinding {
-      if PlayerCore.keyBindings[key] != nil {
-        errorList.append((plugin.plugin.name, key))
-      } else if let (kEqv, kMdf) = KeyCodeHelper.macOSKeyEquivalent(from: key) {
-        menuItem.keyEquivalent = kEqv
-        menuItem.keyEquivalentModifierMask = kMdf
-      }
-    }
-    if !item.items.isEmpty {
-      menuItem.submenu = NSMenu()
-      for submenuItem in item.items {
-        add(menuItemDef: submenuItem, to: menuItem.submenu!, for: plugin, errorList: &errorList)
-      }
-    }
-    item.nsMenuItem = menuItem
-    return menuItem
+    // Retain the shared playback lifecycle hook without exposing plugin actions.
   }
 
   /**
@@ -769,19 +618,13 @@ class MenuController: NSObject, NSMenuDelegate {
     if PlayerCore.nonIdle.count == 0 {
       open.title = stringForOpen
       openAlternative.title = stringForOpen
-      openURL.title = stringForOpenURL
-      openURLAlternative.title = stringForOpenURL
     } else {
       if Preference.bool(for: .alwaysOpenInNewWindow) {
         open.title = stringForOpenAlternative
         openAlternative.title = stringForOpen
-        openURL.title = stringForOpenURLAlternative
-        openURLAlternative.title = stringForOpenURL
       } else {
         open.title = stringForOpen
         openAlternative.title = stringForOpenAlternative
-        openURL.title = stringForOpenURL
-        openURLAlternative.title = stringForOpenURLAlternative
       }
     }
   }
@@ -818,15 +661,10 @@ class MenuController: NSObject, NSMenuDelegate {
       updateTracks(forMenu: menu, type: .sub)
     case secondSubTrackMenu:
       updateTracks(forMenu: menu, type: .secondSub)
-    case onlineSubSourceMenu:
-      updateOnlineSubSourceMenu()
     case savedVideoFiltersMenu:
       updateSavedFiltersMenu(type: MPVProperty.vf)
     case savedAudioFiltersMenu:
       updateSavedFiltersMenu(type: MPVProperty.af)
-    case pluginMenu:
-      PlayerCore.active.events.emit(.menuUpdate)
-      updatePluginMenu()
     default: break
     }
     // check conveniently bound menus
@@ -855,6 +693,14 @@ class MenuController: NSObject, NSMenuDelegate {
   }
 
   func updateKeyEquivalentsFrom(_ keyBindings: [KeyMapping]) {
+    let removedCommands: Set<String> = [
+      IINACommand.openURL.rawValue,
+      IINACommand.findOnlineSubs.rawValue,
+      IINACommand.saveDownloadedSub.rawValue,
+    ]
+    let keyBindings = keyBindings.filter { binding in
+      !binding.isIINACommand || !removedCommands.contains(binding.action.first ?? "")
+    }
     let settings: [(NSMenuItem, Bool, [String], Bool, ClosedRange<Double>?, String?)] = [
       (showCurrentFileInFinder, true, [IINACommand.showCurrentFileInFinder.rawValue], false, nil, nil),
       (deleteCurrentFile, true, [IINACommand.deleteCurrentFile.rawValue], false, nil, nil),
@@ -864,8 +710,6 @@ class MenuController: NSObject, NSMenuDelegate {
       (quickSettingsSub, true, [IINACommand.subPanel.rawValue], false, nil, nil),
       (playlistPanel, true, [IINACommand.playlistPanel.rawValue], false, nil, nil),
       (chapterPanel, true, [IINACommand.chapterPanel.rawValue], false, nil, nil),
-      (findOnlineSub, true, [IINACommand.findOnlineSubs.rawValue], false, nil, nil),
-      (saveDownloadedSub, true, [IINACommand.saveDownloadedSub.rawValue], false, nil, nil),
       (flip, true, [IINACommand.flip.rawValue], false, nil, nil),
       (mirror, true, [IINACommand.mirror.rawValue], false, nil, nil),
       (biggerSize, true, [IINACommand.biggerWindow.rawValue], false, nil, nil),

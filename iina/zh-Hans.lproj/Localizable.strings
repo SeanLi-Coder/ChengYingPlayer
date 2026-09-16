@@ -326,6 +326,7 @@
 "alert.unsupported_video" = "不支持的外部视频文件。";
 "alert.unsupported_sub" = "不支持的外挂字幕。";
 "alert.unsupported_url" = "不支持的 URL。";
+"alert.local_media_only" = "澄影播放器只打开本地媒体文件。请先下载视频，再打开保存的文件。";
 "alert.wrong_url_format" = "URL 格式错误。";
 
 "alert.error_open" = "无法打开文件或流媒体！";

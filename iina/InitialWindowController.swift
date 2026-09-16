@@ -10,7 +10,6 @@ import Cocoa
 
 fileprivate extension NSUserInterfaceItemIdentifier {
   static let openFile = NSUserInterfaceItemIdentifier("openFile")
-  static let openURL = NSUserInterfaceItemIdentifier("openURL")
 }
 
 fileprivate extension NSColor {
@@ -394,8 +393,6 @@ class InitialWindowViewActionButton: NSView {
     self.layer?.backgroundColor = pressedBackground.cgColor
     if self.identifier == .openFile {
       AppDelegate.shared.openFile(self)
-    } else if self.identifier == .openURL {
-      AppDelegate.shared.openURL(self)
     } else {
       if let lastFile = Preference.url(for: .iinaLastPlayedFilePath),
         let windowController = window?.windowController as? InitialWindowController {

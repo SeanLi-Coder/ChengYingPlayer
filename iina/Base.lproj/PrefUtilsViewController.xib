@@ -11,7 +11,6 @@
                 <outlet property="playHistoryClearedLabel" destination="sI2-xW-v1S" id="7uc-8E-r0r"/>
                 <outlet property="restoreAlertsRestoredLabel" destination="KAc-Jd-4LW" id="pj1-lx-MEz"/>
                 <outlet property="savedPlaybackProgressClearedLabel" destination="btv-7s-L8M" id="mFv-fy-6Go"/>
-                <outlet property="sectionBrowserExtView" destination="lOp-07-Z6M" id="UYs-O3-l9R"/>
                 <outlet property="sectionClearCacheView" destination="ve7-5i-dg4" id="Ki9-9t-e2h"/>
                 <outlet property="sectionDefaultAppView" destination="qu5-4u-ozP" id="icl-fU-YLA"/>
                 <outlet property="sectionRestoreAlertsView" destination="Bem-Ss-PQZ" id="5Tg-QI-tuJ"/>
@@ -251,62 +250,6 @@
                 <constraint firstItem="2lD-HN-fmS" firstAttribute="leading" secondItem="Bem-Ss-PQZ" secondAttribute="leading" id="wMJ-ay-p77"/>
             </constraints>
             <point key="canvasLocation" x="139" y="600"/>
-        </customView>
-        <customView translatesAutoresizingMaskIntoConstraints="NO" id="lOp-07-Z6M" userLabel="Prefs &gt; Utils &gt; Browser Extension">
-            <rect key="frame" x="0.0" y="0.0" width="420" height="102"/>
-            <subviews>
-                <textField identifier="SectionTitleBrowserExt" focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Al6-1d-mCg">
-                    <rect key="frame" x="-2" y="78" width="211" height="16"/>
-                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Get Browser Extensions for ChengYing" id="zCe-1f-tkF">
-                        <font key="font" metaFont="systemBold"/>
-                        <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
-                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                    </textFieldCell>
-                </textField>
-                <button identifier="FunctionalButtonChrome" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="HRq-fs-0uo">
-                    <rect key="frame" x="0.0" y="8" width="70" height="18"/>
-                    <buttonCell key="cell" type="inline" title="Chrome" bezelStyle="inline" image="forward" imagePosition="left" alignment="center" borderStyle="border" inset="2" id="yuw-2i-ICd">
-                        <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                        <font key="font" metaFont="smallSystemBold"/>
-                    </buttonCell>
-                    <connections>
-                        <action selector="extChromeBtnAction:" target="-2" id="JZT-7q-PtK"/>
-                    </connections>
-                </button>
-                <button identifier="FunctionalButtonFirefox" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="G58-js-HgZ">
-                    <rect key="frame" x="82" y="8" width="65" height="18"/>
-                    <buttonCell key="cell" type="inline" title="Firefox" bezelStyle="inline" image="forward" imagePosition="left" alignment="center" borderStyle="border" inset="2" id="f9i-sS-MJN">
-                        <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                        <font key="font" metaFont="smallSystemBold"/>
-                    </buttonCell>
-                    <connections>
-                        <action selector="extFirefoxBtnAction:" target="-2" id="zrp-Bb-ZGc"/>
-                    </connections>
-                </button>
-                <textField focusRingType="none" verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" translatesAutoresizingMaskIntoConstraints="NO" id="DZn-sK-pTY">
-                    <rect key="frame" x="-2" y="34" width="424" height="28"/>
-                    <textFieldCell key="cell" controlSize="small" sendsActionOnEndEditing="YES" title="Open links or current webpage in ChengYing with one click. The website must be supported by youtube-dl." id="GAo-fx-NG0">
-                        <font key="font" metaFont="smallSystem"/>
-                        <color key="textColor" name="secondaryLabelColor" catalog="System" colorSpace="catalog"/>
-                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                    </textFieldCell>
-                </textField>
-            </subviews>
-            <constraints>
-                <constraint firstItem="DZn-sK-pTY" firstAttribute="top" secondItem="Al6-1d-mCg" secondAttribute="bottom" constant="16" id="2ik-uq-Qwt"/>
-                <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="Al6-1d-mCg" secondAttribute="trailing" id="8CU-Kr-zH1"/>
-                <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="G58-js-HgZ" secondAttribute="trailing" id="8h7-mK-XFK"/>
-                <constraint firstItem="G58-js-HgZ" firstAttribute="baseline" secondItem="HRq-fs-0uo" secondAttribute="baseline" id="AOw-Dw-AuU"/>
-                <constraint firstItem="DZn-sK-pTY" firstAttribute="leading" secondItem="lOp-07-Z6M" secondAttribute="leading" id="CkD-fd-bWU"/>
-                <constraint firstItem="G58-js-HgZ" firstAttribute="leading" secondItem="HRq-fs-0uo" secondAttribute="trailing" constant="12" id="In7-L9-1EH"/>
-                <constraint firstItem="Al6-1d-mCg" firstAttribute="leading" secondItem="lOp-07-Z6M" secondAttribute="leading" id="gkP-JQ-Jov"/>
-                <constraint firstItem="HRq-fs-0uo" firstAttribute="leading" secondItem="lOp-07-Z6M" secondAttribute="leading" id="jhd-yd-lnA"/>
-                <constraint firstAttribute="bottom" secondItem="HRq-fs-0uo" secondAttribute="bottom" constant="8" id="rd0-xS-Ehg"/>
-                <constraint firstItem="HRq-fs-0uo" firstAttribute="top" secondItem="DZn-sK-pTY" secondAttribute="bottom" constant="8" id="tN3-Bb-JbP"/>
-                <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="DZn-sK-pTY" secondAttribute="trailing" id="uEn-NP-ZYa"/>
-                <constraint firstItem="Al6-1d-mCg" firstAttribute="top" secondItem="lOp-07-Z6M" secondAttribute="top" constant="8" id="vMZ-SW-pO3"/>
-            </constraints>
-            <point key="canvasLocation" x="139" y="1059"/>
         </customView>
         <window title="Window" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" releasedWhenClosed="NO" visibleAtLaunch="NO" frameAutosaveName="" animationBehavior="default" id="gck-1e-Yi7" userLabel="&quot;Set as Default&quot; Window">
             <windowStyleMask key="styleMask" titled="YES" closable="YES" miniaturizable="YES" resizable="YES"/>

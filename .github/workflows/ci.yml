@@ -91,7 +91,7 @@ jobs:
           python -m pip install --require-hashes --requirement Tools/VideoToolsHelper/requirements-build.txt
 
       - name: Prepare playback libraries
-        run: ./other/download_libs.sh --arch arm64 --skip-plugins
+        run: ./other/download_libs.sh --arch arm64
 
       - name: Build bundled video tools
         run: |
@@ -143,18 +143,16 @@ jobs:
             exit 1
           fi
 
-          extension_path="$app_path/Contents/PlugIns/OpenInIINA.appex"
-          if [[ ! -d "$extension_path" ]]; then
-            echo "OpenInIINA.appex was not embedded." >&2
-            exit 1
-          fi
-          codesign --verify --strict --verbose=2 "$extension_path"
-          extension_entitlements="$RUNNER_TEMP/extension-entitlements.plist"
-          codesign -d --entitlements :- "$extension_path" > "$extension_entitlements" 2>/dev/null
-          if [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$extension_entitlements")" != "true" ]]; then
-            echo "The Safari extension signature is missing its sandbox entitlement." >&2
-            exit 1
-          fi
+          for removed_component in \
+            Contents/PlugIns/OpenInIINA.appex \
+            Contents/MacOS/iina-plugin \
+            Contents/MacOS/youtube-dl \
+            Contents/Resources/plugins; do
+            if [[ -e "$app_path/$removed_component" || -L "$app_path/$removed_component" ]]; then
+              echo "Removed component is still bundled: $removed_component" >&2
+              exit 1
+            fi
+          done
 
           "$app_path/Contents/MacOS/ffmpeg" -hide_banner -version
           "$app_path/Contents/MacOS/chengying-video-tools-helper" --help

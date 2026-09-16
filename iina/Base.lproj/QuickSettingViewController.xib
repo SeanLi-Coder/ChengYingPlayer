@@ -2071,18 +2071,6 @@
                                             <action selector="loadExternalSubAction:" target="-2" id="6k4-nh-xFo"/>
                                         </connections>
                                     </segmentedControl>
-                                    <segmentedControl verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="YIE-pv-gCK" userLabel="Search Online Segmented Control">
-                                        <rect key="frame" x="164" y="548" width="115" height="24"/>
-                                        <segmentedCell key="cell" refusesFirstResponder="YES" borderStyle="border" alignment="left" style="rounded" trackingMode="momentary" id="Rbb-wh-cLc">
-                                            <font key="font" metaFont="system"/>
-                                            <segments>
-                                                <segment label="Search Online…"/>
-                                            </segments>
-                                        </segmentedCell>
-                                        <connections>
-                                            <action selector="searchOnlineAction:" target="-2" id="z9B-mh-JoN"/>
-                                        </connections>
-                                    </segmentedControl>
                                     <box title="Box" titlePosition="noTitle" translatesAutoresizingMaskIntoConstraints="NO" id="0ir-bk-Itm">
                                         <rect key="frame" x="20" y="354" width="322" height="174"/>
                                         <view key="contentView" id="SbY-uL-YKR">
@@ -2464,7 +2452,6 @@
                                     <constraint firstItem="VdJ-nq-zaM" firstAttribute="top" secondItem="cOv-Yl-KdH" secondAttribute="bottom" constant="4" id="Axq-IW-PvK"/>
                                     <constraint firstItem="VdJ-nq-zaM" firstAttribute="leading" relation="greaterThanOrEqual" secondItem="dXz-x4-sm5" secondAttribute="leading" id="CCu-4g-OKS"/>
                                     <constraint firstItem="7LX-zh-k2A" firstAttribute="top" secondItem="ipr-WR-eax" secondAttribute="bottom" constant="12" id="Czl-Ke-76C"/>
-                                    <constraint firstItem="YIE-pv-gCK" firstAttribute="leading" secondItem="zQu-u6-goi" secondAttribute="trailing" constant="8" id="DPc-T2-84N"/>
                                     <constraint firstItem="8ZC-Wx-nt7" firstAttribute="leading" relation="greaterThanOrEqual" secondItem="9xm-5m-Q7G" secondAttribute="trailing" constant="8" symbolic="YES" id="EJV-9A-iSr"/>
                                     <constraint firstItem="dXz-x4-sm5" firstAttribute="top" secondItem="VdJ-nq-zaM" secondAttribute="bottom" constant="1" id="Fdp-D4-VPU"/>
                                     <constraint firstItem="ipr-WR-eax" firstAttribute="leading" secondItem="Wuf-PX-OYd" secondAttribute="leading" constant="20" symbolic="YES" id="GJa-kl-cZG"/>
@@ -2502,7 +2489,6 @@
                                     <constraint firstItem="OEX-Gn-xCa" firstAttribute="top" secondItem="VbE-TV-lb5" secondAttribute="bottom" constant="12" id="hmb-st-dnt"/>
                                     <constraint firstItem="r77-VA-Z1b" firstAttribute="trailing" secondItem="dXz-x4-sm5" secondAttribute="trailing" id="kSN-80-IMR"/>
                                     <constraint firstItem="lzW-d6-Asr" firstAttribute="centerX" secondItem="Wuf-PX-OYd" secondAttribute="centerX" id="lDd-s9-Jfa"/>
-                                    <constraint firstItem="YIE-pv-gCK" firstAttribute="centerY" secondItem="zQu-u6-goi" secondAttribute="centerY" id="lUf-kQ-zMz"/>
                                     <constraint firstItem="kzp-GR-Sy4" firstAttribute="leading" relation="greaterThanOrEqual" secondItem="VbE-TV-lb5" secondAttribute="trailing" id="llG-p4-ckS"/>
                                     <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="OEX-Gn-xCa" secondAttribute="trailing" constant="32" id="qdd-SN-rDl"/>
                                     <constraint firstItem="eOz-bB-vzM" firstAttribute="centerY" secondItem="dXz-x4-sm5" secondAttribute="centerY" id="rgl-9k-oY7"/>
@@ -2526,7 +2512,7 @@
                             <constraint firstItem="B8f-KH-BaO" firstAttribute="leading" secondItem="PJb-5N-8QM" secondAttribute="leading" id="KiN-OM-Cn5"/>
                             <constraint firstAttribute="trailing" secondItem="Wuf-PX-OYd" secondAttribute="trailing" id="NTd-uf-my8"/>
                             <constraint firstItem="Ji9-kR-VBA" firstAttribute="trailing" secondItem="PJb-5N-8QM" secondAttribute="trailing" id="RAY-i7-3Pp"/>
-                            <constraint firstItem="YIE-pv-gCK" firstAttribute="trailing" relation="lessThanOrEqual" secondItem="PJb-5N-8QM" secondAttribute="trailing" id="SXw-h1-5CU"/>
+                            <constraint firstItem="zQu-u6-goi" firstAttribute="trailing" relation="lessThanOrEqual" secondItem="PJb-5N-8QM" secondAttribute="trailing" id="SXw-h1-5CU"/>
                             <constraint firstItem="mYH-DV-e4F" firstAttribute="leading" secondItem="PJb-5N-8QM" secondAttribute="leading" id="aMT-hN-hi6"/>
                             <constraint firstItem="M2U-rq-X2L" firstAttribute="leading" secondItem="PJb-5N-8QM" secondAttribute="leading" id="cph-Mm-h9J"/>
                             <constraint firstAttribute="bottom" secondItem="Wuf-PX-OYd" secondAttribute="bottom" id="loV-NP-OEC"/>

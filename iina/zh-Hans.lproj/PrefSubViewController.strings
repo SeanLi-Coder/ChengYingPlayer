@@ -91,8 +91,8 @@
 /* Class = "NSTextFieldCell"; title = "Default encoding:"; ObjectID = "Y75-4k-2Du"; */
 "Y75-4k-2Du.title" = "默认编码:";
 
-/* Class = "NSTextFieldCell"; title = "This option will be stored as ISO 639-2 language code and will work for both mpv and opensubtitles."; ObjectID = "Z2M-dh-eq1"; */
-"Z2M-dh-eq1.title" = "此选项将会以 ISO 639-2 格式保存，并适用于 mpv 和 OpenSubtitles 。";
+/* Class = "NSTextFieldCell"; title = "Subtitle language preference, stored as ISO 639-2 language codes."; ObjectID = "Z2M-dh-eq1"; */
+"Z2M-dh-eq1.title" = "字幕语言偏好将以 ISO 639-2 语言代码保存。";
 
 /* Class = "NSTextFieldCell"; title = "Blur:"; ObjectID = "aO9-D6-KG8"; */
 "aO9-D6-KG8.title" = "模糊:";

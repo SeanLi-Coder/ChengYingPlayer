@@ -654,12 +654,6 @@
                         <action selector="addFileAction:" target="-2" id="Jxt-2n-xTT"/>
                     </connections>
                 </menuItem>
-                <menuItem title="Add URL…" id="zeJ-cr-tRg">
-                    <modifierMask key="keyEquivalentModifierMask"/>
-                    <connections>
-                        <action selector="addURLAction:" target="-2" id="v21-ty-a2p"/>
-                    </connections>
-                </menuItem>
             </items>
             <point key="canvasLocation" x="294" y="497"/>
         </menu>

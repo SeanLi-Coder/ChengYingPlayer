@@ -34,7 +34,9 @@ class PrefUIViewController: PreferenceViewController, PreferenceWindowEmbeddable
 
   static var oscToolbarButtons: [Preference.ToolBarButton] {
     get {
-      return (Preference.array(for: .controlBarToolbarButtons) as? [Int] ?? []).compactMap(Preference.ToolBarButton.init(rawValue:))
+      return (Preference.array(for: .controlBarToolbarButtons) as? [Int] ?? [])
+        .compactMap(Preference.ToolBarButton.init(rawValue:))
+        .filter(\.isAvailable)
     }
   }
 
@@ -245,4 +247,3 @@ class PrefUIViewController: PreferenceViewController, PreferenceWindowEmbeddable
     return timing != 2
   }
 }
-

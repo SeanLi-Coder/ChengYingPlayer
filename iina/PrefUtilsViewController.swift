@@ -24,13 +24,12 @@ class PrefUtilsViewController: PreferenceViewController, PreferenceWindowEmbedda
   }
 
   override var sectionViews: [NSView] {
-    return [sectionDefaultAppView, sectionRestoreAlertsView, sectionClearCacheView, sectionBrowserExtView]
+    return [sectionDefaultAppView, sectionRestoreAlertsView, sectionClearCacheView]
   }
 
   @IBOutlet var sectionDefaultAppView: NSView!
   @IBOutlet var sectionRestoreAlertsView: NSView!
   @IBOutlet var sectionClearCacheView: NSView!
-  @IBOutlet var sectionBrowserExtView: NSView!
   @IBOutlet var setAsDefaultSheet: NSWindow!
   @IBOutlet weak var setAsDefaultVideoCheckBox: NSButton!
   @IBOutlet weak var setAsDefaultAudioCheckBox: NSButton!
@@ -165,11 +164,4 @@ class PrefUtilsViewController: PreferenceViewController, PreferenceWindowEmbedda
     }
   }
 
-  @IBAction func extChromeBtnAction(_ sender: Any) {
-    NSWorkspace.shared.open(URL(string: AppData.chromeExtensionLink)!)
-  }
-
-  @IBAction func extFirefoxBtnAction(_ sender: Any) {
-    NSWorkspace.shared.open(URL(string: AppData.firefoxExtensionLink)!)
-  }
 }
