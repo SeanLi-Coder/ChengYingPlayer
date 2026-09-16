@@ -372,8 +372,12 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       player.mainWindow.showSettingsSidebar(tab: .tools, hideIfAlreadyShown: false)
       player.mainWindow.quickSettingView.performVideoToolsShortcut(action)
     case .setA, .setB:
-      player.mainWindow.quickSettingView.performVideoToolsShortcut(action)
-      player.sendOSD(.abLoop(player.info.abLoopStatus))
+      if player.mainWindow.quickSettingView.performVideoToolsShortcut(action) {
+        player.sendOSD(.abLoop(player.info.abLoopStatus))
+      } else {
+        let key = action == .setB ? "videotools.error.loop_end" : "videotools.error.invalid_range"
+        player.sendOSD(.custom(NSLocalizedString(key, comment: "Invalid keyboard loop marker")))
+      }
     }
     return true
   }

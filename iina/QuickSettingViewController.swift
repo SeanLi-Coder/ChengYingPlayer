@@ -114,15 +114,17 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
   private var toolsTabBtn: NSButton?
   private var videoToolsViewController: VideoToolsViewController?
 
-  func performVideoToolsShortcut(_ action: VideoToolsShortcuts.Action) {
+  @discardableResult
+  func performVideoToolsShortcut(_ action: VideoToolsShortcuts.Action) -> Bool {
     _ = view
     switch action {
     case .rotateLeft: videoToolsViewController?.requestPermanentRotation(clockwiseQuarterTurns: -1)
     case .rotateRight: videoToolsViewController?.requestPermanentRotation(clockwiseQuarterTurns: 1)
-    case .setA: videoToolsViewController?.setLoopMarker(isEnd: false)
-    case .setB: videoToolsViewController?.setLoopMarker(isEnd: true)
+    case .setA: return videoToolsViewController?.setLoopMarker(isEnd: false) ?? false
+    case .setB: return videoToolsViewController?.setLoopMarker(isEnd: true) ?? false
     default: break
     }
+    return true
   }
 
   @IBOutlet weak var buttonTopConstraint: NSLayoutConstraint!

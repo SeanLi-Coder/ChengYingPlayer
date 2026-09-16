@@ -412,25 +412,26 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   /// Keyboard markers own their loop independently of this panel's temporary preview.
-  func setLoopMarker(isEnd: Bool) {
+  @discardableResult
+  func setLoopMarker(isEnd: Bool) -> Bool {
     _ = view
     guard let player, currentLocalMediaURL != nil else {
       showValidationError(NSLocalizedString("videotools.error.no_local_video", comment: "Open a local video first"))
-      return
+      return false
     }
     discardPreviewSnapshot()
     if isEnd {
       guard player.videoToolsSetLoopEnd(), let range = player.videoToolsLoopRange else {
         updatePlaybackControls()
         showValidationError(NSLocalizedString("videotools.error.loop_end", comment: "Set A before setting B after A"))
-        return
+        return false
       }
       startField.stringValue = formatTimestamp(range.start, precision: 6)
       endField.stringValue = formatTimestamp(range.end, precision: 6)
     } else {
       guard player.videoToolsSetLoopStart() else {
         showValidationError(NSLocalizedString("videotools.error.invalid_range", comment: "End must be after start"))
-        return
+        return false
       }
       let start = player.mpv.getDouble(MPVOption.PlaybackControl.abLoopA)
       startField.stringValue = formatTimestamp(start, precision: 6)
@@ -440,6 +441,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     }
     updatePreviewButtons()
     updatePlaybackControls()
+    return true
   }
 
   func setPlaybackControlsVisible(_ visible: Bool) {
