@@ -148,6 +148,7 @@ class PrefUtilsViewController: PreferenceViewController, PreferenceWindowEmbedda
       guard respond == .alertFirstButtonReturn else { return }
       try? FileManager.default.removeItem(atPath: Utility.thumbnailCacheURL.path)
       Utility.createDirIfNotExist(url: Utility.thumbnailCacheURL)
+      CacheManager.shared.needsRefresh = true
       self.updateThumbnailCacheStat()
     }
   }

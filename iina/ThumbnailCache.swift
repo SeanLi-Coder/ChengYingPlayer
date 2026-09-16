@@ -7,6 +7,7 @@
 //
 
 import Cocoa
+import ImageIO
 
 fileprivate let subsystem = Logger.makeSubsystem("thumbcache")
 
@@ -16,189 +17,266 @@ class ThumbnailCache {
   private typealias FileTimestamp = Int64
 
   private static let version: CacheVersion = 2
-  
   private static let sizeofMetadata = MemoryLayout<CacheVersion>.size + MemoryLayout<FileSize>.size + MemoryLayout<FileTimestamp>.size
+  private static let maxFileBytes: UInt64 = 256 * 1_024 * 1_024
+  private static let maxImageBytes = 16 * 1_024 * 1_024
+  private static let maxDecodedBytes: UInt64 = 128 * 1_024 * 1_024
+  private static let maxImageDimension = 4096
+  private static let maxThumbnails = 1001
+  private static let lock = NSRecursiveLock()
+  private static let imageProperties: [NSBitmapImageRep.PropertyKey: Any] = [.compressionFactor: 0.75]
 
-  private static let imageProperties: [NSBitmapImageRep.PropertyKey: Any] = [
-    .compressionFactor: 0.75
-  ]
-  
+  private enum CacheError: Error { case invalid }
+
+  /// Keep throwing I/O available on macOS 10.15 without Foundation's exception-based legacy API.
+  private final class CacheFile {
+    private var descriptor: Int32
+
+    init(_ descriptor: Int32) { self.descriptor = descriptor }
+    deinit { try? close() }
+
+    func close() throws {
+      guard descriptor >= 0 else { return }
+      let current = descriptor
+      descriptor = -1
+      guard Darwin.close(current) == 0 else { throw CacheError.invalid }
+    }
+
+    func synchronize() throws {
+      guard fsync(descriptor) == 0 else { throw CacheError.invalid }
+    }
+
+    func read(upToCount count: Int) throws -> Data? {
+      guard descriptor >= 0, count >= 0, count <= maxImageBytes else { throw CacheError.invalid }
+      var data = Data(count: count)
+      var total = 0
+      try data.withUnsafeMutableBytes { bytes in
+        while total < count {
+          let amount = Darwin.read(descriptor, bytes.baseAddress!.advanced(by: total), count - total)
+          if amount < 0 && errno == EINTR { continue }
+          guard amount >= 0 else { throw CacheError.invalid }
+          if amount == 0 { break }
+          total += amount
+        }
+      }
+      data.count = total
+      return data
+    }
+
+    func write(contentsOf data: Data) throws {
+      guard descriptor >= 0 else { throw CacheError.invalid }
+      try data.withUnsafeBytes { bytes in
+        var total = 0
+        while total < bytes.count {
+          let amount = Darwin.write(descriptor, bytes.baseAddress!.advanced(by: total), bytes.count - total)
+          if amount < 0 && errno == EINTR { continue }
+          guard amount > 0 else { throw CacheError.invalid }
+          total += amount
+        }
+      }
+    }
+  }
+
   private static func log(_ message: @autoclosure () -> String, level: Logger.Level = .debug) {
     Logger.log(message, level: level, subsystem: subsystem)
   }
 
   static func fileExists(forName name: String) -> Bool {
-    return FileManager.default.fileExists(atPath: urlFor(name).path)
+    FileManager.default.fileExists(atPath: urlFor(name).path)
+  }
+
+  private static func videoMetadata(_ url: URL?) -> (FileSize, FileTimestamp)? {
+    guard let url = url,
+          let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+          let size = attributes[.size] as? FileSize,
+          let date = attributes[.modificationDate] as? Date,
+          date.timeIntervalSince1970.isFinite,
+          let timestamp = FileTimestamp(exactly: date.timeIntervalSince1970.rounded(.towardZero)) else { return nil }
+    return (size, timestamp)
+  }
+
+  /// Use a nonblocking, no-follow descriptor so damaged cache entries cannot redirect reads or hang.
+  private static func openCache(_ url: URL) throws -> (CacheFile, UInt64) {
+    let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+    guard descriptor >= 0 else { throw CacheError.invalid }
+    var attributes = stat()
+    guard fstat(descriptor, &attributes) == 0,
+          attributes.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+          attributes.st_size >= sizeofMetadata,
+          UInt64(attributes.st_size) <= maxFileBytes else {
+      Darwin.close(descriptor)
+      throw CacheError.invalid
+    }
+    return (CacheFile(descriptor), UInt64(attributes.st_size))
+  }
+
+  private static func readInteger<T: FixedWidthInteger>(_ type: T.Type, from file: CacheFile) throws -> T {
+    let length = MemoryLayout<T>.size
+    guard let data = try file.read(upToCount: length), data.count == length else { throw CacheError.invalid }
+    var value: T = 0
+    _ = withUnsafeMutableBytes(of: &value) { data.copyBytes(to: $0) }
+    return value
+  }
+
+  private static func data<T>(of value: T) -> Data {
+    var value = value
+    return withUnsafeBytes(of: &value) { Data($0) }
   }
 
   static func fileIsCached(forName name: String, forVideo videoPath: URL?) -> Bool {
-    guard let fileAttr = try? FileManager.default.attributesOfItem(atPath: videoPath!.path) else {
-      log("Cannot get video file attributes", level: .error)
-      return false
-    }
-
-    // file size
-    guard let fileSize = fileAttr[.size] as? FileSize else {
-      log("Cannot get video file size", level: .error)
-      return false
-    }
-
-    // modified date
-    guard let fileModifiedDate = fileAttr[.modificationDate] as? Date else {
-      log("Cannot get video file modification date", level: .error)
-      return false
-    }
-    let fileTimestamp = FileTimestamp(fileModifiedDate.timeIntervalSince1970)
-
-    // Check metadate in the cache
-    if self.fileExists(forName: name) {
-      guard let file = try? FileHandle(forReadingFrom: urlFor(name)) else {
-        log("Cannot open cache file.", level: .error)
-        return false
-      }
-
-      let cacheVersion = file.read(type: CacheVersion.self)
-      if cacheVersion != version { return false }
-
-      return file.read(type: FileSize.self) == fileSize &&
-        file.read(type: FileTimestamp.self) == fileTimestamp
-    }
-
-    return false
+    // Atomic publication and a private descriptor make this safe without waiting for a background
+    // JPEG encode while the playback thread checks metadata.
+    guard let expected = videoMetadata(videoPath),
+          let (file, _) = try? openCache(urlFor(name)) else { return false }
+    defer { try? file.close() }
+    do {
+      return try readInteger(CacheVersion.self, from: file) == version &&
+        readInteger(FileSize.self, from: file) == expected.0 &&
+        readInteger(FileTimestamp.self, from: file) == expected.1
+    } catch { return false }
   }
 
-  /// Write thumbnail cache to file.
-  /// This method is expected to be called when the file doesn't exist.
+  /// Write to a separate file and publish only a complete cache. A failed write preserves any old cache.
   static func write(_ thumbnails: [FFThumbnail], forName name: String, forVideo videoPath: URL?) {
-    log("Writing thumbnail cache...")
-
-    let maxCacheSize = Preference.integer(for: .maxThumbnailPreviewCacheSize) * FloatingPointByteCountFormatter.PrefixFactor.mi.rawValue
-    if maxCacheSize == 0 {
-      return
-    } else if CacheManager.shared.getCacheSize() > maxCacheSize {
-      CacheManager.shared.clearOldCache()
-    }
-
-    let pathURL = urlFor(name)
-    guard FileManager.default.createFile(atPath: pathURL.path, contents: nil, attributes: nil) else {
-      log("Cannot create file.", level: .error)
-      return
-    }
-    guard let file = try? FileHandle(forWritingTo: pathURL) else {
-      log("Cannot write to file.", level: .error)
+    lock.lock()
+    defer { lock.unlock() }
+    let configured = Preference.integer(for: .maxThumbnailPreviewCacheSize)
+    let (maxCacheSize, overflow) = configured.multipliedReportingOverflow(by: 1_024 * 1_024)
+    guard configured > 0, !overflow, !thumbnails.isEmpty, thumbnails.count <= maxThumbnails,
+          let metadata = videoMetadata(videoPath) else { return }
+    let target = urlFor(name)
+    let temporary = target.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).tmp")
+    let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+    guard descriptor >= 0 else {
+      log("Cannot create thumbnail cache.", level: .error)
       return
     }
-
-    // version
-    let versionData = Data(bytesOf: version)
-    file.write(versionData)
-
-    guard let fileAttr = try? FileManager.default.attributesOfItem(atPath: videoPath!.path) else {
-      log("Cannot get video file attributes", level: .error)
-      return
+    let file = CacheFile(descriptor)
+    defer {
+      try? file.close()
+      try? FileManager.default.removeItem(at: temporary)
     }
-
-    // file size
-    guard let fileSize = fileAttr[.size] as? FileSize else {
-      log("Cannot get video file size", level: .error)
-      return
-    }
-    let fileSizeData = Data(bytesOf: fileSize)
-    file.write(fileSizeData)
-
-    // modified date
-    guard let fileModifiedDate = fileAttr[.modificationDate] as? Date else {
-      log("Cannot get video file modification date", level: .error)
-      return
-    }
-    let fileTimestamp = FileTimestamp(fileModifiedDate.timeIntervalSince1970)
-    let fileModificationDateData = Data(bytesOf: fileTimestamp)
-    file.write(fileModificationDateData)
-
-    // data blocks
-    for tb in thumbnails {
-      let timestampData = Data(bytesOf: tb.realTime)
-      guard let tiffData = tb.image?.tiffRepresentation else {
-        log("Cannot generate tiff data.", level: .error)
-        return
+    do {
+      try file.write(contentsOf: data(of: version))
+      try file.write(contentsOf: data(of: metadata.0))
+      try file.write(contentsOf: data(of: metadata.1))
+      var bytesWritten = UInt64(sizeofMetadata)
+      var decodedBytes: UInt64 = 0
+      for thumbnail in thumbnails {
+        try autoreleasepool {
+          guard thumbnail.realTime.isFinite,
+                let image = thumbnail.image,
+                image.size.width > 0, image.size.height > 0,
+                image.size.width <= CGFloat(maxImageDimension),
+                image.size.height <= CGFloat(maxImageDimension),
+                let tiffData = image.tiffRepresentation,
+                let representation = NSBitmapImageRep(data: tiffData),
+                let jpegData = representation.representation(using: .jpeg, properties: imageProperties),
+                !jpegData.isEmpty, jpegData.count <= maxImageBytes else { throw CacheError.invalid }
+          decodedBytes += try decodedSize(jpegData)
+          guard decodedBytes <= maxDecodedBytes else { throw CacheError.invalid }
+          let blockLength = Int64(MemoryLayout<Double>.size + jpegData.count)
+          bytesWritten += UInt64(MemoryLayout<Int64>.size) + UInt64(blockLength)
+          guard bytesWritten <= maxFileBytes else { throw CacheError.invalid }
+          try file.write(contentsOf: data(of: blockLength))
+          try file.write(contentsOf: data(of: thumbnail.realTime))
+          try file.write(contentsOf: jpegData)
+        }
       }
-      guard let jpegData = NSBitmapImageRep(data: tiffData)?.representation(using: .jpeg, properties: imageProperties) else {
-        log("Cannot generate jpeg data.", level: .error)
-        return
+      guard let currentMetadata = videoMetadata(videoPath),
+            metadata.0 == currentMetadata.0, metadata.1 == currentMetadata.1 else { throw CacheError.invalid }
+      try file.synchronize()
+      try file.close()
+      guard rename(temporary.path, target.path) == 0 else { throw CacheError.invalid }
+      CacheManager.shared.needsRefresh = true
+      // Eviction must not remove the previous good cache before its replacement is safely published.
+      if CacheManager.shared.getCacheSize() > maxCacheSize {
+        CacheManager.shared.clearOldCache(excluding: target)
       }
-      let blockLength = Int64(timestampData.count + jpegData.count)
-      let blockLengthData = Data(bytesOf: blockLength)
-      file.write(blockLengthData)
-      file.write(timestampData)
-      file.write(jpegData)
+      log("Finished writing thumbnail cache.")
+    } catch {
+      log("Cannot write thumbnail cache.", level: .warning)
     }
-
-    CacheManager.shared.needsRefresh = true
-    log("Finished writing thumbnail cache.")
   }
 
-  /// Read thumbnail cache to file.
-  /// This method is expected to be called when the file exists.
-  static func read(forName name: String) -> [FFThumbnail]? {
-    log("Reading thumbnail cache...")
+  /// Validate compressed and decoded sizes before constructing images from an untrusted disk cache.
+  private static func decodedSize(_ data: Data) throws -> UInt64 {
+    guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+          (CGImageSourceGetType(source) as String?) == "public.jpeg",
+          CGImageSourceGetCount(source) == 1,
+          let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let depth = properties[kCGImagePropertyDepth] as? Int, depth > 0, depth <= 8,
+          let width = properties[kCGImagePropertyPixelWidth] as? Int,
+          let height = properties[kCGImagePropertyPixelHeight] as? Int,
+          width > 0, height > 0, width <= maxImageDimension, height <= maxImageDimension else {
+      throw CacheError.invalid
+    }
+    return UInt64(width) * UInt64(height) * 4
+  }
 
+  static func read(forName name: String) -> [FFThumbnail]? {
+    lock.lock()
+    defer { lock.unlock() }
     let pathURL = urlFor(name)
-    guard let file = try? FileHandle(forReadingFrom: pathURL) else {
-      log("Cannot open file.", level: .error)
+    guard let (file, eof) = try? openCache(pathURL) else {
+      log("Cannot open thumbnail cache.", level: .warning)
       return nil
     }
-    log("Reading from \(pathURL.path)")
-
-    var result: [FFThumbnail] = []
-
-    // get file length
-    file.seekToEndOfFile()
-    let eof = file.offsetInFile
-
-    // skip metadata
-    file.seek(toFileOffset: UInt64(sizeofMetadata))
-
-    // data blocks
-    while file.offsetInFile != eof {
-      // length and timestamp
-      guard let blockLength = file.read(type: Int64.self),
-            let timestamp = file.read(type: Double.self) else {
-        log("Cannot read image header. Cache file will be deleted.", level: .warning)
-        file.closeFile()
-        deleteCacheFile(at: pathURL)
-        return nil
+    defer { try? file.close() }
+    do {
+      guard try readInteger(CacheVersion.self, from: file) == version else { throw CacheError.invalid }
+      _ = try readInteger(FileSize.self, from: file)
+      _ = try readInteger(FileTimestamp.self, from: file)
+      var offset = UInt64(sizeofMetadata)
+      var decodedBytes: UInt64 = 0
+      var result: [FFThumbnail] = []
+      while offset < eof {
+        try autoreleasepool {
+          guard result.count < maxThumbnails,
+                eof - offset >= UInt64(MemoryLayout<Int64>.size + MemoryLayout<Double>.size) else {
+            throw CacheError.invalid
+          }
+          let blockLength = try readInteger(Int64.self, from: file)
+          offset += UInt64(MemoryLayout<Int64>.size)
+          guard blockLength > MemoryLayout<Double>.size,
+                blockLength <= maxImageBytes + MemoryLayout<Double>.size,
+                UInt64(blockLength) <= eof - offset else { throw CacheError.invalid }
+          let timestamp = Double(bitPattern: try readInteger(UInt64.self, from: file))
+          guard timestamp.isFinite else { throw CacheError.invalid }
+          let imageLength = Int(blockLength) - MemoryLayout<Double>.size
+          guard let jpegData = try file.read(upToCount: imageLength), jpegData.count == imageLength else {
+            throw CacheError.invalid
+          }
+          decodedBytes += try decodedSize(jpegData)
+          guard decodedBytes <= maxDecodedBytes, let image = NSImage(data: jpegData) else { throw CacheError.invalid }
+          let thumbnail = FFThumbnail()
+          thumbnail.realTime = timestamp
+          thumbnail.image = image
+          result.append(thumbnail)
+          offset += UInt64(blockLength)
+        }
       }
-      // jpeg
-      let jpegData = file.readData(ofLength: Int(blockLength) - MemoryLayout.size(ofValue: timestamp))
-      guard let image = NSImage(data: jpegData) else {
-        log("Cannot read image. Cache file will be deleted.", level: .warning)
-        file.closeFile()
-        deleteCacheFile(at: pathURL)
-        return nil
-      }
-      // construct
-      let tb = FFThumbnail()
-      tb.realTime = timestamp
-      tb.image = image
-      result.append(tb)
+      guard !result.isEmpty, try file.read(upToCount: 1)?.isEmpty != false else { throw CacheError.invalid }
+      log("Finished reading thumbnail cache, \(result.count) in total")
+      return result
+    } catch {
+      try? file.close()
+      log("Invalid thumbnail cache will be deleted.", level: .warning)
+      deleteCacheFile(at: pathURL)
+      return nil
     }
-
-    file.closeFile()
-    log("Finished reading thumbnail cache, \(result.count) in total")
-    return result
   }
 
   private static func deleteCacheFile(at pathURL: URL) {
-    // try deleting corrupted cache
     do {
       try FileManager.default.removeItem(at: pathURL)
+      CacheManager.shared.needsRefresh = true
     } catch {
       log("Cannot delete corrupted cache.", level: .error)
     }
   }
 
   private static func urlFor(_ name: String) -> URL {
-    return Utility.thumbnailCacheURL.appendingPathComponent(name)
+    Utility.thumbnailCacheURL.appendingPathComponent(name)
   }
-
 }

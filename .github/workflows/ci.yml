@@ -61,6 +61,9 @@ jobs:
           bash Tools/PlaybackTimeTests/run.sh
           bash Tools/HistorySearchTests/run.sh
           bash Tools/PlaybackLifecycleTests/run.sh
+          bash Tools/ThumbnailLifecycleTests/run.sh
+          bash Tools/ThumbnailCacheTests/run.sh
+          bash Tools/RenderLifecycleTests/run.sh
           bash Tools/WindowLifecycleTests/run.sh
           bash Tools/AutoFileMatchingTests/run.sh
 
@@ -175,6 +178,12 @@ jobs:
 
       - name: Test live filter node safety
         run: bash Tools/PlaybackLifecycleTests/run_live.sh
+
+      - name: Test real thumbnail decoding and cancellation
+        run: bash Tools/ThumbnailDecoderTests/run.sh
+
+      - name: Test real 4K playback rendering
+        run: PLAYBACK_SOAK_MODE=software PLAYBACK_SOAK_SECONDS=180 bash Tools/PlaybackSoakTests/run.sh
 
       - name: Build application
         run: >-

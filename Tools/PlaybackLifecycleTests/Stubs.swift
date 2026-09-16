@@ -47,6 +47,9 @@ final class PlaybackFixture {
   var justStartedFile = false
   var disableOSDForFileLoading = false
   var shouldAutoLoadFiles = true
+  var thumbnails = [Int]()
+  var thumbnailsReady = false
+  var thumbnailsProgress = 0.0
   @Atomic var matchedSubs = [String: [URL]]()
   func getMatchedSubs(_ path: String) -> [URL]? { nil }
 }
@@ -66,6 +69,14 @@ final class VideoFixture {
   func stopDisplayLink() { stops += 1 }
 }
 final class WindowFixture { let videoView = VideoFixture() }
+final class ThumbnailDecoderFixture {
+  var cancellations = 0
+  func cancelThumbnailGeneration() { cancellations += 1 }
+}
+final class ThumbnailSliderFixture {
+  func resetCachedThumbnails() {}
+}
+final class TouchBarFixture { var touchBarPlaySlider: ThumbnailSliderFixture? }
 final class EventFixture {
   enum Event { case fileStarted }
   func emit(_ event: Event) {}
@@ -86,6 +97,8 @@ class PlayerFixture {
   let mpv = PlaybackMPV()
   let mainWindow = WindowFixture()
   let events = EventFixture()
+  let ffmpegController = ThumbnailDecoderFixture()
+  let touchBarSupport = TouchBarFixture()
   let backgroundQueue = DispatchQueue(label: "PlaybackLifecycleTests.matcher")
   var videoToolsMediaGeneration: UInt64 = 0
   var currentMediaIsAudio = MediaStatus.unknown

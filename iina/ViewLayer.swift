@@ -137,8 +137,9 @@ class ViewLayer: CAOpenGLLayer {
   override init(layer: Any) {
     let previousLayer = layer as! ViewLayer
     videoView = previousLayer.videoView
-    cglPixelFormat = previousLayer.cglPixelFormat
-    cglContext = previousLayer.cglContext
+    // Shadow layers can outlive the model layer and must own their CGL objects.
+    cglPixelFormat = CGLRetainPixelFormat(previousLayer.cglPixelFormat)
+    cglContext = CGLRetainContext(previousLayer.cglContext)
     displayLock = previousLayer.displayLock
     super.init(layer: layer)
     autoresizingMask = previousLayer.autoresizingMask
@@ -152,6 +153,11 @@ class ViewLayer: CAOpenGLLayer {
 
   required init?(coder aDecoder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
+  }
+
+  deinit {
+    CGLReleaseContext(cglContext)
+    CGLReleasePixelFormat(cglPixelFormat)
   }
 
   // MARK: - Draw
@@ -218,9 +224,15 @@ class ViewLayer: CAOpenGLLayer {
     }
   }
 
-  override func copyCGLPixelFormat(forDisplayMask mask: UInt32) -> CGLPixelFormatObj { cglPixelFormat }
+  // Core Animation releases each object returned by these copy methods. Keep
+  // that ownership separate from this layer and any presentation-layer copies.
+  override func copyCGLPixelFormat(forDisplayMask mask: UInt32) -> CGLPixelFormatObj {
+    CGLRetainPixelFormat(cglPixelFormat)
+  }
 
-  override func copyCGLContext(forPixelFormat pf: CGLPixelFormatObj) -> CGLContextObj { cglContext }
+  override func copyCGLContext(forPixelFormat pf: CGLPixelFormatObj) -> CGLContextObj {
+    CGLRetainContext(cglContext)
+  }
 
   /// Reload the content of this layer.
   /// - Important: Because this method is called by tasks on the `mpvGLQueue` an explicit

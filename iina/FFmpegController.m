@@ -26,6 +26,13 @@
 #define LOG_WARN(msg, ...) [FFmpegLogger warn:([NSString stringWithFormat:(msg), ##__VA_ARGS__])];
 
 #define THUMB_COUNT_DEFAULT 100
+#define THUMB_COUNT_MAX 1000
+#define THUMB_DIMENSION_MAX 4096
+#define THUMB_MEMORY_MAX (128ULL * 1024 * 1024)
+
+static int thumbnailInterrupt(void *opaque) {
+  return [(__bridge NSOperation *)opaque isCancelled] ? 1 : 0;
+}
 
 #define CHECK_NOTNULL(ptr,msg) if (ptr == NULL) {\
 LOG_ERROR(@"Error when getting thumbnails: %@", msg);\
@@ -46,17 +53,34 @@ return -1;\
 
 @end
 
+// Foundation does not mark a finished NSOperation as cancelled. Keep cancellation observable
+// until its pending main-thread callbacks have also been discarded.
+@interface FFThumbnailOperation : NSBlockOperation
+@property(atomic) BOOL cancellationRequested;
+@end
+
+@implementation FFThumbnailOperation
+- (void)cancel {
+  self.cancellationRequested = YES;
+  [super cancel];
+}
+- (BOOL)isCancelled {
+  return self.cancellationRequested || [super isCancelled];
+}
+@end
+
 
 @interface FFmpegController () {
   NSMutableArray<FFThumbnail *> *_thumbnails;
   NSMutableArray<FFThumbnail *> *_thumbnailPartialResult;
   NSMutableSet *_addedTimestamps;
   NSOperationQueue *_queue;
+  NSOperation *_latestOperation;
   double _timestamp;
 }
 
-- (int)getPeeksForFile:(NSString *)file thumbnailsWidth:(int)thumbnailsWidth;
-- (void)saveThumbnail:(AVFrame *)pFrame width:(int)width height:(int)height index:(int)index realTime:(int)second forFile:(NSString *)file;
+- (int)getPeeksForFile:(NSString *)file thumbnailsWidth:(int)thumbnailsWidth operation:(NSOperation *)operation generation:(NSUInteger)generation;
+- (BOOL)saveThumbnail:(AVFrame *)pFrame index:(int)index realTime:(double)second forFile:(NSString *)file operation:(NSOperation *)operation generation:(NSUInteger)generation;
 
 @end
 
@@ -81,265 +105,267 @@ return -1;\
 
 - (void)generateThumbnailForFile:(NSString *)file
                       thumbWidth:(int)thumbWidth
+                      generation:(NSUInteger)generation
 {
-  [_queue cancelAllOperations];
-  NSBlockOperation *op = [[NSBlockOperation alloc] init];
+  NSBlockOperation *op = [[FFThumbnailOperation alloc] init];
   __weak NSBlockOperation *weakOp = op;
+  __weak FFmpegController *weakController = self;
   [op addExecutionBlock:^(){
-    if ([weakOp isCancelled]) {
-      return;
-    }
-    self->_timestamp = CACurrentMediaTime();
-    int success = [self getPeeksForFile:file thumbnailsWidth:thumbWidth];
-    if (self.delegate) {
-      [self.delegate didGenerateThumbnails:[NSArray arrayWithArray:self->_thumbnails]
-                                   forFile: file
-                                 succeeded:(success < 0 ? NO : YES)];
+    @autoreleasepool {
+      NSOperation *operation = weakOp;
+      FFmpegController *activeController = weakController;
+      if (!activeController || !operation || operation.cancelled) return;
+      activeController->_timestamp = CACurrentMediaTime();
+      int success = [activeController getPeeksForFile:file thumbnailsWidth:thumbWidth operation:operation generation:generation];
+      if (!operation.cancelled) {
+        NSArray *thumbnails = [activeController->_thumbnails copy];
+        __weak FFmpegController *weakSelf = activeController;
+        dispatch_async(dispatch_get_main_queue(), ^{
+          FFmpegController *controller = weakSelf;
+          if (controller && !operation.cancelled) {
+            [controller.delegate didGenerateThumbnails:thumbnails forFile:file succeeded:success >= 0 generation:generation];
+          }
+        });
+      }
+      // The player owns delivered images. The decoder must not retain an old video's images.
+      [activeController->_thumbnails removeAllObjects];
+      [activeController->_thumbnailPartialResult removeAllObjects];
+      [activeController->_addedTimestamps removeAllObjects];
     }
   }];
-  [_queue addOperation:op];
+  @synchronized (self) {
+    [_latestOperation cancel];
+    [_queue cancelAllOperations];
+    _latestOperation = op;
+    [_queue addOperation:op];
+  }
+}
+
+- (void)cancelThumbnailGeneration
+{
+  @synchronized (self) {
+    [_latestOperation cancel];
+    [_queue cancelAllOperations];
+    _latestOperation = nil;
+  }
 }
 
 - (int)getPeeksForFile:(NSString *)file
        thumbnailsWidth:(int)thumbnailsWidth
+             operation:(NSOperation *)operation
+            generation:(NSUInteger)generation
 {
-  int i, ret;
-
-  char *cFilename = strdup(file.fileSystemRepresentation);
+  AVFormatContext *pFormatCtx = NULL;
+  AVCodecContext *pCodecCtx = NULL;
+  AVPacket *packet = NULL;
+  AVFrame *pFrame = NULL;
+  AVFrame *pFrameRGB = NULL;
+  struct SwsContext *swsContext = NULL;
   [_thumbnails removeAllObjects];
   [_thumbnailPartialResult removeAllObjects];
   [_addedTimestamps removeAllObjects];
 
-  // Register all formats and codecs. mpv should have already called it.
-  // av_register_all();
+  // Every failure and cancellation must release the decoder, including partially opened inputs.
+  @try {
+    NSInteger thumbnailCount = self.thumbnailCount;
+    CHECK(thumbnailsWidth > 0 && thumbnailsWidth <= THUMB_DIMENSION_MAX, @"Invalid thumbnail width")
+    CHECK(thumbnailCount > 0 && thumbnailCount <= THUMB_COUNT_MAX, @"Invalid thumbnail count")
+    if (operation.cancelled) return -1;
 
-  // Open video file
-  AVFormatContext *pFormatCtx = NULL;
-  ret = avformat_open_input(&pFormatCtx, cFilename, NULL, NULL);
-  free(cFilename);
-  CHECK_SUCCESS(ret, @"Cannot open video")
+    pFormatCtx = avformat_alloc_context();
+    CHECK_NOTNULL(pFormatCtx, @"Cannot alloc input context")
+    pFormatCtx->interrupt_callback.callback = thumbnailInterrupt;
+    pFormatCtx->interrupt_callback.opaque = (__bridge void *)operation;
+    int ret = avformat_open_input(&pFormatCtx, file.fileSystemRepresentation, NULL, NULL);
+    CHECK_SUCCESS(ret, @"Cannot open video")
+    ret = avformat_find_stream_info(pFormatCtx, NULL);
+    CHECK_SUCCESS(ret, @"Cannot get stream info")
+    if (operation.cancelled) return -1;
 
-  // Find stream information
-  ret = avformat_find_stream_info(pFormatCtx, NULL);
-  CHECK_SUCCESS(ret, @"Cannot get stream info")
-
-  // Find the first video stream
-  int videoStream = -1;
-  for (i = 0; i < pFormatCtx->nb_streams; i++)
-    if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-      videoStream = i;
-      break;
+    int videoStream = -1;
+    for (unsigned int i = 0; i < pFormatCtx->nb_streams; i++) {
+      AVStream *stream = pFormatCtx->streams[i];
+      if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO &&
+          !(stream->disposition & AV_DISPOSITION_ATTACHED_PIC)) {
+        videoStream = (int)i;
+        break;
+      }
     }
-  CHECK_SUCCESS(videoStream, @"No video stream")
+    CHECK_SUCCESS(videoStream, @"No video stream")
+    AVStream *pVideoStream = pFormatCtx->streams[videoStream];
+    CHECK(pVideoStream->time_base.num > 0 && pVideoStream->time_base.den > 0, @"Invalid video time base")
+    const double timebaseDouble = av_q2d(pVideoStream->time_base);
+    int64_t duration = pVideoStream->duration;
+    if (duration == AV_NOPTS_VALUE || duration <= 0) {
+      CHECK(pFormatCtx->duration != AV_NOPTS_VALUE && pFormatCtx->duration > 0, @"Unknown video duration")
+      duration = av_rescale_q(pFormatCtx->duration, AV_TIME_BASE_Q, pVideoStream->time_base);
+    }
+    CHECK(duration > 0, @"Invalid video duration")
+    const int64_t startTime = pVideoStream->start_time == AV_NOPTS_VALUE ? 0 : pVideoStream->start_time;
+    CHECK(startTime <= INT64_MAX - duration, @"Video timestamp overflow")
 
-  // Get the codec context for the video stream
-  AVStream *pVideoStream = pFormatCtx->streams[videoStream];
+    const AVCodec *pCodec = avcodec_find_decoder(pVideoStream->codecpar->codec_id);
+    CHECK_NOTNULL(pCodec, @"Unsupported codec")
+    pCodecCtx = avcodec_alloc_context3(pCodec);
+    CHECK_NOTNULL(pCodecCtx, @"Cannot alloc codec context")
+    ret = avcodec_parameters_to_context(pCodecCtx, pVideoStream->codecpar);
+    CHECK_SUCCESS(ret, @"Cannot copy codec parameters")
+    pCodecCtx->time_base = pVideoStream->time_base;
+    ret = avcodec_open2(pCodecCtx, pCodec, NULL);
+    CHECK_SUCCESS(ret, @"Cannot open codec")
 
-  AVRational videoAvgFrameRate = pVideoStream->avg_frame_rate;
+    packet = av_packet_alloc();
+    pFrame = av_frame_alloc();
+    pFrameRGB = av_frame_alloc();
+    CHECK_NOTNULL(packet, @"Cannot alloc video packet")
+    CHECK_NOTNULL(pFrame, @"Cannot alloc video frame")
+    CHECK_NOTNULL(pFrameRGB, @"Cannot alloc RGBA frame")
+    uint64_t thumbnailBytes = 0;
 
-  // Check whether the denominator (AVRational.den) is zero to prevent division-by-zero
-  if (videoAvgFrameRate.den == 0 || av_q2d(videoAvgFrameRate) == 0) {
-    LOG_DEBUG(@"Avg frame rate = 0, ignore");
-    return -1;
-  }
+    for (int i = 0; i <= thumbnailCount; i++) {
+      @autoreleasepool {
+        if (operation.cancelled) return -1;
+        int64_t seekPosition = startTime + av_rescale(duration, i, thumbnailCount);
+        avcodec_flush_buffers(pCodecCtx);
+        ret = av_seek_frame(pFormatCtx, videoStream, seekPosition, AVSEEK_FLAG_BACKWARD);
+        CHECK_SUCCESS(ret, @"Cannot seek")
+        avcodec_flush_buffers(pCodecCtx);
 
-  // Find the decoder for the video stream
-  const AVCodec *pCodec = avcodec_find_decoder(pVideoStream->codecpar->codec_id);
-  CHECK_NOTNULL(pCodec, @"Unsupported codec")
+        while (!operation.cancelled) {
+          @try {
+            const int readResult = av_read_frame(pFormatCtx, packet);
+            const BOOL draining = readResult == AVERROR_EOF;
+            if (readResult < 0 && !draining) break;
+            if (!draining && packet->stream_index != videoStream) continue;
+            ret = avcodec_send_packet(pCodecCtx, draining ? NULL : packet);
+            if (ret < 0 && ret != AVERROR(EAGAIN)) break;
+            ret = avcodec_receive_frame(pCodecCtx, pFrame);
+            if (ret == AVERROR(EAGAIN)) {
+              if (draining) break;
+              continue;
+            }
+            if (ret < 0) break;
+            if (operation.cancelled) return -1;
 
-  // Open codec
-  AVCodecContext *pCodecCtx = avcodec_alloc_context3(pCodec);
-  AVDictionary *optionsDict = NULL;
+            const int64_t frameTimestamp = pFrame->best_effort_timestamp == AV_NOPTS_VALUE
+              ? seekPosition : pFrame->best_effort_timestamp;
+            NSNumber *currentTimeStamp = @(frameTimestamp);
+            if ([_addedTimestamps containsObject:currentTimeStamp]) {
+              if (CACurrentMediaTime() - _timestamp >= 1) {
+                [self publishThumbnailUpdate:nil forFile:file progress:i operation:operation generation:generation];
+                _timestamp = CACurrentMediaTime();
+              }
+              break;
+            }
+            [_addedTimestamps addObject:currentTimeStamp];
 
-  avcodec_parameters_to_context(pCodecCtx, pVideoStream->codecpar);
-  pCodecCtx->time_base = pVideoStream->time_base;
-
-  if (pCodecCtx->pix_fmt < 0 || pCodecCtx->pix_fmt >= AV_PIX_FMT_NB) {
+            // Decoded frames can change dimensions or format within a stream. Never pass the
+            // initial codec height to sws_scale when the current frame owns a different buffer.
+            CHECK(pFrame->width > 0 && pFrame->height > 0, @"Invalid decoded frame size")
+            CHECK(pFrame->format >= 0 && pFrame->format < AV_PIX_FMT_NB, @"Invalid decoded pixel format")
+            CHECK(sws_isSupportedInput(pFrame->format), @"Unsupported decoded pixel format")
+            const int thumbWidth = thumbnailsWidth;
+            const int64_t scaledHeight = av_rescale(pFrame->height, thumbWidth, pFrame->width);
+            CHECK(scaledHeight > 0 && scaledHeight <= THUMB_DIMENSION_MAX, @"Invalid thumbnail height")
+            const int thumbHeight = (int)scaledHeight;
+            const uint64_t imageBytes = (uint64_t)thumbWidth * thumbHeight * 4;
+            CHECK(thumbnailBytes + imageBytes <= THUMB_MEMORY_MAX, @"Thumbnail memory budget exceeded")
+            if (pFrameRGB->width != thumbWidth || pFrameRGB->height != thumbHeight) {
+              av_frame_unref(pFrameRGB);
+              pFrameRGB->width = thumbWidth;
+              pFrameRGB->height = thumbHeight;
+              pFrameRGB->format = AV_PIX_FMT_RGBA;
+              ret = av_frame_get_buffer(pFrameRGB, 32);
+              CHECK_SUCCESS(ret, @"Cannot alloc RGBA buffer")
+            }
+            ret = av_frame_make_writable(pFrameRGB);
+            CHECK_SUCCESS(ret, @"Cannot access RGBA buffer")
+            swsContext = sws_getCachedContext(swsContext, pFrame->width, pFrame->height, pFrame->format,
+              thumbWidth, thumbHeight, AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
+            CHECK_NOTNULL(swsContext, @"Cannot alloc scaler")
+            ret = sws_scale(swsContext, (const uint8_t * const *)pFrame->data, pFrame->linesize,
+              0, pFrame->height, pFrameRGB->data, pFrameRGB->linesize);
+            CHECK(ret == thumbHeight, @"Cannot convert complete frame")
+            if (operation.cancelled) return -1;
+            const double seconds = ((double)frameTimestamp - (double)startTime) * timebaseDouble;
+            CHECK(isfinite(seconds), @"Invalid thumbnail timestamp")
+            CHECK([self saveThumbnail:pFrameRGB index:i realTime:MAX(0, seconds)
+                             forFile:file operation:operation generation:generation], @"Cannot create thumbnail")
+            thumbnailBytes += imageBytes;
+            break;
+          } @finally {
+            av_packet_unref(packet);
+            av_frame_unref(pFrame);
+          }
+        }
+      }
+    }
+    return operation.cancelled || _thumbnails.count == 0 ? -1 : 0;
+  } @finally {
+    sws_freeContext(swsContext);
+    av_frame_free(&pFrameRGB);
+    av_frame_free(&pFrame);
+    av_packet_free(&packet);
     avcodec_free_context(&pCodecCtx);
     avformat_close_input(&pFormatCtx);
-    LOG_ERROR(@"Error when getting thumbnails: Pixel format is null");
-    return -1;
   }
-
-  ret = avcodec_open2(pCodecCtx, pCodec, &optionsDict);
-  CHECK_SUCCESS(ret, @"Cannot open codec")
-
-  // Allocate video frame
-  AVFrame *pFrame = av_frame_alloc();
-  CHECK_NOTNULL(pFrame, @"Cannot alloc video frame")
-
-  // Allocate the output frame
-  // We need to convert the video frame to RGBA to satisfy CGImage's data format
-  int thumbWidth = thumbnailsWidth;
-  int thumbHeight = (float)thumbWidth / ((float)pCodecCtx->width / pCodecCtx->height);
-
-  AVFrame *pFrameRGB = av_frame_alloc();
-  CHECK_NOTNULL(pFrameRGB, @"Cannot alloc RGBA frame")
-
-  pFrameRGB->width = thumbWidth;
-  pFrameRGB->height = thumbHeight;
-  pFrameRGB->format = AV_PIX_FMT_RGBA;
-
-  // Determine required buffer size and allocate buffer
-  int size = av_image_get_buffer_size(pFrameRGB->format, thumbWidth, thumbHeight, 1);
-  uint8_t *pFrameRGBBuffer = (uint8_t *)av_malloc(size);
-
-  // Assign appropriate parts of buffer to image planes in pFrameRGB
-  ret = av_image_fill_arrays(pFrameRGB->data,
-                             pFrameRGB->linesize,
-                             pFrameRGBBuffer,
-                             pFrameRGB->format,
-                             pFrameRGB->width,
-                             pFrameRGB->height, 1);
-  CHECK_SUCCESS(ret, @"Cannot fill data for RGBA frame")
-
-  // Create a sws context for converting color space and resizing
-  CHECK(pCodecCtx->pix_fmt != AV_PIX_FMT_NONE, @"Pixel format is none")
-  struct SwsContext *sws_ctx = sws_getContext(pCodecCtx->width, pCodecCtx->height, pCodecCtx->pix_fmt,
-                                              pFrameRGB->width, pFrameRGB->height, pFrameRGB->format,
-                                              SWS_BILINEAR,
-                                              NULL, NULL, NULL);
-
-  // Get duration and interval
-  int64_t duration = av_rescale_q(pFormatCtx->duration, AV_TIME_BASE_Q, pVideoStream->time_base);
-  double interval = duration / (double)self.thumbnailCount;
-  double timebaseDouble = av_q2d(pVideoStream->time_base);
-  AVPacket packet;
-
-  // For each preview point
-  for (i = 0; i <= self.thumbnailCount; i++) {
-    int64_t seek_pos = interval * i + pVideoStream->start_time;
-
-    avcodec_flush_buffers(pCodecCtx);
-
-    // Seek to time point
-    // avformat_seek_file(pFormatCtx, videoStream, seek_pos-interval, seek_pos, seek_pos+interval, 0);
-    ret = av_seek_frame(pFormatCtx, videoStream, seek_pos, AVSEEK_FLAG_BACKWARD);
-    CHECK_SUCCESS(ret, @"Cannot seek")
-
-    avcodec_flush_buffers(pCodecCtx);
-
-    // Read and decode frame
-    while(av_read_frame(pFormatCtx, &packet) >= 0) {
-      @try {
-        // Make sure it's video stream
-        if (packet.stream_index == videoStream) {
-
-          // Decode video frame
-          if (avcodec_send_packet(pCodecCtx, &packet) < 0)
-            break;
-
-          ret = avcodec_receive_frame(pCodecCtx, pFrame);
-          if (ret < 0) {  // something happened
-            if (ret == AVERROR(EAGAIN))  // input not ready, retry
-              continue;
-            else
-              break;
-          }
-
-          // Check if duplicated
-          NSNumber *currentTimeStamp = @(pFrame->best_effort_timestamp);
-          if ([_addedTimestamps containsObject:currentTimeStamp]) {
-            double currentTime = CACurrentMediaTime();
-            if (currentTime - _timestamp > 1) {
-              if (self.delegate) {
-                [self.delegate didUpdateThumbnails:NULL forFile: file withProgress: i];
-                _timestamp = currentTime;
-              }
-            }
-            break;
-          } else {
-            [_addedTimestamps addObject:currentTimeStamp];
-          }
-
-          // Convert the frame to RGBA
-          ret = sws_scale(sws_ctx,
-                          (const uint8_t* const *)pFrame->data,
-                          pFrame->linesize,
-                          0,
-                          pCodecCtx->height,
-                          pFrameRGB->data,
-                          pFrameRGB->linesize);
-          CHECK_SUCCESS(ret, @"Cannot convert frame")
-
-          // Save the frame to disk
-          [self saveThumbnail:pFrameRGB
-                        width:pFrameRGB->width
-                       height:pFrameRGB->height
-                        index:i
-                     realTime:(pFrame->best_effort_timestamp * timebaseDouble)
-                      forFile:file];
-          break;
-        }
-      } @finally {
-        // Free the packet
-        av_packet_unref(&packet);
-      }
-    }
-  }
-  // Free the scaler
-  sws_freeContext(sws_ctx);
-
-  // Free the RGB image
-  av_free(pFrameRGBBuffer);
-  av_frame_free(&pFrameRGB);
-  // Free the YUV frame
-  av_frame_free(&pFrame);
-
-  // Free the codec
-  avcodec_free_context(&pCodecCtx);
-  // Close the video file
-  avformat_close_input(&pFormatCtx);
-
-  // LOG_DEBUG(@"Thumbnails generated.");
-  return 0;
 }
 
-
-- (void)saveThumbnail:(AVFrame *)pFrame width
-                     :(int)width height
-                     :(int)height index
-                     :(int)index realTime
-                     :(int)second forFile
-                     :(NSString *)file
+- (void)publishThumbnailUpdate:(NSArray<FFThumbnail *> *)thumbnails
+                      forFile:(NSString *)file
+                     progress:(NSInteger)progress
+                    operation:(NSOperation *)operation
+                   generation:(NSUInteger)generation
 {
-  // Create CGImage
-  CGColorSpaceRef rgb = CGColorSpaceCreateDeviceRGB();
+  if (operation.cancelled) return;
+  NSArray *snapshot = [thumbnails copy];
+  __weak FFmpegController *weakSelf = self;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    FFmpegController *controller = weakSelf;
+    if (controller && !operation.cancelled) {
+      [controller.delegate didUpdateThumbnails:snapshot forFile:file withProgress:progress generation:generation];
+    }
+  });
+}
 
-  CGContextRef cgContext = CGBitmapContextCreate(pFrame->data[0],  // it's converted to RGBA so could be used directly
-                                                 width, height,
-                                                 8,  // 8 bit per component
-                                                 width * 4,  // 4 bytes(rgba) per pixel
-                                                 rgb,
-                                                 kCGImageAlphaPremultipliedLast);
-  CGImageRef cgImage = CGBitmapContextCreateImage(cgContext);
-
-  // Create NSImage
-  NSImage *image = [[NSImage alloc] initWithCGImage:cgImage size: NSZeroSize];
-
-  // Free resources
-  CFRelease(rgb);
-  CFRelease(cgContext);
-  CFRelease(cgImage);
-
-  // Add to list
-  FFThumbnail *tb = [[FFThumbnail alloc] init];
-  tb.image = image;
-  tb.realTime = second;
-  [_thumbnails addObject:tb];
-  [_thumbnailPartialResult addObject:tb];
-  // Post update notification
-  double currentTime = CACurrentMediaTime();
-  if (currentTime - _timestamp >= 0.2) {  // min notification interval: 0.2s
-    if (_thumbnailPartialResult.count >= 10 || (currentTime - _timestamp >= 1 && _thumbnailPartialResult.count > 0)) {
-      if (self.delegate) {
-        [self.delegate didUpdateThumbnails:[NSArray arrayWithArray:_thumbnailPartialResult]
-                                   forFile: file
-                              withProgress: index];
-      }
+- (BOOL)saveThumbnail:(AVFrame *)pFrame
+                index:(int)index
+             realTime:(double)second
+              forFile:(NSString *)file
+            operation:(NSOperation *)operation
+           generation:(NSUInteger)generation
+{
+  CGColorSpaceRef rgb = NULL;
+  CGContextRef cgContext = NULL;
+  CGImageRef cgImage = NULL;
+  @try {
+    rgb = CGColorSpaceCreateDeviceRGB();
+    if (!rgb) return NO;
+    cgContext = CGBitmapContextCreate(pFrame->data[0], pFrame->width, pFrame->height, 8,
+                                     pFrame->linesize[0], rgb, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
+    if (!cgContext) return NO;
+    cgImage = CGBitmapContextCreateImage(cgContext);
+    if (!cgImage) return NO;
+    NSImage *image = [[NSImage alloc] initWithCGImage:cgImage size:NSZeroSize];
+    if (!image) return NO;
+    FFThumbnail *thumbnail = [[FFThumbnail alloc] init];
+    thumbnail.image = image;
+    thumbnail.realTime = second;
+    [_thumbnails addObject:thumbnail];
+    [_thumbnailPartialResult addObject:thumbnail];
+    double currentTime = CACurrentMediaTime();
+    if (currentTime - _timestamp >= 0.2 &&
+        (_thumbnailPartialResult.count >= 10 || currentTime - _timestamp >= 1)) {
+      [self publishThumbnailUpdate:_thumbnailPartialResult forFile:file progress:index
+                        operation:operation generation:generation];
       [_thumbnailPartialResult removeAllObjects];
       _timestamp = currentTime;
     }
+    return YES;
+  } @finally {
+    if (cgImage) CGImageRelease(cgImage);
+    if (cgContext) CGContextRelease(cgContext);
+    if (rgb) CGColorSpaceRelease(rgb);
   }
 }
 

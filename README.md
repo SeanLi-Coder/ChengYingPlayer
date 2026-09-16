@@ -109,6 +109,15 @@ Release 中的 `ChengYingPlayer-<tag>-Release-Source.tar.gz` 是便于审核和�
 
 其他默认快捷键也保留：空格播放/暂停，左右方向键前后跳转 5 秒，Option + 左右方向键逐帧定位，Command + `[` / `]` 减半/加倍播放速度，Command + `\` 恢复正常速度。循环单文件改为 Option + Command + L，在 Finder 中显示文件改为 Option + Command + R。其他键位可以在设置中自定义。
 
+### 4K 播放稳定性
+
+- 后台时间轴缩略图在换片、重开同一文件、关闭窗口或退出时取消旧请求；过期的解码与磁盘读取结果不会写回新视频。保存缓存使用对应视频的结果快照，不会把两部视频的缩略图混写。
+- 缩略图解码的失败和取消路径释放 FFmpeg / Core Graphics 资源，按当前帧尺寸处理动态分辨率，校验尺寸和缓存长度。损坏的缩略图缓存会失效并重新生成，不影响源视频。
+- 修复显示缩放 / presentation layer 切换时 OpenGL 对象的引用生命周期，以及停止显示刷新时的锁顺序问题。这些保护不通过降低视频分辨率、码率或关闭硬件解码实现。
+- 已核对当前播放依赖与上游的 [AV1 解码崩溃修复](https://github.com/iina/iina/releases/tag/v1.4.2-build164)、[大视频被误当封面读入内存的修复](https://github.com/iina/iina/pull/5818)。当前固定播放栈已包含这两类修复，不代表所有历史崩溃都属于同一原因。
+
+仓库提供真实 libmpv + OpenGL 的 4K H.264 / HEVC Main10 持续播放检查，覆盖循环、跳转、变速、换片与内存趋势；默认 3 分钟，可显式延长到 4 小时。测试使用自行生成的素材，不读取个人视频。它与原生渲染生命周期回归互补，**不能代替所有编码、HDR 显示器或数小时完整 App 的实测，也不保证任何视频都不会崩溃**。如果实际使用仍闪退，保留对应时间的 macOS 崩溃报告和视频编码信息，便于定位到具体调用栈。
+
 ### 视频剪辑
 
 - 只需填写起始时间和结束时间。
@@ -202,6 +211,8 @@ open iina.xcodeproj
 如果需要自行构建 mpv 和 FFmpeg，请参考 [`other/`](other/) 中的构建与依赖处理脚本。动态库、编译选项和许可证必须与实际发布版本保持一致。
 
 ## 参与开发
+
+播放稳定性专项检查：`bash Tools/ThumbnailLifecycleTests/run.sh` 验证真实请求生命周期；`bash Tools/ThumbnailCacheTests/run.sh` 验证损坏缓存与清理；`bash Tools/RenderLifecycleTests/run.sh` 验证 CGL 引用与退出锁顺序。准备好播放动态库和媒体工具后，`bash Tools/ThumbnailDecoderTests/run.sh` 验证实际 FFmpeg 缩略图解码，执行 `PLAYBACK_SOAK_SECONDS=600 bash Tools/PlaybackSoakTests/run.sh` 可做 10 分钟真实 4K 硬件解码与 OpenGL 渲染检查；明确设置 `PLAYBACK_SOAK_MODE=software` 才使用软件解码，测试结果会分别标示，不把软件回退当作硬件验证成功。详细范围见各测试目录的 README。
 
 图片专项检查：`bash Tools/ImageViewerTests/run.sh`、`bash Tools/ImageViewerUITests/run.sh`、`bash Tools/ImageRoutingTests/run.sh`、`bash Tools/ImageSlideshowTests/run.sh`、`bash Tools/ImageSlideshowUITests/run.sh`。幻灯片覆盖实际 AppKit 控件、Finder 多色标签、排序、慢图 / 坏图 / 动图、动态间隔、最小化恢复与转换隔离，并使用临时偏好域。先运行 `bash other/build_image_codec.sh` 再运行 `bash Tools/ImageCodecHelper/run.sh`，可测试真实 WebP 像素、动画时序、透明度、ICC、安全限制与取消。测试只生成临时素材，不读取个人相册。完整 App 仍由 CI 构建和签名验证，源码发布限制不变。
 

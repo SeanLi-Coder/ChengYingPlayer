@@ -37,6 +37,11 @@ func lifecycleChecks() {
     drain { player.finishedTasks == 1 }
     check(player.backgroundTaskInUse, "An older file completion cannot clear a newer task's ownership")
     check(player.videoToolsMediaGeneration == 2, "File-generation and loop reset behavior is retained")
+    check(player.thumbnailGeneration == 2 && player.ffmpegController.cancellations == 2,
+          "Every file-start invalidates and cancels previous thumbnail work, including reused paths")
+    player.info.thumbnails = [1, 2, 3]
+    player.info.thumbnailsReady = true
+    player.info.thumbnailsProgress = 1
     if shuttingDown {
       player.info.state = .idle
       player.shutdown()
@@ -46,6 +51,9 @@ func lifecycleChecks() {
       check(player.mpv.stopped == 0, "Stop waits for all pending matcher tasks")
       check(player.mainWindow.videoView.stops == 0, "The display link remains available until all background tasks finish")
     }
+    check(player.ffmpegController.cancellations == 3 && player.info.thumbnails.isEmpty &&
+          !player.info.thumbnailsReady && player.info.thumbnailsProgress == 0,
+          "Stop and quit release thumbnail images and cancel decoding before waiting for the matcher")
     releaseSecond.signal()
     drain { player.finishedTasks == 2 }
     check(!player.backgroundTaskInUse, "Ownership is released after the last completion")

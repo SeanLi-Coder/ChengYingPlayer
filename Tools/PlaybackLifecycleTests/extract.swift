@@ -18,14 +18,20 @@ let declarations = section(player, "  @Atomic var backgroundQueueTicket", "  var
 let start = section(player, "  func fileStarted(path:", "  /// A [MPV_EVENT_FILE_LOADED]")
 let stop = section(player, "  func stop() {", "  func toggleMute(")
 let shutdown = section(player, "  func shutdown() {", "  /// Respond to the mpv core shutting down.")
+let invalidateThumbnails = player.contains("  private func invalidateThumbnails() {")
+  ? section(player, "  private func invalidateThumbnails() {", "  func generateThumbnails() {") : ""
+let thumbnailGenerationFallback = declarations.contains("var thumbnailGeneration:")
+  ? "" : "@Atomic var thumbnailGeneration: UInt = 0"
 let playerSource = """
 import Foundation
 
 final class PlayerUnderTest: PlayerFixture {
 \(declarations)
+\(thumbnailGenerationFallback)
 \(start)
 \(stop)
 \(shutdown)
+\(invalidateThumbnails)
   func checkTicket(_ ticket: Int) throws {
     if backgroundQueueTicket != ticket { throw TicketExpiredError.ticketExpired }
   }
