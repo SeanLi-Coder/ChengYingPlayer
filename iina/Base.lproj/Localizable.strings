@@ -22,15 +22,22 @@
 
 // Guide Window
 "guide.highlights" = "Highlights";
+"guide.welcome.title" = "Welcome to ChengYingPlayer";
+"guide.welcome.subtitle" = "A local-first media player with practical video tools built directly into playback.";
+"guide.welcome.playback" = "Play local and network media with playlists, subtitles, chapters, history, and Picture in Picture.";
+"guide.welcome.clip" = "Create a high-fidelity clip by entering only its start and end times, with live range preview.";
+"guide.welcome.frames" = "Export every frame from a range up to five seconds at the source resolution.";
+"guide.welcome.rotate" = "Permanently rotate a video by 90°, 180°, 270°, or 360° without overwriting the source.";
+"guide.welcome.source" = "Project source and releases";
 "guide.basic_settings" = "Basic Settings";
 "guide.faq" = "Frequently Asked Questions";
 
 // Initial Window
-"initial.announcement" = "You are using a %@ version of IINA";
-"initial.beta.desc" = "If you want to rollback to a release version, uncheck \"receive beta updates\" from Settings > General, and install a stable release from our <a href=\"https://iina.io\">official website</a>.";
-"initial.nightly.desc" = "Nightly is not recommended to be used as your daily driver. Currently nightly builds do not support auto update. Please manually download newer builds from our <a href=\"https://nightly.iina.io\">nightly website</a>.";
+"initial.announcement" = "You are using a %@ version of ChengYing";
+"initial.beta.desc" = "To return to a stable version, disable beta updates in Settings > General and download the latest <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/releases/latest\">GitHub Release</a>.";
+"initial.nightly.desc" = "Nightly builds are intended for testing. Download newer builds from the project's <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/releases\">GitHub Releases</a>.";
 "initial.debug.desc" = "Debug builds are usually not optimized for performance, so it is not recommended to be used as daily drive. Debug builds do not support auto update.";
-"initial.bug_report" = "Report via <a href=\"https://github.com/iina/iina/issues\">GitHub issues</a>.";
+"initial.bug_report" = "Report via the project's <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/issues\">GitHub Issues</a>.";
 
 // Inspector Window
 "inspector.error" = "Error";
@@ -53,6 +60,56 @@
 "quicksetting.hdr" = "HDR";
 "quicksetting.hide" = "Hide";
 "quicksetting.reset_speed" = "Reset speed to 1x";
+
+// Local video tools
+"videotools.tab" = "TOOLS";
+"videotools.title" = "Local Video Tools";
+"videotools.mode" = "MODE";
+"videotools.operation.probe" = "Inspect";
+"videotools.operation.clip" = "Clip";
+"videotools.operation.frames" = "Frames";
+"videotools.operation.rotate" = "Rotate";
+"videotools.start" = "Start";
+"videotools.end" = "End";
+"videotools.use_current" = "Current";
+"videotools.preview_range" = "Preview Range";
+"videotools.preview_rotation" = "Preview Rotation";
+"videotools.stop_preview" = "Stop Preview";
+"videotools.frames_hint" = "A frame range can be up to 5 seconds. Changing the start time sets the end time to 5 seconds later.";
+"videotools.rotation" = "ROTATION";
+"videotools.output_folder" = "OUTPUT FOLDER";
+"videotools.output_default" = "Same folder as source";
+"videotools.choose" = "Choose…";
+"videotools.choose_output" = "Choose Output Folder";
+"videotools.run" = "Run";
+"videotools.run_clip" = "Create Clip";
+"videotools.run_frames" = "Extract Every Frame";
+"videotools.run_rotate" = "Create Rotated Video";
+"videotools.reveal" = "Show in Finder";
+"videotools.no_local_video" = "Open a local video to use these tools.";
+"videotools.status.ready" = "Ready";
+"videotools.status.starting" = "Starting…";
+"videotools.status.running" = "Processing…";
+"videotools.status.cancelling" = "Cancelling…";
+"videotools.status.completed" = "Completed";
+"videotools.status.failed" = "Failed";
+"videotools.status.failed_detail" = "Failed: %@";
+"videotools.status.cancelled" = "Cancelled";
+"videotools.status.task" = "%1$@ · %2$@\n%3$@";
+"videotools.elapsed" = "Elapsed %@";
+"videotools.eta" = "ETA %@";
+"videotools.frames_count" = "%d frames";
+"videotools.error.missing_executable" = "The bundled executable “%@” is missing or cannot run. Reinstall the app.";
+"videotools.error.launch_failed" = "Could not start the video tools helper: %@";
+"videotools.error.disconnected" = "The video tools helper stopped unexpectedly: %@";
+"videotools.error.protocol" = "The video tools helper uses unsupported protocol version %@.";
+"videotools.error.invalid_response" = "The video tools helper returned invalid data: %@";
+"videotools.error.busy" = "Another video task is still running.";
+"videotools.error.no_local_video" = "Open a local video first.";
+"videotools.error.invalid_time" = "Enter a valid time such as 01:23.500.";
+"videotools.error.invalid_range" = "The end time must be after the start time.";
+"videotools.error.after_duration" = "The selected range extends past the end of the video.";
+"videotools.error.frames_too_long" = "Frame extraction is limited to 5 seconds per task.";
 
 // EQ Presets
 "eq.preset.flat" = "Flat";
@@ -276,7 +333,7 @@
 "alert.add_filter.title" = "New Filter";
 "alert.add_filter.message" = "Please enter a filter string in format of mpv's vf or af command.";
 
-"alert.keybinding_config.error" = "Error parsing keybinding configuration file \"%@\"! Fallback to IINA Default keybinding setting. Please check your configuration.";
+"alert.keybinding_config.error" = "Error parsing keybinding configuration file \"%@\"! Fallback to ChengYing Default keybinding setting. Please check your configuration.";
 
 "alert.extra_option.cannot_read" = "Cannot read user defined extra mpv options.";
 "alert.extra_option.empty" = "Key or value cannot be empty!";
@@ -293,8 +350,8 @@
 "alert.sub.cannot_login" = "Cannot login. Please check your username, password and network status.\n\n%@";
 "alert.sub.save_downloaded.title" = "Save Downloaded Subtitle";
 
-"alert.set_default.title" = "Setting IINA as Default App";
-"alert.set_default.message" = "IINA will be set as the default app for all file types it supports.";
+"alert.set_default.title" = "Setting ChengYing as Default App";
+"alert.set_default.message" = "ChengYing will be set as the default app for all file types it supports.";
 "alert.set_default.success" = "Finished with %d success and %d failed.";
 
 "alert.add_watch.title" = "Add Watch Property";
@@ -339,9 +396,9 @@
 
 "alert.duplicate_config" = "You cannot edit default configurations directly. Please duplicate one before editing.";
 
-"alert.assrt_register" = "Due to limited API quota, you are strongly recommended to use your own API token. The default token is only for demo usage, and you may encounter network error.";
+"alert.assrt_register" = "ASSRT requires your own API token. Register for a token, then paste it into ChengYingPlayer.";
 "alert.assrt_register.register" = "Register Now";
-"alert.assrt_register.try" = "Try First";
+"alert.assrt_register.try" = "Enter Token";
 "alert.assrt_token_prompt.title" = "Enter your API token";
 "alert.assrt_token_prompt.message" = "Please register in the opened webpage. Get your token in your user home page and enter it below:";
 "alert.assrt_token_invalid" = "Your Assrt API token seems to be invalid.";
@@ -462,6 +519,6 @@
 "plugin.install_error.file_not_found" = "Cannot find the package file.";
 "plugin.install_error.cannot_download" = "Failed to download the plugin.\n\nOutput:%@\n";
 "plugin.install_error.cannot_unpackage" = "Failed to unpackage the plugin.\n\nOutput:%@\n";
-"plugin.install_error.cannot_load" = "IINA cannot load this plugin. It might be in the wrong format.";
+"plugin.install_error.cannot_load" = "ChengYing cannot load this plugin. It might be in the wrong format.";
 "plugin.check_for_updates" = "Check for Updates";
 "plugin.updating" = "Downloading update…";

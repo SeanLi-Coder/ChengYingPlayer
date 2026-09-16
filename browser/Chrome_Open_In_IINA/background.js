@@ -11,7 +11,7 @@ const dict = {
 
 Object.keys(dict).forEach((item) => {
   chrome.contextMenus.create({
-    title: `Open this ${item} in IINA`,
+    title: `Open this ${item} in ChengYingPlayer`,
     id: `openiniina_${item}`,
     contexts: [item],
   });

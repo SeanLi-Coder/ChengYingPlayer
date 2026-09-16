@@ -25,8 +25,8 @@
 /* Class = "NSTextFieldCell"; title = "Playlist:"; ObjectID = "6TV-DG-503"; */
 "6TV-DG-503.title" = "播放列表:";
 
-/* Class = "NSTextFieldCell"; title = "Requires restarting IINA to take effect."; ObjectID = "8kU-8g-VgX"; */
-"8kU-8g-VgX.title" = "重启 IINA 后生效。";
+/* Class = "NSTextFieldCell"; title = "Requires restarting ChengYing to take effect."; ObjectID = "8kU-8g-VgX"; */
+"8kU-8g-VgX.title" = "重启澄影播放器后生效。";
 
 /* Class = "NSButtonCell"; title = "Only in \"music mode\""; ObjectID = "AVe-9Z-RgQ"; */
 "AVe-9Z-RgQ.title" = "仅在“音乐模式”下显示";

@@ -125,7 +125,7 @@ class Logger: NSObject {
     return sessionDir
   }()
 
-  private static let logFile: URL = logDirectory.appendingPathComponent("iina.log")
+  private static let logFile: URL = logDirectory.appendingPathComponent("chengying.log")
 
   private static let loggerSubsystem = Logger.makeSubsystem("logger")
 

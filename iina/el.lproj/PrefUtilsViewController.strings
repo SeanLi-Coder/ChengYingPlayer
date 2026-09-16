@@ -16,8 +16,8 @@
 /* Class = "NSTextFieldCell"; title = "Cleared."; ObjectID = "Fb4-dy-CXX"; */
 "Fb4-dy-CXX.title" = "Εκκαθαρισμένο.";
 
-/* Class = "NSTextFieldCell"; title = "Open links or current webpage in IINA with one click. The website must be supported by youtube-dl."; ObjectID = "GAo-fx-NG0"; */
-"GAo-fx-NG0.title" = "Άνοιγμα συνδέσμων ή τρέχουσα ιστοσελίδα σε IINA με ένα κλικ. Η ιστοσελίδα πρέπει να υποστηρίζεται από youtube-dl.";
+/* Class = "NSTextFieldCell"; title = "Open links or current webpage in ChengYing with one click. The website must be supported by youtube-dl."; ObjectID = "GAo-fx-NG0"; */
+"GAo-fx-NG0.title" = "Άνοιγμα συνδέσμων ή τρέχουσα ιστοσελίδα σε ChengYing με ένα κλικ. Η ιστοσελίδα πρέπει να υποστηρίζεται από youtube-dl.";
 
 /* Class = "NSButtonCell"; title = "OK"; ObjectID = "IkF-qG-s4j"; */
 "IkF-qG-s4j.title" = "ΟΚ";
@@ -34,8 +34,8 @@
 /* Class = "NSTextFieldCell"; title = "Clear Cache"; ObjectID = "QHA-tO-oSn"; */
 "QHA-tO-oSn.title" = "Εκκαθάριση προσωρινής μνήμης";
 
-/* Class = "NSButtonCell"; title = "Set IINA as the Default Application…"; ObjectID = "e1p-Aa-WFG"; */
-"e1p-Aa-WFG.title" = "Ορισμός της IINA ως προεπιλεγμένης εφαρμογής…";
+/* Class = "NSButtonCell"; title = "Set ChengYing as the Default Application…"; ObjectID = "e1p-Aa-WFG"; */
+"e1p-Aa-WFG.title" = "Ορισμός της ChengYing ως προεπιλεγμένης εφαρμογής…";
 
 /* Class = "NSButtonCell"; title = "Firefox"; ObjectID = "f9i-sS-MJN"; */
 "f9i-sS-MJN.title" = "Firefox";
@@ -70,11 +70,11 @@
 /* Class = "NSTextFieldCell"; title = "Current thumbnail cache:"; ObjectID = "uV3-aF-UB7"; */
 "uV3-aF-UB7.title" = "Τρέχουσα μνήμη μικρογραφιών:";
 
-/* Class = "NSTextFieldCell"; title = "Please select the media types that you want to make IINA as the default Application for."; ObjectID = "uvK-Y1-dZr"; */
-"uvK-Y1-dZr.title" = "Παρακαλώ επιλέξτε τους τύπους πολυμέσων για τους οποίους θέλετε να κάνετε IINA ως προεπιλεγμένη εφαρμογή.";
+/* Class = "NSTextFieldCell"; title = "Please select the media types that you want to make ChengYing as the default Application for."; ObjectID = "uvK-Y1-dZr"; */
+"uvK-Y1-dZr.title" = "Παρακαλώ επιλέξτε τους τύπους πολυμέσων για τους οποίους θέλετε να κάνετε ChengYing ως προεπιλεγμένη εφαρμογή.";
 
 /* Class = "NSButtonCell"; title = "Chrome"; ObjectID = "yuw-2i-ICd"; */
 "yuw-2i-ICd.title" = "Chrome";
 
-/* Class = "NSTextFieldCell"; title = "Get Browser Extensions for IINA"; ObjectID = "zCe-1f-tkF"; */
-"zCe-1f-tkF.title" = "Αποκτήστε επεκτάσεις προγράμματος περιήγησης για IINA";
+/* Class = "NSTextFieldCell"; title = "Get Browser Extensions for ChengYing"; ObjectID = "zCe-1f-tkF"; */
+"zCe-1f-tkF.title" = "Αποκτήστε επεκτάσεις προγράμματος περιήγησης για ChengYing";

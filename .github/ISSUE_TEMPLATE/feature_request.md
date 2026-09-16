@@ -1,22 +1,24 @@
 ---
-name: Feature request
-about: Suggest an idea for this project
-title: ''
-labels: ''
+name: 功能建议
+about: 为澄影播放器提出新功能或体验改进
+title: "[Feature] "
+labels: enhancement
 assignees: ''
-
 ---
 
-<!-- Please use English, if possible. If you really feel the need to use a different language to get your point across, you may add a description in your native language to supplement your report. -->
-<!-- Please also try to search for your request to avoid it being closed as a duplicate. -->
+## 希望增加或改进什么
 
-**What you want IINA to do:**
+请清楚描述目标和使用场景。
 
-<!-- Fill this out if IINA already does something similar, or you would like to change some current behavior. -->
-**What IINA does currently:**
+## 现在遇到的问题
 
-<!-- This is probably where you explain how you'd use this feature. -->
-**Why you think this should be added:**
+请说明现有行为，以及为什么不能满足需求。
 
-<!-- If applicable. -->
-**Examples of other projects that have something similar:**
+## 建议的交互或结果
+
+如有界面草图、示例文件或相似软件，可在这里补充。
+
+## 其他信息
+
+- [ ] 我已经搜索过现有 Issue，没有发现相同建议。
+- [ ] 这个建议不要求把本地媒体上传到第三方服务器。

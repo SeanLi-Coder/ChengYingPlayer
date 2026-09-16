@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "E3DE8DC91FD8166A0021921C"
-               BuildableName = "iina-cli"
+               BuildableName = "chengying-cli"
                BlueprintName = "iina-cli"
                ReferencedContainer = "container:iina.xcodeproj">
             </BuildableReference>
@@ -31,7 +31,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E3DE8DC91FD8166A0021921C"
-            BuildableName = "iina-cli"
+            BuildableName = "chengying-cli"
             BlueprintName = "iina-cli"
             ReferencedContainer = "container:iina.xcodeproj">
          </BuildableReference>
@@ -54,7 +54,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E3DE8DC91FD8166A0021921C"
-            BuildableName = "iina-cli"
+            BuildableName = "chengying-cli"
             BlueprintName = "iina-cli"
             ReferencedContainer = "container:iina.xcodeproj">
          </BuildableReference>
@@ -71,7 +71,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E3DE8DC91FD8166A0021921C"
-            BuildableName = "iina-cli"
+            BuildableName = "chengying-cli"
             BlueprintName = "iina-cli"
             ReferencedContainer = "container:iina.xcodeproj">
          </BuildableReference>

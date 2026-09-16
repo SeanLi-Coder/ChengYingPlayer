@@ -28,8 +28,8 @@ class KeychainAccess {
       self.init(rawValue: rawValue)
     }
 
-    static let openSubAccount = ServiceName(rawValue: "IINA OpenSubtitles Account")
-    static let httpAuth = ServiceName(rawValue: "IINA Saved HTTP Password")
+    static let openSubAccount = ServiceName(rawValue: "ChengYingPlayer OpenSubtitles Account")
+    static let httpAuth = ServiceName(rawValue: "ChengYingPlayer Saved HTTP Password")
   }
 
   static func write(username: String, password: String, forService serviceName: ServiceName, server: String? = nil, port: Int? = nil) throws {
@@ -104,4 +104,3 @@ class KeychainAccess {
   }
 
 }
-

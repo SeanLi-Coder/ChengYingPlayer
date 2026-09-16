@@ -145,6 +145,9 @@ class PlayerCore: NSObject {
   var userLabel: String?
   var disableUI = false
   var disableWindowAnimation = false
+  /// Changes for every mpv start-file event, including reloads of the same URL.
+  /// Video tool previews use this to avoid restoring state into a different media load.
+  private(set) var videoToolsMediaGeneration: UInt64 = 0
 
   var touchBarSupport: TouchBarSupport {
     get {
@@ -370,7 +373,7 @@ class PlayerCore: NSObject {
       // of coordinating two mpv commands executing at the same time, wait until the stop command
       // finishes and the core becomes idle before sending the loadfile command. The stop command
       // normally does not take long to complete, so this should not be noticeable to the user.
-      log("Waiting for stop command to finish before opening: \(url.absoluteString)")
+      log("Waiting for stop command to finish before opening: \(Utility.mediaLogSummary(url))")
       pendingAutoLoad = shouldAutoLoad
       pendingUrl = url
       return
@@ -380,13 +383,13 @@ class PlayerCore: NSObject {
       // Replace the player window with the loading window. Closing the player window will result in
       // an asynchronous stop command being sent to mpv. As described above, delay sending the
       // loadfile command until the stop command finishes.
-      log("Closing window before opening: \(url.absoluteString)")
+      log("Closing window before opening: \(Utility.mediaLogSummary(url))")
       pendingAutoLoad = shouldAutoLoad
       pendingUrl = url
       currentWindow.close()
       return
     }
-    log("Open URL: \(url.absoluteString)")
+    log("Open URL: \(Utility.mediaLogSummary(url))")
     if shouldAutoLoad {
       info.shouldAutoLoadFiles = true
     }
@@ -475,13 +478,13 @@ class PlayerCore: NSObject {
       var pstr = str
       if performPercentEncoding {
         guard let encoded = str.addingPercentEncoding(withAllowedCharacters: .urlAllowed) else {
-          log("Cannot add percent encoding for \(str)", level: .error)
+          log("Cannot add percent encoding for media input (length=\(str.utf8.count))", level: .error)
           return
         }
         pstr = encoded
       }
       guard let url = URL(string: pstr) else {
-        log("Cannot parse url for \(pstr)", level: .error)
+        log("Cannot parse media URL (length=\(pstr.utf8.count))", level: .error)
         return
       }
       openURL(url)
@@ -500,7 +503,7 @@ class PlayerCore: NSObject {
   ///   - url: URL of the media to open.
   ///   - isNetwork: Whether the media must be streamed over the network.
   private func openMainWindow(path: String, url: URL, isNetwork: Bool) {
-    log("Opening \(path) in main window")
+    log("Opening \(Utility.mediaLogSummary(url)) in main window")
     info.currentURL = url
     info.isNetworkResource = isNetwork
     info.audioTracks = []
@@ -549,7 +552,7 @@ class PlayerCore: NSObject {
   static func loadKeyBindings() {
     Logger.log("Loading key bindings")
     let userConfigs = PrefKeyBindingViewController.userConfigs
-    let iinaDefaultConfPath = PrefKeyBindingViewController.defaultConfigs["IINA Default"]!
+    let iinaDefaultConfPath = PrefKeyBindingViewController.defaultConfigs["ChengYing Default"]!
     var inputConfPath = iinaDefaultConfPath
     if let confFromUd = Preference.string(for: .currentInputConfigName) {
       if let currentConfigFilePath = Utility.getFilePath(Configs: userConfigs, forConfig: confFromUd, showAlert: false) {
@@ -611,12 +614,12 @@ class PlayerCore: NSObject {
       path = customYtdlPath + ":" + path
     }
     setenv("PATH", path, 1)
-    log("Set path to \(path)")
+    log("Configured executable search path")
 
     // set http proxy
     if let proxy = Preference.string(for: .httpProxy), !proxy.isEmpty {
       setenv("http_proxy", "http://" + proxy, 1)
-      log("Set http_proxy to \(proxy)")
+      log("Configured http_proxy")
     }
 
     mpv.mpvInit()
@@ -1099,7 +1102,7 @@ class PlayerCore: NSObject {
     // The following internal property was added to provide a way to disable the FFmpeg image
     // decoder should a problem be discovered by users running old versions of macOS.
     guard Preference.bool(for: .enableFFmpegImageDecoder) else { return nil }
-    Logger.log("Using FFmpeg to decode screenshot: \(url)")
+    Logger.log("Using FFmpeg to decode screenshot: \(Utility.mediaLogSummary(url))")
     return FFmpegController.createNSImage(withContentsOf: url)
   }
 
@@ -1355,7 +1358,7 @@ class PlayerCore: NSObject {
   func loadExternalVideoFile(_ url: URL) {
     mpv.command(.videoAdd, args: [url.path], checkError: false) { code in
       if code < 0 {
-        self.log("Unsupported video: \(url.path)", level: .error)
+        self.log("Unsupported video: \(Utility.mediaLogSummary(url))", level: .error)
         DispatchQueue.main.async {
           Utility.showAlert("unsupported_video")
         }
@@ -1366,7 +1369,7 @@ class PlayerCore: NSObject {
   func loadExternalAudioFile(_ url: URL) {
     mpv.command(.audioAdd, args: [url.path], checkError: false) { code in
       if code < 0 {
-        self.log("Unsupported audio: \(url.path)", level: .error)
+        self.log("Unsupported audio: \(Utility.mediaLogSummary(url))", level: .error)
         DispatchQueue.main.async {
           Utility.showAlert("unsupported_audio")
         }
@@ -1403,7 +1406,7 @@ class PlayerCore: NSObject {
 
     mpv.command(.subAdd, args: [url.path], checkError: false, level: .verbose) { code in
       if code < 0 {
-        self.log("Unsupported sub: \(url.path)", level: .error)
+        self.log("Unsupported sub: \(Utility.mediaLogSummary(url))", level: .error)
         // if another modal panel is shown, popping up an alert now will cause some infinite loop.
         if delay {
           DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + 0.5) {
@@ -1998,6 +2001,7 @@ class PlayerCore: NSObject {
   func fileStarted(path: String) {
     guard info.state.active else { return }
     log("File started")
+    videoToolsMediaGeneration &+= 1
     info.justStartedFile = true
     info.disableOSDForFileLoading = true
     currentMediaIsAudio = .unknown

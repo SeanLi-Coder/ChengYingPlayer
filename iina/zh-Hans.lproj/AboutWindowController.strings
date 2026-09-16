@@ -1,5 +1,5 @@
 /* Class = "NSWindow"; title = "About"; ObjectID = "F0z-JX-Cv5"; */
-"F0z-JX-Cv5.title" = "About";
+"F0z-JX-Cv5.title" = "关于澄影播放器";
 
 /* Class = "NSTabViewItem"; label = "Credits"; ObjectID = "HMc-Oy-hBR"; */
 "HMc-Oy-hBR.label" = "第三方库开源许可";
@@ -22,5 +22,8 @@
 /* Class = "NSButtonCell"; title = "Credits"; ObjectID = "zCH-uO-acx"; */
 "zCH-uO-acx.title" = "致谢";
 
-/* Class = "NSTextFieldCell"; title = "IINA localization is powered by Crowdin."; ObjectID = "HLj-vT-kNp"; */
-"HLj-vT-kNp.title" = "IINA 的本地化由 Crowdin 提供支持。";
+/* Class = "NSTextFieldCell"; title = "Thanks to every translation contributor."; ObjectID = "HLj-vT-kNp"; */
+"HLj-vT-kNp.title" = "感谢所有翻译贡献者。";
+
+/* Class = "NSButtonCell"; title = "Translation contributors"; ObjectID = "7k7-70-Kku"; */
+"7k7-70-Kku.title" = "翻译贡献者";

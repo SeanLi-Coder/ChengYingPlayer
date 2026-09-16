@@ -51,7 +51,7 @@ class SleepPreventer: NSObject {
     let options: ProcessInfo.ActivityOptions = allowScreenSaver ?
       .idleSystemSleepDisabled : .idleDisplaySleepDisabled
     activityToken = ProcessInfo.processInfo.beginActivity(options: options,
-                                                          reason: "IINA playback is in progress")
+                                                          reason: "ChengYingPlayer playback is in progress")
 
     let logMessage = allowScreenSaver ? "Preventing system from sleeping" : "Preventing screen saver from starting"
     Logger.log(logMessage, level: .verbose)

@@ -31,7 +31,7 @@
 /* Class = "NSMenuItem"; title = "bottom"; ObjectID = "92n-Uq-o4G"; */
 "92n-Uq-o4G.title" = "下";
 
-/* Class = "NSTextFieldCell"; title = "When the macOS Reduce Motion accessibility setting is enabled IINA will reduce user interface animations that are known to cause problems for those with vestibular disorders. Should that be insufficient, this setting can be used to reduce motion further by eliminating user interface animations."; ObjectID = "9IR-Sf-wMq"; */
+/* Class = "NSTextFieldCell"; title = "When the macOS Reduce Motion accessibility setting is enabled ChengYing will reduce user interface animations that are known to cause problems for those with vestibular disorders. Should that be insufficient, this setting can be used to reduce motion further by eliminating user interface animations."; ObjectID = "9IR-Sf-wMq"; */
 "9IR-Sf-wMq.title" = "macOSのアクセシビリティ設定「視差効果を減らす」が有効な場合、前庭機能障害を持つユーザに問題を引き起こすとされるユーザインターフェイスのアニメーションを軽減します。それでも不十分な場合は、この設定を使用してユーザインターフェイスのアニメーションを無効化して視差効果をさらに減らすことができます。";
 
 /* Class = "NSMenuItem"; title = "% of screen"; ObjectID = "AE4-BD-wZi"; */

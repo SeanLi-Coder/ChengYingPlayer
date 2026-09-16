@@ -19,15 +19,15 @@ execURL.resolveSymlinksInPath()
 
 let processInfo = ProcessInfo.processInfo
 
-let iinaPath = execURL.deletingLastPathComponent().appendingPathComponent("IINA").path
+let appPath = execURL.deletingLastPathComponent().appendingPathComponent("ChengYing").path
 
-guard FileManager.default.fileExists(atPath: iinaPath) else {
-  print("Cannot find IINA binary. This command line tool only works in IINA.app bundle.")
+guard FileManager.default.fileExists(atPath: appPath) else {
+  print("Cannot find ChengYing binary. This command line tool only works in ChengYing.app bundle.")
   exit(1)
 }
 
 let task = Process()
-task.launchPath = iinaPath
+task.launchPath = appPath
 
 var keepRunning = false
 
@@ -38,7 +38,7 @@ var userArgs = Array(processInfo.arguments.dropFirst())
 if userArgs.contains(where: { $0 == "--help" || $0 == "-h" }) {
   print(
     """
-    Usage: iina-cli [arguments] [files] [-- mpv_option [...]]
+    Usage: chengying-cli [arguments] [files] [-- mpv_option [...]]
 
     Arguments:
     --mpv-*:
@@ -47,12 +47,12 @@ if userArgs.contains(where: { $0 == "--help" || $0 == "-h" }) {
     --separate-windows | -w:
             Open all files in separate windows.
     --stdin, --no-stdin:
-            You may also pipe to stdin directly. Sometimes iina-cli can detect whether
+            You may also pipe to stdin directly. Sometimes chengying-cli can detect whether
             stdin has file, but sometimes not. Therefore it's recommended to always
-            supply --stdin when piping to iina, and --no-stdin when you are not intend
+            supply --stdin when piping to ChengYing, and --no-stdin when you do not intend
             to use stdin.
     --keep-running:
-            Normally iina-cli launches IINA and quits immediately. Supply this option
+            Normally chengying-cli launches ChengYing and quits immediately. Supply this option
             if you would like to keep it running until the main application exits.
     --music-mode:
             Enter music mode after opening the media.

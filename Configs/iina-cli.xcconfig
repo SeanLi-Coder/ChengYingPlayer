@@ -8,4 +8,4 @@
 
 
 LD_RUNPATH_SEARCH_PATHS = @executable_path/../Frameworks
-PRODUCT_NAME = $(TARGET_NAME)
+PRODUCT_NAME = chengying-cli

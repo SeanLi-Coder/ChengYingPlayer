@@ -239,6 +239,14 @@
 		846352581EEEE11A0043F0CC /* ThumbnailPeekView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 846352571EEEE11A0043F0CC /* ThumbnailPeekView.swift */; };
 		846654941F4EEBE300C91B8C /* vlc-default-input.conf in Copy Configs */ = {isa = PBXBuildFile; fileRef = 846654921F4EEA5500C91B8C /* vlc-default-input.conf */; };
 		8466BE181D5CDD0300039D03 /* QuickSettingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8466BE161D5CDD0300039D03 /* QuickSettingViewController.swift */; };
+		D4C700012F6A000100000001 /* VideoToolsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C700102F6A000100000001 /* VideoToolsModels.swift */; };
+		D4C700022F6A000100000002 /* VideoToolsHelperClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C700112F6A000100000002 /* VideoToolsHelperClient.swift */; };
+		D4C700032F6A000100000003 /* VideoToolsTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C700122F6A000100000003 /* VideoToolsTaskManager.swift */; };
+		D4C700042F6A000100000004 /* VideoToolsPlayerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C700132F6A000100000004 /* VideoToolsPlayerBridge.swift */; };
+		D4C700052F6A000100000005 /* VideoToolsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C700142F6A000100000005 /* VideoToolsViewController.swift */; };
+		D4C701012F6A000100000001 /* ffmpeg in Copy Video Tools */ = {isa = PBXBuildFile; fileRef = D4C701102F6A000100000001 /* ffmpeg */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		D4C701022F6A000100000002 /* ffprobe in Copy Video Tools */ = {isa = PBXBuildFile; fileRef = D4C701112F6A000100000002 /* ffprobe */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		D4C701032F6A000100000003 /* chengying-video-tools-helper in Copy Video Tools */ = {isa = PBXBuildFile; fileRef = D4C701122F6A000100000003 /* chengying-video-tools-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		846DD8CA1FB39B2500991A81 /* movist-default-input.conf in Copy Configs */ = {isa = PBXBuildFile; fileRef = 846DD8C81FB39A9800991A81 /* movist-default-input.conf */; };
 		847557141F405F8C0006B0FF /* MainWindowMenuActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 847557131F405F8C0006B0FF /* MainWindowMenuActions.swift */; };
 		847557161F406D360006B0FF /* MiniPlayerWindowMenuActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 847557151F406D360006B0FF /* MiniPlayerWindowMenuActions.swift */; };
@@ -393,7 +401,7 @@
 		E3DBD23F218EF4F100B3AFBF /* AboutWindowContributorAvatarItem.xib in Resources */ = {isa = PBXBuildFile; fileRef = E3DBD23D218EF4F100B3AFBF /* AboutWindowContributorAvatarItem.xib */; };
 		E3DC53982A28F0DC002A5A48 /* JavascriptAPIInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3DC53972A28F0DC002A5A48 /* JavascriptAPIInput.swift */; };
 		E3DE8DCD1FD8166A0021921C /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3DE8DCC1FD8166A0021921C /* main.swift */; };
-		E3DE8DD31FD848BA0021921C /* iina-cli in Copy Executables */ = {isa = PBXBuildFile; fileRef = E3DE8DCA1FD8166A0021921C /* iina-cli */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		E3DE8DD31FD848BA0021921C /* chengying-cli in Copy Executables */ = {isa = PBXBuildFile; fileRef = E3DE8DCA1FD8166A0021921C /* chengying-cli */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		E3ECC89E1FE9A6D900BED8C7 /* GeometryDef.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3ECC89D1FE9A6D900BED8C7 /* GeometryDef.swift */; };
 		E3F698872120D878005792C9 /* ExtendedColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3F698862120D878005792C9 /* ExtendedColors.swift */; };
 		E3FC31461FE1501E00B9B86F /* PowerSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3FC31451FE1501E00B9B86F /* PowerSource.swift */; };
@@ -443,11 +451,24 @@
 			dstPath = "";
 			dstSubfolderSpec = 6;
 			files = (
-				E3DE8DD31FD848BA0021921C /* iina-cli in Copy Executables */,
+				E3DE8DD31FD848BA0021921C /* chengying-cli in Copy Executables */,
 				515B5E5A2A579903001FCD49 /* iina-plugin in Copy Executables */,
 				8461BA681E4237C7008BB852 /* youtube-dl in Copy Executables */,
 			);
 			name = "Copy Executables";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D4C701202F6A000100000001 /* Copy Video Tools */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				D4C701012F6A000100000001 /* ffmpeg in Copy Video Tools */,
+				D4C701022F6A000100000002 /* ffprobe in Copy Video Tools */,
+				D4C701032F6A000100000003 /* chengying-video-tools-helper in Copy Video Tools */,
+			);
+			name = "Copy Video Tools";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		84817C991DBDF57C00CC2279 /* Copy Dylibs */ = {
@@ -1441,6 +1462,14 @@
 		846352571EEEE11A0043F0CC /* ThumbnailPeekView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ThumbnailPeekView.swift; sourceTree = "<group>"; };
 		846654921F4EEA5500C91B8C /* vlc-default-input.conf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "vlc-default-input.conf"; sourceTree = "<group>"; };
 		8466BE161D5CDD0300039D03 /* QuickSettingViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuickSettingViewController.swift; sourceTree = "<group>"; };
+		D4C700102F6A000100000001 /* VideoToolsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoToolsModels.swift; sourceTree = "<group>"; };
+		D4C700112F6A000100000002 /* VideoToolsHelperClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoToolsHelperClient.swift; sourceTree = "<group>"; };
+		D4C700122F6A000100000003 /* VideoToolsTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoToolsTaskManager.swift; sourceTree = "<group>"; };
+		D4C700132F6A000100000004 /* VideoToolsPlayerBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoToolsPlayerBridge.swift; sourceTree = "<group>"; };
+		D4C700142F6A000100000005 /* VideoToolsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoToolsViewController.swift; sourceTree = "<group>"; };
+		D4C701102F6A000100000001 /* ffmpeg */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = ffmpeg; path = deps/executable/ffmpeg; sourceTree = SOURCE_ROOT; };
+		D4C701112F6A000100000002 /* ffprobe */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = ffprobe; path = deps/executable/ffprobe; sourceTree = SOURCE_ROOT; };
+		D4C701122F6A000100000003 /* chengying-video-tools-helper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = "chengying-video-tools-helper"; path = "deps/executable/chengying-video-tools-helper"; sourceTree = SOURCE_ROOT; };
 		846BE12D21B347830084ABB9 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/OpenURLWindowController.strings"; sourceTree = "<group>"; };
 		846BE12F21B347920084ABB9 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/MiniPlayerWindowController.strings"; sourceTree = "<group>"; };
 		846BE13021B349030084ABB9 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/FilterPresets.strings"; sourceTree = "<group>"; };
@@ -1683,7 +1712,7 @@
 		84EA52DF2404E83C00F7617A /* ca */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ca; path = ca.lproj/Localizable.strings; sourceTree = "<group>"; };
 		84EA52E12404E83C00F7617A /* ca */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ca; path = ca.lproj/FilterPresets.strings; sourceTree = "<group>"; };
 		84EA52E22404E83C00F7617A /* ca */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ca; path = ca.lproj/KeyBinding.strings; sourceTree = "<group>"; };
-		84EB1ED61D2F51D3004FA5A1 /* IINA.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IINA.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		84EB1ED61D2F51D3004FA5A1 /* ChengYing.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChengYing.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		84EB1ED91D2F51D3004FA5A1 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		84EB1EDB1D2F51D3004FA5A1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		84EB1EE01D2F51D3004FA5A1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -1941,7 +1970,7 @@
 		E3DBD23C218EF4F100B3AFBF /* AboutWindowContributorAvatarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutWindowContributorAvatarItem.swift; sourceTree = "<group>"; };
 		E3DBD23D218EF4F100B3AFBF /* AboutWindowContributorAvatarItem.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = AboutWindowContributorAvatarItem.xib; sourceTree = "<group>"; };
 		E3DC53972A28F0DC002A5A48 /* JavascriptAPIInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavascriptAPIInput.swift; sourceTree = "<group>"; };
-		E3DE8DCA1FD8166A0021921C /* iina-cli */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "iina-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
+		E3DE8DCA1FD8166A0021921C /* chengying-cli */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "chengying-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E3DE8DCC1FD8166A0021921C /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		E3ECC89D1FE9A6D900BED8C7 /* GeometryDef.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeometryDef.swift; sourceTree = "<group>"; };
 		E3F698862120D878005792C9 /* ExtendedColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtendedColors.swift; sourceTree = "<group>"; };
@@ -2265,6 +2294,9 @@
 			isa = PBXGroup;
 			children = (
 				8461BA671E4237C2008BB852 /* youtube-dl */,
+				D4C701102F6A000100000001 /* ffmpeg */,
+				D4C701112F6A000100000002 /* ffprobe */,
+				D4C701122F6A000100000003 /* chengying-video-tools-helper */,
 			);
 			name = Executables;
 			path = iina;
@@ -2383,6 +2415,7 @@
 		84A0BAA31D2FAEA000BC8DA1 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				D4C700202F6A000100000001 /* VideoTools */,
 				84A0BA931D2F9E9600BC8DA1 /* MainMenu.xib */,
 				E38BD4AE20054BD9007635FC /* MainWindow.swift */,
 				D1B4E24D2A3AFC9100E36F1D /* MiniPlayerWindow.swift */,
@@ -2422,6 +2455,18 @@
 				84D377681D7413D8007F7396 /* Accessories */,
 			);
 			name = Views;
+			sourceTree = "<group>";
+		};
+		D4C700202F6A000100000001 /* VideoTools */ = {
+			isa = PBXGroup;
+			children = (
+				D4C700102F6A000100000001 /* VideoToolsModels.swift */,
+				D4C700112F6A000100000002 /* VideoToolsHelperClient.swift */,
+				D4C700122F6A000100000003 /* VideoToolsTaskManager.swift */,
+				D4C700132F6A000100000004 /* VideoToolsPlayerBridge.swift */,
+				D4C700142F6A000100000005 /* VideoToolsViewController.swift */,
+			);
+			path = VideoTools;
 			sourceTree = "<group>";
 		};
 		84A0BAA61D2FAF8400BC8DA1 /* Utils */ = {
@@ -2673,8 +2718,8 @@
 		84EB1ED71D2F51D3004FA5A1 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				84EB1ED61D2F51D3004FA5A1 /* IINA.app */,
-				E3DE8DCA1FD8166A0021921C /* iina-cli */,
+				84EB1ED61D2F51D3004FA5A1 /* ChengYing.app */,
+				E3DE8DCA1FD8166A0021921C /* chengying-cli */,
 				49542973216C34950058F680 /* OpenInIINA.appex */,
 				E38558872A484A2D0083772D /* iina-plugin */,
 			);
@@ -2825,6 +2870,7 @@
 				84B1CE561F98CAE300994D63 /* Copy Dylib Symlinks */,
 				84817CE81DBE2E3200CC2279 /* Copy Lua Scripts */,
 				84E745DA1DFDE9C600588DED /* Copy Configs */,
+				D4C701202F6A000100000001 /* Copy Video Tools */,
 				8461BA631E423423008BB852 /* Copy Executables */,
 				E3E720A12CD7073D003470BF /* Copy Default Plugins */,
 				4954298A216C34960058F680 /* Embed App Extensions */,
@@ -2844,8 +2890,8 @@
 				B4E4470025CE3F930069F06E /* Sparkle */,
 				8451E6D82604AEFC009A15D7 /* Just */,
 			);
-			productName = mpvx;
-			productReference = 84EB1ED61D2F51D3004FA5A1 /* IINA.app */;
+			productName = ChengYing;
+			productReference = 84EB1ED61D2F51D3004FA5A1 /* ChengYing.app */;
 			productType = "com.apple.product-type.application";
 		};
 		E38558862A484A2D0083772D /* iina-plugin */ = {
@@ -2883,8 +2929,8 @@
 			name = "iina-cli";
 			packageProductDependencies = (
 			);
-			productName = "iina-cli";
-			productReference = E3DE8DCA1FD8166A0021921C /* iina-cli */;
+			productName = "chengying-cli";
+			productReference = E3DE8DCA1FD8166A0021921C /* chengying-cli */;
 			productType = "com.apple.product-type.tool";
 		};
 /* End PBXNativeTarget section */
@@ -3168,6 +3214,11 @@
 				511BF43E2E1305C800E9721E /* MiniPlaySlider.swift in Sources */,
 				842904E21F0EC01600478376 /* AutoFileMatcher.swift in Sources */,
 				8466BE181D5CDD0300039D03 /* QuickSettingViewController.swift in Sources */,
+				D4C700012F6A000100000001 /* VideoToolsModels.swift in Sources */,
+				D4C700022F6A000100000002 /* VideoToolsHelperClient.swift in Sources */,
+				D4C700032F6A000100000003 /* VideoToolsTaskManager.swift in Sources */,
+				D4C700042F6A000100000004 /* VideoToolsPlayerBridge.swift in Sources */,
+				D4C700052F6A000100000005 /* VideoToolsViewController.swift in Sources */,
 				84A0BA9E1D2FAD4000BC8DA1 /* MainWindowController.swift in Sources */,
 				E3785B092A83380E00787CB7 /* WebSocketServer.swift in Sources */,
 				84E48D4E1E0F1090002C7A3F /* FilterWindowController.swift in Sources */,
@@ -5162,32 +5213,32 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/dduan/Just";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.8.0;
+				kind = revision;
+				revision = 1824bf84cf52d11d69ae20cfb89f0ce5bffa5650;
 			};
 		};
 		B4E446E625CB53920069F06E /* XCRemoteSwiftPackageReference "PromiseKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/mxcl/PromiseKit";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 6.22.1;
+				kind = revision;
+				revision = 8a98e31a47854d3180882c8068cc4d9381bf382d;
 			};
 		};
 		B4E446F525CB54EF0069F06E /* XCRemoteSwiftPackageReference "GRMustache" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRMustache.swift";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 4.2.0;
+				kind = revision;
+				revision = 6e9dcfb807959e19f2915be1928aeccf01babba5;
 			};
 		};
 		B4E446FF25CE3F930069F06E /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle/";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.7.0;
+				kind = revision;
+				revision = 0ca3004e98712ea2b39dd881d28448630cce1c99;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

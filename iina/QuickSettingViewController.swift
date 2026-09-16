@@ -42,9 +42,10 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     case video
     case audio
     case sub
+    case tools
 
     init(buttonTag: Int) {
-      self = [.video, .audio, .sub][at: buttonTag] ?? .video
+      self = [.video, .audio, .sub, .tools][at: buttonTag] ?? .video
     }
 
     init?(name: String) {
@@ -55,6 +56,8 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
         self = .audio
       case "sub":
         self = .sub
+      case "tools":
+        self = .tools
       default:
         self = .video
       }
@@ -65,6 +68,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
       case .video: return 0
       case .audio: return 1
       case .sub: return 2
+      case .tools: return 3
       }
     }
 
@@ -73,6 +77,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
       case .video: return "video"
       case .audio: return "audio"
       case .sub: return "sub"
+      case .tools: return "tools"
       }
     }
   }
@@ -105,6 +110,9 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
   @IBOutlet weak var audioTabBtn: NSButton!
   @IBOutlet weak var subTabBtn: NSButton!
   @IBOutlet weak var tabView: NSTabView!
+
+  private var toolsTabBtn: NSButton?
+  private var videoToolsViewController: VideoToolsViewController?
 
   @IBOutlet weak var buttonTopConstraint: NSLayoutConstraint!
 
@@ -221,6 +229,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     for (view, item) in zip(tabScrollViews, tabView.tabViewItems) {
       item.view = view
     }
+    setupVideoToolsTab()
 
     withAllTableViews { (view, _) in
       view.delegate = self
@@ -420,7 +429,13 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     updateControlsState()
   }
 
+  override func viewDidDisappear() {
+    super.viewDidDisappear()
+    videoToolsViewController?.stopPreview()
+  }
+
   deinit {
+    videoToolsViewController?.stopPreview()
     observers.forEach {
       NotificationCenter.default.removeObserver($0)
     }
@@ -539,6 +554,9 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
 
   private func switchToTab(_ tab: TabViewType) {
     guard isViewLoaded else { return }
+    if currentTab == .tools, tab != .tools {
+      videoToolsViewController?.stopPreview()
+    }
     currentTab = tab
     tabView.selectTabViewItem(at: tab.buttonTag)
     updateTabActiveStatus()
@@ -547,9 +565,9 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
 
   private func updateTabActiveStatus() {
     let currentTag = currentTab.buttonTag
-    [videoTabBtn, audioTabBtn, subTabBtn].forEach { btn in
-      let isActive = currentTag == btn!.tag
-      btn!.contentTintColor = isActive ? .sidebarTabTintActive : .sidebarTabTint
+    [videoTabBtn, audioTabBtn, subTabBtn, toolsTabBtn].compactMap { $0 }.forEach { btn in
+      let isActive = currentTag == btn.tag
+      btn.contentTintColor = isActive ? .sidebarTabTintActive : .sidebarTabTint
     }
   }
 
@@ -568,7 +586,45 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
       subTableView.reloadData()
       secSubTableView.reloadData()
       updateSubTabControl()
+    case .tools:
+      videoToolsViewController?.refreshCurrentMedia()
     }
+  }
+
+  private func setupVideoToolsTab() {
+    guard videoToolsViewController == nil,
+          let buttonStack = videoTabBtn.superview as? NSStackView else { return }
+
+    let toolsController = VideoToolsViewController(player: player, mainWindow: mainWindow)
+    addChild(toolsController)
+    videoToolsViewController = toolsController
+
+    let tabItem = NSTabViewItem(identifier: TabViewType.tools.name)
+    tabItem.label = NSLocalizedString("videotools.tab", comment: "Tools tab")
+    tabItem.view = toolsController.view
+    tabView.addTabViewItem(tabItem)
+
+    let button = NSButton(
+      title: NSLocalizedString("videotools.tab", comment: "Tools tab"),
+      target: self,
+      action: #selector(tabBtnAction(_:))
+    )
+    button.tag = TabViewType.tools.buttonTag
+    button.bezelStyle = .shadowlessSquare
+    button.setButtonType(.momentaryPushIn)
+    button.imagePosition = .imageLeading
+    button.imageScaling = .scaleProportionallyDown
+    button.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    if let sourceImage = NSImage(named: "pref_utils"),
+       let image = sourceImage.copy() as? NSImage {
+      image.size = NSSize(width: 22, height: 18)
+      image.isTemplate = true
+      button.image = image
+    }
+    buttonStack.addArrangedSubview(button)
+    button.heightAnchor.constraint(equalTo: buttonStack.heightAnchor).isActive = true
+    toolsTabBtn = button
   }
 
   func setHdrAvailability(to available: Bool) {

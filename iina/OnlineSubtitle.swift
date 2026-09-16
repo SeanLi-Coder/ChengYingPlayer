@@ -37,17 +37,17 @@ class OnlineSubtitle: NSObject {
   }
 
   static var loggedIn: Bool {
-    let id = Preference.string(for: .onlineSubProvider) ?? Providers.openSub.id
+    let id = Preference.string(for: .onlineSubProvider) ?? Providers.shooter.id
     switch id {
     case Providers.openSub.id:
-      return Providers.openSub.getFetcher().loggedIn
+      return Providers.shooter.getFetcher().loggedIn
     case Providers.shooter.id:
       return Providers.shooter.getFetcher().loggedIn
     case Providers.assrt.id:
       return Providers.assrt.getFetcher().loggedIn
     default:
       guard let provider = Providers.fromPlugin[id] else {
-        return Providers.openSub.getFetcher().loggedIn
+        return Providers.shooter.getFetcher().loggedIn
       }
       return provider.getFetcher().loggedIn
     }
@@ -110,13 +110,13 @@ class OnlineSubtitle: NSObject {
     static func nameForID(_ id: String) -> String {
       switch id {
       case Providers.openSub.id:
-        return Providers.openSub.name
+        return Providers.shooter.name
       case Providers.shooter.id:
         return Providers.shooter.name
       case Providers.assrt.id:
         return Providers.assrt.name
       default:
-        return Providers.fromPlugin[id]?.name ?? Providers.openSub.name
+        return Providers.fromPlugin[id]?.name ?? Providers.shooter.name
       }
     }
   }
@@ -158,17 +158,17 @@ class OnlineSubtitle: NSObject {
   }
 
   static func logout(timeout: TimeInterval? = nil) {
-    let id = Preference.string(for: .onlineSubProvider) ?? Providers.openSub.id
+    let id = Preference.string(for: .onlineSubProvider) ?? Providers.shooter.id
     switch id {
     case Providers.openSub.id:
-      _logout(using: Providers.openSub, timeout: timeout)
+      _logout(using: Providers.shooter, timeout: timeout)
     case Providers.shooter.id:
       _logout(using: Providers.shooter, timeout: timeout)
     case Providers.assrt.id:
       _logout(using: Providers.assrt, timeout: timeout)
     default:
       guard let provider = Providers.fromPlugin[id] else {
-        _logout(using: Providers.openSub, timeout: timeout)
+        _logout(using: Providers.shooter, timeout: timeout)
         return
       }
       _logout(using: provider, timeout: timeout)
@@ -197,10 +197,10 @@ class OnlineSubtitle: NSObject {
   }
 
   static func search(forFile url: URL, player: PlayerCore, providerID: String? = nil, callback: @escaping ([URL]) -> Void) {
-    let id = providerID ?? Preference.string(for: .onlineSubProvider) ?? Providers.openSub.id
+    let id = providerID ?? Preference.string(for: .onlineSubProvider) ?? Providers.shooter.id
     switch id {
     case Providers.openSub.id:
-      _search(using: Providers.openSub, forFile: url, player, callback)
+      _search(using: Providers.shooter, forFile: url, player, callback)
     case Providers.shooter.id:
       _search(using: Providers.shooter, forFile: url, player, callback)
     case Providers.assrt.id:
@@ -209,7 +209,7 @@ class OnlineSubtitle: NSObject {
       if let provider = Providers.fromPlugin[id] {
         _search(using: provider, forFile: url, player, callback)
       } else {
-        _search(using: Providers.openSub, forFile: url, player, callback)
+        _search(using: Providers.shooter, forFile: url, player, callback)
       }
     }
   }
@@ -279,9 +279,8 @@ class OnlineSubtitle: NSObject {
 
   static func populateMenu(_ menu: NSMenu, action: Selector? = nil, insertSeparator: Bool = true) {
     let defaultProviders = [
-      (Providers.openSub.name, Providers.openSub.id),
-      (Providers.assrt.name, Providers.assrt.id),
-      (Providers.shooter.name, Providers.shooter.id)
+      (Providers.shooter.name, Providers.shooter.id),
+      (Providers.assrt.name, Providers.assrt.id)
     ]
     menu.removeAllItems()
     for (name, id) in defaultProviders {

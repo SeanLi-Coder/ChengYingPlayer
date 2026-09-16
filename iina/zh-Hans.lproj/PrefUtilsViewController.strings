@@ -16,8 +16,8 @@
 /* Class = "NSTextFieldCell"; title = "Cleared."; ObjectID = "Fb4-dy-CXX"; */
 "Fb4-dy-CXX.title" = "已清空。";
 
-/* Class = "NSTextFieldCell"; title = "Open links or current webpage in IINA with one click. The website must be supported by youtube-dl."; ObjectID = "GAo-fx-NG0"; */
-"GAo-fx-NG0.title" = "一键在 IINA 中打开网页中的链接或当前页面。网站需要 youtube-dl 的支持。";
+/* Class = "NSTextFieldCell"; title = "Open links or current webpage in ChengYing with one click. The website must be supported by youtube-dl."; ObjectID = "GAo-fx-NG0"; */
+"GAo-fx-NG0.title" = "一键在澄影播放器中打开网页链接或当前页面；目标网站需要 youtube-dl 支持。";
 
 /* Class = "NSButtonCell"; title = "OK"; ObjectID = "IkF-qG-s4j"; */
 "IkF-qG-s4j.title" = "好";
@@ -34,8 +34,8 @@
 /* Class = "NSTextFieldCell"; title = "Clear Cache"; ObjectID = "QHA-tO-oSn"; */
 "QHA-tO-oSn.title" = "清除缓存";
 
-/* Class = "NSButtonCell"; title = "Set IINA as the Default Application…"; ObjectID = "e1p-Aa-WFG"; */
-"e1p-Aa-WFG.title" = "将 IINA 设为默认应用…";
+/* Class = "NSButtonCell"; title = "Set ChengYing as the Default Application…"; ObjectID = "e1p-Aa-WFG"; */
+"e1p-Aa-WFG.title" = "将澄影播放器设为默认应用…";
 
 /* Class = "NSButtonCell"; title = "Firefox"; ObjectID = "f9i-sS-MJN"; */
 "f9i-sS-MJN.title" = "Firefox";
@@ -70,11 +70,11 @@
 /* Class = "NSTextFieldCell"; title = "Current thumbnail cache:"; ObjectID = "uV3-aF-UB7"; */
 "uV3-aF-UB7.title" = "当前缩略图缓存:";
 
-/* Class = "NSTextFieldCell"; title = "Please select the media types that you want to make IINA as the default Application for."; ObjectID = "uvK-Y1-dZr"; */
-"uvK-Y1-dZr.title" = "请选择希望将 IINA 设为默认应用程序的文件类型。";
+/* Class = "NSTextFieldCell"; title = "Please select the media types that you want to make ChengYing as the default Application for."; ObjectID = "uvK-Y1-dZr"; */
+"uvK-Y1-dZr.title" = "请选择希望由澄影播放器默认打开的媒体类型。";
 
 /* Class = "NSButtonCell"; title = "Chrome"; ObjectID = "yuw-2i-ICd"; */
 "yuw-2i-ICd.title" = "Chrome";
 
-/* Class = "NSTextFieldCell"; title = "Get Browser Extensions for IINA"; ObjectID = "zCe-1f-tkF"; */
-"zCe-1f-tkF.title" = "获取 IINA 的浏览器插件";
+/* Class = "NSTextFieldCell"; title = "Get Browser Extensions for ChengYing"; ObjectID = "zCe-1f-tkF"; */
+"zCe-1f-tkF.title" = "获取澄影播放器浏览器扩展";

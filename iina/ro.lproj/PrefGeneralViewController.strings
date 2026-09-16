@@ -25,8 +25,8 @@
 /* Class = "NSTextFieldCell"; title = "Playlist:"; ObjectID = "6TV-DG-503"; */
 "6TV-DG-503.title" = "Listă de redare:";
 
-/* Class = "NSTextFieldCell"; title = "Requires restarting IINA to take effect."; ObjectID = "8kU-8g-VgX"; */
-"8kU-8g-VgX.title" = "Necesită repornirea IINA pentru a avea efect.";
+/* Class = "NSTextFieldCell"; title = "Requires restarting ChengYing to take effect."; ObjectID = "8kU-8g-VgX"; */
+"8kU-8g-VgX.title" = "Necesită repornirea ChengYing pentru a avea efect.";
 
 /* Class = "NSButtonCell"; title = "Only in \"music mode\""; ObjectID = "AVe-9Z-RgQ"; */
 "AVe-9Z-RgQ.title" = "Numai în modul \"muzică\"";

@@ -99,13 +99,9 @@ class OpenSubClient {
   /// Hostname to initially use to access the REST API.
   private let apiDefaultHostname = "api.opensubtitles.com"
 
-  /// Official IINA [Open Subtitles](https://www.opensubtitles.com/)
-  /// [API key](https://opensubtitles.stoplight.io/docs/opensubtitles-api/e3750fd63a100-getting-started#api-key).
-  ///
-  /// The API key identifies the _application_ using the
-  /// [REST API](https://opensubtitles.stoplight.io/docs/opensubtitles-api/e3750fd63a100-getting-started),
-  /// not the  [Open Subtitles](https://www.opensubtitles.com/) user.
-  private let apiKey = "SPX87dlUuuHpxeh5u3rd7dHekOT6oYpx"
+  /// ChengYingPlayer does not bundle a third-party OpenSubtitles API key.
+  /// The built-in provider list therefore excludes this client.
+  private let apiKey = ""
 
   /// [JSON decoder](https://developer.apple.com/documentation/foundation/jsondecoder) properly configured
   /// to decode responses from API methods.
@@ -163,7 +159,7 @@ class OpenSubClient {
   /// [Important-HTTP Request Headers](https://opensubtitles.stoplight.io/docs/opensubtitles-api/e3750fd63a100-getting-started#important-http-request-headers).
   private let userAgent: String = {
     let (version, build) = InfoDictionary.shared.version
-    return "IINA v\(version)"
+    return "ChengYingPlayer/\(version)"
   }()
 
   // MARK: - REST API Methods

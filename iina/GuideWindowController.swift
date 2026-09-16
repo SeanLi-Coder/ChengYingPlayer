@@ -9,8 +9,6 @@
 import Cocoa
 @preconcurrency import WebKit
 
-fileprivate let highlightsLink = "https://iina.io/highlights"
-
 class GuideWindowController: NSWindowController {
   override var windowNibName: NSNib.Name {
     return NSNib.Name("GuideWindowController")
@@ -37,7 +35,7 @@ class GuideWindowController: NSWindowController {
   }
 
   private func loadHighlightsPage() {
-    window?.title = NSLocalizedString("guide.highlights", comment: "Highlights")
+    window?.title = NSLocalizedString("guide.welcome.title", comment: "Welcome")
     let webView = WKWebView()
     highlightsWebView = webView
     webView.isHidden = true
@@ -46,8 +44,41 @@ class GuideWindowController: NSWindowController {
     highlightsContainerView.addSubview(webView, positioned: .below, relativeTo: nil)
     Utility.quickConstraints(["H:|-0-[v]-0-|", "V:|-0-[v]-0-|"], ["v": webView])
 
-    let (version, _) = InfoDictionary.shared.version
-    webView.load(URLRequest(url: URL(string: "\(highlightsLink)/\(version.split(separator: "-").first!)/")!))
+    let title = NSLocalizedString("guide.welcome.title", comment: "Welcome")
+    let subtitle = NSLocalizedString("guide.welcome.subtitle", comment: "Player description")
+    let playback = NSLocalizedString("guide.welcome.playback", comment: "Playback feature")
+    let clip = NSLocalizedString("guide.welcome.clip", comment: "Clip feature")
+    let frames = NSLocalizedString("guide.welcome.frames", comment: "Frame extraction feature")
+    let rotate = NSLocalizedString("guide.welcome.rotate", comment: "Rotation feature")
+    let source = NSLocalizedString("guide.welcome.source", comment: "Source link")
+    let html = """
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="color-scheme" content="light dark">
+        <style>
+          body { font: -apple-system-body; margin: 34px; color: -apple-system-label; }
+          h1 { font: -apple-system-title1; margin: 0 0 8px; }
+          p { color: -apple-system-secondary-label; line-height: 1.45; }
+          ul { padding-left: 22px; line-height: 1.65; }
+          a { color: -apple-system-link; }
+        </style>
+      </head>
+      <body>
+        <h1>\(title)</h1>
+        <p>\(subtitle)</p>
+        <ul>
+          <li>\(playback)</li>
+          <li>\(clip)</li>
+          <li>\(frames)</li>
+          <li>\(rotate)</li>
+        </ul>
+        <p><a href="https://github.com/SeanLi-Coder/ChengYingPlayer">\(source)</a></p>
+      </body>
+    </html>
+    """
+    webView.loadHTMLString(html, baseURL: nil)
     highlightsLoadingIndicator.startAnimation(nil)
   }
 
@@ -63,7 +94,7 @@ class GuideWindowController: NSWindowController {
 extension GuideWindowController: WKNavigationDelegate {
   func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
     if let url = navigationAction.request.url {
-      if url.absoluteString.starts(with: "https://iina.io/highlights/") {
+      if url.scheme == "about" {
         decisionHandler(.allow)
         return
       } else {

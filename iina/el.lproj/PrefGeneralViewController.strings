@@ -25,8 +25,8 @@
 /* Class = "NSTextFieldCell"; title = "Playlist:"; ObjectID = "6TV-DG-503"; */
 "6TV-DG-503.title" = "Playlist:";
 
-/* Class = "NSTextFieldCell"; title = "Requires restarting IINA to take effect."; ObjectID = "8kU-8g-VgX"; */
-"8kU-8g-VgX.title" = "Απαιτεί την επανεκκίνηση της IINA για να τεθεί σε ισχύ.";
+/* Class = "NSTextFieldCell"; title = "Requires restarting ChengYing to take effect."; ObjectID = "8kU-8g-VgX"; */
+"8kU-8g-VgX.title" = "Απαιτεί την επανεκκίνηση της ChengYing για να τεθεί σε ισχύ.";
 
 /* Class = "NSButtonCell"; title = "Only in \"music mode\""; ObjectID = "AVe-9Z-RgQ"; */
 "AVe-9Z-RgQ.title" = "Only in \"music mode\"";

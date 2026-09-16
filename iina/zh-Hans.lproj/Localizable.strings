@@ -22,15 +22,22 @@
 
 // Guide Window
 "guide.highlights" = "更新亮点";
+"guide.welcome.title" = "欢迎使用澄影播放器";
+"guide.welcome.subtitle" = "一款以本地播放为核心、把实用视频工具直接放进播放器的中文媒体应用。";
+"guide.welcome.playback" = "播放本地或网络媒体，支持播放列表、字幕、章节、历史记录和画中画。";
+"guide.welcome.clip" = "只输入起点和终点即可高保真剪辑，并可实时预览所选区间。";
+"guide.welcome.frames" = "最多选择 5 秒区间，以原视频分辨率逐帧导出图片。";
+"guide.welcome.rotate" = "永久旋转 90°、180°、270° 或 360°，始终生成新文件，不覆盖原片。";
+"guide.welcome.source" = "查看项目源码与安装包";
 "guide.basic_settings" = "基本设置";
 "guide.faq" = "常见问题";
 
 // Initial Window
-"initial.announcement" = "您正在使用 IINA 的 %@ 版本";
-"initial.beta.desc" = "如果你想回滚到发布版本，请从“设置” > “通用” 中取消勾选 “接收测试版本（Beta）更新”，并从我们的<a href=\"https://iina.io\">官方网站</a>安装一个稳定版本。";
-"initial.nightly.desc" = "我们不建议将 Nightly 作为日常使用的版本。目前 Nightly 不支持自动更新。请从我们的<a href=\"https://nightly.iina.io\"> Nightly 网站</a>手动下载更新的版本。";
+"initial.announcement" = "您正在使用澄影播放器 %@";
+"initial.beta.desc" = "如果要回到稳定版本，请在“设置” > “通用”中取消勾选“接收测试版本（Beta）更新”，并从本项目的 <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/releases/latest\">GitHub Release</a> 下载稳定版本。";
+"initial.nightly.desc" = "Nightly 版本适合测试，不建议用于日常播放。请从本项目的 <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/releases\">GitHub Release</a> 手动下载更新版本。";
 "initial.debug.desc" = "调试版本（Debug）通常没有对性能进行优化，所以不建议日常用。调试版本（Debug）不支持自动更新。";
-"initial.bug_report" = "通过<a href=\"https://github.com/iina/iina/issues\">GitHub issues</a>报告。";
+"initial.bug_report" = "通过本项目的 <a href=\"https://github.com/SeanLi-Coder/ChengYingPlayer/issues\">GitHub Issues</a> 报告。";
 
 // Inspector Window
 "inspector.error" = "错误";
@@ -53,6 +60,56 @@
 "quicksetting.hdr" = "HDR";
 "quicksetting.hide" = "隐藏";
 "quicksetting.reset_speed" = "原速";
+
+// 本地视频工具
+"videotools.tab" = "工具";
+"videotools.title" = "本地视频工具";
+"videotools.mode" = "功能";
+"videotools.operation.probe" = "检测";
+"videotools.operation.clip" = "剪辑";
+"videotools.operation.frames" = "逐帧截图";
+"videotools.operation.rotate" = "永久旋转";
+"videotools.start" = "起点";
+"videotools.end" = "终点";
+"videotools.use_current" = "当前时间";
+"videotools.preview_range" = "实时预览区间";
+"videotools.preview_rotation" = "预览旋转";
+"videotools.stop_preview" = "停止预览";
+"videotools.frames_hint" = "每次最多截取 5 秒。修改起点后，终点会自动设为起点之后 5 秒。";
+"videotools.rotation" = "旋转角度";
+"videotools.output_folder" = "保存目录";
+"videotools.output_default" = "默认保存到原视频同级目录";
+"videotools.choose" = "选择…";
+"videotools.choose_output" = "选择保存目录";
+"videotools.run" = "开始";
+"videotools.run_clip" = "确定并剪辑";
+"videotools.run_frames" = "逐帧截图";
+"videotools.run_rotate" = "生成旋转视频";
+"videotools.reveal" = "在 Finder 中显示";
+"videotools.no_local_video" = "请先打开一个本地视频。";
+"videotools.status.ready" = "准备就绪";
+"videotools.status.starting" = "正在启动…";
+"videotools.status.running" = "正在处理…";
+"videotools.status.cancelling" = "正在取消…";
+"videotools.status.completed" = "处理完成";
+"videotools.status.failed" = "处理失败";
+"videotools.status.failed_detail" = "处理失败：%@";
+"videotools.status.cancelled" = "已取消";
+"videotools.status.task" = "%1$@ · %2$@\n%3$@";
+"videotools.elapsed" = "已用 %@";
+"videotools.eta" = "预计剩余 %@";
+"videotools.frames_count" = "%d 帧";
+"videotools.error.missing_executable" = "内置组件“%@”缺失或无法运行，请重新安装应用。";
+"videotools.error.launch_failed" = "无法启动视频工具：%@";
+"videotools.error.disconnected" = "视频工具意外停止：%@";
+"videotools.error.protocol" = "视频工具的协议版本 %@ 不受支持。";
+"videotools.error.invalid_response" = "视频工具返回了无效数据：%@";
+"videotools.error.busy" = "另一个视频任务仍在运行。";
+"videotools.error.no_local_video" = "请先打开一个本地视频。";
+"videotools.error.invalid_time" = "请输入有效时间，例如 01:23.500。";
+"videotools.error.invalid_range" = "终点时间必须晚于起点时间。";
+"videotools.error.after_duration" = "所选区间超过了视频结尾。";
+"videotools.error.frames_too_long" = "单次逐帧截图最多支持 5 秒。";
 
 // EQ Presets
 "eq.preset.flat" = "平坦";
@@ -276,7 +333,7 @@
 "alert.add_filter.title" = "添加新滤镜";
 "alert.add_filter.message" = "请输入符合 mpv 的 vf 或 af 格式的滤镜字符串。";
 
-"alert.keybinding_config.error" = "无法读取快捷键配置文件“%@”！已回退至 IINA 默认的键位设置。请检查你的快捷键配置。";
+"alert.keybinding_config.error" = "无法读取快捷键配置文件“%@”！已回退至澄影播放器的默认键位设置。请检查快捷键配置。";
 
 "alert.extra_option.cannot_read" = "无法读取用户定义的 mpv 额外选项。";
 "alert.extra_option.empty" = "键或值不能为空！";
@@ -293,8 +350,8 @@
 "alert.sub.cannot_login" = "无法登录。请检查您的用户名、密码及网络状态。\n\n%@";
 "alert.sub.save_downloaded.title" = "保存已下载字幕";
 
-"alert.set_default.title" = "正在将 IINA 设为默认程序";
-"alert.set_default.message" = "IINA 将作为默认程序打开所有支持文件类型。";
+"alert.set_default.title" = "将澄影播放器设为默认程序";
+"alert.set_default.message" = "澄影播放器将作为默认程序打开所有支持的文件类型。";
 "alert.set_default.success" = "已完成。%d 成功，%d 失败。";
 
 "alert.add_watch.title" = "添加监视属性";
@@ -339,9 +396,9 @@
 
 "alert.duplicate_config" = "您无法直接编辑默认配置。请先复制后再编辑。";
 
-"alert.assrt_register" = "由于 API 配额限制，我们强烈建议您使用自己的 API token。默认 API token 仅做测试用途，且您有可能遇到网络错误。";
+"alert.assrt_register" = "ASSRT 需要使用您自己的 API token。请先注册，然后将 token 粘贴到澄影播放器。";
 "alert.assrt_register.register" = "立即注册";
-"alert.assrt_register.try" = "试用一下";
+"alert.assrt_register.try" = "输入 Token";
 "alert.assrt_token_prompt.title" = "输入您的 API token";
 "alert.assrt_token_prompt.message" = "请在弹出网页中注册帐号。在您个人首页中获得 token 并在下方输入:";
 "alert.assrt_token_invalid" = "您的 Assrt API token 疑似无效。";
@@ -462,6 +519,6 @@
 "plugin.install_error.file_not_found" = "找不到软件包文件。";
 "plugin.install_error.cannot_download" = "下载插件失败。\n\n输出: %@\n";
 "plugin.install_error.cannot_unpackage" = "解包插件失败。\n\n输出: %@\n";
-"plugin.install_error.cannot_load" = "IINA无法加载此插件，可能是格式错误。";
+"plugin.install_error.cannot_load" = "澄影无法加载此插件，可能是格式错误。";
 "plugin.check_for_updates" = "检查更新";
 "plugin.updating" = "下载更新中……";

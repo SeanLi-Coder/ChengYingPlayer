@@ -112,5 +112,8 @@ browser/Firefox_Open_In_IINA/*
 /.vscode
 
 deps/executable/youtube-dl
+deps/executable/chengying-video-tools-helper
+deps/executable/ffmpeg
+deps/executable/ffprobe
 deps/plugins
-
+deps/sources

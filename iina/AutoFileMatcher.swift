@@ -205,7 +205,7 @@ class AutoFileMatcher {
 
       // match video and sub if both are the closest one to each other
       if subAutoLoadOption.shouldLoadSubsMatchedByIINA() {
-        log("Matching by IINA...", level: .verbose)
+        log("Matching by ChengYingPlayer...", level: .verbose)
         // is in series
         if !video.prefix.isEmpty, let matchedSubPrefix = matchedPrefixes[video.prefix] {
           // find sub with same name

@@ -57,7 +57,7 @@ export function restoreOptions() {
 }
 
 export function openInIINA(tabId, url, options = {}) {
-    const baseURL = `iina://open?`;
+    const baseURL = `chengying://open?`;
     const params = [`url=${encodeURIComponent(url).replace(/'/g, '%27')}`];
     switch (options.mode) {
         case "fullScreen":

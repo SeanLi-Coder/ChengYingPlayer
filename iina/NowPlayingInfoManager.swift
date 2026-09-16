@@ -116,11 +116,12 @@ class NowPlayingInfoManager {
     if currentURL != url {
       guard withTitle else {
         // Internal error, URL should only change when being told to change the title.
-        log("Attempt to change URL to: \(currentURL.mpvStr) with title set to false", level: .error)
+        log("Attempt to change URL to: \(Utility.mediaLogSummary(currentURL)) with title set to false", level: .error)
         return
       }
       if let url {
-        log("Switching Now Playing session from: \(url.mpvStr)\n  to: \(currentURL.mpvStr)")
+        log("Switching Now Playing session from: \(Utility.mediaLogSummary(url)) " +
+            "to: \(Utility.mediaLogSummary(currentURL))")
         // If the media item has changed then if artwork is being displayed or being worked on in
         // the background it must be discarded.
         discardArtwork(url)
@@ -651,7 +652,7 @@ class NowPlayingInfoManager {
   }
 
   private func log(_ message: String, _ url: URL, level: Logger.Level = .debug) {
-    log(message + " for: \(url.mpvStr)", level: level)
+    log(message + " for: \(Utility.mediaLogSummary(url))", level: level)
   }
 
   private func observe(_ name: Notification.Name, block: @escaping (Notification) -> Void) {

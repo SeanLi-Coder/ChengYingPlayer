@@ -51,17 +51,17 @@ struct AppData {
   static let thumbnailCacheFolder = "thumb_cache"
   static let screenshotCacheFolder = "screenshot_cache"
 
-  static let githubLink = "https://github.com/iina/iina"
-  static let contributorsLink = "https://github.com/iina/iina/graphs/contributors"
-  static let crowdinMembersLink = "https://crowdin.com/project/iina"
-  static let wikiLink = "https://github.com/iina/iina/wiki"
-  static let websiteLink = "https://iina.io"
+  static let githubLink = "https://github.com/SeanLi-Coder/ChengYingPlayer"
+  static let contributorsLink = "https://github.com/SeanLi-Coder/ChengYingPlayer/graphs/contributors"
+  static let crowdinMembersLink = contributorsLink
+  static let wikiLink = "https://github.com/SeanLi-Coder/ChengYingPlayer#readme"
+  static let websiteLink = "https://github.com/SeanLi-Coder/ChengYingPlayer"
   static let ytdlHelpLink = "https://github.com/rg3/youtube-dl/blob/master/README.md#readme"
-  static let appcastLink = "https://www.iina.io/appcast.xml"
-  static let appcastBetaLink = "https://www.iina.io/appcast-beta.xml"
+  static let appcastLink = "https://raw.githubusercontent.com/SeanLi-Coder/ChengYingPlayer/main/appcast.xml"
+  static let appcastBetaLink = appcastLink
   static let assrtRegisterLink = "https://secure.assrt.net/user/register.xml?redir=http%3A%2F%2Fassrt.net%2Fusercp.php"
-  static let chromeExtensionLink = "https://chrome.google.com/webstore/detail/open-in-iina/pdnojahnhpgmdhjdhgphgdcecehkbhfo"
-  static let firefoxExtensionLink = "https://addons.mozilla.org/addon/open-in-iina-x"
+  static let chromeExtensionLink = githubLink
+  static let firefoxExtensionLink = githubLink
   static let toneMappingHelpLink = "https://en.wikipedia.org/wiki/Tone_mapping"
   static let targetPeakHelpLink = "https://mpv.io/manual/stable/#options-target-peak"
   static let algorithmHelpLink = "https://mpv.io/manual/stable/#options-tone-mapping"

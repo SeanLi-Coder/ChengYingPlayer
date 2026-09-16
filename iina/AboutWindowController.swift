@@ -127,7 +127,7 @@ class AboutWindowController: NSWindowController {
 
   @objc func openCommitLink() {
     guard let commitSHA = InfoDictionary.shared.buildCommit else { return }
-    NSWorkspace.shared.open(.init(string: "https://github.com/iina/iina/commit/\(commitSHA)")!)
+    NSWorkspace.shared.open(.init(string: "https://github.com/SeanLi-Coder/ChengYingPlayer/commit/\(commitSHA)")!)
   }
 
   @IBAction func sectionBtnAction(_ sender: NSButton) {
@@ -163,28 +163,29 @@ extension AboutWindowController: NSCollectionViewDataSource {
   private func getContributors() -> [Contributor] {
     // This method will be called only once when `self.contributors` is needed,
     // i.e. when `contributorsCollectionView` is being initialized.
-    loadContributors(from: "https://api.github.com/repos/iina/iina/contributors")
+    loadContributors(from: "https://api.github.com/repos/SeanLi-Coder/ChengYingPlayer/contributors")
     return []
   }
 
   private func loadContributors(from url: String) {
-    Just.get(url, asyncCompletionHandler: { response in
-      let prevCount = self.contributors.count
+    Just.get(url, asyncCompletionHandler: { [weak self] response in
       guard let data = response.content,
         let contributors = try? JSONDecoder().decode([Contributor].self, from: data) else {
           return
       }
-      self.contributors.append(contentsOf: contributors)
-      // avoid possible crash
-      guard self.contributors.count > prevCount else { return }
-      let insertIndices = ([Int](prevCount..<self.contributors.count)).map {
-        IndexPath(item: $0, section: 0)
-      }
-      DispatchQueue.main.sync {
+      let nextURL = response.links["next"]?["url"]
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        let previousCount = self.contributors.count
+        self.contributors.append(contentsOf: contributors)
+        guard self.contributors.count > previousCount else { return }
+        let insertIndices = (previousCount..<self.contributors.count).map {
+          IndexPath(item: $0, section: 0)
+        }
         self.contributorsCollectionView.insertItems(at: Set(insertIndices))
-      }
-      if let nextURL = response.links["next"]?["url"] {
-        self.loadContributors(from: nextURL)
+        if let nextURL {
+          self.loadContributors(from: nextURL)
+        }
       }
     })
   }

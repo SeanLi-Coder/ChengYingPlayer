@@ -207,7 +207,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     // Start the log file by logging the version of IINA producing the log file.
     let (version, build) = InfoDictionary.shared.version
     let type = InfoDictionary.shared.buildTypeIdentifier
-    Logger.log("IINA \(version) Build \(build)" + (type == nil ? "" : " " + type!))
+    Logger.log("ChengYingPlayer \(version) Build \(build)" + (type == nil ? "" : " " + type!))
 
     // The copyright is used in the Finder "Get Info" window which is a narrow window so the
     // copyright consists of multiple lines.
@@ -300,7 +300,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var iinaArgFilenames: [String] = []
     var dropNextArg = false
 
-    Logger.log("Command-line args: \(arguments)")
+    Logger.log("Received \(arguments.count) command-line argument(s)")
     for arg in arguments {
       if dropNextArg {
         dropNextArg = false
@@ -325,13 +325,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     }
 
     commandLineStatus.parseArguments(iinaArgs)
-    Logger.log("Filenames from args: \(iinaArgFilenames)")
-    Logger.log("Derived mpv properties from args: \(commandLineStatus.mpvArguments)")
+    Logger.log("Derived \(iinaArgFilenames.count) media item(s) from command-line args")
+    Logger.log("Derived \(commandLineStatus.mpvArguments.count) mpv properties from command-line args")
 
-    print("IINA \(version) Build \(build)")
+    print("ChengYingPlayer \(version) Build \(build)")
 
     guard !iinaArgFilenames.isEmpty || commandLineStatus.isStdin else {
-      print("This binary is not intended for being used as a command line tool. Please use the bundled iina-cli.")
+      print("This binary is not intended for direct command-line use. Please use the bundled chengying-cli.")
       print("Please ignore this message if you are running in a debug environment.")
       return
     }
@@ -823,7 +823,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   @objc func handleURLEvent(event: NSAppleEventDescriptor, withReplyEvent replyEvent: NSAppleEventDescriptor) {
     openFileCalled = true
     guard let url = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue else { return }
-    Logger.log("URL event: \(url)")
+    Logger.log("URL event received (\(urlEventLogSummary(url)))")
     if isReady {
       parsePendingURL(url)
     } else {
@@ -833,10 +833,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
 
   /**
-   Parses the pending iina:// url.
+   Parses the pending chengying:// URL.
    - Parameter url: the pending URL.
    - Note:
-   The iina:// URL scheme currently supports the following actions:
+   The chengying:// URL scheme currently supports the following actions:
 
    __/open__
    - `url`: a url or string to open.
@@ -848,13 +848,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
      Options starting with `no-` are not supported.
    */
   private func parsePendingURL(_ url: String) {
-    Logger.log("Parsing URL \(url)")
     guard let parsed = URLComponents(string: url) else {
       Logger.log("Cannot parse URL using URLComponents", level: .warning)
       return
     }
+    Logger.log("Parsing URL event (\(urlEventLogSummary(parsed)))")
     
-    if parsed.scheme != "iina" {
+    if parsed.scheme != "chengying" {
       // try to open the URL directly
       PlayerCore.activeOrNewForMenuAction(isAlternative: false).openURLString(url)
       return
@@ -866,7 +866,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     if host == "open" || host == "weblink" {
       // open a file or link
       guard let queries = parsed.queryItems else { return }
-      let queryDict = [String: String](uniqueKeysWithValues: queries.map { ($0.name, $0.value ?? "") })
+      var queryDict: [String: String] = [:]
+      for query in queries {
+        guard queryDict[query.name] == nil else {
+          Logger.log("Ignoring ChengYing URL with a duplicate query parameter", level: .warning)
+          return
+        }
+        queryDict[query.name] = query.value ?? ""
+      }
 
       // url
       guard let urlValue = queryDict["url"], !urlValue.isEmpty else {
@@ -910,7 +917,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             continue
           }
           guard let mpvOptionValue = query.value else { continue }
-          Logger.log("Setting \(mpvOptionName) to \(mpvOptionValue)")
+          Logger.log("Setting approved mpv option \(mpvOptionName) from URL event")
           player.mpv.setString(mpvOptionName, mpvOptionValue)
         }
       }
@@ -939,6 +946,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         Utility.showAlert("nothing_to_open")
       }
     }
+  }
+
+  private func urlEventLogSummary(_ rawURL: String) -> String {
+    guard let components = URLComponents(string: rawURL) else { return "invalid URL" }
+    return urlEventLogSummary(components)
+  }
+
+  private func urlEventLogSummary(_ components: URLComponents) -> String {
+    let scheme = components.scheme?.lowercased() ?? "unknown"
+    guard scheme == "chengying" else { return "external scheme=\(scheme)" }
+    let supportedActions = ["open", "weblink"]
+    let action = components.host.flatMap { supportedActions.contains($0) ? $0 : nil } ?? "unknown"
+    return "scheme=chengying action=\(action) parameters=\(components.queryItems?.count ?? 0)"
   }
 
   @IBAction func openURL(_ sender: AnyObject) {
@@ -1019,7 +1039,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     }
 
     let alert = NSAlert()
-    let path = NSString(string: "~/Downloads/iina-debug-dump-\(Date.timeIntervalSinceReferenceDate).txt").expandingTildeInPath
+    let path = NSString(string: "~/Downloads/chengying-debug-dump-\(Date.timeIntervalSinceReferenceDate).txt").expandingTildeInPath
     let url = URL(fileURLWithPath: path)
     FileManager.default.createFile(atPath: path, contents: nil)
     guard let handle = try? FileHandle(forWritingTo: url) else {
@@ -1176,7 +1196,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
           Logger.log("Unable to obtain obtain the path from a bookmark", level: .error)
           continue
         }
-        Logger.log("Unable to create a bookmark, creating URL from path for: \(path)", level: .verbose)
+        Logger.log("Unable to create a bookmark; restoring a recent document from its stored path", level: .verbose)
         NSDocumentController.shared.noteNewRecentDocumentURL(url)
         continue
       }
@@ -1205,7 +1225,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
       guard let bookmark = try? document.bookmarkData() else {
         // Fall back to storing a string when unable to create a bookmark.
         let path = document.absoluteString
-        Logger.log("Unable to create a bookmark, saving recent document as a string: \(path)")
+        Logger.log("Unable to create a bookmark; saving a recent document using its URL representation")
         recentDocuments.append(path)
         continue
       }
@@ -1275,7 +1295,7 @@ struct CommandLineStatus {
   }
 
   func applyMPVArguments(to playerCore: PlayerCore) {
-    Logger.log("Setting mpv properties from arguments: \(mpvArguments)")
+    Logger.log("Applying \(mpvArguments.count) mpv properties from command-line arguments")
     for argPair in mpvArguments {
       if argPair.0 == "shuffle" && argPair.1 == "yes" {
         // Special handling for this one

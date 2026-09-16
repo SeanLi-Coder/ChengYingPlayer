@@ -134,7 +134,7 @@ class Assrt {
         self.token = token
         usesUserToken = true
       } else {
-        self.token = "5IzWrb2J099vmA96ECQXwdRSe9xdoBUv"
+        self.token = ""
       }
     }
 
@@ -161,7 +161,7 @@ class Assrt {
       alert.informativeText = String(format: NSLocalizedString("alert.assrt_register", comment: "alert.assrt_register"))
       alert.alertStyle = .warning
       alert.addButton(withTitle: NSLocalizedString("alert.assrt_register.register", comment: "alert.assrt_register.register"))
-      alert.addButton(withTitle: NSLocalizedString("alert.assrt_register.try", comment: "alert.assrt_register.try"))
+      alert.addButton(withTitle: NSLocalizedString("general.cancel", comment: "Cancel"))
       let result = alert.runModal()
       if result == .alertFirstButtonReturn {
         // if user chose register
@@ -178,7 +178,7 @@ class Assrt {
         }
         return false
       }
-      return true
+      return false
     }
 
     func search(_ query: String) -> Promise<[Subtitle]> {

@@ -954,8 +954,8 @@ struct Preference {
     .subMarginY: Float(22),
     .subPos: Float(100),
     .subLang: "",
-    .legacyOnlineSubSource: 1, /* openSub */
-    .onlineSubProvider: OnlineSubtitle.Providers.openSub.id,
+    .legacyOnlineSubSource: 0,
+    .onlineSubProvider: OnlineSubtitle.Providers.shooter.id,
     .displayInLetterBox: true,
     .subScaleWithWindow: true,
     .openSubUsername: "",
@@ -977,7 +977,7 @@ struct Preference {
     .ytdlRawOptions: "",
     .httpProxy: "",
 
-    .currentInputConfigName: "IINA Default",
+    .currentInputConfigName: "ChengYing Default",
 
     .enableAdvancedSettings: false,
     .useMpvOsd: false,

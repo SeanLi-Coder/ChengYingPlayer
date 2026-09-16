@@ -1,6 +1,13 @@
-- [ ] I have read [CONTRIBUTING.md](https://github.com/iina/iina/blob/develop/CONTRIBUTING.md)
-- [ ] This implements/fixes issue #.
+## 变更内容
 
----
+请简要说明本次修改解决的问题。
 
-**Description:**
+## 验证方式
+
+请列出已执行的测试，以及测试使用的 macOS 和设备架构。
+
+## 提交确认
+
+- [ ] 没有提交媒体文件、账号配置、证书、密钥或其他私人数据。
+- [ ] 新增依赖与 GPLv3 兼容，并已补充来源、版本和许可证说明。
+- [ ] 用户可见文本已提供简体中文，行为变更已覆盖必要测试。

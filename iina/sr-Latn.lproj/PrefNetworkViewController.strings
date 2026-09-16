@@ -22,11 +22,11 @@
 /* Class = "NSTextFieldCell"; title = "Cache:"; ObjectID = "LNk-io-MM7"; */
 "LNk-io-MM7.title" = "Keš:";
 
-/* Class = "NSTextFieldCell"; title = "Requires restarting IINA to take effect."; ObjectID = "RwW-JS-iTv"; */
-"RwW-JS-iTv.title" = "IINA se mora ponovo pokrenuti da bi postavka bila prihvaćena.";
+/* Class = "NSTextFieldCell"; title = "Requires restarting ChengYing to take effect."; ObjectID = "RwW-JS-iTv"; */
+"RwW-JS-iTv.title" = "ChengYing se mora ponovo pokrenuti da bi postavka bila prihvaćena.";
 
-/* Class = "NSTextFieldCell"; title = "IINA will search youtube-dl in this folder. Restart needed."; ObjectID = "YqE-yV-BvQ"; */
-"YqE-yV-BvQ.title" = "IINA će potražiti youtube-dl u ovoj fascikli. Potrebno je ponovno pokretanje.";
+/* Class = "NSTextFieldCell"; title = "ChengYing will search youtube-dl in this folder. Restart needed."; ObjectID = "YqE-yV-BvQ"; */
+"YqE-yV-BvQ.title" = "ChengYing će potražiti youtube-dl u ovoj fascikli. Potrebno je ponovno pokretanje.";
 
 /* Class = "NSMenuItem"; title = "Auto"; ObjectID = "aNr-lv-K0r"; */
 "aNr-lv-K0r.title" = "Automatski";

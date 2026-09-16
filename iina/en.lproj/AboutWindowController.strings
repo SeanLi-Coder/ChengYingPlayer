@@ -22,5 +22,8 @@
 /* Class = "NSButtonCell"; title = "Credits"; ObjectID = "zCH-uO-acx"; */
 "zCH-uO-acx.title" = "Credits";
 
-/* Class = "NSTextFieldCell"; title = "IINA localization is powered by Crowdin."; ObjectID = "HLj-vT-kNp"; */
-"HLj-vT-kNp.title" = "IINA localization is powered by Crowdin.";
+/* Class = "NSTextFieldCell"; title = "Thanks to every translation contributor."; ObjectID = "HLj-vT-kNp"; */
+"HLj-vT-kNp.title" = "Thanks to every translation contributor.";
+
+/* Class = "NSButtonCell"; title = "Translation contributors"; ObjectID = "7k7-70-Kku"; */
+"7k7-70-Kku.title" = "Translation contributors";

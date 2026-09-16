@@ -1,37 +1,319 @@
-name: CI
+name: Build and test
 
 on:
   push:
-      branches: [develop]
+    branches: [main]
+    tags: ["v*"]
   pull_request:
-      branches: [develop]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - xcode: "26.0"
-            deployment_target: ""
-    runs-on:  macos-26
+  media-helper-tests:
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install dependencies
-        run: ./other/download_libs.sh $DOWNLOAD_LIBS_ARGS
-        env:
-          DOWNLOAD_LIBS_ARGS: ${{ github.event_name == 'pull_request' && '--skip-plugins' || '' }}
-
-      - name: Build
-        run: xcodebuild -project iina.xcodeproj ONLY_ACTIVE_ARCH=NO -scheme iina -configuration Nightly ${{ matrix.deployment_target }}
-        env:
-          DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
-
-      - name: Archive
-        run: tar cvJf ~/iina.tar.xz -C /Users/runner/Library/Developer/Xcode/DerivedData/iina-csbkugdtxazzqogjnydbothqrvib/Build/Products/Nightly IINA.app 
-
-      - name: Save artifacts
-        uses: actions/upload-artifact@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          name: IINA
-          path: ~/iina.tar.xz
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13.2"
+          cache: pip
+          cache-dependency-path: Tools/VideoToolsHelper/requirements-dev.txt
+
+      - name: Install test dependencies
+        run: |
+          brew install ffmpeg
+          python -m pip install --requirement Tools/VideoToolsHelper/requirements-dev.txt
+
+      - name: Test media helper
+        working-directory: Tools/VideoToolsHelper
+        run: |
+          python -m ruff check helper.py media.py tests
+          python -m pytest -q
+
+  build-apple-silicon:
+    needs: media-helper-tests
+    runs-on: macos-26
+    timeout-minutes: 180
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+      ARCHS: arm64
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "Release tags must use vMAJOR.MINOR.PATCH format." >&2
+            exit 1
+          fi
+          tag_version="${BASH_REMATCH[1]}"
+          app_version="$(sed -nE 's/^[[:space:]]*MARKETING_VERSION[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' Configs/Deployment.xcconfig)"
+          if [[ -z "$app_version" || "$tag_version" != "$app_version" ]]; then
+            echo "Tag version $tag_version does not match MARKETING_VERSION ${app_version:-<missing>}." >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13.2"
+          cache: pip
+          cache-dependency-path: Tools/VideoToolsHelper/requirements-build.txt
+
+      - name: Install build dependencies
+        run: |
+          brew install cmake pkg-config
+          python -m pip install --requirement Tools/VideoToolsHelper/requirements-build.txt
+
+      - name: Prepare playback libraries
+        run: ./other/download_libs.sh --arch arm64 --skip-plugins
+
+      - name: Build bundled video tools
+        run: |
+          ./other/build_media_binaries.sh
+          HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/VideoToolsHelper/build_helper.sh
+
+      - name: Build application
+        run: >-
+          xcodebuild
+          -project iina.xcodeproj
+          -scheme iina
+          -configuration Release
+          -derivedDataPath "$RUNNER_TEMP/DerivedData"
+          ONLY_ACTIVE_ARCH=YES
+          ARCHS=arm64
+          CODE_SIGN_STYLE=Manual
+          CODE_SIGN_IDENTITY=-
+          DEVELOPMENT_TEAM=
+          CODE_SIGNING_ALLOWED=YES
+          CODE_SIGNING_REQUIRED=YES
+
+      - name: Assemble and verify application
+        run: |
+          set -euo pipefail
+          app_path="$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
+          if [[ ! -d "$app_path" ]]; then
+            echo "ChengYing.app was not produced." >&2
+            exit 1
+          fi
+
+          ./other/install_legal_notices.sh "$app_path/Contents/Resources"
+          codesign --force --sign - --options runtime --entitlements iina/IINA.entitlements "$app_path"
+
+          for executable in ffmpeg ffprobe chengying-video-tools-helper chengying-cli; do
+            executable_path="$app_path/Contents/MacOS/$executable"
+            if [[ ! -x "$executable_path" ]]; then
+              echo "$executable was not copied into the application bundle." >&2
+              exit 1
+            fi
+            codesign --verify --strict --verbose=2 "$executable_path"
+          done
+
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
+          app_entitlements="$RUNNER_TEMP/app-entitlements.plist"
+          codesign -d --entitlements :- "$app_path" > "$app_entitlements" 2>/dev/null
+          if [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.disable-library-validation' "$app_entitlements")" != "true" ]]; then
+            echo "The application signature is missing its library validation entitlement." >&2
+            exit 1
+          fi
+
+          extension_path="$app_path/Contents/PlugIns/OpenInIINA.appex"
+          if [[ ! -d "$extension_path" ]]; then
+            echo "OpenInIINA.appex was not embedded." >&2
+            exit 1
+          fi
+          codesign --verify --strict --verbose=2 "$extension_path"
+          extension_entitlements="$RUNNER_TEMP/extension-entitlements.plist"
+          codesign -d --entitlements :- "$extension_path" > "$extension_entitlements" 2>/dev/null
+          if [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$extension_entitlements")" != "true" ]]; then
+            echo "The Safari extension signature is missing its sandbox entitlement." >&2
+            exit 1
+          fi
+
+          "$app_path/Contents/MacOS/ffmpeg" -hide_banner -version
+          "$app_path/Contents/MacOS/chengying-video-tools-helper" --help
+          "$app_path/Contents/MacOS/chengying-cli" --help
+          helper_output="$RUNNER_TEMP/helper-smoke.jsonl"
+          printf '%s\n' '{"id":"shutdown-smoke","command":"shutdown"}' | \
+            "$app_path/Contents/MacOS/chengying-video-tools-helper" \
+              --ffmpeg "$app_path/Contents/MacOS/ffmpeg" \
+              --ffprobe "$app_path/Contents/MacOS/ffprobe" \
+              --stdio > "$helper_output"
+          grep -Eq '"type"[[:space:]]*:[[:space:]]*"ready"' "$helper_output"
+          grep -Eq '"action"[[:space:]]*:[[:space:]]*"shutdown"' "$helper_output"
+
+          "$app_path/Contents/MacOS/ChengYing" --no-stdin >"$RUNNER_TEMP/chengying-launch.log" 2>&1 &
+          app_pid=$!
+          sleep 5
+          if ! kill -0 "$app_pid" 2>/dev/null; then
+            cat "$RUNNER_TEMP/chengying-launch.log" >&2
+            echo "ChengYing exited during the launch smoke test." >&2
+            exit 1
+          fi
+          kill "$app_pid"
+          wait "$app_pid" || true
+
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Contents/Info.plist")"
+          if [[ "$bundle_id" != "io.github.SeanLi-Coder.ChengYingPlayer" ]]; then
+            echo "Unexpected bundle identifier: $bundle_id" >&2
+            exit 1
+          fi
+          bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
+          expected_version="$(sed -nE 's/^[[:space:]]*MARKETING_VERSION[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' Configs/Deployment.xcconfig)"
+          if [[ -z "$expected_version" || "$bundle_version" != "$expected_version" ]]; then
+            echo "Unexpected bundle version: $bundle_version (expected ${expected_version:-<missing>})." >&2
+            exit 1
+          fi
+          legal_dir="$app_path/Contents/Resources/Legal"
+          for legal_file in \
+            ChengYingPlayer-GPLv3.txt \
+            ChengYingPlayer-NOTICE.md \
+            THIRD_PARTY_NOTICES.md \
+            SOURCE_MANIFEST.txt \
+            FFmpeg-COPYING.GPLv3.txt \
+            FFmpeg-LICENSE.md \
+            x264-COPYING.txt \
+            x265-COPYING.txt \
+            CPython-LICENSE.txt \
+            PyInstaller-COPYING.txt \
+            PyInstaller-hooks-contrib-LICENSE.txt \
+            PyInstaller-waflib-LICENSE.txt \
+            PyInstaller-zlib-LICENSE.txt \
+            altgraph-LICENSE.txt \
+            macholib-LICENSE.txt \
+            packaging-LICENSE.txt \
+            packaging-LICENSE.APACHE.txt \
+            packaging-LICENSE.BSD.txt \
+            setuptools-LICENSE.txt; do
+            if [[ ! -s "$legal_dir/$legal_file" ]]; then
+              echo "Missing bundled legal notice: $legal_file" >&2
+              exit 1
+            fi
+          done
+
+      - name: Package release source
+        if: startsWith(github.ref, 'refs/tags/')
+        id: package
+        run: |
+          set -euo pipefail
+          build_label="$(printf '%s' "$GITHUB_REF_NAME" | LC_ALL=C tr -c 'A-Za-z0-9._-' '-')"
+          if [[ -z "$build_label" ]]; then
+            build_label="${GITHUB_SHA:0:12}"
+          fi
+          source_archive="$RUNNER_TEMP/ChengYingPlayer-${build_label}-Release-Source.tar.gz"
+          SOURCE_REF="$GITHUB_SHA" ./other/package_release_source.sh "$source_archive"
+          tar -tzf "$source_archive" >/dev/null
+          source_archive_name="$(basename "$source_archive")"
+          source_checksum="${source_archive}.sha256"
+          (cd "$RUNNER_TEMP" && shasum -a 256 "$source_archive_name" > "${source_archive_name}.sha256")
+          source_manifest="$RUNNER_TEMP/ChengYingPlayer-${build_label}-Third-Party-Source-Manifest.txt"
+          source ./other/third_party_sources.sh
+          write_third_party_source_manifest "$source_manifest"
+          {
+            echo "source_archive=$source_archive"
+            echo "source_checksum=$source_checksum"
+            echo "source_manifest=$source_manifest"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload release source artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ChengYingPlayer-Release-Source
+          path: |
+            ${{ steps.package.outputs.source_archive }}
+            ${{ steps.package.outputs.source_checksum }}
+            ${{ steps.package.outputs.source_manifest }}
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build-apple-silicon
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download release source artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ChengYingPlayer-Release-Source
+          path: dist
+
+      - name: Publish tagged release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(dist/*-Release-Source.tar.gz)
+          checksums=(dist/*-Release-Source.tar.gz.sha256)
+          manifests=(dist/*-Third-Party-Source-Manifest.txt)
+          if (( ${#archives[@]} != 1 || ${#checksums[@]} != 1 || ${#manifests[@]} != 1 )); then
+            echo "Expected exactly one release-source archive, checksum, and source manifest." >&2
+            find dist -maxdepth 2 -type f -print >&2
+            exit 1
+          fi
+          for checksum in "${checksums[@]}"; do
+            (cd dist && sha256sum --check "$(basename "$checksum")")
+          done
+          release_assets=("${archives[@]}" "${checksums[@]}" "${manifests[@]}")
+
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            allowed_assets=(
+              "$(basename "${archives[0]}")"
+              "$(basename "${checksums[0]}")"
+              "$(basename "${manifests[0]}")"
+            )
+            mapfile -t existing_assets < <(
+              gh release view "$GITHUB_REF_NAME" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json assets \
+                --jq '.assets[].name'
+            )
+            for existing_asset in "${existing_assets[@]}"; do
+              allowed=false
+              for allowed_asset in "${allowed_assets[@]}"; do
+                if [[ "$existing_asset" == "$allowed_asset" ]]; then
+                  allowed=true
+                  break
+                fi
+              done
+              if [[ "$allowed" != true ]]; then
+                echo "Refusing to update a source-only release that contains a non-source asset: $existing_asset" >&2
+                echo "Remove the unexpected asset manually, then rerun this workflow." >&2
+                exit 1
+              fi
+            done
+            gh release upload "$GITHUB_REF_NAME" "${release_assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" "${release_assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "ChengYingPlayer $GITHUB_REF_NAME (Source Only)" \
+              --verify-tag \
+              --notes "Source-only release. No App, DMG, ZIP, or other application binary is included. See README.md for build and compliance details."
+          fi

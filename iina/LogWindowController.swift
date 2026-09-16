@@ -96,7 +96,7 @@ class LogWindowController: NSWindowController, NSMenuDelegate {
   }
 
   @IBAction func save(_ sender: Any) {
-    Utility.quickSavePanel(title: "Log", filename: "iina.log", sheetWindow: window) { url in
+    Utility.quickSavePanel(title: "Log", filename: "chengying.log", sheetWindow: window) { url in
       let logs = (self.logArrayController.content as! [Logger.Log]).map { $0.logString }.joined()
       try? logs.write(to: url, atomically: true, encoding: .utf8)
     }
@@ -155,4 +155,3 @@ class LogWindowController: NSWindowController, NSMenuDelegate {
     return LogWindowController.indicatorIcon(withColor: colorMap[value]!)
   }
 }
-

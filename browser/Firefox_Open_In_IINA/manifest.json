@@ -2,11 +2,11 @@
   "manifest_version": 2,
   "applications": {
     "gecko": {
-      "id": "open_in_iina_firefox@iina.io"
+      "id": "open_in_chengying_player@users.noreply.github.com"
     }
   },
-  "name": "Open In IINA",
-  "description": "Open videos and audios in IINA.",
+  "name": "Open In ChengYingPlayer",
+  "description": "Open videos and audio in ChengYingPlayer.",
   "version": "2.0.0",
   "options_ui": {
     "page": "options.html"
@@ -16,7 +16,7 @@
   },
   "browser_action": {
     "default_icon": "icon.png",
-    "default_title": "Open In IINA"
+    "default_title": "Open In ChengYingPlayer"
   },
   "permissions": [
     "tabs",

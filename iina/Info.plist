@@ -553,7 +553,7 @@
 			<key>CFBundleTypeIconSystemGenerated</key>
 			<integer>0</integer>
 			<key>CFBundleTypeName</key>
-			<string>IINA Plugin</string>
+			<string>ChengYing Plugin</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 			<key>LSHandlerRank</key>
@@ -575,7 +575,7 @@
 			<key>CFBundleTypeIconSystemGenerated</key>
 			<integer>0</integer>
 			<key>CFBundleTypeName</key>
-			<string>IINA Plugin Package</string>
+			<string>ChengYing Plugin Package</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 			<key>LSHandlerRank</key>
@@ -588,16 +588,20 @@
 	</array>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon.icns</string>
+	<key>CFBundleDisplayName</key>
+	<string>澄影播放器</string>
+	<key>CFBundleName</key>
+	<string>ChengYing</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>IINA wrapper</string>
+			<string>ChengYing URL Handler</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>iina</string>
+				<string>chengying</string>
 			</array>
 		</dict>
 	</array>
@@ -626,7 +630,7 @@
 			<key>NSMenuItem</key>
 			<dict>
 				<key>default</key>
-				<string>IINA: Open URL</string>
+				<string>澄影播放器：打开链接</string>
 			</dict>
 			<key>NSMessage</key>
 			<string>droppedText</string>
@@ -636,12 +640,12 @@
 			</array>
 		</dict>
 	</array>
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
 	<key>SUFeedURL</key>
-	<string>https://www.iina.io/appcast.xml</string>
-	<key>SUPublicDSAKeyFile</key>
-	<string>dsa_pub.pem</string>
-	<key>SUPublicEDKey</key>
-	<string>UpwCRYfYOg0OGgQHY6RUdrV29yPcdkvxGlEfq46r6a0=</string>
+	<string>https://raw.githubusercontent.com/SeanLi-Coder/ChengYingPlayer/main/appcast.xml</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
@@ -650,7 +654,7 @@
 				<string>com.pkware.zip-archive</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>IINA Plugin Package</string>
+			<string>ChengYing Plugin Package</string>
 			<key>UTTypeIconFile</key>
 			<string>doc_plugin</string>
 			<key>UTTypeIcons</key>
@@ -672,7 +676,7 @@
 				<string>com.apple.package</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>IINA Plugin</string>
+			<string>ChengYing Plugin</string>
 			<key>UTTypeIconFile</key>
 			<string>doc_plugin</string>
 			<key>UTTypeIcons</key>

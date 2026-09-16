@@ -39,6 +39,26 @@ class Utility {
   typealias InputValidator<T> = (T) -> ValidationResult
 
   // MARK: - Logs, alerts
+
+  /// Returns a bounded, single-line value suitable for diagnostic logs.
+  static func logSafeComponent(_ value: String) -> String {
+    let sanitized = value.unicodeScalars.map { scalar in
+      CharacterSet.controlCharacters.contains(scalar) ? "?" : String(scalar)
+    }.joined()
+    return String(sanitized.prefix(200))
+  }
+
+  /// Identifies media in logs without exposing credentials, URL paths, query values, or fragments.
+  static func mediaLogSummary(_ url: URL) -> String {
+    if url.isFileURL {
+      let filename = url.lastPathComponent.isEmpty ? "<unnamed>" : url.lastPathComponent
+      return "file=\(logSafeComponent(filename))"
+    }
+    let scheme = logSafeComponent(url.scheme?.lowercased() ?? "unknown")
+    let host = logSafeComponent(url.host ?? "<no-host>")
+    return "remote=\(scheme)://\(host)"
+  }
+
   static func showAlert(_ key: String, comment: String? = nil, arguments: [CVarArg]? = nil, style: NSAlert.Style = .critical, sheetWindow: NSWindow? = nil, suppressionKey: PK? = nil, disableMenus: Bool = false) {
     let alert = NSAlert()
     if let suppressionKey = suppressionKey {

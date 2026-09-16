@@ -171,7 +171,7 @@ class PrefSubViewController: PreferenceViewController, PreferenceWindowEmbeddabl
   }
 
   private func refreshSubSourceAccessoryView() {
-    let map = [OnlineSubtitle.Providers.openSub.id: 1, OnlineSubtitle.Providers.assrt.id: 2]
+    let map = [OnlineSubtitle.Providers.assrt.id: 2]
     let id = subSourcePopUpButton.selectedItem?.representedObject as? String ?? ""
     for (index, view) in subSourceStackView.views.enumerated() {
       if index == 0 { continue }

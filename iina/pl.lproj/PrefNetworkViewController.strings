@@ -22,11 +22,11 @@
 /* Class = "NSTextFieldCell"; title = "Cache:"; ObjectID = "LNk-io-MM7"; */
 "LNk-io-MM7.title" = "Pamięć podręczna:";
 
-/* Class = "NSTextFieldCell"; title = "Requires restarting IINA to take effect."; ObjectID = "RwW-JS-iTv"; */
-"RwW-JS-iTv.title" = "Program IINA musi zostać zrestartowany aby efekt został zastosowany.";
+/* Class = "NSTextFieldCell"; title = "Requires restarting ChengYing to take effect."; ObjectID = "RwW-JS-iTv"; */
+"RwW-JS-iTv.title" = "Program ChengYing musi zostać zrestartowany aby efekt został zastosowany.";
 
-/* Class = "NSTextFieldCell"; title = "IINA will search youtube-dl in this folder. Restart needed."; ObjectID = "YqE-yV-BvQ"; */
-"YqE-yV-BvQ.title" = "IINA będzie szukać youtube-dl w tym folderze. Wymagany restart.";
+/* Class = "NSTextFieldCell"; title = "ChengYing will search youtube-dl in this folder. Restart needed."; ObjectID = "YqE-yV-BvQ"; */
+"YqE-yV-BvQ.title" = "ChengYing będzie szukać youtube-dl w tym folderze. Wymagany restart.";
 
 /* Class = "NSMenuItem"; title = "Auto"; ObjectID = "aNr-lv-K0r"; */
 "aNr-lv-K0r.title" = "Automatycznie";

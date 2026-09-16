@@ -85,8 +85,8 @@
 /* Class = "NSTextFieldCell"; title = "nits"; ObjectID = "baO-xy-7hD"; */
 "baO-xy-7hD.title" = "Nits";
 
-/* Class = "NSTextFieldCell"; title = "Measured peak brightness of the display. If set to 0, IINA detects this value. If detection fails, IINA sets the target peak to 400."; ObjectID = "aTt-aZ-rjK"; */
-"aTt-aZ-rjK.title" = "Gemessener Helligkeits-Spitzenwert des Bildschirms. Wenn auf 0 gesetzt, erkennt IINA diesen Wert. Wenn diese Erkennung fehlschlägt, setzt IINA den Wert auf 400.";
+/* Class = "NSTextFieldCell"; title = "Measured peak brightness of the display. If set to 0, ChengYing detects this value. If detection fails, ChengYing sets the target peak to 400."; ObjectID = "aTt-aZ-rjK"; */
+"aTt-aZ-rjK.title" = "Gemessener Helligkeits-Spitzenwert des Bildschirms. Wenn auf 0 gesetzt, erkennt ChengYing diesen Wert. Wenn diese Erkennung fehlschlägt, setzt ChengYing den Wert auf 400.";
 
 /* Class = "NSTextFieldCell"; title = "Algorithm:"; ObjectID = "qzI-rq-PqO"; */
 "qzI-rq-PqO.title" = "Algorithmus:";

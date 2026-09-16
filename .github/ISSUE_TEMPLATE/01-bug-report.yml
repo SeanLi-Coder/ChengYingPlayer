@@ -1,93 +1,92 @@
-name: "Report an Issue"
-description: "Create a report for an issue or a bug"
+name: "问题报告"
+description: "报告播放、视频工具或界面问题"
+title: "[Bug] "
+labels:
+  - bug
 body:
-- type: markdown
-  attributes:
-    value: |
-      Thanks for considering about contributing to IINA and making it even better! To help us focus on unique issues, please first check out the existing issues, including closed ones. If you see someone else has already opened an issue about the same stuff, you should reply to their existing issue instead of opening a new one.
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先搜索现有 Issue，并移除日志中的私人路径、账号和媒体信息。
 
-- type: input
-  attributes:
-    label: IINA Version
-  validations:
-    required: true
+  - type: input
+    id: version
+    attributes:
+      label: 澄影播放器版本
+      placeholder: "例如：0.1.0"
+    validations:
+      required: true
 
-- type: dropdown
-  attributes:
-    label: Release Channel
-    options:
-      - Release
-      - Beta
-      - Nightly
-      - Other
-      - Not Sure
-    description: "If \"Other\" is selected, please specify in the IINA version text field."
-  validations:
-    required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS 版本
+      placeholder: "例如：macOS 15.6"
+    validations:
+      required: true
 
-- type: input
-  attributes:
-    label: macOS Version
-  validations:
-    required: true
+  - type: dropdown
+    id: device
+    attributes:
+      label: Mac 类型
+      options:
+        - Apple Silicon
+        - Intel
+        - 不确定
+    validations:
+      required: true
 
-- type: textarea
-  attributes:
-    label: Steps to Reproduce
-    value: |-
-      - First step...
-      - Second step...
-      - ...
-  validations:
-    required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题类型
+      options:
+        - 播放
+        - 视频剪辑
+        - 逐帧截图
+        - 永久旋转
+        - 字幕或播放列表
+        - 界面或其他
+    validations:
+      required: true
 
-- type: textarea
-  attributes:
-    label: Expected Behavior
-  validations:
-    required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开……
+        2. 选择……
+        3. 出现……
+    validations:
+      required: true
 
-- type: textarea
-  attributes:
-    label: Actual Behavior
-  validations:
-    required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
 
-- type: textarea
-  attributes:
-    label: Crash Report or Process Sample
-    description: "If you're reporting a crash, please drag and drop the trace log file below. You can find these in ~/Library/Logs/DiagnosticReports/; the filename should prefixed with IINA and include the crash time. If you are reporting a hang (IINA stops responding) please generate a process sample and drag and drop the file below. For more information see the FAQ question: [How to collect a process sample when reporting an issue?](https://github.com/iina/iina/wiki/FAQ#how-to-collect-a-process-sample-when-reporting-an-issue)"
-    placeholder: Drag and drop the crash report or process sample file here; do not paste the content directly.
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+    validations:
+      required: true
 
-- type: textarea
-  attributes:
-    label: Logs
-    description: "If applicable, please provide the log files after reproducing the issue. If you haven't done so already, you can enable logging in Settings > Advanced. For more information see the FAQ question: [How to collect log files when reporting an issue?](https://github.com/iina/iina/wiki/FAQ#how-to-collect-log-files-when-reporting-an-issue)"
-    placeholder: Drag and drop the iina.log and mpv.log files here; do not paste the content directly.
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 日志、崩溃报告或样例信息
+      description: 请勿上传私人视频；如必须提供样例，请使用可公开分享的最小文件并说明编码、分辨率和 HDR 类型。
 
-- type: textarea
-  attributes:
-    label: Sample Files
-    description: If the issue or bug is related to a specific file/file type (including subtitles), please provide sample files for us to reproduce. Please zip into one file if there are multiple files. For small files, just drag and drop into the text field below. If GitHub reports the file type is not supported, put the file in a zip archive. For larger files, please consider uploading to file hosting services which can be freely accessible by us (e.g. Google Drive, iCloud Drive, etc).
-    placeholder: Drag and drop any sample files, or paste the link to the files.
-
-- type: input
-  attributes:
-    label: How often can you reproduce the issue
-  validations:
-    required: true
-
-- type: checkboxes
-  attributes:
-    label: |
-      Required Actions
-    options:
-      - label: I tried my best to search from the existing issues (including closed issues) and didn't find duplicated issues.
-        required: true
-- type: checkboxes
-  attributes:
-    label: |
-      Optional Actions
-    options:
-      - label: I tested with the Nightly build and confirmed the issue is not fixed.
-      - label: I tested with the latest version of mpv and confirmed mpv doesn't have this issue.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交确认
+      options:
+        - label: 我已经搜索过现有 Issue，没有发现相同问题。
+          required: true
+        - label: 我已经移除日志中的私人信息。
+          required: true

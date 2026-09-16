@@ -561,7 +561,8 @@ class MPVController: NSObject {
     setUserOption(PK.ytdlRawOptions, type: .string, forName: MPVOption.ProgramBehavior.ytdlRawOptions,
                   verboseIfDefault: true)
     chkErr(setOptionString(MPVOption.ProgramBehavior.resetOnNextFile,
-            "\(MPVOption.PlaybackControl.abLoopA),\(MPVOption.PlaybackControl.abLoopB)", level: .verbose))
+            "\(MPVOption.PlaybackControl.abLoopA),\(MPVOption.PlaybackControl.abLoopB)," +
+            "\(MPVOption.PlaybackControl.abLoopCount),\(MPVOption.Video.videoRotate)", level: .verbose))
 
     setUserOption(PK.audioDriverEnableAVFoundation, type: .other, forName: MPVOption.Audio.ao,
                   verboseIfDefault: true) { key in
@@ -603,7 +604,7 @@ class MPVController: NSObject {
 
     // Load keybindings. This is still required for mpv to handle media keys or apple remote.
     let userConfigs = PrefKeyBindingViewController.userConfigs
-    var inputConfPath =  PrefKeyBindingViewController.defaultConfigs["IINA Default"]
+    var inputConfPath =  PrefKeyBindingViewController.defaultConfigs["ChengYing Default"]
     if let confFromUd = Preference.string(for: .currentInputConfigName) {
       if let currentConfigFilePath = Utility.getFilePath(Configs: userConfigs, forConfig: confFromUd, showAlert: false) {
         inputConfPath = currentConfigFilePath
@@ -792,11 +793,18 @@ class MPVController: NSObject {
     return strArgs
   }
 
+  private func commandLogSummary(_ prefix: String, command: MPVCommand, args: [String?]) -> String {
+    let commandName = Utility.logSafeComponent(command.rawValue)
+    let argumentCount = args.compactMap { $0 }.count
+    guard argumentCount > 0 else { return "\(prefix): \(commandName)" }
+    return "\(prefix): \(commandName) (\(argumentCount) argument(s) redacted)"
+  }
+
   // Send arbitrary mpv command.
   func command(_ command: MPVCommand, args: [String?] = [], checkError: Bool = true,
                level: Logger.Level = .debug, returnValueCallback: ((Int32) -> Void)? = nil) {
     guard mpv != nil else { return }
-    log("Run command: \(command.rawValue) \(args.compactMap{$0}.joined(separator: " "))", level: level)
+    log(commandLogSummary("Run command", command: command, args: args), level: level)
     var cargs = makeCArgs(command, args).map { $0.flatMap { UnsafePointer<CChar>(strdup($0)) } }
     defer {
       for ptr in cargs {
@@ -814,15 +822,14 @@ class MPVController: NSObject {
   }
 
   func command(rawString: String, level: Logger.Level = .debug) -> Int32 {
-    log("Run command: \(rawString)", level: level)
+    log("Run raw command (contents redacted, length=\(rawString.utf8.count))", level: level)
     return mpv_command_string(mpv, rawString)
   }
 
   func asyncCommand(_ command: MPVCommand, args: [String?] = [], checkError: Bool = true,
                     replyUserdata: UInt64, level: Logger.Level = .debug) {
     guard mpv != nil else { return }
-    log("Asynchronously run command: \(command.rawValue) \(args.compactMap{$0}.joined(separator: " "))",
-        level: level)
+    log(commandLogSummary("Asynchronously run command", command: command, args: args), level: level)
     var cargs = makeCArgs(command, args).map { $0.flatMap { UnsafePointer<CChar>(strdup($0)) } }
     defer {
       for ptr in cargs {
@@ -862,7 +869,7 @@ class MPVController: NSObject {
 
   @discardableResult
   func setString(_ name: String, _ value: String, level: Logger.Level = .debug) -> Int32 {
-    log("Set property: \(name)=\(value)", level: level)
+    log("Set string property: \(Utility.logSafeComponent(name))=<redacted>", level: level)
     return mpv_set_property_string(mpv, name, value)
   }
 
@@ -1611,7 +1618,7 @@ class MPVController: NSObject {
                                verboseIfDefault: Bool = false) -> Int32 {
     let levelToUse: Logger.Level = verboseIfDefault &&
       MPVOptionDefaults.shared.getString(name) == value ? .verbose  : level
-    log("Set option: \(name)=\(value)", level: levelToUse)
+    log("Set string option: \(Utility.logSafeComponent(name))=<redacted>", level: levelToUse)
     return mpv_set_option_string(mpv, name, value)
   }
 
