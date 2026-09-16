@@ -221,6 +221,9 @@ for argument in ["--music-mode", "--music-mode=yes", "--music-mode=no"] {
 
 // Source integration guards complement, but do not replace, the runtime and XIB checks above.
 let playlistSource = try String(contentsOf: root.appendingPathComponent("iina/PlaylistViewController.swift"), encoding: .utf8)
+let miniPlayerSource = try String(contentsOf: root.appendingPathComponent("iina/MiniPlayerWindowController.swift"), encoding: .utf8)
+check(!miniPlayerSource.contains("overrideAutoSwitchToMusicMode"),
+      "Source integration: the legacy window lifecycle does not reference removed music state")
 check(!playlistSource.contains(".playlistShowMetadataInMusicMode"), "Source integration: playlist display ignores the retired music-only preference")
 check(playlistSource.contains(".playlistShowMetadata"), "Source integration: the general playlist metadata preference is preserved")
 check(playlistSource.contains("Utility.mediaType(forExtension: fileExtension) == .audio"),
