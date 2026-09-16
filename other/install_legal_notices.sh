@@ -89,8 +89,23 @@ tar -xOf "$PYINSTALLER_HOOKS_ARCHIVE" "pyinstaller_hooks_contrib-$PYINSTALLER_HO
 tar -xOf "$SETUPTOOLS_ARCHIVE" "setuptools-$SETUPTOOLS_VERSION/LICENSE" \
   > "$LEGAL_DIR/setuptools-LICENSE.txt"
 
+DOWNLOAD_CENTER_LEGAL="$PROJECT_ROOT/deps/download-center/Legal"
+read -r -a BUILD_ARCHS <<< "${ARCHS:-arm64}"
+if [[ "${#BUILD_ARCHS[@]}" == "1" && "${BUILD_ARCHS[0]}" == "x86_64" ]]; then
+  # No ARM-only runtime is included in an Intel application build.
+  if [[ -d "$LEGAL_DIR/DownloadCenter" ]]; then
+    rm -rf -- "$LEGAL_DIR/DownloadCenter"
+  fi
+else
+  if [[ ! -s "$DOWNLOAD_CENTER_LEGAL/runtime-artifacts.json" || ! -s "$DOWNLOAD_CENTER_LEGAL/RednoteDownloader-MIT-LICENSE.txt" ]]; then
+    echo "Build the download center and its pinned runtime notices before packaging." >&2
+    exit 1
+  fi
+  ditto --noqtn "$DOWNLOAD_CENTER_LEGAL" "$LEGAL_DIR/DownloadCenter"
+fi
+
 for legal_file in "$LEGAL_DIR"/*; do
-  if [[ ! -s "$legal_file" ]]; then
+  if [[ -f "$legal_file" && ! -s "$legal_file" ]]; then
     echo "Legal notice is empty: $legal_file" >&2
     exit 1
   fi

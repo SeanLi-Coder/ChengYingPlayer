@@ -1,0 +1,9 @@
+# Native download center tests
+
+Run `bash Tools/DownloadCenterTests/run.sh` on macOS. Production models, subprocess service, the actual AppKit/WebKit window, and shared styling are compiled and typechecked for Intel macOS 10.15. The download service requires Apple Silicon and macOS 13.5 or later.
+
+The only application boundary double is `PlayerCore.openURL`. A standard-library Python fixture provides an isolated stdio child and a real authenticated loopback HTTP server. It never imports the vendored application, accesses Chrome cookies, visits a remote website, or reads user download history. State and tiny output fixtures live under the test's temporary directory.
+
+Tests exercise startup validation, malformed/oversized/pid-mismatched handshakes, timeouts, occupied instances, raw-error privacy, cookie flags, origin and bridge schema checks, output-file safety, native HTTP authentication, real WKWebView cookie isolation, JavaScript confirmation sheets, native playback dispatch, blocked external navigation, window-close behavior, and EOF shutdown. A second browser case serves the actual preserved HTML/JS/CSS plus the real desktop adapter against synthetic API/SSE responses, then clicks its real native play button and checks directory updates. Existing vendored backend/frontend tests and helper integration tests separately cover actual download behavior; these loopback fixtures do not contact remote platforms.
+
+The complete-frontend case briefly presents its synthetic window and dispatches real AppKit events. This is necessary because the preserved frontend correctly suspends initial polling while `document.hidden` is true; the tests do not replace the browser visibility API or bypass the frontend's build gate. Set `CHENGYING_CAPTURE_DIR=/absolute/output/path` to export actual WebKit viewport PNGs for both localizations, including the output-action area.

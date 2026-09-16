@@ -66,6 +66,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   lazy var historyWindow: HistoryWindowController = HistoryWindowController()
   lazy var guideWindow: GuideWindowController = GuideWindowController()
   lazy var logWindow: LogWindowController = LogWindowController()
+  lazy var downloadCenterWindow = DownloadCenterWindowController()
 
   lazy var preferenceWindowController: PreferenceWindowController = {
     let list: [NSViewController & PreferenceWindowEmbeddable] = [
@@ -410,6 +411,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   /// - Returns: `false` if the application should not be terminated when its last window is closed; otherwise, `true` to
   ///     terminate the application.
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    // A download task is independent of player-window lifetime.
+    guard !DownloadCenterService.shared.isRunning else { return false }
     // If the user has not enabled the setting then no need to check anything else.
     guard Preference.bool(for: .quitWhenNoOpenedWindow) else { return false }
     let player = PlayerCore.active
@@ -422,6 +425,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     Logger.log("App should terminate")
     isTerminating = true
     SubtitleToolsService.shared.shutdown()
+    DownloadCenterService.shared.shutdown()
 
     // Normally termination happens fast enough that the user does not have time to initiate
     // additional actions, however to be sure shutdown further input from the user.
@@ -673,12 +677,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
   func applicationWillTerminate(_ notification: Notification) {
     SubtitleToolsService.shared.shutdown()
+    DownloadCenterService.shared.shutdown()
     if let videoToolsShortcutMonitor {
       NSEvent.removeMonitor(videoToolsShortcutMonitor)
     }
     videoToolsMenuObservers.forEach(NotificationCenter.default.removeObserver)
     Logger.log("App will terminate")
     Logger.closeLogFile()
+  }
+
+  @objc func menuShowDownloadCenter(_ sender: Any?) {
+    guard !isTerminating else { return }
+    downloadCenterWindow.showWindow(sender)
   }
 
   @objc func menuShowSubtitleTools(_ sender: NSMenuItem) {

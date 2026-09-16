@@ -37,12 +37,15 @@ jobs:
         with:
           python-version: "3.13.2"
           cache: pip
-          cache-dependency-path: Tools/VideoToolsHelper/requirements-dev.txt
+          cache-dependency-path: |
+            Tools/VideoToolsHelper/requirements-dev.txt
+            Tools/DownloaderHelper/requirements-dev.txt
+            Tools/DownloaderHelper/requirements-runtime.txt
 
       - name: Install test dependencies
         run: |
           brew install ffmpeg
-          python -m pip install --require-hashes --requirement Tools/VideoToolsHelper/requirements-dev.txt
+          python -m pip install --require-hashes --only-binary=:all: --requirement Tools/DownloaderHelper/requirements-dev.txt
 
       - name: Test media helper
         working-directory: Tools/VideoToolsHelper
@@ -74,6 +77,18 @@ jobs:
           python -m ruff check Tools/SubtitleToolsHelper
           python -m pytest -q Tools/SubtitleToolsHelper/tests
           ./Tools/SubtitleToolsTests/run.sh
+
+      - name: Test preserved downloader engine
+        run: python Tools/DownloaderHelper/run_upstream_tests.py
+
+      - name: Test private download-center adapter
+        run: |
+          python -m ruff check Tools/DownloaderHelper --exclude vendor
+          python -m pytest -q Tools/DownloaderHelper/tests
+          python Tools/DownloaderHelper/smoke_helper.py \
+            --helper Tools/DownloaderHelper/helper.py \
+            --ffmpeg "$(command -v ffmpeg)" --ffprobe "$(command -v ffprobe)"
+          bash Tools/DownloadCenterTests/run.sh
 
   build-apple-silicon:
     needs: media-helper-tests
@@ -108,12 +123,15 @@ jobs:
         with:
           python-version: "3.13.2"
           cache: pip
-          cache-dependency-path: Tools/VideoToolsHelper/requirements-build.txt
+          cache-dependency-path: |
+            Tools/VideoToolsHelper/requirements-build.txt
+            Tools/DownloaderHelper/requirements-build.txt
+            Tools/DownloaderHelper/requirements-runtime.txt
 
       - name: Install build dependencies
         run: |
           brew install cmake pkg-config
-          python -m pip install --require-hashes --requirement Tools/VideoToolsHelper/requirements-build.txt
+          python -m pip install --require-hashes --only-binary=:all: --requirement Tools/DownloaderHelper/requirements-build.txt
 
       - name: Prepare playback libraries
         run: ./other/download_libs.sh --arch arm64
@@ -123,6 +141,7 @@ jobs:
           ./other/build_media_binaries.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/VideoToolsHelper/build_helper.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/SubtitleToolsHelper/build_helper.sh
+          HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/DownloaderHelper/build_helper.sh
 
       - name: Test live playlist reordering
         run: PATH="$PWD/deps/executable:$PATH" PLAYLIST_REQUIRE_LIVE_TESTS=1 bash Tools/PlaylistPlaybackTests/run.sh
@@ -163,6 +182,15 @@ jobs:
             codesign --verify --strict --verbose=2 "$executable_path"
           done
 
+          download_center="$app_path/Contents/Helpers/DownloadCenter"
+          for executable in chengying-download-center-helper deno _internal/playwright/driver/node; do
+            if [[ ! -x "$download_center/$executable" ]]; then
+              echo "Missing bundled download-center executable: $executable" >&2
+              exit 1
+            fi
+            codesign --verify --strict --verbose=2 "$download_center/$executable"
+          done
+
           codesign --verify --deep --strict --verbose=2 "$app_path"
 
           app_entitlements="$RUNNER_TEMP/app-entitlements.plist"
@@ -186,6 +214,16 @@ jobs:
           "$app_path/Contents/MacOS/ffmpeg" -hide_banner -version
           "$app_path/Contents/MacOS/chengying-video-tools-helper" --help
           "$app_path/Contents/MacOS/chengying-subtitle-tools-helper" --help
+          "$download_center/chengying-download-center-helper" --help
+          PATH="$download_center:$PATH" "$download_center/chengying-download-center-helper" --self-test
+          python Tools/DownloaderHelper/smoke_helper.py \
+            --helper "$download_center/chengying-download-center-helper" \
+            --ffmpeg "$app_path/Contents/MacOS/ffmpeg" \
+            --ffprobe "$app_path/Contents/MacOS/ffprobe"
+          if [[ -n "$(find "$download_center" -type d -name '__pycache__' -print -quit)" ]]; then
+            echo "The download center wrote bytecode into its signed application bundle." >&2
+            exit 1
+          fi
           "$app_path/Contents/MacOS/chengying-cli" --help
           helper_output="$RUNNER_TEMP/helper-smoke.jsonl"
           printf '%s\n' '{"id":"shutdown-smoke","command":"shutdown"}' | \
@@ -258,6 +296,13 @@ jobs:
             setuptools-LICENSE.txt; do
             if [[ ! -s "$legal_dir/$legal_file" ]]; then
               echo "Missing bundled legal notice: $legal_file" >&2
+              exit 1
+            fi
+          done
+          for legal_file in runtime-artifacts.json RednoteDownloader-MIT-LICENSE.txt DISTRIBUTION.md \
+            playwright/playwright/driver/LICENSE playwright/playwright/driver/package/NOTICE; do
+            if [[ ! -s "$legal_dir/DownloadCenter/$legal_file" ]]; then
+              echo "Missing download-center legal notice: $legal_file" >&2
               exit 1
             fi
           done

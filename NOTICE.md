@@ -43,7 +43,7 @@ See [`LICENSE`](LICENSE) for the controlling terms. If this summary and GPLv3 di
 
 ## Third-party components
 
-The upstream application includes or depends on third-party software. In addition, local and CI application builds bundle four local media-tool executables. The following list is not a substitute for the complete component licenses:
+The upstream application includes or depends on third-party software. In addition, local and CI application builds bundle four local media-tool executables and a separate download-center helper with its own runtime. The following list is not a substitute for the complete component licenses:
 
 | Component | Copyright or project attribution | License notice |
 | --- | --- | --- |
@@ -64,6 +64,10 @@ Exact upstream application notices are bundled in [`iina/Credits.rtf`](iina/Cred
 The subtitle feature adapts the repository owner's earlier `subtitle_add` / 译幕 workflow. Its optional Qwen3 and Hy-MT2 weights and isolated AI runtime are downloaded directly from their official upstreams only at the user's request; they are not relicensed as GPLv3 or included in a source release. In particular, Hy-MT2 uses the Tencent HY Community License, not Apache-2.0. Exact asset locks and additional FreeType, HarfBuzz, FriBidi, libunibreak, and libass notices are documented in `Legal/THIRD_PARTY_NOTICES.md`.
 
 ## Current source-only release policy
+
+The download center incorporates Original Media Downloader / 原迹下载器 (`rednote_downloader`), version 1.2.23, commit `e532e4fcd74bce4dfe730e49b8f1b49adceff62e`, copyright © 2026 Sean Li, under its retained MIT license. Its complete tracked source, except the upstream GitHub workflows, is preserved in `Tools/DownloaderHelper/vendor/rednote`; the two documented adaptation/test patches and per-file original/current hashes are recorded in `Tools/DownloaderHelper/upstream-manifest.json`. The native host and its integration code are modifications distributed under this project's GPLv3 license.
+
+The separately frozen download runtime uses checksum-pinned dependencies, including yt-dlp, Playwright and its Node driver, Deno, FastAPI, and their dependencies. Their complete wheel/source provenance and collected notices are described in `Tools/DownloaderHelper/DISTRIBUTION.md` and `Legal/THIRD_PARTY_NOTICES.md`. Google Chrome and browser profiles are not redistributed. Downloader wheels and runtime binaries are not included in the source-only release, and the manifest is not a claim of complete corresponding source for an application binary.
 
 The project's GitHub Actions workflow currently publishes source-only releases. It may build and smoke-test `ChengYing.app` inside an ephemeral runner, but it must not upload the application, a DMG, a ZIP, or any other application binary as an Actions artifact or GitHub Release asset.
 

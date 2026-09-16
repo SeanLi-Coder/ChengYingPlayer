@@ -134,6 +134,7 @@ class InitialWindowController: NSWindowController {
   var loaded = false
   let recentFilesTableView = NSTableView()
   let primaryOpenButton = NSButton()
+  let downloadCenterButton = NSButton()
   let resumeButton = WelcomeResumeButton()
   private let recentScrollView = NSScrollView()
   private let recentHeading = welcomeLabel(welcomeString("welcome.recent"), size: 17, weight: .semibold)
@@ -278,6 +279,14 @@ class InitialWindowController: NSWindowController {
     primaryOpenButton.keyEquivalentModifierMask = [.command]
     primaryOpenButton.translatesAutoresizingMaskIntoConstraints = false
     ChengYingStyle.primaryButton(primaryOpenButton)
+    downloadCenterButton.identifier = NSUserInterfaceItemIdentifier("welcome.download")
+    downloadCenterButton.title = welcomeString("welcome.download")
+    downloadCenterButton.image = ChengYingStyle.symbol("arrow.down.circle")
+    downloadCenterButton.imagePosition = .imageLeading
+    downloadCenterButton.target = self
+    downloadCenterButton.action = #selector(openDownloadCenter)
+    downloadCenterButton.translatesAutoresizingMaskIntoConstraints = false
+    ChengYingStyle.secondaryButton(downloadCenterButton)
     let dragHint = welcomeLabel(welcomeString("welcome.drop"), size: 11, color: .secondaryLabelColor)
     let features = makeFeatures()
     let privacy = welcomeLabel(welcomeString("welcome.privacy"), size: 10, color: .tertiaryLabelColor)
@@ -286,7 +295,7 @@ class InitialWindowController: NSWindowController {
     let build = info.buildType == .release ? "" : " · \(info.buildType.description)"
     let versionLabel = welcomeLabel("ChengYing  \(version)\(build)", size: 10, color: .tertiaryLabelColor)
 
-    [icon, brand, eyebrow, title, description, primaryOpenButton, dragHint, features, privacy, versionLabel]
+    [icon, brand, eyebrow, title, description, primaryOpenButton, downloadCenterButton, dragHint, features, privacy, versionLabel]
       .forEach(hero.addSubview)
     NSLayoutConstraint.activate([
       icon.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
@@ -307,8 +316,12 @@ class InitialWindowController: NSWindowController {
       primaryOpenButton.trailingAnchor.constraint(equalTo: hero.trailingAnchor),
       primaryOpenButton.topAnchor.constraint(equalTo: description.bottomAnchor, constant: 26),
       primaryOpenButton.heightAnchor.constraint(equalToConstant: 46),
+      downloadCenterButton.leadingAnchor.constraint(equalTo: primaryOpenButton.leadingAnchor),
+      downloadCenterButton.trailingAnchor.constraint(equalTo: primaryOpenButton.trailingAnchor),
+      downloadCenterButton.topAnchor.constraint(equalTo: primaryOpenButton.bottomAnchor, constant: 8),
+      downloadCenterButton.heightAnchor.constraint(equalToConstant: 34),
       dragHint.centerXAnchor.constraint(equalTo: primaryOpenButton.centerXAnchor),
-      dragHint.topAnchor.constraint(equalTo: primaryOpenButton.bottomAnchor, constant: 10),
+      dragHint.topAnchor.constraint(equalTo: downloadCenterButton.bottomAnchor, constant: 10),
       features.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
       features.trailingAnchor.constraint(equalTo: hero.trailingAnchor),
       features.topAnchor.constraint(equalTo: dragHint.bottomAnchor, constant: 26),
@@ -343,6 +356,10 @@ class InitialWindowController: NSWindowController {
     grid.rowSpacing = 12
     grid.columnSpacing = 24
     return grid
+  }
+
+  @objc private func openDownloadCenter() {
+    NSApp.sendAction(NSSelectorFromString("menuShowDownloadCenter:"), to: NSApp.delegate, from: self)
   }
 
   private func makeLibrary() -> NSView {

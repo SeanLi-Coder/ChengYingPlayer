@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D4CB00012F6A000100000001 /* DownloadCenterModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CB00112F6A000100000001 /* DownloadCenterModels.swift */; };
+		D4CB00022F6A000100000002 /* DownloadCenterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CB00122F6A000100000002 /* DownloadCenterService.swift */; };
+		D4CB00032F6A000100000003 /* DownloadCenterWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CB00132F6A000100000003 /* DownloadCenterWindowController.swift */; };
+		D4CB00042F6A000100000004 /* DownloadCenter.strings in Resources */ = {isa = PBXBuildFile; fileRef = D4CB00302F6A000100000001 /* DownloadCenter.strings */; };
 		D4C900012F6A000100000001 /* ChengYingStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C900022F6A000100000001 /* ChengYingStyle.swift */; };
 		D4CA00012F6A000100000001 /* PlaylistFileMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00112F6A000100000001 /* PlaylistFileMetadata.swift */; };
 		D4CA00022F6A000100000002 /* PlaylistPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00122F6A000100000002 /* PlaylistPresentation.swift */; };
@@ -583,6 +587,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D4CB00112F6A000100000001 /* DownloadCenterModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterModels.swift; sourceTree = "<group>"; };
+		D4CB00122F6A000100000002 /* DownloadCenterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterService.swift; sourceTree = "<group>"; };
+		D4CB00132F6A000100000003 /* DownloadCenterWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterWindowController.swift; sourceTree = "<group>"; };
+		D4CB00312F6A000100000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/DownloadCenter.strings; sourceTree = "<group>"; };
+		D4CB00322F6A000100000002 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/DownloadCenter.strings"; sourceTree = "<group>"; };
 		D4C900022F6A000100000001 /* ChengYingStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChengYingStyle.swift; sourceTree = "<group>"; };
 		D4CA00112F6A000100000001 /* PlaylistFileMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistFileMetadata.swift; sourceTree = "<group>"; };
 		D4CA00122F6A000100000002 /* PlaylistPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPresentation.swift; sourceTree = "<group>"; };
@@ -2182,6 +2191,16 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		D4CB00202F6A000100000001 /* DownloadCenter */ = {
+			isa = PBXGroup;
+			children = (
+				D4CB00112F6A000100000001 /* DownloadCenterModels.swift */,
+				D4CB00122F6A000100000002 /* DownloadCenterService.swift */,
+				D4CB00132F6A000100000003 /* DownloadCenterWindowController.swift */,
+			);
+			path = DownloadCenter;
+			sourceTree = "<group>";
+		};
 		D4C800202F6A000100000001 /* SubtitleTools */ = {
 			isa = PBXGroup;
 			children = (
@@ -2418,6 +2437,7 @@
 				84EB1EE01D2F51D3004FA5A1 /* Info.plist */,
 				845AC09E1E1AE6C10080B614 /* Localizable.strings */,
 				D4C800302F6A000100000001 /* SubtitleTools.strings */,
+				D4CB00302F6A000100000001 /* DownloadCenter.strings */,
 				D4CA00302F6A000100000001 /* PlaylistBrowser.strings */,
 				34F294BF2C0B68B300F14962 /* Contribution.rtf */,
 				8483FAFF1EDFF325000F55D6 /* Credits.rtf */,
@@ -2430,6 +2450,7 @@
 			children = (
 				D4C700202F6A000100000001 /* VideoTools */,
 				D4C800202F6A000100000001 /* SubtitleTools */,
+				D4CB00202F6A000100000001 /* DownloadCenter */,
 				84A0BA931D2F9E9600BC8DA1 /* MainMenu.xib */,
 				E38BD4AE20054BD9007635FC /* MainWindow.swift */,
 				D1B4E24D2A3AFC9100E36F1D /* MiniPlayerWindow.swift */,
@@ -2892,6 +2913,7 @@
 				84817CE81DBE2E3200CC2279 /* Copy Lua Scripts */,
 				84E745DA1DFDE9C600588DED /* Copy Configs */,
 				D4C701202F6A000100000001 /* Copy Video Tools */,
+				D4CB00402F6A000100000001 /* Embed Download Center */,
 				8461BA631E423423008BB852 /* Copy Executables */,
 				51728768291B6F30009E6EC1 /* Write Info.h */,
 			);
@@ -3093,6 +3115,7 @@
 				849581F31F03D55A00D3B359 /* InitialWindowController.xib in Resources */,
 				845AC09C1E1AE6C10080B614 /* Localizable.strings in Resources */,
 				D4C800052F6A000100000005 /* SubtitleTools.strings in Resources */,
+				D4CB00042F6A000100000004 /* DownloadCenter.strings in Resources */,
 				D4CA00042F6A000100000004 /* PlaylistBrowser.strings in Resources */,
 				8400D5F61E1AB34D006785F5 /* PrefNetworkViewController.xib in Resources */,
 				8400D5D51E1AB317006785F5 /* FilterWindowController.xib in Resources */,
@@ -3107,6 +3130,18 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		D4CB00402F6A000100000001 /* Embed Download Center */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = ();
+			name = "Embed Download Center";
+			outputPaths = ();
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "bash \"$SRCROOT/other/embed_download_center.sh\"\n";
+		};
 		51728768291B6F30009E6EC1 /* Write Info.h */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -3216,6 +3251,9 @@
 				8466BE181D5CDD0300039D03 /* QuickSettingViewController.swift in Sources */,
 				D4C700012F6A000100000001 /* VideoToolsModels.swift in Sources */,
 				D4C800012F6A000100000001 /* SubtitleToolsModels.swift in Sources */,
+				D4CB00012F6A000100000001 /* DownloadCenterModels.swift in Sources */,
+				D4CB00022F6A000100000002 /* DownloadCenterService.swift in Sources */,
+				D4CB00032F6A000100000003 /* DownloadCenterWindowController.swift in Sources */,
 				D4C800022F6A000100000002 /* SubtitleToolsHelperClient.swift in Sources */,
 				D4C800032F6A000100000003 /* SubtitleToolsService.swift in Sources */,
 				D4C800042F6A000100000004 /* SubtitleToolsViewController.swift in Sources */,
@@ -3387,6 +3425,15 @@
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
+		D4CB00302F6A000100000001 /* DownloadCenter.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				D4CB00312F6A000100000001 /* en */,
+				D4CB00322F6A000100000002 /* zh-Hans */,
+			);
+			name = DownloadCenter.strings;
+			sourceTree = "<group>";
+		};
 		D4CA00302F6A000100000001 /* PlaylistBrowser.strings */ = {
 			isa = PBXVariantGroup;
 			children = (

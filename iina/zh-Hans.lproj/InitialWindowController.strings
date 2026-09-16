@@ -16,3 +16,4 @@
 "welcome.empty.title" = "这里还很安静";
 "welcome.empty.hint" = "打开一个视频，\n最近播放会显示在这里。";
 "welcome.resume" = "继续上次\n%@\n从 %@ 继续播放";
+"welcome.download" = "下载网络视频";

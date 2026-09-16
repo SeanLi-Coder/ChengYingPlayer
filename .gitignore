@@ -118,3 +118,5 @@ deps/executable/ffmpeg
 deps/executable/ffprobe
 deps/plugins
 deps/sources
+/deps/download-center/
+/deps/.download-center-build.*/

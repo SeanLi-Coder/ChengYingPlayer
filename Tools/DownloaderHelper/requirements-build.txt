@@ -1,0 +1,2 @@
+-r ../VideoToolsHelper/requirements-build.txt
+-r requirements-runtime.txt

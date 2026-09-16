@@ -124,6 +124,7 @@ class MenuController: NSObject, NSMenuDelegate {
   @IBOutlet weak var quickSettingsVideo: NSMenuItem!
   private var videoToolsMenuItem: NSMenuItem?
   private var subtitleToolsMenuItem: NSMenuItem?
+  private var downloadCenterMenuItem: NSMenuItem?
   @IBOutlet weak var cycleVideoTracks: NSMenuItem!
   @IBOutlet weak var videoTrack: NSMenuItem!
   @IBOutlet weak var videoTrackMenu: NSMenu!
@@ -206,6 +207,13 @@ class MenuController: NSObject, NSMenuDelegate {
     // File menu
 
     fileMenu.delegate = self
+    if downloadCenterMenuItem == nil {
+      let item = NSMenuItem(title: downloadCenterString("menu.show"),
+                            action: #selector(AppDelegate.menuShowDownloadCenter(_:)), keyEquivalent: "")
+      item.target = NSApp.delegate
+      fileMenu.insertItem(item, at: fileMenu.index(of: openAlternative) + 1)
+      downloadCenterMenuItem = item
+    }
 
     stringForOpen = open.title
     stringForOpenAlternative = openAlternative.title

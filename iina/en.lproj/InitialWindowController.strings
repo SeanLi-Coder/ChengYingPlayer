@@ -16,3 +16,4 @@
 "welcome.empty.title" = "Ready for your next video";
 "welcome.empty.hint" = "Open a file and your recent videos\nwill appear here.";
 "welcome.resume" = "CONTINUE WATCHING\n%@\nContinue from %@";
+"welcome.download" = "Download online videos";

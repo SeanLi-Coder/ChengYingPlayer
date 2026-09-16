@@ -52,6 +52,16 @@ The optional isolated runtime uses Astral's CPython 3.13.15 standalone build and
 
 Subtitle segmentation and translation handling adapt the repository owner's earlier [subtitle_add / 译幕](https://github.com/SeanLi-Coder/subtitle_add) workflow. The new native interface, resumable asset manager, isolated runtime, and local worker are distributed as source under this project's GPLv3 license.
 
+## Download center
+
+The downloader engine and its original interface retain the MIT license of Original Media Downloader / 原迹下载器, copyright © 2026 Sean Li. The vendored version is 1.2.23 at commit `e532e4fcd74bce4dfe730e49b8f1b49adceff62e`; see [`Tools/DownloaderHelper/UPSTREAM.md`](../Tools/DownloaderHelper/UPSTREAM.md), its retained `vendor/rednote/LICENSE`, and the per-file SHA-256 manifest. Native-host modifications are part of this GPLv3 project.
+
+The additional onedir helper embeds the same pinned CPython/PyInstaller toolchain and fixed runtime wheels. The authoritative complete list of exact package versions, wheel URLs, and SHA-256 digests is [`Tools/DownloaderHelper/runtime-artifacts.json`](../Tools/DownloaderHelper/runtime-artifacts.json); the install locks reject artifacts with different hashes. This includes yt-dlp 2026.8.19, its EJS solver, Playwright 1.62.0 with its Node driver, and Deno 2.9.5. The build collects the installed distributions' license files and Playwright's bundled third-party notices, preserving their distinct terms; it does not represent every component as GPLv3 or MIT.
+
+The local application build stores these notices both beside the helper and in `Contents/Resources/Legal/DownloadCenter`. The Google Chrome browser is not included; users supply their own installation. No browser profile, Cookie store, download history, or downloaded media is included in the repository or build inputs.
+
+See [`Tools/DownloaderHelper/DISTRIBUTION.md`](../Tools/DownloaderHelper/DISTRIBUTION.md) for limitations on redistribution. A source release includes the downloader source and dependency lock/manifest, not its runtime wheels or executables. Before anyone distributes a binary, all embedded runtime components, including nested Node/Deno dependencies, require the applicable notices and any corresponding-source obligations to be fulfilled for the exact distributed artifacts. The existing source-only release gate remains in force.
+
 ## Integrity and source availability
 
 The authoritative checksums, filenames, and download URLs are stored in [`other/third_party_sources.sh`](../other/third_party_sources.sh) and reproduced as `SOURCE_MANIFEST.txt` in both a locally built application bundle and the release source archive. The build fails if a downloaded archive does not match its recorded SHA-256.

@@ -39,18 +39,22 @@ trap cleanup EXIT
 mkdir -p "$PACKAGE_DIR" "$SOURCE_DIR" "$(dirname "$OUTPUT_PATH")"
 git -C "$PROJECT_ROOT" archive --format=tar "$COMMIT" | tar -xf - -C "$PACKAGE_DIR"
 
-while IFS=$'\t' read -r component version filename url expected_sha256; do
+while IFS=$'\t' read -r component _version filename _url _expected_sha256; do
   source_path="$(fetch_verified_source "$component" "$SOURCE_CACHE_DIR")"
   install -m 644 "$source_path" "$SOURCE_DIR/$filename"
 done < <(third_party_source_records)
 
 write_third_party_source_manifest "$SOURCE_DIR/SOURCE_MANIFEST.txt"
+install -m 644 "$PROJECT_ROOT/Tools/DownloaderHelper/runtime-artifacts.json" \
+  "$SOURCE_DIR/DownloadCenter-WHEEL-MANIFEST.json"
 {
   printf '%s\n' "ChengYingPlayer release source package"
   printf '%s\n' ""
   printf 'Release source commit: %s\n' "$COMMIT"
   printf '%s\n' "The application source and build scripts are in this directory."
   printf '%s\n' "Verified source archives for the added FFmpeg tools, frozen helper runtime, and helper build dependencies are in third-party-sources/."
+  printf '%s\n' "The download center preserves its upstream MIT source under Tools/DownloaderHelper/vendor/rednote/."
+  printf '%s\n' "DownloadCenter-WHEEL-MANIFEST.json identifies pinned runtime wheels; those binaries are not included in this source-only archive."
   printf '%s\n' "This source-only release does not distribute the playback dylibs used by CI and is not an offer for those upstream binaries."
   printf '%s\n' "See NOTICE.md and Legal/THIRD_PARTY_NOTICES.md before building or redistributing a binary."
 } > "$PACKAGE_DIR/RELEASE_SOURCE_README.txt"
