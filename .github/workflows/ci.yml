@@ -47,6 +47,9 @@ jobs:
           python -m ruff check helper.py media.py tests
           python -m pytest -q
 
+      - name: Test native playback controls
+        run: ./Tools/VideoToolsTests/run.sh
+
   build-apple-silicon:
     needs: media-helper-tests
     runs-on: macos-26

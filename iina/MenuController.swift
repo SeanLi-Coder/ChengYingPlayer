@@ -126,6 +126,7 @@ class MenuController: NSObject, NSMenuDelegate {
   // Video
   @IBOutlet weak var videoMenu: NSMenu!
   @IBOutlet weak var quickSettingsVideo: NSMenuItem!
+  private var videoToolsMenuItem: NSMenuItem?
   @IBOutlet weak var cycleVideoTracks: NSMenuItem!
   @IBOutlet weak var videoTrack: NSMenuItem!
   @IBOutlet weak var videoTrackMenu: NSMenu!
@@ -279,6 +280,13 @@ class MenuController: NSObject, NSMenuDelegate {
     videoMenu.delegate = self
 
     quickSettingsVideo.action = #selector(MainWindowController.menuShowVideoQuickSettings(_:))
+    if videoToolsMenuItem == nil {
+      let item = NSMenuItem(title: NSLocalizedString("videotools.menu.show", comment: "Show video tools"),
+                            action: #selector(MainMenuActionHandler.menuShowVideoTools(_:)),
+                            keyEquivalent: "")
+      videoMenu.insertItem(item, at: videoMenu.index(of: quickSettingsVideo) + 1)
+      videoToolsMenuItem = item
+    }
     videoTrackMenu.delegate = self
 
     // -- window size
@@ -508,6 +516,8 @@ class MenuController: NSObject, NSMenuDelegate {
           player.mainWindow.quickSettingView.currentTab == .video
     quickSettingsVideo?.title = isDisplayingSettings ? Constants.String.hideVideoPanel :
         Constants.String.videoPanel
+    videoToolsMenuItem?.state = player.mainWindow.sideBarStatus == .settings &&
+        player.mainWindow.quickSettingView.currentTab == .tools ? .on : .off
     let isInFullScreen = player.mainWindow.fsState.isFullscreen
     let isInPIP = player.mainWindow.pipStatus == .inPIP
     let isOntop = player.isInMiniPlayer ? player.miniPlayer.isOntop : player.mainWindow.isOntop

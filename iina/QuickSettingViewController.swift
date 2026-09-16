@@ -427,10 +427,12 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     // image sub
     super.viewDidAppear()
     updateControlsState()
+    videoToolsViewController?.setPlaybackControlsVisible(currentTab == .tools)
   }
 
   override func viewDidDisappear() {
     super.viewDidDisappear()
+    videoToolsViewController?.setPlaybackControlsVisible(false)
     videoToolsViewController?.stopPreview()
   }
 
@@ -559,6 +561,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     }
     currentTab = tab
     tabView.selectTabViewItem(at: tab.buttonTag)
+    videoToolsViewController?.setPlaybackControlsVisible(tab == .tools && mainWindow.sideBarStatus == .settings)
     updateTabActiveStatus()
     reload()
   }

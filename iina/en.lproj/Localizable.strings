@@ -64,6 +64,24 @@
 // Local video tools
 "videotools.tab" = "TOOLS";
 "videotools.title" = "Local Video Tools";
+"videotools.menu.show" = "Video Tools…";
+"videotools.playback.title" = "PLAYBACK AND POSITIONING";
+"videotools.playback.backward" = "Back 5s";
+"videotools.playback.forward" = "Forward 5s";
+"videotools.playback.play" = "Play";
+"videotools.playback.pause" = "Pause";
+"videotools.playback.previous_frame" = "Previous Frame";
+"videotools.playback.next_frame" = "Next Frame";
+"videotools.playback.speed" = "Playback Speed";
+"videotools.playback.speed_hint" = "Playback and preview only; exports keep the original speed.";
+"videotools.playback.normal_speed" = "1× (Normal)";
+"videotools.playback.slower" = "Slower";
+"videotools.playback.faster" = "Faster";
+"videotools.set_start" = "Set Start";
+"videotools.set_end" = "Set End";
+"videotools.go_start" = "Go to Start";
+"videotools.go_end" = "Go to End";
+"videotools.markers_hint" = "Find a frame, then set the start or end at the current position. Preview the range when ready. Typing new times updates the preview automatically.";
 "videotools.mode" = "MODE";
 "videotools.operation.probe" = "Inspect";
 "videotools.operation.clip" = "Clip";

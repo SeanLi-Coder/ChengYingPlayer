@@ -64,6 +64,24 @@
 // 本地视频工具
 "videotools.tab" = "工具";
 "videotools.title" = "本地视频工具";
+"videotools.menu.show" = "视频工具…";
+"videotools.playback.title" = "播放与定位";
+"videotools.playback.backward" = "后退 5 秒";
+"videotools.playback.forward" = "快进 5 秒";
+"videotools.playback.play" = "播放";
+"videotools.playback.pause" = "暂停";
+"videotools.playback.previous_frame" = "上一帧";
+"videotools.playback.next_frame" = "下一帧";
+"videotools.playback.speed" = "播放速度";
+"videotools.playback.speed_hint" = "仅影响播放与预览，导出保持原速。";
+"videotools.playback.normal_speed" = "1×（正常速度）";
+"videotools.playback.slower" = "放慢";
+"videotools.playback.faster" = "加快";
+"videotools.set_start" = "设为起点";
+"videotools.set_end" = "设为终点";
+"videotools.go_start" = "定位起点";
+"videotools.go_end" = "定位终点";
+"videotools.markers_hint" = "找到画面后，将当前播放位置设为起点或终点，再点预览。直接修改时间会自动更新预览。";
 "videotools.mode" = "功能";
 "videotools.operation.probe" = "检测";
 "videotools.operation.clip" = "剪辑";

@@ -17,13 +17,37 @@ struct VideoToolsPlayerSnapshot {
 }
 
 extension PlayerCore {
+  /// Read mpv directly so a marker does not use the UI timer's cached position.
+  var videoToolsCurrentTime: Double? {
+    guard info.state.loaded else { return nil }
+    let position = mpv.getFlag(MPVProperty.eofReached)
+      ? info.videoDuration?.second ?? 0
+      : mpv.getDouble(MPVProperty.timePos)
+    guard position.isFinite, position >= 0 else { return nil }
+    return position
+  }
+
+  /// Keep navigation inside the current file, including at the end boundary.
+  func videoToolsSeek(to seconds: Double, pausePlayback: Bool) {
+    guard info.state.loaded, seconds.isFinite else { return }
+    var target = max(0, seconds)
+    var shouldPause = pausePlayback
+    if let duration = info.videoDuration?.second, duration.isFinite, duration > 0 {
+      let lastPosition = max(0, duration - 0.001)
+      shouldPause = shouldPause || target >= lastPosition
+      target = min(target, lastPosition)
+    }
+    if shouldPause { pause() }
+    seek(absoluteSecond: target)
+  }
+
   func videoToolsCaptureSnapshot() -> VideoToolsPlayerSnapshot? {
-    guard info.state.loaded, let mediaURL = info.currentURL else { return nil }
-    syncPositionIfNeeded()
+    guard info.state.loaded, let mediaURL = info.currentURL,
+          let position = videoToolsCurrentTime else { return nil }
     return VideoToolsPlayerSnapshot(
       mediaURL: mediaURL,
       mediaGeneration: videoToolsMediaGeneration,
-      position: info.videoPosition?.second ?? 0,
+      position: position,
       wasPaused: mpv.getFlag(MPVOption.PlaybackControl.pause),
       abLoopA: mpv.getDouble(MPVOption.PlaybackControl.abLoopA),
       abLoopB: mpv.getDouble(MPVOption.PlaybackControl.abLoopB),
@@ -60,12 +84,12 @@ extension PlayerCore {
     videoToolsRestorePreviewOptions(snapshot)
   }
 
-  func videoToolsRestoreSnapshot(_ snapshot: VideoToolsPlayerSnapshot) {
+  func videoToolsRestoreSnapshot(_ snapshot: VideoToolsPlayerSnapshot, restorePlaybackState: Bool = true) {
     let state = info.state
     guard state != .shuttingDown, state != .shutDown else { return }
     guard videoToolsMediaGeneration == snapshot.mediaGeneration,
           info.currentURL == snapshot.mediaURL || info.currentURL == nil else { return }
-    let canRestorePlaybackPosition = state.loaded
+    let canRestorePlaybackPosition = state.loaded && restorePlaybackState
     if canRestorePlaybackPosition, snapshot.wasPaused {
       pause()
     }

@@ -8,12 +8,40 @@ import Cocoa
 final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private static let maximumFrameRange = 5.0
   private static let maximumTimestampSeconds = 359_999_999.0
+  private static let playbackSpeeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 8.0, 16.0]
 
   private weak var player: PlayerCore?
   private weak var mainWindow: MainWindowController?
   private let taskManager = VideoToolsTaskManager.shared
 
   private let sourceLabel = NSTextField(labelWithString: "")
+  private let playbackPositionLabel = NSTextField(labelWithString: "")
+  private let playbackControl = NSSegmentedControl(
+    labels: [
+      NSLocalizedString("videotools.playback.backward", comment: "Back five seconds"),
+      NSLocalizedString("videotools.playback.play", comment: "Play"),
+      NSLocalizedString("videotools.playback.forward", comment: "Forward five seconds"),
+    ], trackingMode: .momentary, target: nil, action: nil
+  )
+  private let frameStepControl = NSSegmentedControl(
+    labels: [
+      NSLocalizedString("videotools.playback.previous_frame", comment: "Previous frame"),
+      NSLocalizedString("videotools.playback.next_frame", comment: "Next frame"),
+    ], trackingMode: .momentary, target: nil, action: nil
+  )
+  private let speedPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+  private let slowerButton = NSButton(
+    title: NSLocalizedString("videotools.playback.slower", comment: "Slower"), target: nil, action: nil
+  )
+  private let fasterButton = NSButton(
+    title: NSLocalizedString("videotools.playback.faster", comment: "Faster"), target: nil, action: nil
+  )
+  private let rangeNavigationControl = NSSegmentedControl(
+    labels: [
+      NSLocalizedString("videotools.go_start", comment: "Go to start"),
+      NSLocalizedString("videotools.go_end", comment: "Go to end"),
+    ], trackingMode: .momentary, target: nil, action: nil
+  )
   private let modeControl = NSSegmentedControl(
     labels: [
       NSLocalizedString("videotools.operation.clip", comment: "Clip video"),
@@ -27,12 +55,12 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private let startField = NSTextField(string: "")
   private let endField = NSTextField(string: "")
   private let setStartButton = NSButton(
-    title: NSLocalizedString("videotools.use_current", comment: "Use current time"),
+    title: NSLocalizedString("videotools.set_start", comment: "Set start at current position"),
     target: nil,
     action: nil
   )
   private let setEndButton = NSButton(
-    title: NSLocalizedString("videotools.use_current", comment: "Use current time"),
+    title: NSLocalizedString("videotools.set_end", comment: "Set end at current position"),
     target: nil,
     action: nil
   )
@@ -82,6 +110,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private var rotationGroup: NSStackView!
   private var outputGroup: NSStackView!
   private var previewTimer: Timer?
+  private var playbackControlsTimer: Timer?
   private var previewSnapshot: VideoToolsPlayerSnapshot?
   private var outputDirectoryURL: URL?
   private var observedSourceURL: URL?
@@ -102,6 +131,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   deinit {
     previewTimer?.invalidate()
+    playbackControlsTimer?.invalidate()
     stopPreview(updateButton: false)
     observers.forEach(NotificationCenter.default.removeObserver)
   }
@@ -135,6 +165,9 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     sourceLabel.maximumNumberOfLines = 2
     stack.addArrangedSubview(sourceLabel)
 
+    stack.addArrangedSubview(makePlaybackControls())
+    stack.addArrangedSubview(makeSeparator())
+
     stack.addArrangedSubview(makeCaption(NSLocalizedString("videotools.mode", comment: "Mode")))
     modeControl.selectedSegment = 0
     modeControl.target = self
@@ -156,7 +189,17 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     rangePreviewButton.target = self
     rangePreviewButton.action = #selector(toggleRangePreview(_:))
     rangePreviewButton.bezelStyle = .rounded
-    timeGroup = makeVerticalGroup([startRow, endRow, rangePreviewButton], spacing: 7)
+    rangeNavigationControl.target = self
+    rangeNavigationControl.action = #selector(navigateToRangeBoundary(_:))
+    rangeNavigationControl.segmentDistribution = .fillEqually
+    let markerHint = makeLabel(NSLocalizedString("videotools.markers_hint", comment: "How to select a range"))
+    markerHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+    markerHint.textColor = .secondaryLabelColor
+    markerHint.maximumNumberOfLines = 0
+    markerHint.lineBreakMode = .byWordWrapping
+    timeGroup = makeVerticalGroup([
+      startRow, endRow, rangeNavigationControl, rangePreviewButton, markerHint,
+    ], spacing: 7)
     stack.addArrangedSubview(timeGroup)
 
     frameHintLabel.stringValue = NSLocalizedString("videotools.frames_hint", comment: "Frame extraction limit")
@@ -243,6 +286,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     view = scrollView
     updateModeUI(resetFrameEnd: false)
     updateTaskUI()
+    updatePlaybackControls()
   }
 
   override func viewDidLayout() {
@@ -297,9 +341,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       outputDirectoryURL = newURL?.deletingLastPathComponent()
       updateOutputField()
       if let player, newURL != nil {
-        player.syncPositionIfNeeded()
-        let start = max(0, player.info.videoPosition?.second ?? 0)
-        startField.stringValue = formatTimestamp(start)
+        let start = player.videoToolsCurrentTime ?? 0
+        startField.stringValue = formatTimestamp(start, precision: 6)
         setDefaultEnd(after: start)
       } else {
         startField.stringValue = ""
@@ -315,13 +358,76 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       sourceLabel.toolTip = nil
     }
     updateTaskUI()
+    updatePlaybackControls()
   }
 
   func stopPreview() {
     stopPreview(updateButton: true)
   }
 
+  func setPlaybackControlsVisible(_ visible: Bool) {
+    playbackControlsTimer?.invalidate()
+    playbackControlsTimer = nil
+    guard visible, isViewLoaded else { return }
+    updatePlaybackControls()
+    let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+      self?.updatePlaybackControls()
+    }
+    timer.tolerance = 0.05
+    RunLoop.main.add(timer, forMode: .common)
+    playbackControlsTimer = timer
+  }
+
   // MARK: - Actions
+
+  @objc private func playbackControlClicked(_ sender: NSSegmentedControl) {
+    guard (0...2).contains(sender.selectedSegment), let player, player.info.state.loaded else { return }
+    if sender.selectedSegment == 1 {
+      previewTimer?.invalidate()
+      previewTimer = nil
+      player.togglePause()
+    } else {
+      guard let position = player.videoToolsCurrentTime else { return }
+      stopPreview(updateButton: true, restorePlaybackState: false)
+      player.videoToolsSeek(to: position + (sender.selectedSegment == 0 ? -5 : 5), pausePlayback: false)
+    }
+    updatePlaybackControls()
+  }
+
+  @objc private func stepFrame(_ sender: NSSegmentedControl) {
+    guard (0...1).contains(sender.selectedSegment), let player, player.info.state.loaded else { return }
+    stopPreview(updateButton: true, restorePlaybackState: false)
+    player.pause()
+    player.frameStep(backwards: sender.selectedSegment == 0)
+    updatePlaybackControls()
+  }
+
+  @objc private func selectPlaybackSpeed(_ sender: NSPopUpButton) {
+    guard let player, player.info.state.loaded,
+          Self.playbackSpeeds.indices.contains(sender.indexOfSelectedItem) else { return }
+    player.setSpeed(Self.playbackSpeeds[sender.indexOfSelectedItem])
+    updatePlaybackControls()
+  }
+
+  @objc private func changePlaybackSpeed(_ sender: NSButton) {
+    guard let player, player.info.state.loaded else { return }
+    let currentSpeed = player.mpv.getDouble(MPVOption.PlaybackControl.speed)
+    guard currentSpeed.isFinite else { return }
+    let speed = sender === slowerButton
+      ? Self.playbackSpeeds.last(where: { $0 < currentSpeed - 0.000_001 })
+      : Self.playbackSpeeds.first(where: { $0 > currentSpeed + 0.000_001 })
+    if let speed { player.setSpeed(speed) }
+    updatePlaybackControls()
+  }
+
+  @objc private func navigateToRangeBoundary(_ sender: NSSegmentedControl) {
+    guard (0...1).contains(sender.selectedSegment) else { return }
+    let field = sender.selectedSegment == 0 ? startField : endField
+    guard let target = parseTimestamp(field.stringValue), let player, player.info.state.loaded else { return }
+    stopPreview(updateButton: true, restorePlaybackState: false)
+    player.videoToolsSeek(to: target, pausePlayback: true)
+    updatePlaybackControls()
+  }
 
   @objc private func modeChanged(_ sender: NSSegmentedControl) {
     stopPreview(updateButton: true)
@@ -329,18 +435,25 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   @objc private func setStartToCurrentTime(_ sender: NSButton) {
+    guard player?.info.state.loaded == true else { return }
+    player?.pause()
     guard let currentTime = currentPlaybackTime else { return }
-    startField.stringValue = formatTimestamp(currentTime)
-    if selectedOperation == .frames {
+    stopPreview(updateButton: true, restorePlaybackState: false)
+    startField.stringValue = formatTimestamp(currentTime, precision: 6)
+    if selectedOperation == .frames || (parseTimestamp(endField.stringValue) ?? 0) <= currentTime {
       setDefaultEnd(after: currentTime)
     }
-    scheduleRangePreview()
+    updatePlaybackControls()
   }
 
   @objc private func setEndToCurrentTime(_ sender: NSButton) {
+    guard player?.info.state.loaded == true else { return }
+    player?.pause()
     guard let currentTime = currentPlaybackTime else { return }
-    endField.stringValue = formatTimestamp(currentTime)
-    scheduleRangePreview()
+    stopPreview(updateButton: true, restorePlaybackState: false)
+    endField.stringValue = formatTimestamp(currentTime, precision: 6)
+    _ = validatedRange(showError: true)
+    updatePlaybackControls()
   }
 
   @objc private func toggleRangePreview(_ sender: NSButton) {
@@ -475,11 +588,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     updatePreviewButtons()
   }
 
-  private func stopPreview(updateButton: Bool) {
+  private func stopPreview(updateButton: Bool, restorePlaybackState: Bool = true) {
     previewTimer?.invalidate()
     previewTimer = nil
     if let previewSnapshot {
-      player?.videoToolsRestoreSnapshot(previewSnapshot)
+      player?.videoToolsRestoreSnapshot(previewSnapshot, restorePlaybackState: restorePlaybackState)
       self.previewSnapshot = nil
     }
     if updateButton, isViewLoaded {
@@ -522,6 +635,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   private var currentLocalMediaURL: URL? {
     guard let player,
+          player.info.state.loaded,
           !player.info.isNetworkResource,
           let url = player.info.currentURL,
           url.isFileURL,
@@ -531,8 +645,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   private var currentPlaybackTime: Double? {
     guard let player, currentLocalMediaURL != nil else { return nil }
-    player.syncPositionIfNeeded()
-    return player.info.videoPosition?.second
+    return player.videoToolsCurrentTime
   }
 
   private func validatedRange(showError: Bool) -> (start: Double, end: Double)? {
@@ -602,11 +715,20 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private func setDefaultEnd(after start: Double) {
     let duration = player?.info.videoDuration?.second ?? (start + Self.maximumFrameRange)
     let end = max(start, min(start + Self.maximumFrameRange, duration))
-    endField.stringValue = formatTimestamp(end)
+    endField.stringValue = formatTimestamp(end, precision: 6)
   }
 
-  private func formatTimestamp(_ seconds: Double) -> String {
-    VideoTime(max(0, seconds)).stringRepresentationWithPrecision(3)
+  private func formatTimestamp(_ seconds: Double, precision: Int = 3) -> String {
+    guard seconds.isFinite else { return "--:--.---" }
+    let precision = min(6, max(1, precision))
+    let scale = Int(pow(10, Double(precision)))
+    let ticks = Int((min(Self.maximumTimestampSeconds, max(0, seconds)) * Double(scale)).rounded())
+    let totalSeconds = ticks / scale
+    let hours = totalSeconds / 3600
+    let minutes = totalSeconds % 3600 / 60
+    let remainingSeconds = totalSeconds % 60
+    let time = String(format: "%02d:%02d.%0\(precision)d", minutes, remainingSeconds, ticks % scale)
+    return hours > 0 ? "\(hours):\(time)" : time
   }
 
   private func updateModeUI(resetFrameEnd: Bool) {
@@ -704,6 +826,103 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   // MARK: - UI construction
+
+  private func makePlaybackControls() -> NSStackView {
+    playbackPositionLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+    playbackPositionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    playbackControl.target = self
+    playbackControl.action = #selector(playbackControlClicked(_:))
+    frameStepControl.target = self
+    frameStepControl.action = #selector(stepFrame(_:))
+    for control in [playbackControl, frameStepControl] {
+      control.segmentDistribution = .fillEqually
+      control.segmentStyle = .rounded
+    }
+    for speed in Self.playbackSpeeds {
+      speedPopup.addItem(withTitle: playbackSpeedTitle(speed))
+    }
+    speedPopup.target = self
+    speedPopup.action = #selector(selectPlaybackSpeed(_:))
+    speedPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    speedPopup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    speedPopup.setAccessibilityLabel(NSLocalizedString("videotools.playback.speed", comment: "Playback speed"))
+    for button in [slowerButton, fasterButton] {
+      button.target = self
+      button.action = #selector(changePlaybackSpeed(_:))
+      button.bezelStyle = .rounded
+    }
+    let speedHint = makeLabel(NSLocalizedString("videotools.playback.speed_hint", comment: "Playback speed does not change exports"))
+    speedHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+    speedHint.textColor = .secondaryLabelColor
+    speedHint.maximumNumberOfLines = 0
+    speedHint.lineBreakMode = .byWordWrapping
+    return makeVerticalGroup([
+      makeCaption(NSLocalizedString("videotools.playback.title", comment: "Playback and positioning")),
+      playbackPositionLabel,
+      playbackControl,
+      frameStepControl,
+      makeCaption(NSLocalizedString("videotools.playback.speed", comment: "Playback speed")),
+      makeHorizontalGroup([slowerButton, speedPopup, fasterButton], spacing: 7),
+      speedHint,
+    ], spacing: 7)
+  }
+
+  private func playbackSpeedTitle(_ speed: Double) -> String {
+    if speed == 1 {
+      return NSLocalizedString("videotools.playback.normal_speed", comment: "Normal playback speed")
+    }
+    return String(format: "%g×", speed)
+  }
+
+  private func updatePlaybackControls() {
+    guard isViewLoaded else { return }
+    let loaded = player?.info.state.loaded == true
+    let localMediaLoaded = loaded && currentLocalMediaURL != nil
+    playbackControl.isEnabled = loaded
+    frameStepControl.isEnabled = loaded && player?.info.vid != nil && player?.info.vid != 0
+    speedPopup.isEnabled = loaded
+    for control in [startField, endField, setStartButton, setEndButton, rangePreviewButton, rotationPreviewButton] as [NSControl] {
+      control.isEnabled = localMediaLoaded
+    }
+    for (index, field) in [startField, endField].enumerated() {
+      let target = parseTimestamp(field.stringValue)
+      let withinDuration = target.map { $0 <= (player?.info.videoDuration?.second ?? .infinity) } ?? false
+      rangeNavigationControl.setEnabled(localMediaLoaded && withinDuration, forSegment: index)
+    }
+    guard loaded, let player else {
+      playbackPositionLabel.stringValue = "--:--.--- / --:--.---"
+      playbackControl.setLabel(NSLocalizedString("videotools.playback.play", comment: "Play"), forSegment: 1)
+      slowerButton.isEnabled = false
+      fasterButton.isEnabled = false
+      return
+    }
+    let position = player.videoToolsCurrentTime.map { formatTimestamp($0) } ?? "--:--.---"
+    let duration = player.info.videoDuration?.second
+    let durationText = duration.flatMap { $0.isFinite && $0 >= 0 ? formatTimestamp($0) : nil } ?? "--:--.---"
+    playbackPositionLabel.stringValue = "\(position) / \(durationText)"
+    let paused = player.mpv.getFlag(MPVOption.PlaybackControl.pause)
+    playbackControl.setLabel(NSLocalizedString(
+      paused ? "videotools.playback.play" : "videotools.playback.pause", comment: "Play or pause"
+    ), forSegment: 1)
+    let speed = player.mpv.getDouble(MPVOption.PlaybackControl.speed)
+    guard speed.isFinite, speed > 0 else { return }
+    slowerButton.isEnabled = speed > Self.playbackSpeeds[0]
+    fasterButton.isEnabled = speed < Self.playbackSpeeds[Self.playbackSpeeds.count - 1]
+    if let index = Self.playbackSpeeds.firstIndex(where: { abs($0 - speed) < 0.000_001 }) {
+      speedPopup.selectItem(at: index)
+      if speedPopup.numberOfItems > Self.playbackSpeeds.count {
+        speedPopup.removeItem(at: Self.playbackSpeeds.count)
+      }
+    } else {
+      let title = playbackSpeedTitle(speed)
+      if speedPopup.numberOfItems == Self.playbackSpeeds.count {
+        speedPopup.addItem(withTitle: title)
+      }
+      speedPopup.item(at: Self.playbackSpeeds.count)?.title = title
+      speedPopup.item(at: Self.playbackSpeeds.count)?.isEnabled = false
+      speedPopup.selectItem(at: Self.playbackSpeeds.count)
+    }
+  }
 
   private func configureTimeFields() {
     for field in [startField, endField] {

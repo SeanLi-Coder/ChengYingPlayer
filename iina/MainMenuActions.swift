@@ -202,6 +202,24 @@ extension MainMenuActionHandler {
 // MARK: - Video
 
 extension MainMenuActionHandler {
+  private var canShowVideoTools: Bool {
+    guard !player.isInMiniPlayer,
+          player.mainWindow.loaded,
+          player.mainWindow.window?.isVisible == true,
+          !player.mainWindow.isInInteractiveMode,
+          player.info.state.loaded,
+          player.info.isAudio == .notAudio,
+          !player.info.isNetworkResource,
+          let url = player.info.currentURL,
+          url.isFileURL else { return false }
+    return FileManager.default.fileExists(atPath: url.path)
+  }
+
+  @objc func menuShowVideoTools(_ sender: NSMenuItem) {
+    guard canShowVideoTools else { return }
+    player.mainWindow.showSettingsSidebar(tab: .tools)
+  }
+
   @objc func menuChangeAspect(_ sender: NSMenuItem) {
     if let aspectStr = sender.representedObject as? String {
       player.setVideoAspect(aspectStr)
@@ -470,6 +488,8 @@ extension MainMenuActionHandler {
 
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     switch menuItem.action {
+    case #selector(menuShowVideoTools(_:)):
+      return canShowVideoTools
     case #selector(menuDeleteCurrentFile(_:)), #selector(menuShowCurrentFileInFinder(_:)):
       return player.info.currentURL != nil && !player.info.isNetworkResource
     default:
