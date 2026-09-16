@@ -39,7 +39,7 @@ jobs:
       - name: Install test dependencies
         run: |
           brew install ffmpeg
-          python -m pip install --requirement Tools/VideoToolsHelper/requirements-dev.txt
+          python -m pip install --require-hashes --requirement Tools/VideoToolsHelper/requirements-dev.txt
 
       - name: Test media helper
         working-directory: Tools/VideoToolsHelper
@@ -85,7 +85,7 @@ jobs:
       - name: Install build dependencies
         run: |
           brew install cmake pkg-config
-          python -m pip install --requirement Tools/VideoToolsHelper/requirements-build.txt
+          python -m pip install --require-hashes --requirement Tools/VideoToolsHelper/requirements-build.txt
 
       - name: Prepare playback libraries
         run: ./other/download_libs.sh --arch arm64 --skip-plugins
