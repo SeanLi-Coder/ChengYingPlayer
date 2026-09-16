@@ -503,7 +503,8 @@ class MPVController: NSObject {
     chkErr(setOptionString(MPVOption.ProgramBehavior.ytdl, "no", level: .verbose))
     chkErr(setOptionString(MPVOption.ProgramBehavior.resetOnNextFile,
             "\(MPVOption.PlaybackControl.abLoopA),\(MPVOption.PlaybackControl.abLoopB)," +
-            "\(MPVOption.PlaybackControl.abLoopCount),\(MPVOption.Video.videoRotate)", level: .verbose))
+            "\(MPVOption.PlaybackControl.abLoopCount),\(MPVOption.Video.videoRotate)," +
+            "\(MPVOption.Video.videoZoom),\(MPVOption.Video.videoPanX),\(MPVOption.Video.videoPanY)", level: .verbose))
 
     chkErr(setOptionString(MPVOption.Audio.ao, "coreaudio", level: .verbose))
 

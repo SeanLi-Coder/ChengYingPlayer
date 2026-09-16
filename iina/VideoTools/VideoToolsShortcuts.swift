@@ -14,6 +14,13 @@ enum VideoToolsShortcuts {
     case speedDown
     case setA
     case setB
+    case zoomIn
+    case zoomOut
+    case panLeft
+    case panRight
+    case panUp
+    case panDown
+    case resetViewport
     case consume
   }
 
@@ -54,6 +61,34 @@ enum VideoToolsShortcuts {
     // Physical key codes keep shortcuts stable while using a Chinese input method.
     // Caps Lock is a typing mode, not an additional shortcut modifier.
     let modifiers = modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock)
+
+    if (123...126).contains(keyCode) {
+      // AppKit marks arrow keys as numeric-pad/function events even without those keys held.
+      let arrowModifiers = modifiers.subtracting([.numericPad, .function])
+      guard arrowModifiers == [.command, .shift] else { return nil }
+      switch keyCode {
+      case 123: return .panLeft
+      case 124: return .panRight
+      case 125: return .panDown
+      default: return .panUp
+      }
+    }
+
+    if keyCode == 29, modifiers == [.command, .shift] {
+      return isRepeat ? .consume : .resetViewport
+    }
+
+    if keyCode == 24, modifiers.isEmpty || modifiers == [.shift] {
+      return .zoomIn
+    }
+    if keyCode == 27, modifiers.isEmpty {
+      return .zoomOut
+    }
+    if keyCode == 69 || keyCode == 78 {
+      guard modifiers.subtracting(.numericPad).isEmpty else { return nil }
+      return keyCode == 69 ? .zoomIn : .zoomOut
+    }
+
     if keyCode == 37 || keyCode == 15 {
       guard modifiers == [.command, .shift],
             deviceFlags & UInt64(NX_DEVICELCMDKEYMASK) != 0,

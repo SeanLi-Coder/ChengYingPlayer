@@ -2043,6 +2043,9 @@ class PlayerCore: NSObject {
     log("File loaded")
 
     info.state = .loaded
+    // View transforms belong to one load, even when watch-later data or a
+    // previous file retained mpv presentation properties.
+    videoToolsResetViewport()
 
     // Must force drawing to cover the case where this player was previously used to play a video
     // and is now playing an audio file without an album cover and without using music mode.

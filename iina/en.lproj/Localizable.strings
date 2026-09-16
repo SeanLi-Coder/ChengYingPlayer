@@ -557,3 +557,4 @@
 "videotools.rotation.shortcut_pending" = "Preparing the cumulative rotation export…";
 "videotools.rotation.shortcut_queued" = "The latest angle will be exported after the current task.";
 "videotools.rotation.shortcut_saved" = "Saved beside the original. Playback keeps the rotated original preview.";
+"videotools.viewport.status" = "Picture %.0f%% · X %+.0f%% / Y %+.0f%% · ⇧⌘0 resets";

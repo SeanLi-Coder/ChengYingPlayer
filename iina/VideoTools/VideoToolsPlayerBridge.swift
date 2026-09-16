@@ -5,6 +5,50 @@
 
 import Foundation
 
+/// A viewing transform relative to mpv's normal fitted video rectangle, not the window.
+struct VideoToolsViewport: Equatable {
+  let scale: Double
+  let panX: Double
+  let panY: Double
+
+  var zoom: Double { log2(scale) }
+
+  init(zoom: Double, panX: Double, panY: Double) {
+    let zoom = zoom.isFinite ? min(3, max(log2(0.2), zoom)) : 0
+    self.init(scale: pow(2, zoom), panX: panX, panY: panY)
+  }
+
+  private init(scale: Double, panX: Double, panY: Double) {
+    self.scale = min(8, max(0.2, scale))
+    // Keep the original fitted rectangle covered when zoomed. Returning to the
+    // normal view recenters it, so a pan cannot leave the picture off-screen.
+    let limit = max(0, (1 - 1 / self.scale) / 2)
+    self.panX = panX.isFinite ? min(limit, max(-limit, panX)) : 0
+    self.panY = panY.isFinite ? min(limit, max(-limit, panY)) : 0
+  }
+
+  func applying(_ action: VideoToolsShortcuts.Action) -> VideoToolsViewport? {
+    switch action {
+    case .zoomIn, .zoomOut:
+      let delta = action == .zoomIn ? 0.1 : -0.1
+      // Preserve arbitrary imported scales while removing binary rounding noise.
+      let next = ((scale + delta) * 1_000_000_000_000).rounded() / 1_000_000_000_000
+      return VideoToolsViewport(scale: next, panX: panX, panY: panY)
+    case .panLeft, .panRight, .panUp, .panDown:
+      // mpv's pan unit is the full scaled image size. Compensate for zoom so
+      // each press moves by 5% of the original fitted dimension at every scale.
+      let step = 0.05 / scale
+      return VideoToolsViewport(scale: scale,
+        panX: panX + (action == .panLeft ? -step : action == .panRight ? step : 0),
+        panY: panY + (action == .panUp ? -step : action == .panDown ? step : 0))
+    case .resetViewport:
+      return VideoToolsViewport(scale: 1, panX: 0, panY: 0)
+    default:
+      return nil
+    }
+  }
+}
+
 struct VideoToolsPlayerSnapshot {
   let mediaURL: URL
   let mediaGeneration: UInt64
@@ -19,6 +63,27 @@ struct VideoToolsPlayerSnapshot {
 }
 
 extension PlayerCore {
+  @discardableResult
+  func videoToolsApplyViewportShortcut(_ action: VideoToolsShortcuts.Action) -> VideoToolsViewport? {
+    guard info.state.loaded, let videoTrack = info.vid, videoTrack > 0 else { return nil }
+    let current = VideoToolsViewport(zoom: mpv.getDouble(MPVOption.Video.videoZoom),
+      panX: mpv.getDouble(MPVOption.Video.videoPanX), panY: mpv.getDouble(MPVOption.Video.videoPanY))
+    guard let next = current.applying(action) else { return nil }
+    // Only presentation properties change. Do not resize a window, seek, change
+    // playback speed, or affect the source used by any export operation.
+    mpv.setDouble(MPVOption.Video.videoZoom, next.zoom)
+    mpv.setDouble(MPVOption.Video.videoPanX, next.panX)
+    mpv.setDouble(MPVOption.Video.videoPanY, next.panY)
+    return next
+  }
+
+  func videoToolsResetViewport() {
+    guard info.state.loaded else { return }
+    mpv.setDouble(MPVOption.Video.videoZoom, 0)
+    mpv.setDouble(MPVOption.Video.videoPanX, 0)
+    mpv.setDouble(MPVOption.Video.videoPanY, 0)
+  }
+
   var videoToolsLoopRange: VideoToolsLoopRange? {
     guard info.state.loaded,
           let count = mpv.getString(MPVOption.PlaybackControl.abLoopCount), count != "0" else { return nil }

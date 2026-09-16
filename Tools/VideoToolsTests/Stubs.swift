@@ -17,7 +17,10 @@ enum MPVOption {
   enum PlaybackControl {
     static let pause = "pause", speed = "speed", abLoopA = "a", abLoopB = "b", abLoopCount = "count"
   }
-  enum Video { static let videoRotate = "rotation" }
+  enum Video {
+    static let videoRotate = "rotation"
+    static let videoZoom = "video-zoom", videoPanX = "video-pan-x", videoPanY = "video-pan-y"
+  }
 }
 enum MPVHook { static let onUnLoad = "unload" }
 final class MPVHookValue {

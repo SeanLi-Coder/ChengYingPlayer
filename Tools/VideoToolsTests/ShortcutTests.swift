@@ -72,6 +72,90 @@ func runVideoToolsShortcutTests() {
         "Marker repeats do not move the selected boundary")
   check(resolve(0) == nil, "Unrelated keys are not consumed")
 
+  let zoomShortcuts: [(UInt16, NSEvent.ModifierFlags, Action)] = [
+    (24, [], .zoomIn), (24, [.shift], .zoomIn), (27, [], .zoomOut),
+    (69, [], .zoomIn), (69, [.numericPad], .zoomIn),
+    (78, [], .zoomOut), (78, [.numericPad], .zoomOut)
+  ]
+  for (keyCode, modifiers, action) in zoomShortcuts {
+    check(resolve(keyCode, modifiers: modifiers) == action,
+          "Zoom shortcut maps physical key \(keyCode) with flags \(modifiers.rawValue)")
+    check(resolve(keyCode, modifiers: modifiers.union(.capsLock)) == action,
+          "Caps Lock preserves zoom key \(keyCode)")
+    check(resolve(keyCode, modifiers: modifiers, isRepeat: true) == action,
+          "Zoom key \(keyCode) supports continuous key repeat")
+    for extraModifier: NSEvent.ModifierFlags in [.command, .control, .option, .function] {
+      check(resolve(keyCode, modifiers: modifiers.union(extraModifier)) == nil,
+            "Additional modifier prevents zoom key \(keyCode)")
+    }
+    check(resolve(keyCode, modifiers: modifiers, isTextInput: true) == nil,
+          "Text entry keeps zoom key \(keyCode)")
+    check(resolve(keyCode, modifiers: modifiers, isModal: true) == nil,
+          "Modal UI keeps zoom key \(keyCode)")
+    check(resolve(keyCode, modifiers: modifiers, hasMedia: false) == nil,
+          "Empty player does not consume zoom key \(keyCode)")
+  }
+  check(resolve(27, modifiers: [.shift]) == nil, "Underscore does not trigger zoom out")
+  for keyCode: UInt16 in [24, 27] {
+    check(resolve(keyCode, modifiers: [.numericPad]) == nil,
+          "Main keyboard zoom key \(keyCode) does not ignore numeric-pad modifiers")
+  }
+  for keyCode: UInt16 in [69, 78] {
+    check(resolve(keyCode, modifiers: [.numericPad, .shift]) == nil,
+          "Numeric-pad zoom key \(keyCode) does not ignore Shift")
+  }
+
+  let panShortcuts: [(UInt16, Action)] = [(123, .panLeft), (124, .panRight), (125, .panDown), (126, .panUp)]
+  let panBaseModifiers: NSEvent.ModifierFlags = [.command, .shift]
+  for (keyCode, action) in panShortcuts {
+    for intrinsicFlags: NSEvent.ModifierFlags in [[], .numericPad, .function, [.numericPad, .function]] {
+      let modifiers = panBaseModifiers.union(intrinsicFlags)
+      for commandSide in [UInt64(0), leftCommand, rightCommand, leftCommand | rightCommand] {
+        check(resolve(keyCode, modifiers: modifiers, deviceFlags: commandSide) == action,
+              "Pan key \(keyCode) accepts either Command key and intrinsic arrow flags \(intrinsicFlags.rawValue)")
+      }
+      check(resolve(keyCode, modifiers: modifiers, isRepeat: true) == action,
+            "Pan key \(keyCode) supports continuous key repeat")
+      check(resolve(keyCode, modifiers: modifiers.union(.capsLock)) == action,
+            "Caps Lock preserves pan key \(keyCode)")
+      for extraModifier: NSEvent.ModifierFlags in [.control, .option] {
+        check(resolve(keyCode, modifiers: modifiers.union(extraModifier)) == nil,
+              "Additional modifier prevents pan key \(keyCode)")
+      }
+      for missingModifier: NSEvent.ModifierFlags in [.command, .shift] {
+        check(resolve(keyCode, modifiers: modifiers.subtracting(missingModifier)) == nil,
+              "Pan key \(keyCode) requires both Command and Shift")
+      }
+      check(resolve(keyCode, modifiers: modifiers, isTextInput: true) == nil,
+            "Text entry keeps pan key \(keyCode)")
+      check(resolve(keyCode, modifiers: modifiers, isModal: true) == nil,
+            "Modal UI keeps pan key \(keyCode)")
+      check(resolve(keyCode, modifiers: modifiers, hasMedia: false) == nil,
+            "Empty player does not consume pan key \(keyCode)")
+    }
+    check(resolve(keyCode) == nil, "Bare arrow key \(keyCode) keeps its original playback binding")
+  }
+
+  for commandSide in [UInt64(0), leftCommand, rightCommand, leftCommand | rightCommand] {
+    check(resolve(29, modifiers: [.command, .shift], deviceFlags: commandSide) == .resetViewport,
+          "Viewport reset accepts either Command key")
+  }
+  check(resolve(29, modifiers: [.command, .shift, .capsLock]) == .resetViewport,
+        "Caps Lock preserves viewport reset")
+  check(resolve(29, modifiers: [.command, .shift], isRepeat: true) == .consume,
+        "Repeated viewport reset is consumed without resetting again")
+  for modifiers: NSEvent.ModifierFlags in [[], .command, .shift, [.command, .shift, .option],
+                                         [.command, .shift, .control], [.command, .shift, .numericPad],
+                                         [.command, .shift, .function]] {
+    check(resolve(29, modifiers: modifiers) == nil, "Viewport reset requires exactly Command and Shift")
+  }
+  check(resolve(29, modifiers: [.command, .shift], isTextInput: true) == nil,
+        "Text entry prevents viewport reset")
+  check(resolve(29, modifiers: [.command, .shift], isModal: true) == nil,
+        "Modal UI prevents viewport reset")
+  check(resolve(29, modifiers: [.command, .shift], hasMedia: false) == nil,
+        "Empty player prevents viewport reset")
+
   let event = NSEvent.keyEvent(
     with: .keyDown,
     location: .zero,
@@ -86,6 +170,22 @@ func runVideoToolsShortcutTests() {
   )!
   check(VideoToolsShortcuts.resolve(event, hasMedia: true, isTextInput: false) == .rotateLeft,
         "NSEvent adapter preserves device-specific left Command flags")
+  for (keyCode, action) in panShortcuts {
+    let arrowEvent = NSEvent.keyEvent(
+      with: .keyDown,
+      location: .zero,
+      modifierFlags: [.command, .shift, .numericPad, .function],
+      timestamp: 0,
+      windowNumber: 0,
+      context: nil,
+      characters: String(UnicodeScalar(NSLeftArrowFunctionKey)!),
+      charactersIgnoringModifiers: String(UnicodeScalar(NSLeftArrowFunctionKey)!),
+      isARepeat: true,
+      keyCode: keyCode
+    )!
+    check(VideoToolsShortcuts.resolve(arrowEvent, hasMedia: true, isTextInput: false) == action,
+          "NSEvent adapter resolves repeated physical arrow key \(keyCode) with intrinsic AppKit flags")
+  }
   let keyUp = NSEvent.keyEvent(
     with: .keyUp,
     location: .zero,

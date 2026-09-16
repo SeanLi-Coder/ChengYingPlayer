@@ -557,3 +557,4 @@
 "videotools.rotation.shortcut_pending" = "正在准备导出累计旋转结果…";
 "videotools.rotation.shortcut_queued" = "当前任务完成后，将继续导出最新累计角度。";
 "videotools.rotation.shortcut_saved" = "已保存到原视频同级目录；播放器继续预览旋转后的原视频。";
+"videotools.viewport.status" = "画面 %.0f%% · 水平 %+.0f%% / 垂直 %+.0f%% · ⇧⌘0 复位";

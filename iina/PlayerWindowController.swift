@@ -358,6 +358,13 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     switch action {
     case .consume:
       break
+    case .zoomIn, .zoomOut, .panLeft, .panRight, .panUp, .panDown, .resetViewport:
+      if let viewport = player.videoToolsApplyViewportShortcut(action) {
+        let format = NSLocalizedString("videotools.viewport.status", comment: "Video zoom and pan feedback")
+        let message = String(format: format, viewport.scale * 100, viewport.panX * viewport.scale * 100,
+                             viewport.panY * viewport.scale * 100)
+        player.sendOSD(.custom(message))
+      }
     case .speedUp, .speedDown:
       let speed = VideoToolsShortcuts.adjustedSpeed(
         from: player.mpv.getDouble(MPVOption.PlaybackControl.speed),
