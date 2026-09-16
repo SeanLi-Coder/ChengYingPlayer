@@ -199,9 +199,9 @@ for required_architecture in "${required_architectures[@]}"; do
           ("$required_library" == libgcc_s.1.1.dylib || "$required_library" == libstdc++.6.dylib) ]]; then
       continue
     fi
-    lipo -verify_arch "$required_architecture" "$STAGED_LIB_PATH/$required_library"
+    lipo "$STAGED_LIB_PATH/$required_library" -verify_arch "$required_architecture"
   done < "$REQUIRED_LIBRARIES_PATH"
-  lipo -verify_arch "$required_architecture" "$STAGED_YT_DLP_PATH"
+  lipo "$STAGED_YT_DLP_PATH" -verify_arch "$required_architecture"
 done
 
 hdiutil detach "$MOUNT_PATH" -quiet
