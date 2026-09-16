@@ -158,6 +158,10 @@ bool viewport_live_wait(double seconds) {
 
 bool viewport_live_open(const char *path, bool hardware) {
   graphics_unavailable = false;
+  const char *software_gl = getenv("CHENGYING_TEST_SOFTWARE_GL");
+  if (!require(!software_gl || strcmp(software_gl, "1") == 0,
+               "CHENGYING_TEST_SOFTWARE_GL accepts only 1 when set") ||
+      !require(!software_gl || !hardware, "Forced software OpenGL requires software decoding mode")) return false;
   [NSApplication sharedApplication];
   [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
   [NSApp finishLaunching];
@@ -173,7 +177,7 @@ bool viewport_live_open(const char *path, bool hardware) {
   };
   NSOpenGLPixelFormat *format = nil;
   NSOpenGLContext *context = nil;
-  for (unsigned attempt = 0; attempt < (hardware ? 1u : 2u); attempt++) {
+  for (unsigned attempt = software_gl ? 1u : 0u; attempt < (hardware ? 1u : 2u); attempt++) {
     NSOpenGLPixelFormatAttribute *attributes = attempt ? software_attributes : accelerated_attributes;
     format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
     if (format) context = [[NSOpenGLContext alloc] initWithFormat:format shareContext:nil];
@@ -182,7 +186,7 @@ bool viewport_live_open(const char *path, bool hardware) {
   if (!context) {
     if (!hardware) {
       graphics_unavailable = true;
-      fprintf(stderr, "UNAVAILABLE: Neither accelerated nor Generic Float AppKit CGL 3.2 is available; no GL test ran\n");
+      fprintf(stderr, "UNAVAILABLE: No requested AppKit CGL 3.2 context is available; no GL test ran\n");
       return false;
     }
     return require(false, "A real accelerated OpenGL context is required in hardware mode");
@@ -200,7 +204,7 @@ bool viewport_live_open(const char *path, bool hardware) {
   [view.openGLContext update];
   original_frame = window.frame;
   if (!require(view.openGLContext != nil, "A real AppKit OpenGL context is required")) return false;
-  printf("GPU: %s\n", glGetString(GL_RENDERER));
+  printf("GPU: %s; FRAMEBUFFER: %dx%d; FORCED_SOFTWARE_GL: %d\n", glGetString(GL_RENDERER), WIDTH, HEIGHT, software_gl != NULL);
   gl_library = dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_NOW | RTLD_LOCAL);
   if (!require(gl_library != NULL, "System OpenGL entry points are required")) return false;
   player = mpv_create();
@@ -245,10 +249,13 @@ bool viewport_live_open(const char *path, bool hardware) {
   while (!failed && (!loaded || frame_count < 1) && now() < deadline) pump();
   if (!require(loaded && frame_count > 0, "The generated video must load and render")) return false;
   if (!viewport_live_wait(0.2)) return false;
-  double width = 0, height = 0;
+  double width = 0, height = 0, duration = 0;
   if (!read_value("width", MPV_FORMAT_DOUBLE, &width) ||
       !read_value("height", MPV_FORMAT_DOUBLE, &height) ||
       !require(width == 3840 && height == 2160, "The real decoder retains the 4K source dimensions")) return false;
+  if (!read_value("duration", MPV_FORMAT_DOUBLE, &duration) ||
+      !require(duration > 90 * 1.7 + 3,
+               "The reference outlasts the watchdog at maximum test speed, including the seek offset")) return false;
   if (!check(mpv_get_property_async(player, request(), "hwdec-current", MPV_FORMAT_STRING), "Read the decoder mode") ||
       !await_reply()) return false;
   printf("DECODER: %s; SOURCE: %.0fx%.0f\n", reply_string, width, height);

@@ -35,6 +35,7 @@ static double rss_samples[MAX_SAMPLES];
 static double footprint_samples[MAX_SAMPLES];
 static size_t memory_count;
 static bool graphics_unavailable;
+static bool force_software_gl;
 
 typedef struct {
   mpv_handle *mpv;
@@ -42,6 +43,7 @@ typedef struct {
   const char *mode;
   double duration;
   double started;
+  atomic_uint visible_clip;
 } Controller;
 
 static double monotonic_time(void) {
@@ -71,19 +73,17 @@ static void *get_proc_address(void *context, const char *name) {
   return dlsym(context, name);
 }
 
-static uint64_t framebuffer_hash(GLuint fbo) {
+static uint64_t framebuffer_hash(GLuint fbo, int width, int height, unsigned char *pixels) {
   uint64_t hash = UINT64_C(1469598103934665603);
   glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
   glReadBuffer(GL_COLOR_ATTACHMENT0);
-  for (int row = 1; row < 8; row++) {
-    for (int column = 1; column < 8; column++) {
-      unsigned char pixel[4] = {0};
-      glReadPixels(column * VIDEO_WIDTH / 8, row * VIDEO_HEIGHT / 8,
-                   1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-      for (int byte = 0; byte < 3; byte++) {
-        hash ^= pixel[byte];
-        hash *= UINT64_C(1099511628211);
-      }
+  // Sparse fixed points can all miss testsrc2's moving regions at some sizes.
+  // Read the complete output instead of inferring a frozen video from static bars.
+  glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+  for (size_t pixel = 0; pixel < (size_t)width * height; pixel++) {
+    for (unsigned channel = 0; channel < 3; channel++) {
+      hash ^= pixels[pixel * 4 + channel];
+      hash *= UINT64_C(1099511628211);
     }
   }
   glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -193,6 +193,7 @@ static void *control_playback(void *context) {
     if (!verified && now - last_loaded > 0.5) {
       check_video_parameters(controller);
       verified = true;
+      atomic_store(&controller->visible_clip, active_path + 1);
     }
     if (now >= next_position) {
       double position = -1;
@@ -218,6 +219,7 @@ static void *control_playback(void *context) {
       next_speed = now + 17;
     }
     if (now >= next_switch && now + 1 < controller->started + controller->duration) {
+      atomic_store(&controller->visible_clip, 0);
       active_path = 1 - active_path;
       const char *replace[] = {"loadfile", controller->paths[active_path], "replace", NULL};
       if (!checked(mpv_command(mpv, replace), "Switch codec without recreating renderer")) break;
@@ -242,8 +244,11 @@ static bool run_generation(const char *first, const char *second, const char *mo
   mpv_handle *mpv = NULL;
   mpv_render_context *renderer = NULL;
   void *gl_library = NULL;
+  unsigned char *pixels = NULL;
   GLuint texture = 0, fbo = 0;
   unsigned frames = 0, changed_hashes = 0;
+  unsigned clip_frames[2] = {0}, clip_changes[2] = {0};
+  uint64_t clip_hashes[2] = {0};
   uint64_t previous_hash = 0;
   pthread_t controller_thread;
   atomic_store(&render_pending, false);
@@ -259,9 +264,15 @@ static bool run_generation(const char *first, const char *second, const char *mo
     (CGLPixelFormatAttribute)0
   };
   const bool software_mode = strcmp(mode, "software") == 0;
+  // A CPU GL renderer is a correctness target, not a 4K rasterization benchmark.
+  // Decode dimensions stay 4K; the software run models a 640x360 playback window.
+  const int output_width = software_mode ? 640 : VIDEO_WIDTH;
+  const int output_height = software_mode ? 360 : VIDEO_HEIGHT;
+  pixels = malloc((size_t)output_width * output_height * 4);
+  if (!pixels) { fail("Unable to allocate the output pixel readback buffer"); goto cleanup; }
   bool context_ready = false;
   GLint pixel_count = 0;
-  for (unsigned attempt = 0; attempt < (software_mode ? 2u : 1u); attempt++) {
+  for (unsigned attempt = force_software_gl ? 1u : 0u; attempt < (software_mode ? 2u : 1u); attempt++) {
     CGLPixelFormatAttribute *attributes = attempt ? software_attributes : accelerated_attributes;
     if (CGLChoosePixelFormat(attributes, &pixel_format, &pixel_count) == kCGLNoError && pixel_format &&
         CGLCreateContext(pixel_format, NULL, &gl_context) == kCGLNoError && gl_context &&
@@ -275,7 +286,7 @@ static bool run_generation(const char *first, const char *second, const char *mo
   if (!context_ready) {
     if (software_mode && generation == 1) {
       graphics_unavailable = true;
-      fprintf(stderr, "UNAVAILABLE: Neither accelerated nor Generic Float CGL 3.2 is available; no GL test ran\n");
+      fprintf(stderr, "UNAVAILABLE: No requested CGL 3.2 context is available; no GL test ran\n");
     } else {
       fail("A required CGL 3.2 context is unavailable; no null-VO substitute was used");
     }
@@ -283,6 +294,10 @@ static bool run_generation(const char *first, const char *second, const char *mo
   }
   printf("GPU generation=%u renderer=%s version=%s mode=%s\n", generation,
          glGetString(GL_RENDERER), glGetString(GL_VERSION), mode);
+  printf("TARGET source=%dx%d framebuffer=%dx%d fitting=%s criterion=%s forced_software_gl=%d\n",
+         VIDEO_WIDTH, VIDEO_HEIGHT, output_width, output_height,
+         software_mode ? "bilinear" : "player-default",
+         software_mode ? "codec-pixel-progress" : "codec-pixel-progress-and-throughput", force_software_gl);
   gl_library = dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_NOW | RTLD_LOCAL);
   if (!gl_library) { fail("Unable to load the system OpenGL entry points"); goto cleanup; }
   mpv = mpv_create();
@@ -297,6 +312,17 @@ static bool run_generation(const char *first, const char *second, const char *mo
   };
   for (size_t index = 0; index < sizeof(options) / sizeof(options[0]); index++) {
     if (!checked(mpv_set_option_string(mpv, options[index][0], options[index][1]), options[index][0])) goto cleanup;
+  }
+  // A small software-rendered viewport uses the same explicit bilinear fitting
+  // as the live viewport pixel test. Hardware keeps the default quality pipeline.
+  if (software_mode) {
+    const char *software_options[][2] = {
+      {"scale", "bilinear"}, {"dscale", "bilinear"}, {"correct-downscaling", "no"},
+      {"deband", "no"}, {"dither-depth", "no"}
+    };
+    for (size_t index = 0; index < sizeof(software_options) / sizeof(software_options[0]); index++) {
+      if (!checked(mpv_set_option_string(mpv, software_options[index][0], software_options[index][1]), software_options[index][0])) goto cleanup;
+    }
   }
   if (!checked(mpv_initialize(mpv), "Initialize libmpv")) goto cleanup;
   char *mpv_version = mpv_get_property_string(mpv, "mpv-version");
@@ -316,40 +342,53 @@ static bool run_generation(const char *first, const char *second, const char *mo
   mpv_render_context_set_update_callback(renderer, update_callback, NULL);
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, VIDEO_WIDTH, VIDEO_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, output_width, output_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glBindTexture(GL_TEXTURE_2D, 0);
   glGenFramebuffers(1, &fbo);
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
-  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { fail("The 4K framebuffer is incomplete"); goto cleanup; }
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { fail("The output framebuffer is incomplete"); goto cleanup; }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
-  Controller controller = {mpv, {first, second}, mode, duration, monotonic_time()};
+  Controller controller = {mpv, {first, second}, mode, duration, monotonic_time(), ATOMIC_VAR_INIT(0)};
   if (pthread_create(&controller_thread, NULL, control_playback, &controller) != 0) { fail("Unable to start the independent playback controller"); goto cleanup; }
   double next_sample = controller.started + 1;
+  double last_pixel_progress = controller.started;
   while (!atomic_load(&controller_done)) {
     if (atomic_exchange(&render_pending, false)) {
       uint64_t flags = mpv_render_context_update(renderer);
       if (flags & MPV_RENDER_UPDATE_FRAME) {
-        mpv_opengl_fbo target = {(int)fbo, VIDEO_WIDTH, VIDEO_HEIGHT, GL_RGBA8};
+        mpv_opengl_fbo target = {(int)fbo, output_width, output_height, GL_RGBA8};
         int flip = 1, depth = 8;
         mpv_render_param draw[] = {
           {MPV_RENDER_PARAM_OPENGL_FBO, &target}, {MPV_RENDER_PARAM_FLIP_Y, &flip},
           {MPV_RENDER_PARAM_DEPTH, &depth}, {MPV_RENDER_PARAM_INVALID, NULL}
         };
-        checked(mpv_render_context_render(renderer, draw), "Render an actual 4K frame");
+        unsigned clip = atomic_load(&controller.visible_clip);
+        checked(mpv_render_context_render(renderer, draw), "Render an actual decoded 4K frame");
         glFlush();
         mpv_render_context_report_swap(renderer);
         frames++;
+        // Exclude frames straddling a file replacement from per-codec evidence.
+        if (clip && clip == atomic_load(&controller.visible_clip)) clip_frames[clip - 1]++;
       }
     }
     double now = monotonic_time();
     if (now >= next_sample) {
-      uint64_t hash = framebuffer_hash(fbo);
-      if (previous_hash && previous_hash != hash) changed_hashes++;
+      unsigned clip = atomic_load(&controller.visible_clip);
+      uint64_t hash = framebuffer_hash(fbo, output_width, output_height, pixels);
+      if (previous_hash && previous_hash != hash) {
+        changed_hashes++;
+        last_pixel_progress = now;
+      }
       previous_hash = hash;
+      if (clip && clip == atomic_load(&controller.visible_clip) && clip_frames[clip - 1]) {
+        if (clip_hashes[clip - 1] && clip_hashes[clip - 1] != hash) clip_changes[clip - 1]++;
+        clip_hashes[clip - 1] = hash;
+      }
       if (glGetError() != GL_NO_ERROR) fail("OpenGL reported an error rendering or sampling the 4K frame");
+      if (now - last_pixel_progress > 15) fail("Rendered pixels stopped making progress for 15 seconds");
       sample_memory(now - controller.started, generation, frames);
       next_sample = now + 1;
     }
@@ -362,8 +401,15 @@ static bool run_generation(const char *first, const char *second, const char *mo
     nanosleep(&delay, NULL);
   }
   pthread_join(controller_thread, NULL);
-  if (frames < duration * 3 || changed_hashes < 3) fail("Insufficient rendered frames or changing GPU output to verify playback");
-  printf("GENERATION generation=%u frames=%u changed_hashes=%u duration=%.1f\n", generation, frames, changed_hashes, duration);
+  if (!software_mode && frames < duration * 3) fail("Accelerated 4K rendering did not meet the hardware throughput guard");
+  for (unsigned clip = 0; clip < 2; clip++) {
+    // Two real frames and two distinct sampled outputs prove each loaded codec
+    // reached the framebuffer, without equating CPU rendering with real-time GPU playback.
+    if (clip_frames[clip] < 2 || clip_changes[clip] < 1) fail("A loaded codec did not produce independently verified changing pixels");
+  }
+  if (changed_hashes < 3) fail("Insufficient changing OpenGL output to verify playback");
+  printf("GENERATION generation=%u frames=%u changed_hashes=%u clip_frames=%u,%u clip_changes=%u,%u duration=%.1f\n",
+         generation, frames, changed_hashes, clip_frames[0], clip_frames[1], clip_changes[0], clip_changes[1], duration);
 cleanup:
   if (renderer) {
     mpv_render_context_set_update_callback(renderer, NULL, NULL);
@@ -375,6 +421,7 @@ cleanup:
   if (gl_context) { glFinish(); CGLSetCurrentContext(NULL); CGLReleaseContext(gl_context); }
   if (pixel_format) CGLReleasePixelFormat(pixel_format);
   if (gl_library) dlclose(gl_library);
+  free(pixels);
   return !graphics_unavailable && !atomic_load(&failed);
 }
 
@@ -404,6 +451,16 @@ int main(int argc, char **argv) {
   if (errno || !end || *end || !isfinite(duration) || duration < 60 || duration > 14400 ||
       (strcmp(argv[4], "hardware") != 0 && strcmp(argv[4], "software") != 0)) {
     fprintf(stderr, "FAIL: Expected 60..14400 seconds and an explicit hardware or software mode\n");
+    return 2;
+  }
+  const char *software_gl = getenv("CHENGYING_TEST_SOFTWARE_GL");
+  if (software_gl && strcmp(software_gl, "1") != 0) {
+    fprintf(stderr, "FAIL: CHENGYING_TEST_SOFTWARE_GL accepts only 1 when set\n");
+    return 2;
+  }
+  force_software_gl = software_gl != NULL;
+  if (force_software_gl && strcmp(argv[4], "software") != 0) {
+    fprintf(stderr, "FAIL: Forced software OpenGL requires software decoding mode\n");
     return 2;
   }
   void *codec = dlopen(argv[5], RTLD_NOW | RTLD_LOCAL);
@@ -442,8 +499,9 @@ int main(int argc, char **argv) {
   if (atomic_load(&loaded_count) < 6 || atomic_load(&switch_count) < 3 ||
       atomic_load(&seek_count) < 3 || atomic_load(&speed_count) < 3) fail("Expected playback transitions were not exercised");
   if (atomic_load(&failed)) return 1;
-  printf("PASS: Actual 4K OpenGL render soak seconds=%.0f mode=%s hardware_verified=%d software_verified=%d loads=%u switches=%u seeks=%u speed_changes=%u\n",
-         duration, argv[4], atomic_load(&verified_hardware), atomic_load(&verified_software),
+  printf("PASS: Actual 4K-source OpenGL render soak seconds=%.0f mode=%s framebuffer=%s hardware_verified=%d software_verified=%d loads=%u switches=%u seeks=%u speed_changes=%u\n",
+         duration, argv[4], strcmp(argv[4], "hardware") == 0 ? "3840x2160" : "640x360",
+         atomic_load(&verified_hardware), atomic_load(&verified_software),
          atomic_load(&loaded_count), atomic_load(&switch_count), atomic_load(&seek_count), atomic_load(&speed_count));
   return 0;
 }

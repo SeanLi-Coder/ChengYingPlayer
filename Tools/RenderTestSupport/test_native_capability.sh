@@ -29,4 +29,29 @@ for mode in hardware software; do
     exit 1
   fi
 done
+for scenario in forced-software forced-hardware invalid-switch; do
+  mode=software
+  flag=1
+  expected_status=77
+  expected_attempts=1
+  if [[ "$scenario" == forced-hardware ]]; then
+    mode=hardware
+    expected_status=2
+    expected_attempts=0
+  elif [[ "$scenario" == invalid-switch ]]; then
+    flag=unexpected
+    expected_status=2
+    expected_attempts=0
+  fi
+  status=0
+  CHENGYING_TEST_SOFTWARE_GL="$flag" "$test_dir/NativeCapability" \
+    /not-opened-h264 /not-opened-hevc 60 "$mode" "$project_root/deps/lib/libavcodec.61.dylib" \
+    > "$test_dir/$scenario.log" 2>&1 || status=$?
+  attempts="$(grep -c '^BOUNDARY:' "$test_dir/$scenario.log" || true)"
+  if (( status != expected_status )) || [[ "$attempts" != "$expected_attempts" ]]; then
+    sed -n '1,80p' "$test_dir/$scenario.log" >&2
+    echo "FAIL: Native $scenario renderer selection changed." >&2
+    exit 1
+  fi
+done
 echo 'PASS: Actual soak harness keeps hardware context failure fatal and classifies only initial software context absence as capability status 77 (mock CGL boundary, not a rendering pass).'

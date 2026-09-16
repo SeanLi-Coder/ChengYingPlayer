@@ -19,7 +19,12 @@ echo 'Generating an isolated 4K viewport reference video.'
 "$ffmpeg" -hide_banner -loglevel error -nostdin -f lavfi \
   -i 'color=c=white:size=3840x2160:rate=24,drawbox=x=1680:y=960:w=480:h=240:color=red:t=fill' \
   -t 6 -an -c:v libx264 -preset ultrafast -crf 18 -threads 4 -pix_fmt yuv420p \
-  -g 24 -movflags +faststart "$test_dir/reference.mp4"
+  -g 24 -movflags +faststart "$test_dir/reference-short.mp4"
+# A real software GL frame can take over a second. Repeating the encoded packets
+# keeps active-playback property snapshots from crossing a six-second loop while
+# preserving the exact 4K/24fps decoder input. 180s exceeds the 90s watchdog at 1.7x.
+"$ffmpeg" -hide_banner -loglevel error -nostdin -stream_loop 29 \
+  -i "$test_dir/reference-short.mp4" -map 0:v:0 -c copy -movflags +faststart "$test_dir/reference.mp4"
 
 # Mechanical extraction executes the production model and bridge verbatim. The
 # strict landmarks deliberately fail if production integration is reorganized.

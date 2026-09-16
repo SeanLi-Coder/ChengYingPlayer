@@ -7,7 +7,11 @@ bash Tools/VideoViewportTests/Live/run.sh
 ```
 
 The test generates an isolated six-second 3840x2160 H.264 video with a red
-reference rectangle on a white background. No user media, preferences, network,
+reference rectangle on a white background, then repeats its encoded packets
+without re-encoding to form a 180-second reference. This exceeds the ninety-second
+process watchdog at the test's maximum 1.7x playback speed, preventing legitimate
+end-of-file loops from invalidating time-progress assertions on a slow CPU
+renderer. No user media, preferences, network,
 or downloaded models are used. Its temporary fixture and executable are removed
 at exit, and an external watchdog bounds a player or graphics-driver deadlock.
 
@@ -34,6 +38,12 @@ For a Mac environment without VideoToolbox, choose the explicitly labeled mode:
 ```sh
 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
 ```
+
+Both modes retain the 3840x2160 decoder input and actual 640x360 framebuffer
+pixel assertions. To reproduce Apple's real Generic Float CPU renderer instead
+of allowing an accelerated context, add `CHENGYING_TEST_SOFTWARE_GL=1` in software
+mode. This test-only option is rejected in hardware mode; it does not mock the
+renderer or relax the watchdog or pixel expectations.
 
 This is a bounded live renderer/bridge test, not a full application UI automation.
 It does not instantiate the complete application's `CAOpenGLLayer`, its actual

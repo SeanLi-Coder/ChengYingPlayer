@@ -122,7 +122,6 @@ jobs:
           bash Tools/DownloadCenterTests/run.sh
 
   build-apple-silicon:
-    needs: media-helper-tests
     runs-on: macos-26
     timeout-minutes: 180
     env:
@@ -431,7 +430,7 @@ jobs:
 
   publish-release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build-apple-silicon
+    needs: [media-helper-tests, build-apple-silicon]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

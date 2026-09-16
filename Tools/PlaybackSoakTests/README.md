@@ -13,9 +13,16 @@ Main10 clips. It never reads user media, playback settings, cookies, or network
 resources. Fixtures and the compiled executable are removed on completion.
 
 This is not a null-video-output test. It uses the application's actual pinned
-libmpv, a real accelerated CGL 3.2 context, and the libmpv OpenGL render API with
-advanced control enabled. Every frame is rendered to a real 4K framebuffer.
-Sparse GPU pixel reads verify changing output. A separate controller thread
+libmpv, a real CGL 3.2 context, and the libmpv OpenGL render API with
+advanced control enabled. Hardware mode renders to a 3840x2160 framebuffer;
+software mode decodes the same 4K sources into a 640x360 playback-window
+framebuffer with the live viewport suite's explicit bilinear fitting and no
+correct-downscaling, debanding or dithering. This bounds CPU rasterization work
+without reducing source resolution or changing the decoder. Hardware mode keeps
+the player's default quality pipeline. Both dimensions, fitting and the GL
+renderer are printed. Complete output
+pixel reads verify changing output without missing small moving regions.
+A separate controller thread
 keeps synchronous player calls away from the render thread. Three generations
 exercise full decoder/render/context release and recreation, while looping,
 seeking, changing speed, and switching between codecs. Even the shortest run
@@ -35,7 +42,22 @@ PLAYBACK_SOAK_MODE=software bash Tools/PlaybackSoakTests/run.sh
 
 Software mode tries the accelerated context first, then Apple's Generic Float
 CGL 3.2 renderer. It still requires real OpenGL rendering and labels the decoder
-mode and GL renderer separately. If both context choices are unavailable before
+mode and GL renderer separately. Each codec must independently reach the
+framebuffer and produce distinct sampled images in every generation. Both modes
+fail when playback or rendered pixels stop progressing for fifteen seconds, and
+retain the same memory and transition checks. Only hardware mode additionally
+requires the original minimum three rendered frames per second; software mode
+is a rendering-correctness test, not evidence of real-time 4K rasterization.
+
+To reproduce a virtual Mac's actual CPU renderer on a physical Mac, use:
+
+```sh
+CHENGYING_TEST_SOFTWARE_GL=1 PLAYBACK_SOAK_MODE=software bash Tools/PlaybackSoakTests/run.sh
+```
+
+This test-only switch requests Generic Float directly and is rejected in
+hardware mode. It does not mock OpenGL or change the application. If all requested
+context choices are unavailable before
 playback begins, it exits with capability status 77. Only an explicitly opted-in
 GitHub Actions software run (`CHENGYING_ALLOW_CI_GL_SKIP=1`) may turn that one
 status into a visible **SKIP** warning and job-summary entry. No OpenGL pass is
@@ -52,7 +74,7 @@ long-lived resources but cannot represent every long-file container or codec
 feature. No claim of all-video or all-driver stability follows from a pass.
 
 The test samples its own resident memory and physical footprint once per second,
-checks playback/GPU-output progress, and compares warmed-up median windows.
+checks playback/rendered-output progress, and compares warmed-up median windows.
 The 256 MiB growth and 2 GiB absolute limits are intentionally broad regression
 guards for this isolated fixture, not application-wide memory limits. Separate
 system processes such as WindowServer and VTDecoderXPCService are not measured.
