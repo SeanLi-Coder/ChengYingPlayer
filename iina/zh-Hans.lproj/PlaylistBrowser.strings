@@ -1,0 +1,13 @@
+"sort.label" = "排序";
+"sort.name" = "名称";
+"sort.size" = "文件大小";
+"sort.modified" = "修改日期";
+"sort.created" = "创建日期";
+"sort.ascending" = "升序：名称 A–Z、从小到大、从旧到新";
+"sort.descending" = "降序：名称 Z–A、从大到小、从新到旧";
+"sort.manual" = "手动顺序";
+"sort.ascending.short" = "升序";
+"sort.descending.short" = "降序";
+"refresh" = "刷新 Finder 标签和文件信息";
+"refresh.busy" = "正在读取 Finder 标签和文件信息…";
+"tags.label" = "Finder 标签";

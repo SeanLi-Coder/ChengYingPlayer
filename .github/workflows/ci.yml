@@ -63,6 +63,12 @@ jobs:
           bash Tools/VisualStyleTests/run.sh
           bash Tools/WelcomeDesignTests/run.sh
 
+      - name: Test folder playlists and Finder tags
+        run: |
+          bash Tools/PlaylistMetadataTests/run.sh
+          bash Tools/PlaylistPlaybackTests/run.sh
+          bash Tools/PlaylistPresentationTests/run.sh
+
       - name: Test local subtitle tools
         run: |
           python -m ruff check Tools/SubtitleToolsHelper
@@ -117,6 +123,9 @@ jobs:
           ./other/build_media_binaries.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/VideoToolsHelper/build_helper.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/SubtitleToolsHelper/build_helper.sh
+
+      - name: Test live playlist reordering
+        run: PATH="$PWD/deps/executable:$PATH" PLAYLIST_REQUIRE_LIVE_TESTS=1 bash Tools/PlaylistPlaybackTests/run.sh
 
       - name: Build application
         run: >-

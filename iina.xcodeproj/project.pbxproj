@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		D4C900012F6A000100000001 /* ChengYingStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C900022F6A000100000001 /* ChengYingStyle.swift */; };
+		D4CA00012F6A000100000001 /* PlaylistFileMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00112F6A000100000001 /* PlaylistFileMetadata.swift */; };
+		D4CA00022F6A000100000002 /* PlaylistPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00122F6A000100000002 /* PlaylistPresentation.swift */; };
+		D4CA00032F6A000100000003 /* PlaylistPlaybackPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00132F6A000100000003 /* PlaylistPlaybackPolicy.swift */; };
+		D4CA00042F6A000100000004 /* PlaylistBrowser.strings in Resources */ = {isa = PBXBuildFile; fileRef = D4CA00302F6A000100000001 /* PlaylistBrowser.strings */; };
 		D4C800012F6A000100000001 /* SubtitleToolsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C800102F6A000100000001 /* SubtitleToolsModels.swift */; };
 		D4C800022F6A000100000002 /* SubtitleToolsHelperClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C800112F6A000100000002 /* SubtitleToolsHelperClient.swift */; };
 		D4C800032F6A000100000003 /* SubtitleToolsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C800122F6A000100000003 /* SubtitleToolsService.swift */; };
@@ -580,6 +584,11 @@
 
 /* Begin PBXFileReference section */
 		D4C900022F6A000100000001 /* ChengYingStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChengYingStyle.swift; sourceTree = "<group>"; };
+		D4CA00112F6A000100000001 /* PlaylistFileMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistFileMetadata.swift; sourceTree = "<group>"; };
+		D4CA00122F6A000100000002 /* PlaylistPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPresentation.swift; sourceTree = "<group>"; };
+		D4CA00132F6A000100000003 /* PlaylistPlaybackPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPlaybackPolicy.swift; sourceTree = "<group>"; };
+		D4CA00312F6A000100000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/PlaylistBrowser.strings; sourceTree = "<group>"; };
+		D4CA00322F6A000100000002 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/PlaylistBrowser.strings"; sourceTree = "<group>"; };
 		D4C800102F6A000100000001 /* SubtitleToolsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsModels.swift; sourceTree = "<group>"; };
 		D4C800112F6A000100000002 /* SubtitleToolsHelperClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsHelperClient.swift; sourceTree = "<group>"; };
 		D4C800122F6A000100000003 /* SubtitleToolsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsService.swift; sourceTree = "<group>"; };
@@ -2409,6 +2418,7 @@
 				84EB1EE01D2F51D3004FA5A1 /* Info.plist */,
 				845AC09E1E1AE6C10080B614 /* Localizable.strings */,
 				D4C800302F6A000100000001 /* SubtitleTools.strings */,
+				D4CA00302F6A000100000001 /* PlaylistBrowser.strings */,
 				34F294BF2C0B68B300F14962 /* Contribution.rtf */,
 				8483FAFF1EDFF325000F55D6 /* Credits.rtf */,
 			);
@@ -2480,6 +2490,9 @@
 			isa = PBXGroup;
 			children = (
 				D4C900022F6A000100000001 /* ChengYingStyle.swift */,
+				D4CA00112F6A000100000001 /* PlaylistFileMetadata.swift */,
+				D4CA00122F6A000100000002 /* PlaylistPresentation.swift */,
+				D4CA00132F6A000100000003 /* PlaylistPlaybackPolicy.swift */,
 				84A886E21E24F2D3008755BB /* Sub */,
 				8497A4831D2FF573005F504F /* iina-Bridging-Header.h */,
 				513A4FF929B53F8100A8EA7D /* Atomic.swift */,
@@ -3080,6 +3093,7 @@
 				849581F31F03D55A00D3B359 /* InitialWindowController.xib in Resources */,
 				845AC09C1E1AE6C10080B614 /* Localizable.strings in Resources */,
 				D4C800052F6A000100000005 /* SubtitleTools.strings in Resources */,
+				D4CA00042F6A000100000004 /* PlaylistBrowser.strings in Resources */,
 				8400D5F61E1AB34D006785F5 /* PrefNetworkViewController.xib in Resources */,
 				8400D5D51E1AB317006785F5 /* FilterWindowController.xib in Resources */,
 				E3B3DD5720FDB8A600325184 /* PreferenceWindowController.xib in Resources */,
@@ -3206,6 +3220,9 @@
 				D4C800032F6A000100000003 /* SubtitleToolsService.swift in Sources */,
 				D4C800042F6A000100000004 /* SubtitleToolsViewController.swift in Sources */,
 				D4C900012F6A000100000001 /* ChengYingStyle.swift in Sources */,
+				D4CA00012F6A000100000001 /* PlaylistFileMetadata.swift in Sources */,
+				D4CA00022F6A000100000002 /* PlaylistPresentation.swift in Sources */,
+				D4CA00032F6A000100000003 /* PlaylistPlaybackPolicy.swift in Sources */,
 				D4C700022F6A000100000002 /* VideoToolsHelperClient.swift in Sources */,
 				D4C700032F6A000100000003 /* VideoToolsTaskManager.swift in Sources */,
 				D4C700042F6A000100000004 /* VideoToolsPlayerBridge.swift in Sources */,
@@ -3370,6 +3387,15 @@
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
+		D4CA00302F6A000100000001 /* PlaylistBrowser.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				D4CA00312F6A000100000001 /* en */,
+				D4CA00322F6A000100000002 /* zh-Hans */,
+			);
+			name = PlaylistBrowser.strings;
+			sourceTree = "<group>";
+		};
 		D4C800302F6A000100000001 /* SubtitleTools.strings */ = {
 			isa = PBXVariantGroup;
 			children = (

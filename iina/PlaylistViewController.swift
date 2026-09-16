@@ -38,6 +38,26 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   private var pendingSwitchRequest: TabViewType?
 
   var playlistChangeObserver: NSObjectProtocol?
+  private var activationObserver: NSObjectProtocol?
+  private var lifecycleObservers: [NSObjectProtocol] = []
+  private var playlistReloadWork: DispatchWorkItem?
+  private let sortControls = PlaylistSortControls()
+  private var sortKey: PlaylistFileSortKey = .name
+  private var sortAscending = true
+  private var sortFolder: String?
+  private var sortContextEntryIDs: Set<Int64> = []
+  private var pendingSortIDs: [Int64]?
+  private var fileMetadata: [String: PlaylistFileMetadata] = [:]
+  private var metadataPaths: Set<String> = []
+  private var metadataGeneration: UInt = 0
+  private var metadataLoading = false
+  private let metadataQueue: OperationQueue = {
+    let queue = OperationQueue()
+    queue.name = "io.github.SeanLi-Coder.ChengYingPlayer.playlist-metadata"
+    queue.maxConcurrentOperationCount = 1
+    queue.qualityOfService = .utility
+    return queue
+  }()
 
   /** Enum for tab switching */
   enum TabViewType: Int {
@@ -113,6 +133,8 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     addBtn.toolTip = NSLocalizedString("mini_player.add", comment: "add")
     removeBtn.toolTip = NSLocalizedString("mini_player.remove", comment: "remove")
     sortBtn.toolTip = NSLocalizedString("mini_player.sort", comment: "sort")
+    installSortControls()
+    playlistTableView.rowHeight = 44
 
     hideTotalLength()
 
@@ -129,9 +151,23 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     }
 
     // notifications
-    playlistChangeObserver = NotificationCenter.default.addObserver(forName: .iinaPlaylistChanged, object: player, queue: OperationQueue.main) { [unowned self] _ in
+    playlistChangeObserver = NotificationCenter.default.addObserver(forName: .iinaPlaylistChanged, object: player, queue: OperationQueue.main) { [weak self] _ in
+      guard let self else { return }
       self.playlistTotalLengthIsReady = false
-      self.reloadData(playlist: true, chapters: false)
+      self.playlistReloadWork?.cancel()
+      let work = DispatchWorkItem { [weak self] in self?.reloadData(playlist: true, chapters: false) }
+      self.playlistReloadWork = work
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+    }
+    activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                                                               object: nil, queue: .main) { [weak self] _ in
+      guard let self, self.view.window != nil, !self.view.isHiddenOrHasHiddenAncestor else { return }
+      self.refreshFileMetadata(force: true)
+    }
+    for name in [Notification.Name.iinaPlayerStopped, .iinaPlayerShutdown] {
+      lifecycleObservers.append(NotificationCenter.default.addObserver(forName: name, object: player, queue: .main) { [weak self] _ in
+        self?.cancelMetadataRefresh()
+      })
     }
 
     // register for double click action
@@ -154,23 +190,163 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   }
 
   override func viewDidAppear() {
+    super.viewDidAppear()
     reloadData(playlist: true, chapters: true)
+    refreshFileMetadata(force: true)
     updateLoopBtnStatus()
   }
 
   deinit {
-    NotificationCenter.default.removeObserver(self.playlistChangeObserver!)
+    if let playlistChangeObserver { NotificationCenter.default.removeObserver(playlistChangeObserver) }
+    if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
+    lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
+    playlistReloadWork?.cancel()
+    metadataQueue.cancelAllOperations()
   }
 
   func reloadData(playlist: Bool, chapters: Bool) {
     guard player.info.state.active else { return }
     if playlist {
       player.getPlaylist()
+      let folder = player.info.currentURL?.deletingLastPathComponent().path
+      let entryIDs = Set(player.info.playlist.map(\.entryID))
+      let replacedList = !entryIDs.isEmpty && entryIDs.isDisjoint(with: sortContextEntryIDs)
+      if sortFolder == nil || replacedList || (folder != sortFolder && entryIDs != sortContextEntryIDs) {
+        sortKey = .name
+        sortAscending = true
+        pendingSortIDs = nil
+      }
+      sortFolder = folder
+      sortContextEntryIDs = entryIDs
+      if let pendingSortIDs, player.info.playlist.map(\.entryID) != pendingSortIDs {
+        self.pendingSortIDs = nil
+      }
+      refreshFileMetadata(force: replacedList)
       playlistTableView.reloadData()
+      updateSortControls()
     }
     if chapters {
       chapterTableView.reloadData()
     }
+  }
+
+  private func installSortControls() {
+    guard let scrollView = playlistTableView.enclosingScrollView, let container = scrollView.superview else { return }
+    // Reserve a separate toolbar without changing the existing table's bottom controls.
+    let topConstraints = container.constraints.filter {
+      ($0.firstItem as? NSView) === scrollView && $0.firstAttribute == .top &&
+        ($0.secondItem as? NSView) === container && $0.secondAttribute == .top
+    }
+    NSLayoutConstraint.deactivate(topConstraints)
+    sortControls.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(sortControls)
+    NSLayoutConstraint.activate([
+      sortControls.topAnchor.constraint(equalTo: container.topAnchor),
+      sortControls.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+      sortControls.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+      sortControls.heightAnchor.constraint(equalToConstant: 38),
+      scrollView.topAnchor.constraint(equalTo: sortControls.bottomAnchor)
+    ])
+    sortControls.onSortChange = { [weak self] key, ascending in self?.requestSort(key: key, ascending: ascending) }
+    sortControls.onRefresh = { [weak self] in self?.refreshFileMetadata(force: true) }
+  }
+
+  private func metadataForSort(_ items: [MPVPlaylistItem]) -> [PlaylistFileMetadata] {
+    items.map { item in
+      fileMetadata[item.filename] ?? PlaylistFileMetadata(url: item.isNetworkResource ?
+        URL(string: item.filename) ?? URL(fileURLWithPath: item.filename) : URL(fileURLWithPath: item.filename))
+    }
+  }
+
+  private func updateSortControls() {
+    let items = player.info.playlist
+    let indices = PlaylistFileMetadata.sortedIndices(for: metadataForSort(items), by: sortKey, ascending: sortAscending)
+    let manual = pendingSortIDs == nil && indices != Array(items.indices)
+    sortControls.update(key: sortKey, ascending: sortAscending, manual: manual, busy: metadataLoading)
+  }
+
+  private func refreshFileMetadata(force: Bool = false) {
+    guard let player, player.info.state.active else {
+      cancelMetadataRefresh()
+      return
+    }
+    let paths = Set(player.info.playlist.filter { !$0.isNetworkResource }.map(\.filename))
+    guard force || paths != metadataPaths else { return }
+    metadataPaths = paths
+    metadataGeneration &+= 1
+    let generation = metadataGeneration
+    metadataQueue.cancelAllOperations()
+    fileMetadata = fileMetadata.filter { paths.contains($0.key) }
+    metadataLoading = !paths.isEmpty
+    updateSortControls()
+    guard !paths.isEmpty else {
+      pendingSortIDs = nil
+      return
+    }
+    let operation = BlockOperation()
+    operation.addExecutionBlock { [weak self, weak operation] in
+      var results: [String: PlaylistFileMetadata] = [:]
+      for path in paths {
+        guard operation?.isCancelled == false else { return }
+        results[path] = PlaylistFileMetadata.read(from: URL(fileURLWithPath: path))
+      }
+      guard let operation, !operation.isCancelled else { return }
+      DispatchQueue.main.async { [weak self] in
+        guard let self, !operation.isCancelled, self.metadataGeneration == generation else { return }
+        guard let player = self.player, player.info.state.active else {
+          self.cancelMetadataRefresh()
+          return
+        }
+        self.fileMetadata = results
+        self.metadataLoading = false
+        if let ids = self.pendingSortIDs {
+          self.pendingSortIDs = nil
+          self.player.getPlaylist()
+          if self.player.info.playlist.map(\.entryID) == ids {
+            self.applySort()
+          }
+        }
+        self.playlistTableView.reloadData()
+        self.updateSortControls()
+      }
+    }
+    metadataQueue.addOperation(operation)
+  }
+
+  private func requestSort(key: PlaylistFileSortKey, ascending: Bool) {
+    guard let player, player.info.state.active else { return }
+    player.getPlaylist()
+    sortKey = key
+    sortAscending = ascending
+    pendingSortIDs = nil
+    if key == .name {
+      applySort()
+    } else {
+      pendingSortIDs = player.info.playlist.map(\.entryID)
+      refreshFileMetadata(force: true)
+    }
+    updateSortControls()
+  }
+
+  private func applySort() {
+    guard let player, player.info.state.active else { return }
+    let items = player.info.playlist
+    let selectedIDs = Set(playlistTableView.selectedRowIndexes.compactMap { items.indices.contains($0) ? items[$0].entryID : nil })
+    let indices = PlaylistFileMetadata.sortedIndices(for: metadataForSort(items), by: sortKey, ascending: sortAscending)
+    guard player.playlistReorder(newPlaylist: indices.map { items[$0] }) else { return }
+    player.getPlaylist()
+    playlistTableView.reloadData()
+    let selection = IndexSet(player.info.playlist.indices.filter { selectedIDs.contains(player.info.playlist[$0].entryID) })
+    playlistTableView.selectRowIndexes(selection, byExtendingSelection: false)
+  }
+
+  private func cancelMetadataRefresh() {
+    metadataGeneration &+= 1
+    metadataQueue.cancelAllOperations()
+    metadataLoading = false
+    pendingSortIDs = nil
+    metadataPaths.removeAll()
+    fileMetadata.removeAll()
   }
 
   private func showTotalLength() {
@@ -465,38 +641,30 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
 
   @IBAction func sortingBtnAction(_ sender: NSButton) {
     let menu = NSMenu()
-    if #available(macOS 14.0, *) {
-      menu.addItem(.sectionHeader(title: NSLocalizedString("playlist.sorting.header", comment: "Sorting")))
+    for (index, key) in PlaylistFileSortKey.allCases.enumerated() {
+      for ascending in [true, false] {
+        let direction = playlistBrowserString(ascending ? "sort.ascending.short" : "sort.descending.short")
+        let item = NSMenuItem(title: "\(key.title) · \(direction)", action: #selector(sortMenuAction(_:)), keyEquivalent: "")
+        item.target = self
+        item.tag = index * 2 + (ascending ? 0 : 1)
+        item.state = sortControls.keyPopup.indexOfSelectedItem == index && sortAscending == ascending ? .on : .off
+        menu.addItem(item)
+      }
     }
-    menu.addItem(withTitle: NSLocalizedString("playlist.sorting.filename_ascending", comment: "Filename Ascending"), action: #selector(sortPathAscending), keyEquivalent: "")
-    menu.addItem(withTitle: NSLocalizedString("playlist.sorting.filename_descending", comment: "Filename Descending"), action: #selector(sortPathDesecnding), keyEquivalent: "")
-    menu.addItem(withTitle: NSLocalizedString("playlist.sorting.path_ascending", comment: "File Path Ascending"), action: #selector(sortPathAscending), keyEquivalent: "")
-    menu.addItem(withTitle: NSLocalizedString("playlist.sorting.path_descending", comment: "File Path Descending"), action: #selector(sortPathDesecnding), keyEquivalent: "")
-    NSMenu.popUpContextMenu(menu, with: NSApplication.shared.currentEvent!, for: sender)
+    menu.addItem(.separator())
+    let refresh = NSMenuItem(title: playlistBrowserString("refresh"), action: #selector(refreshMetadataAction), keyEquivalent: "")
+    refresh.target = self
+    menu.addItem(refresh)
+    menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY), in: sender)
   }
 
-  @objc func sortNameAscending() { sortName(ascending: true) }
-  @objc func sortNameDesecnding() { sortName(ascending: false) }
-  @objc func sortPathAscending() { sortPath(ascending: true) }
-  @objc func sortPathDesecnding() { sortPath(ascending: false) }
-
-  private func sortName(ascending: Bool) {
-    var playlist = player.info.playlist
-    playlist.sort(by: {
-      let results = $0.filenameForDisplay < $1.filenameForDisplay
-      return ascending ? results : !results
-    })
-    player.playlistReorder(newPlaylist: playlist)
+  @objc private func sortMenuAction(_ sender: NSMenuItem) {
+    let index = sender.tag / 2
+    guard PlaylistFileSortKey.allCases.indices.contains(index) else { return }
+    requestSort(key: PlaylistFileSortKey.allCases[index], ascending: sender.tag % 2 == 0)
   }
 
-  private func sortPath(ascending: Bool) {
-    var playlist = player.info.playlist
-    playlist.sort(by: {
-      let results = $0.filename < $1.filename
-      return ascending ? results : !results
-    })
-    player.playlistReorder(newPlaylist: playlist)
-  }
+  @objc private func refreshMetadataAction() { refreshFileMetadata(force: true) }
 
   // MARK: - Table delegates
 
@@ -527,6 +695,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
         v.textField?.stringValue = item.isPlaying ? pointer : ""
       } else if identifier == .trackName {
         let cellView = v as! PlaylistTrackCellView
+        let configurationToken = cellView.configure(entryID: item.entryID, tags: fileMetadata[item.filename]?.tags ?? [])
         // file name
         let filename = item.filenameForDisplay
         let displayStr: String = NSString(string: filename).deletingPathExtension
@@ -558,6 +727,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
         player.playlistQueue.async {
           if let (artist, title) = getCachedMetadata() {
             DispatchQueue.main.async {
+              guard cellView.configurationToken == configurationToken else { return }
               cellView.setTitle(title)
               cellView.setAdditionalInfo(artist)
             }
@@ -568,6 +738,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
             if duration > 0 {
               // if FFmpeg got the duration successfully
               DispatchQueue.main.async {
+                guard cellView.configurationToken == configurationToken else { return }
                 cellView.durationLabel.stringValue = VideoTime(duration).stringRepresentation
                 if let progress = cached.progress {
                   cellView.playbackProgressView.percentage = progress / duration
@@ -586,7 +757,9 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
                 // if FFmpeg got the duration successfully
                 self.refreshTotalLength()
                 DispatchQueue.main.async {
-                  self.playlistTableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integersIn: 0...1))
+                  guard cellView.configurationToken == configurationToken,
+                        let currentRow = self.player.info.playlist.firstIndex(where: { $0.entryID == item.entryID }) else { return }
+                  self.playlistTableView.reloadData(forRowIndexes: IndexSet(integer: currentRow), columnIndexes: IndexSet(integersIn: 0...1))
                 }
               }
             }
@@ -897,6 +1070,44 @@ class PlaylistTrackCellView: NSTableCellView {
   @IBOutlet weak var infoLabelTrailingConstraint: NSLayoutConstraint!
   @IBOutlet weak var durationLabel: NSTextField!
   @IBOutlet weak var playbackProgressView: PlaylistPlaybackProgressView!
+  private let tagList = PlaylistTagListView()
+  private(set) var representedEntryID: Int64?
+  private(set) var configurationToken = UUID()
+
+  override func awakeFromNib() {
+    super.awakeFromNib()
+    guard let title = textField else { return }
+    let topRow: [NSView] = [title, prefixBtn, infoLabel, durationLabel, subBtn]
+    NSLayoutConstraint.deactivate(constraints.filter { constraint in
+      constraint.firstAttribute == .centerY && constraint.secondAttribute == .centerY &&
+        (constraint.secondItem as? NSView) === self && topRow.contains { $0 === (constraint.firstItem as? NSView) }
+    })
+    tagList.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(tagList)
+    NSLayoutConstraint.activate([
+      title.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+      prefixBtn.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+      infoLabel.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+      durationLabel.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+      subBtn.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+      tagList.leadingAnchor.constraint(equalTo: leadingAnchor),
+      tagList.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+      tagList.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 3),
+      tagList.heightAnchor.constraint(equalToConstant: 14)
+    ])
+  }
+
+  @discardableResult
+  func configure(entryID: Int64, tags: [PlaylistFileTag]) -> UUID {
+    configurationToken = UUID()
+    representedEntryID = entryID
+    playbackProgressView.percentage = 0
+    playbackProgressView.needsDisplay = true
+    durationLabel.stringValue = ""
+    setAdditionalInfo(nil)
+    tagList.setTags(tags)
+    return configurationToken
+  }
 
   func setPrefix(_ prefix: String?) {
     if let prefix = prefix {
@@ -939,6 +1150,9 @@ class PlaylistTrackCellView: NSTableCellView {
 
   override func prepareForReuse() {
     super.prepareForReuse()
+    representedEntryID = nil
+    configurationToken = UUID()
+    tagList.setTags([])
     playbackProgressView.percentage = 0
     playbackProgressView.needsDisplay = true
     setPrefix(nil)

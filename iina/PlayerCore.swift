@@ -173,6 +173,9 @@ class PlayerCore: NSObject {
   let playlistQueue: DispatchQueue
   let thumbnailQueue: DispatchQueue
 
+  /// Serialize UI edits with the background folder matcher without restarting the decoder.
+  let playlistMutationLock = NSRecursiveLock()
+
   /**
    This ticket will be increased each time before a new task being submitted to `backgroundQueue`.
 
@@ -400,6 +403,8 @@ class PlayerCore: NSObject {
       return nil
     }
     let urls = Utility.resolveURLs(urls)
+    playlistMutationLock.lock()
+    defer { playlistMutationLock.unlock() }
 
     // Handle folder URL (to support mpv shuffle, etc), BD folders and m3u / m3u8 files first.
     // For these cases, mpv will load/build the playlist and notify IINA when it can be retrieved.
@@ -422,11 +427,8 @@ class PlayerCore: NSObject {
       return 0
     }
 
-    if !autoLoad {
-      info.shouldAutoLoadFiles = false
-    } else {
-      info.shouldAutoLoadFiles = (count == 1)
-    }
+    info.shouldAutoLoadFiles = PlaylistPlaybackPolicy.shouldAutoLoadSiblings(
+      inputURLs: urls, playableFileCount: count, requested: autoLoad)
 
     // open the first file
     open(playableFiles[0])
@@ -528,7 +530,9 @@ class PlayerCore: NSObject {
     // Send load file command
     info.justOpenedFile = true
     info.state = .loading
+    playlistMutationLock.lock()
     mpv.command(.loadfile, args: [path], level: .verbose)
+    playlistMutationLock.unlock()
 
     if Preference.bool(for: .autoRepeat) {
        let loopMode = Preference.DefaultRepeatMode(rawValue: Preference.integer(for: .defaultRepeatMode))
@@ -1160,7 +1164,9 @@ class PlayerCore: NSObject {
   }
 
   func toggleShuffle() {
+    playlistMutationLock.lock()
     mpv.command(.playlistShuffle)
+    playlistMutationLock.unlock()
     postNotification(.iinaPlaylistChanged)
   }
 
@@ -1377,46 +1383,50 @@ class PlayerCore: NSObject {
 
   func appendToPlaylist(_ path: String, silent: Bool = false) {
     guard Utility.isLocalMediaPath(path) else { return }
+    playlistMutationLock.lock()
     mpv.playlistAppend(path)
+    playlistMutationLock.unlock()
     if !silent {
       postNotification(.iinaPlaylistChanged)
     }
   }
 
   func playlistMove(_ from: Int, to: Int) {
+    playlistMutationLock.lock()
     mpv.playlistMove(from, to: to)
+    playlistMutationLock.unlock()
     postNotification(.iinaPlaylistChanged)
   }
 
-  func playlistReorder(newPlaylist: [MPVPlaylistItem]) {
-    guard Set(info.playlist) == Set(newPlaylist) else { return }
-    if info.playlist == newPlaylist { return }
-    mpv.command(.playlistClear)
-    guard let currentPlaying = newPlaylist.firstIndex(where: { $0.isPlaying } ) else {
-      for item in newPlaylist {
-        mpv.playlistAppend(item.filename)
-      }
-      return
+  @discardableResult
+  func playlistReorder(newPlaylist: [MPVPlaylistItem]) -> Bool {
+    playlistMutationLock.lock()
+    defer {
+      getPlaylist()
+      playlistMutationLock.unlock()
+      postNotification(.iinaPlaylistChanged)
     }
-
-    for i in (0..<currentPlaying).reversed() {
-      mpv.playlistInsert(newPlaylist[i].filename, index: 0)
-    }
-    for i in currentPlaying + 1..<newPlaylist.count {
-      mpv.playlistAppend(newPlaylist[i].filename)
-    }
-
-    postNotification(.iinaPlaylistChanged)
+    let expectedIDs = newPlaylist.first?.snapshotEntryIDs ?? []
+    guard newPlaylist.allSatisfy({ $0.snapshotEntryIDs == expectedIDs }) else { return false }
+    return PlaylistPlaybackPolicy.reorder(to: newPlaylist.map(\.entryID), expectedIDs: expectedIDs,
+      readIDs: { self.playlistSnapshot()?.map(\.entryID) }, move: { step in
+        var succeeded = false
+        self.mpv.command(.playlistMove, args: [String(step.from), String(step.to)],
+                         checkError: false, level: .verbose) { succeeded = $0 >= 0 }
+        return succeeded
+      })
   }
 
   func addToPlaylist(paths: [String], at index: Int = -1) {
     let paths = paths.filter(Utility.isLocalMediaPath)
     guard !paths.isEmpty else { return }
+    playlistMutationLock.lock()
+    defer { playlistMutationLock.unlock() }
     getPlaylist()
+    guard let previousCount = playlistSnapshot()?.count else { return }
     for path in paths {
       mpv.playlistAppend(path)
     }
-    let previousCount = info.$playlist.withLock { $0.count }
     if index <= previousCount && index >= 0 {
       for i in 0..<paths.count {
         playlistMove(previousCount + i, to: index + i)
@@ -1426,12 +1436,16 @@ class PlayerCore: NSObject {
   }
 
   func playlistRemove(_ index: Int) {
+    playlistMutationLock.lock()
     mpv.playlistRemove(index)
+    playlistMutationLock.unlock()
     postNotification(.iinaPlaylistChanged)
   }
 
   func playlistRemove(_ indexSet: IndexSet) {
     guard !indexSet.isEmpty else { return }
+    playlistMutationLock.lock()
+    defer { playlistMutationLock.unlock() }
     var count = 0
     for i in indexSet {
       mpv.playlistRemove(i - count)
@@ -1441,7 +1455,9 @@ class PlayerCore: NSObject {
   }
 
   func clearPlaylist() {
+    playlistMutationLock.lock()
     mpv.command(.playlistClear)
+    playlistMutationLock.unlock()
     postNotification(.iinaPlaylistChanged)
   }
 
@@ -1871,9 +1887,11 @@ class PlayerCore: NSObject {
 
       DispatchQueue.main.async { [self] in
         log("Running on_before_start_file hook: shuffling playlist")
+        playlistMutationLock.lock()
         mpv.command(.playlistShuffle)
         /// will cancel this file load sequence (so `fileLoaded` will not be called), then will start loading item at index 0
         mpv.command(.playlistPlayIndex, args: ["0"])
+        playlistMutationLock.unlock()
         next()
       }
     }
@@ -2744,17 +2762,12 @@ class PlayerCore: NSObject {
   }
 
   func getPlaylist() {
-    info.$playlist.withLock { playlist in
-      playlist.removeAll()
-      let playlistCount = mpv.getInt(MPVProperty.playlistCount)
-      for index in 0..<playlistCount {
-        let playlistItem = MPVPlaylistItem(filename: mpv.getString(MPVProperty.playlistNFilename(index))!,
-                                           isCurrent: mpv.getFlag(MPVProperty.playlistNCurrent(index)),
-                                           isPlaying: mpv.getFlag(MPVProperty.playlistNPlaying(index)),
-                                           title: mpv.getString(MPVProperty.playlistNTitle(index)))
-        playlist.append(playlistItem)
-      }
-    }
+    guard let snapshot = playlistSnapshot() else { return }
+    info.$playlist.withLock { $0 = snapshot }
+  }
+
+  func playlistSnapshot() -> [MPVPlaylistItem]? {
+    return MPVPlaylistItem.playlist(from: mpv.getNode(MPVProperty.playlist))
   }
 
   func getChapters() {

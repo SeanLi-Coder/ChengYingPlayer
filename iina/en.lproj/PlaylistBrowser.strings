@@ -1,0 +1,13 @@
+"sort.label" = "Sort";
+"sort.name" = "Name";
+"sort.size" = "File size";
+"sort.modified" = "Date modified";
+"sort.created" = "Date created";
+"sort.ascending" = "Ascending: A–Z, smallest or oldest first";
+"sort.descending" = "Descending: Z–A, largest or newest first";
+"sort.manual" = "Manual order";
+"sort.ascending.short" = "Ascending";
+"sort.descending.short" = "Descending";
+"refresh" = "Refresh Finder tags and file details";
+"refresh.busy" = "Reading Finder tags and file details…";
+"tags.label" = "Finder tags";

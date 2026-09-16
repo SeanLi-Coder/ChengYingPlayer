@@ -20,14 +20,9 @@ extension PlayerCore {
   func hasPlayableFiles(in paths: [String]) -> Bool {
     for path in paths {
       if path.isDirectoryAsPath {
-        // is directory, enumerate its content
-        guard let dirEnumerator = FileManager.default.enumerator(atPath: path) else { return false }
-        while let fileName = dirEnumerator.nextObject() as? String {
-          // ignore hidden files
-          guard !fileName.hasPrefix(".") else { continue }
-          if Utility.playableFileExt.contains(fileName.lowercasedPathExtension) {
-            return true
-          }
+        if !PlaylistPlaybackPolicy.regularFiles(in: URL(fileURLWithPath: path, isDirectory: true),
+                                               extensions: Set(Utility.supportedFileExt[.video]!)).isEmpty {
+          return true
         }
       } else {
         // is file, check extension
@@ -47,37 +42,9 @@ extension PlayerCore {
    - Returns: URLs of all playable files as an array of `URL`.
    */
   func getPlayableFiles(in urls: [URL]) -> [URL] {
-    var playableFiles: [URL] = []
-    for url in urls {
-      if !url.isFileURL {
-        playableFiles.append(url)
-        continue
-      }
-      if url.hasDirectoryPath {
-        // is directory
-        // `enumerator(at:includingPropertiesForKeys:)` doesn't work :(
-        guard let dirEnumerator = FileManager.default.enumerator(atPath: url.path) else { return [] }
-        while let fileName = dirEnumerator.nextObject() as? String {
-          guard !fileName.hasPrefix(".") else { continue }
-          if Utility.playableFileExt.contains(fileName.lowercasedPathExtension) {
-            playableFiles.append(url.appendingPathComponent(fileName))
-          }
-        }
-      } else {
-        // is file
-        if !Utility.blacklistExt.contains(url.pathExtension.lowercased()) {
-          playableFiles.append(url)
-        }
-      }
-    }
-    return Array(Set(playableFiles)).sorted { url1, url2 in
-      let folder1 = url1.deletingLastPathComponent(), folder2 = url2.deletingLastPathComponent()
-      if folder1.absoluteString == folder2.absoluteString {
-        return url1.lastPathComponent.localizedStandardCompare(url2.lastPathComponent) == .orderedAscending
-      } else {
-        return folder1.absoluteString < folder2.absoluteString
-      }
-    }
+    return PlaylistPlaybackPolicy.playableFiles(in: urls,
+                                               videoExtensions: Set(Utility.supportedFileExt[.video]!),
+                                               blacklistedExtensions: Set(Utility.blacklistExt))
   }
 
   /**
@@ -212,8 +179,7 @@ extension PlayerCore {
         }
         return loadedSubtitle
       } else if loadedFileCount == 1 {
-        // loaded one file
-        info.shouldAutoLoadFiles = true
+        // openURLs already decided whether this was an explicit list or a single local file.
         return true
       } else {
         // add multiple files to playlist

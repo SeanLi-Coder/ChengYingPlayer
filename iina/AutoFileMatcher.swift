@@ -46,7 +46,7 @@ class AutoFileMatcher {
 
   private func getAllMediaFiles() throws {
     // get all files in current directory
-    guard let files = try? fm.contentsOfDirectory(at: currentFolder, includingPropertiesForKeys: nil, options: searchOptions) else { return }
+    let files = PlaylistPlaybackPolicy.regularFiles(in: currentFolder)
 
     log("Getting all media files...")
     // group by extension
@@ -61,8 +61,8 @@ class AutoFileMatcher {
     log("Got all media files, video=\(filesGroupedByMediaType[.video]!.count), audio=\(filesGroupedByMediaType[.audio]!.count)")
 
     // natural sort
-    filesGroupedByMediaType[.video]!.sort { $0.filename.localizedStandardCompare($1.filename) == .orderedAscending }
-    filesGroupedByMediaType[.audio]!.sort { $0.filename.localizedStandardCompare($1.filename) == .orderedAscending }
+    filesGroupedByMediaType[.video]!.sort { PlaylistPlaybackPolicy.naturalNameOrder($0.url, $1.url) }
+    filesGroupedByMediaType[.audio]!.sort { PlaylistPlaybackPolicy.naturalNameOrder($0.url, $1.url) }
   }
 
   private func getAllPossibleSubs() throws -> [FileInfo] {
@@ -106,7 +106,11 @@ class AutoFileMatcher {
     for subDir in subDirs {
       try checkTicket()
       if let contents = try? fm.contentsOfDirectory(at: subDir, includingPropertiesForKeys: nil, options: searchOptions) {
-        subtitles.append(contentsOf: contents.compactMap { subExts.contains($0.pathExtension.lowercased()) ? FileInfo($0) : nil })
+        subtitles.append(contentsOf: contents.compactMap {
+          guard subExts.contains($0.pathExtension.lowercased()),
+                (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return nil }
+          return FileInfo($0)
+        })
       }
     }
 
@@ -115,12 +119,24 @@ class AutoFileMatcher {
   }
 
   private func addFilesToPlaylist() throws {
+    player.playlistMutationLock.lock()
+    defer { player.playlistMutationLock.unlock() }
+    try checkTicket()
+    guard let currentURL = player.info.currentURL,
+          let mediaType = Utility.mediaType(forExtension: currentURL.pathExtension),
+          mediaType == .video || mediaType == .audio,
+          let media = filesGroupedByMediaType[mediaType],
+          media.contains(where: { $0.url.path == currentURL.path }),
+          let snapshot = player.playlistSnapshot(), snapshot.count == 1,
+          snapshot[0].filename == currentURL.path else { return }
+
+    // Do not replace an explicitly edited/imported list, or mix background audio into video playback.
     var addedCurrentVideo = false
     var needQuit = false
 
     log("Adding files to playlist")
     // add videos
-    for video in filesGroupedByMediaType[.video]! + filesGroupedByMediaType[.audio]! {
+    for video in media {
       // add to playlist
       if video.url.path == player.info.currentURL?.path {
         addedCurrentVideo = true
