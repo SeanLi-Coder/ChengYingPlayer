@@ -515,17 +515,44 @@ jobs:
               --notes "下载 Apple-Silicon.dmg，打开后将 ChengYing 拖到 Applications 即可安装，支持 M4 Max 等 Apple Silicon Mac。无需 Homebrew 或 Python。此版本使用 ad-hoc 签名，尚未经过 Apple 公证；首次打开可能需要在系统设置 → 隐私与安全性中选择‘仍要打开’，无需关闭 Gatekeeper。macOS 12+ 可使用本地播放/编辑，下载中心需要 macOS 13.5+ 及自行安装的 Google Chrome。Release-Source.tar.gz 是与此版本对应的应用源码、播放组件和依赖源码及构建记录，不是安装包。"
           fi
 
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > "$RUNNER_TEMP/release.json"
-          python3 - "$RUNNER_TEMP/release.json" "${release_assets[@]}" <<'PY'
+          # Draft releases are not available through the REST release-by-tag endpoint.
+          # Resolve one exact tag across all pages, then verify that same release by ID.
+          gh api --method GET --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          release_id="$(
+            python3 - "$RUNNER_TEMP/releases.json" "$GITHUB_REF_NAME" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          pages = json.loads(Path(sys.argv[1]).read_text())
+          if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
+              raise SystemExit("The release-list response has an unexpected format.")
+          releases = [release for page in pages for release in page]
+          if any(not isinstance(release, dict) for release in releases):
+              raise SystemExit("The release-list response contains an invalid release.")
+          matches = [release for release in releases if release.get("tag_name") == sys.argv[2]]
+          if len(matches) != 1:
+              raise SystemExit("Expected exactly one release for the requested tag.")
+          release = matches[0]
+          if release.get("draft") is not True or type(release.get("id")) is not int or release["id"] <= 0:
+              raise SystemExit("Refusing to publish a non-draft release or an invalid release ID.")
+          print(release["id"])
+          PY
+          )"
+          gh api --method GET "repos/$GITHUB_REPOSITORY/releases/$release_id" > "$RUNNER_TEMP/release.json"
+          python3 - "$RUNNER_TEMP/release.json" "$release_id" "$GITHUB_REF_NAME" "${release_assets[@]}" <<'PY'
           import hashlib
           import json
           import sys
           from pathlib import Path
 
           release = json.loads(Path(sys.argv[1]).read_text())
-          expected = {Path(path).name: Path(path) for path in sys.argv[2:]}
+          expected = {Path(path).name: Path(path) for path in sys.argv[4:]}
           assets = release["assets"]
-          if not release["draft"] or len(assets) != len(expected) or {asset["name"] for asset in assets} != set(expected):
+          if release.get("id") != int(sys.argv[2]) or release.get("tag_name") != sys.argv[3] or release.get("draft") is not True:
+              raise SystemExit("The resolved release identity or draft state changed before verification.")
+          if len(expected) != 5 or len(assets) != len(expected) or {asset["name"] for asset in assets} != set(expected):
               raise SystemExit("The draft release does not contain exactly the verified asset set.")
           for asset in assets:
               path = expected[asset["name"]]
