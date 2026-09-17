@@ -53,6 +53,13 @@ jobs:
           python -m ruff check helper.py media.py conversion.py tests ../VideoToolsTests/app_conversion_smoke.py
           python -m pytest -q
 
+      - name: Preflight native media information UI and image metadata
+        run: |
+          python Tools/MediaInfoTests/LocalizationTests.py
+          bash Tools/MediaInfoTests/ImageRun.sh
+          bash Tools/MediaInfoTests/RoutingRun.sh
+          bash Tools/MediaInfoTests/WindowTests.sh
+
       - name: Test native playback controls
         run: |
           ./Tools/VideoToolsTests/run.sh

@@ -101,6 +101,61 @@ private enum WindowTests {
     URL(fileURLWithPath: "/Media/Local Library/\(name)")
   }
 
+  private static func capture(_ window: NSWindow, requested: NSSize, scale: CGFloat?,
+                              name: String, destination: URL) throws -> Data {
+    let content = window.contentView!
+    let bounds = content.bounds
+    let backing = content.convertToBacking(bounds)
+    guard let native = content.bitmapImageRepForCachingDisplay(in: bounds) else {
+      fatalError("FAIL: AppKit could not allocate the native screenshot bitmap")
+    }
+    let expected = scale.map { NSSize(width: bounds.width * $0, height: bounds.height * $0) } ?? backing.size
+    let width = Int(ceil(expected.width))
+    let height = Int(ceil(expected.height))
+    let bitmap: NSBitmapImageRep
+    if scale != nil {
+      // Match AppKit's pixel format while exercising both backing densities on any display.
+      guard let explicit = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+                                           bitsPerSample: native.bitsPerSample, samplesPerPixel: native.samplesPerPixel,
+                                           hasAlpha: native.hasAlpha, isPlanar: native.isPlanar,
+                                           colorSpaceName: native.colorSpaceName, bitmapFormat: native.bitmapFormat,
+                                           bytesPerRow: 0, bitsPerPixel: native.bitsPerPixel) else {
+        fatalError("FAIL: AppKit could not allocate the explicit-density screenshot bitmap")
+      }
+      explicit.size = bounds.size
+      bitmap = explicit
+    } else {
+      bitmap = native
+    }
+    print("Screenshot \(name): requested=\(NSStringFromSize(requested)) frame=\(NSStringFromRect(window.frame)) " +
+          "content=\(NSStringFromRect(bounds)) backing=\(NSStringFromRect(backing)) " +
+          "screen=\(window.screen.map { NSStringFromRect($0.visibleFrame) } ?? "none") " +
+          "windowScale=\(window.backingScaleFactor) renderScale=\(scale.map(String.init(describing:)) ?? "native") " +
+          "bitmapPoints=\(NSStringFromSize(bitmap.size)) pixels=\(bitmap.pixelsWide)x\(bitmap.pixelsHigh)")
+    check(bitmap.pixelsWide == width && bitmap.pixelsHigh == height,
+          "The \(name) bitmap exactly covers the actual content at its rendering density")
+    window.effectiveAppearance.performAsCurrentDrawingAppearance {
+      content.cacheDisplay(in: bounds, to: bitmap)
+    }
+    guard let png = bitmap.representation(using: .png, properties: [:]),
+          let decoded = NSBitmapImageRep(data: png) else {
+      fatalError("FAIL: The \(name) screenshot is not a valid PNG")
+    }
+    check(decoded.pixelsWide == width && decoded.pixelsHigh == height && png.count > 1024,
+          "The \(name) PNG preserves the complete bitmap dimensions")
+    var colors = Set<String>()
+    for y in stride(from: 0, to: height, by: max(1, height / 32)) {
+      for x in stride(from: 0, to: width, by: max(1, width / 32)) {
+        if let color = decoded.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), color.alphaComponent > 0.9 {
+          colors.insert("\(Int(color.redComponent * 255)),\(Int(color.greenComponent * 255)),\(Int(color.blueComponent * 255))")
+        }
+      }
+    }
+    check(colors.count > 8, "The \(name) screenshot contains visible, nonuniform interface pixels")
+    try png.write(to: destination.appendingPathComponent("\(name).png"))
+    return png
+  }
+
   static func main() throws {
     setbuf(stdout, nil)
     _ = NSApplication.shared
@@ -187,24 +242,36 @@ private enum WindowTests {
 
     inspector.present(url: url("Night Flight.mp4"), kind: .video, relativeTo: nil)
     wait("The screenshot snapshot is ready", until: { inspector.displayedSnapshot?.url == url("Night Flight.mp4") })
-    window.setContentSize(NSSize(width: 640, height: 660))
     let destination = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
-    var signatures: [Data] = []
-    for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
-      window.appearance = NSAppearance(named: appearance)
+    for (layout, requested) in [("minimum", window.contentMinSize), ("standard", NSSize(width: 640, height: 660))] {
+      window.setContentSize(requested)
+      RunLoop.current.run(until: Date().addingTimeInterval(0.1))
       window.contentView!.layoutSubtreeIfNeeded()
-      window.displayIfNeeded()
-      let content = window.contentView!
-      let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds)!
-      window.effectiveAppearance.performAsCurrentDrawingAppearance {
-        content.cacheDisplay(in: content.bounds, to: bitmap)
+      let bounds = window.contentView!.bounds
+      check(bounds.width >= window.contentMinSize.width && bounds.height >= window.contentMinSize.height,
+            "The actual \(layout) content respects the minimum layout size")
+      if layout == "minimum" {
+        check(bounds.size == requested, "The smaller screenshot exercises the actual minimum-size layout")
       }
-      let png = bitmap.representation(using: .png, properties: [:])!
-      try png.write(to: destination.appendingPathComponent("media-info-\(name).png"))
-      signatures.append(png)
-      check(bitmap.pixelsWide >= 640 && bitmap.pixelsHigh >= 660, "The complete production window renders in \(name) appearance")
+      var signatures: [[Data]] = []
+      for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+        window.appearance = NSAppearance(named: appearance)
+        window.contentView!.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        let prefix = layout == "standard" ? "media-info-\(name)" : "media-info-minimum-\(name)"
+        var rendered: [Data] = []
+        for scale: CGFloat? in [nil, 1, 2] {
+          let suffix = scale.map { "-\(Int($0))x" } ?? ""
+          rendered.append(try capture(window, requested: requested, scale: scale,
+                                      name: prefix + suffix, destination: destination))
+        }
+        signatures.append(rendered)
+      }
+      for index in 0..<3 {
+        check(signatures[0][index] != signatures[1][index],
+              "Light and dark \(layout) appearances differ at rendering density \(index)")
+      }
     }
-    check(signatures[0] != signatures[1], "Light and dark appearances produce distinct adaptive rendering")
 
     fake.block("native-close.mp4")
     inspector.sourceDidChange(url: url("native-close.mp4"), kind: .video)
