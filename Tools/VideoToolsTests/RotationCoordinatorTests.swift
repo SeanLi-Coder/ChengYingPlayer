@@ -82,6 +82,7 @@ private enum RotationCoordinatorTests {
     do {
       let manager = RotationTaskDouble()
       let coordinator = manager.coordinator(debounceInterval: 0.01)
+      defer { coordinator.reset(cancelActive: false) }
       try coordinator.request(inputURL: source, clockwiseQuarterTurns: -1)
       expect(coordinator.state.desiredDegrees == 270, "Left must mean counterclockwise")
       try coordinator.request(inputURL: source, clockwiseQuarterTurns: -1)
@@ -102,6 +103,7 @@ private enum RotationCoordinatorTests {
     do {
       let manager = RotationTaskDouble()
       let coordinator = manager.coordinator()
+      defer { coordinator.reset(cancelActive: false) }
       try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
       pump { manager.requests.count == 1 }
       try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
@@ -124,6 +126,7 @@ private enum RotationCoordinatorTests {
     do {
       let manager = RotationTaskDouble()
       let coordinator = manager.coordinator()
+      defer { coordinator.reset(cancelActive: false) }
       try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
       pump { manager.requests.count == 1 }
       try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
@@ -137,6 +140,7 @@ private enum RotationCoordinatorTests {
     do {
       let manager = RotationTaskDouble()
       let coordinator = manager.coordinator()
+      defer { coordinator.reset(cancelActive: false) }
       for _ in 0..<4 { try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1) }
       expect(coordinator.state.desiredDegrees == 0, "A full turn must restore the preview orientation")
       pump { manager.requests.count == 1 }
@@ -147,6 +151,7 @@ private enum RotationCoordinatorTests {
     do {
       let manager = RotationTaskDouble()
       let coordinator = manager.coordinator()
+      defer { coordinator.reset(cancelActive: false) }
       try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
       pump { manager.requests.count == 1 }
       manager.finish(.completed)
@@ -167,6 +172,7 @@ private enum RotationCoordinatorTests {
     for throughCoordinator in [true, false] {
       let manager = RotationTaskDouble()
       let coordinator = manager.coordinator()
+      defer { coordinator.reset(cancelActive: false) }
       try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
       pump { manager.requests.count == 1 }
       try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
@@ -186,6 +192,7 @@ private enum RotationCoordinatorTests {
     do {
       let manager = RotationTaskDouble()
       let coordinator = manager.coordinator()
+      defer { coordinator.reset(cancelActive: false) }
       try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
       coordinator.reset()
       assertNoDeferredExport(manager, count: 0)
@@ -210,6 +217,10 @@ private enum RotationCoordinatorTests {
       let manager = RotationTaskDouble()
       let first = manager.coordinator()
       let second = manager.coordinator()
+      defer {
+        first.reset(cancelActive: false)
+        second.reset(cancelActive: false)
+      }
       try first.request(inputURL: source, clockwiseQuarterTurns: 1)
       pump { manager.requests.count == 1 }
       do {
@@ -229,6 +240,7 @@ private enum RotationCoordinatorTests {
       let manager = RotationTaskDouble()
       manager.startError = VideoToolsClientError.disconnected("Test error")
       let coordinator = manager.coordinator()
+      defer { coordinator.reset(cancelActive: false) }
       try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
       pump { coordinator.state.phase == .failed }
       expect(coordinator.state.error != nil, "Launch errors must be reported")
@@ -236,9 +248,34 @@ private enum RotationCoordinatorTests {
       expect(!coordinator.state.hasQueuedRotation, "Launch errors must discard pending work")
     }
 
+    // Fixture cleanup must not depend on ARC releasing an inactive scope immediately.
+    do {
+      var retainedCoordinator: VideoToolsRotationCoordinator?
+      do {
+        let manager = RotationTaskDouble()
+        let coordinator = manager.coordinator()
+        defer { coordinator.reset(cancelActive: false) }
+        retainedCoordinator = coordinator
+        try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
+        pump { manager.requests.count == 1 }
+        try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
+        expect(coordinator.state.phase == .exporting && coordinator.state.hasQueuedRotation,
+               "The retained fixture owns active and queued work before cleanup")
+        expect(VideoToolsRotationCoordinator.hasPendingUpdateWork,
+               "A deliberately retained active fixture blocks updates")
+      }
+      withExtendedLifetime(retainedCoordinator) {
+        expect(retainedCoordinator?.state.phase == .idle && retainedCoordinator?.state.hasQueuedRotation == false,
+               "Deferred cleanup resets the retained fixture without relying on deinit")
+        expect(!VideoToolsRotationCoordinator.hasPendingUpdateWork,
+               "A strongly retained but explicitly cleaned fixture does not block updates")
+      }
+    }
+
     do {
       let manager = RotationTaskDouble()
       let coordinator = manager.coordinator(debounceInterval: 0.1)
+      defer { coordinator.reset(cancelActive: false) }
       let identifier = UUID()
       expect(UpdateWorkAdmission.shared.acquire(identifier), "Update barrier can start while rotation is idle")
       do {
