@@ -13,6 +13,13 @@ protocol VideoToolsRotationTaskManaging: AnyObject {
 
 /// Owns one player's cumulative rotation without ever using an exported file as its input.
 final class VideoToolsRotationCoordinator {
+  private static let instances = NSHashTable<VideoToolsRotationCoordinator>.weakObjects()
+  static var hasPendingUpdateWork: Bool {
+    precondition(Thread.isMainThread)
+    return instances.allObjects.contains {
+      $0.state.phase == .pending || $0.state.phase == .exporting || $0.state.hasQueuedRotation
+    }
+  }
   enum Phase: Equatable {
     case idle
     case pending
@@ -53,6 +60,7 @@ final class VideoToolsRotationCoordinator {
     self.taskManager = taskManager
     self.notificationCenter = notificationCenter
     self.debounceInterval = max(0, debounceInterval)
+    Self.instances.add(self)
     observer = notificationCenter.addObserver(forName: .videoToolsTaskChanged, object: nil, queue: nil) {
       [weak self] notification in
       guard let self = self,
@@ -71,6 +79,7 @@ final class VideoToolsRotationCoordinator {
   /// A busy error means the request was not accepted and the preview must not change.
   func request(inputURL: URL, clockwiseQuarterTurns: Int) throws {
     precondition(Thread.isMainThread)
+    guard !UpdateWorkAdmission.shared.isHelperRestartBlocked else { throw VideoToolsClientError.busy }
     guard inputURL.isFileURL else {
       throw VideoToolsClientError.invalidResponse("Permanent rotation requires a local video.")
     }

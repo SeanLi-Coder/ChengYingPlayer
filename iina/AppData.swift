@@ -57,7 +57,7 @@ struct AppData {
   static let wikiLink = "https://github.com/SeanLi-Coder/ChengYingPlayer#readme"
   static let websiteLink = "https://github.com/SeanLi-Coder/ChengYingPlayer"
   static let ytdlHelpLink = "https://github.com/rg3/youtube-dl/blob/master/README.md#readme"
-  static let appcastLink = "https://raw.githubusercontent.com/SeanLi-Coder/ChengYingPlayer/main/appcast.xml"
+  static let appcastLink = "https://github.com/SeanLi-Coder/ChengYingPlayer/releases/latest/download/appcast.xml"
   static let appcastBetaLink = appcastLink
   static let assrtRegisterLink = "https://secure.assrt.net/user/register.xml?redir=http%3A%2F%2Fassrt.net%2Fusercp.php"
   static let chromeExtensionLink = githubLink

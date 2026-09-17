@@ -130,7 +130,26 @@ if DownloadCenterService.supportsRuntime {
         check(error == .alreadyRunning, "An occupied data directory has its own actionable startup error")
       }
     }
+    wait("Failed startup retires its exact helper", timeout: 8) { !UpdateWorkAdmission.shared.hasDrainingProcesses }
+    var failedActivity: Bool??
+    failed.updateActivity { failedActivity = .some($0) }
+    wait("Failed helper state has an authoritative activity result") { failedActivity != nil }
+    check(mode == "already_running" ? failedActivity! == nil : failedActivity! == false,
+          "A dead failed helper permits updates, but an unknown external owner still blocks them")
+    let failedLease = UUID()
+    var failedAcquired: Bool?
+    failed.acquireUpdateLease(failedLease) { failedAcquired = $0 }
+    wait("Failed helper installation lease completes") { failedAcquired != nil }
+    check(failedAcquired == (mode != "already_running"), "Failed-state readiness and acquisition agree about child ownership")
+    if failedAcquired == true {
+      var failedDrained: Bool?
+      failed.shutdownForUpdate(failedLease) { failedDrained = $0 }
+      wait("Failed but dead helper completes the full install drain") { failedDrained != nil }
+      check(failedDrained == true, "No nonexistent HTTP backend is required for safe installation")
+    }
+    failed.releaseUpdateLease(failedLease)
     failed.shutdown()
+    wait("Normal fixture shutdown finishes retired children", timeout: 8) { !UpdateWorkAdmission.shared.hasDrainingProcesses }
   }
   setenv("CHENGYING_TEST_MODE", "ready", 1)
   let service = DownloadCenterService(locations: { locations })
@@ -198,6 +217,52 @@ if DownloadCenterService.supportsRuntime {
   service.shutdown()
   check(!service.isRunning, "Application-owned shutdown closes the helper session")
   wait("EOF shutdown stops the exact owned helper process", timeout: 8) { kill(liveSession.pid, 0) != 0 && errno == ESRCH }
+  wait("Owned helper drain tracking clears after normal exit") { !UpdateWorkAdmission.shared.hasDrainingProcesses }
+
+  setenv("CHENGYING_TEST_MODE", "update_drain", 1)
+  let updateService = DownloadCenterService(locations: { locations })
+  updateService.start()
+  wait("Update fixture reaches ready state") { if case .ready = updateService.state { return true }; return false }
+  guard case .ready(let updateSession) = updateService.state else { fatalError("Expected update fixture session") }
+  var updateBusy: Bool??
+  updateService.updateActivity { updateBusy = .some($0) }
+  wait("Native update activity completes asynchronously") { updateBusy != nil }
+  check(updateBusy! == false, "An idle helper is not confused with an active download")
+  let firstLease = UUID()
+  var acquired: Bool?
+  updateService.acquireUpdateLease(firstLease) { acquired = $0 }
+  wait("Authenticated maintenance PUT obtains a lease") { acquired != nil }
+  check(acquired == true, "The native service decodes the backend lease result")
+  updateService.releaseUpdateLease(firstLease)
+  updateBusy = nil
+  updateService.updateActivity { updateBusy = .some($0) }
+  wait("Released lease can be queried") { updateBusy != nil }
+  // HTTP requests may be serviced out of order; wait for DELETE acknowledgement indirectly.
+  for _ in 0..<20 where updateBusy! != false {
+    pumpEvents(for: 0.05)
+    updateBusy = nil
+    updateService.updateActivity { updateBusy = .some($0) }
+    wait("Release eventually restores activity admission") { updateBusy != nil }
+  }
+  check(updateBusy! == false, "Cancelling installation sends authenticated DELETE and releases downloads")
+  let finalLease = UUID()
+  acquired = nil
+  updateService.acquireUpdateLease(finalLease) { acquired = $0 }
+  wait("A new install can acquire a fresh lease") { acquired != nil }
+  check(acquired == true, "Released installation does not poison a new lease")
+  var drained: Bool?
+  updateService.shutdownForUpdate(finalLease) { drained = $0 }
+  wait("Committed update drain reserves the closing helper") { UpdateWorkAdmission.shared.hasDrainingProcesses }
+  updateService.releaseUpdateLease(finalLease)
+  updateBusy = nil
+  updateService.updateActivity { updateBusy = .some($0) }
+  wait("Cancellation can inspect the still-exiting backend") { updateBusy != nil }
+  check(updateBusy! == true, "Cancelling after EOF never releases backend admission to new jobs")
+  wait("Idle update shutdown waits for actual helper exit") { drained != nil }
+  check(drained == true && kill(updateSession.pid, 0) != 0 && errno == ESRCH,
+        "Update is authorized only after the exact child process has exited")
+  check(!updateService.isRunning, "Graceful update shutdown restores the idle service state")
+  updateService.releaseUpdateLease(finalLease)
 
   setenv("CHENGYING_TEST_MODE", "frontend", 1)
   let fullService = DownloadCenterService(locations: { locations })

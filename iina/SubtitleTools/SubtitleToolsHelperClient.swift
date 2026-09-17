@@ -12,6 +12,7 @@ final class SubtitleToolsHelperClient: SubtitleToolsTransport {
   private var pending = [Data]()
   private var ready = false
   private var failureReported = false
+  var updateActivityIsUncertain: Bool { queue.sync { failureReported && process?.isRunning == true } }
   private var terminationObserver: NSObjectProtocol?
 
   init() {
@@ -37,6 +38,21 @@ final class SubtitleToolsHelperClient: SubtitleToolsTransport {
   func shutdown() {
     if DispatchQueue.getSpecific(key: queueIdentity) == true { stopProcess() }
     else { queue.sync { stopProcess() } }
+  }
+
+  func shutdownForUpdate(completion: @escaping (Bool) -> Void) {
+    let reservation = UpdateProcessDrain.reserve()
+    queue.async {
+      let child = self.process
+      self.failureReported = true
+      if child?.isRunning == true,
+         let data = try? JSONEncoder().encode(SubtitleToolsRequest(id: UUID().uuidString, command: "shutdown")) {
+        try? self.write(data + Data([10]))
+      }
+      try? self.input?.close()
+      self.input = nil
+      UpdateProcessDrain.wait(for: child, reservation: reservation, completion: completion)
+    }
   }
 
   private func stopProcess() {

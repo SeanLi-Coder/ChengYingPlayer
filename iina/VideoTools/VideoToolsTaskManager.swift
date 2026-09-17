@@ -32,7 +32,7 @@ final class VideoToolsTaskManager {
     outputDirectory: URL? = nil
   ) throws -> String {
     precondition(Thread.isMainThread)
-    if snapshot?.isActive == true {
+    if UpdateWorkAdmission.shared.isHelperRestartBlocked || snapshot?.isActive == true {
       throw VideoToolsClientError.busy
     }
 

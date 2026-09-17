@@ -7,6 +7,7 @@ import stat
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from fastapi import HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -14,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from proxy_config import ProxySettingsError
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
+from update_maintenance import UpdateMaintenance, UpdateMaintenanceMiddleware
 
 COOKIE_NAME = "chengying_download_session"
 VIDEO_EXTENSIONS = frozenset(
@@ -179,6 +181,7 @@ def install_desktop_adapter(
     engine, *, token: str, origin: str, assets: Path, proxy_settings=None
 ):
     application = engine.app
+    maintenance = UpdateMaintenance(engine.manager)
     # The original engine/API/static files remain unmodified. Only its host page
     # receives desktop affordances; its own build handshake still covers its source.
     application.router.routes[:] = [
@@ -247,6 +250,22 @@ def install_desktop_adapter(
             Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         )
         return {"chrome_installed": any(path.is_file() for path in chrome_paths)}
+
+    @application.get("/api/native/activity", include_in_schema=False)
+    def native_activity():
+        return maintenance.activity()
+
+    @application.put("/api/native/maintenance/{identifier}", include_in_schema=False)
+    def acquire_maintenance(identifier: UUID):
+        return maintenance.acquire(str(identifier))
+
+    @application.delete("/api/native/maintenance/{identifier}", include_in_schema=False)
+    def release_maintenance(identifier: UUID):
+        return maintenance.release(str(identifier))
+
+    @application.put("/api/native/maintenance/{identifier}/commit", include_in_schema=False)
+    def commit_maintenance(identifier: UUID):
+        return maintenance.commit(str(identifier))
 
     def require_proxy_settings():
         if proxy_settings is None:
@@ -341,5 +360,6 @@ def install_desktop_adapter(
         return await run_in_threadpool(probe)
 
     application.mount("/native", StaticFiles(directory=assets), name="desktop-assets")
+    application.add_middleware(UpdateMaintenanceMiddleware, maintenance=maintenance)
     application.add_middleware(DesktopSessionMiddleware, token=token, origin=origin)
     return application

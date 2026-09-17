@@ -22,6 +22,8 @@ final class ImageViewerWindowController: NSWindowController {
   static var instances: [ImageViewerWindowController] = []
   var inputs: [[URL]] = []
   var isBusy = false
+  var isSlideshowRunning = false
+  var isActiveForUpdate: Bool { isBusy || isSlideshowRunning }
   var cancelCount = 0
 
   init(urls: [URL]) {

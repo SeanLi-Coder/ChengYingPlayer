@@ -14,6 +14,7 @@ done
 
 # Compile the actual AppKit controller and bridge against small playback doubles.
 xcrun swiftc -o "$test_bundle/MacOS/NativeControlsTests" \
+  "$project_root/iina/Updates/UpdateWorkAdmission.swift" \
   "$project_root/Tools/VideoToolsTests/Stubs.swift" \
   "$project_root/iina/ChengYingStyle.swift" \
   "$project_root/iina/MediaInfo/MediaInfoModels.swift" \
@@ -31,12 +32,14 @@ for language in en zh-Hans zh-Hant; do
 done
 
 xcrun swiftc -o "$test_dir/RotationCoordinatorTests" \
+  "$project_root/iina/Updates/UpdateWorkAdmission.swift" \
   "$project_root/iina/VideoTools/VideoToolsModels.swift" \
   "$project_root/iina/VideoTools/VideoToolsRotationCoordinator.swift" \
   "$project_root/Tools/VideoToolsTests/RotationCoordinatorTests.swift"
 "$test_dir/RotationCoordinatorTests"
 
 xcrun swiftc -o "$test_bundle/MacOS/TaskManagerTests" \
+  "$project_root/iina/Updates/UpdateWorkAdmission.swift" \
   "$project_root/iina/VideoTools/VideoToolsModels.swift" \
   "$project_root/iina/VideoTools/VideoToolsRotationCoordinator.swift" \
   "$project_root/iina/VideoTools/VideoToolsTaskManager.swift" \

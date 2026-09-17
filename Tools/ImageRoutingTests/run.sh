@@ -4,6 +4,7 @@ project_root="$(cd "$(dirname "$0")/../.." && pwd)"
 test_dir="$(mktemp -d "${TMPDIR:-/tmp}/chengying-image-routing-tests.XXXXXX")"
 trap 'rm -rf "$test_dir"' EXIT
 sources=(
+  "$project_root/iina/Updates/UpdateWorkAdmission.swift"
   "$project_root/Tools/ImageRoutingTests/Stubs.swift"
   "$project_root/iina/ImageViewer/ImageFileSupport.swift"
   "$project_root/iina/PlaylistPlaybackPolicy.swift"

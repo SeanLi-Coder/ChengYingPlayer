@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 VENDORED_ASSETS = ROOT / "Tools/DownloaderHelper/vendor/rednote/app/static"
 DESKTOP_ASSETS = ROOT / "Tools/DownloaderHelper/static"
 STOP = threading.Event()
+DRAIN_OBSERVED = threading.Event()
+UPDATE_LEASE = None
 PROXY_LOCK = threading.RLock()
 PROXY = {"enabled": False, "url": "", "read_error": "", "busy": False,
          "reads": 0, "writes": 0, "tests": 0, "config_writes": 0}
@@ -76,12 +78,32 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         self.fixture_mutation()
 
+    def do_DELETE(self):
+        self.fixture_mutation()
+
     def do_POST(self):
         self.fixture_mutation()
 
     def fixture_mutation(self):
+        global UPDATE_LEASE
         if self.headers.get("Cookie") != "chengying_download_session=" + TOKEN:
             self.json_response({}, 401)
+            return
+        if self.path.startswith("/api/native/maintenance/"):
+            parts = self.path.split("/")
+            identifier = parts[4]
+            if self.path.endswith("/commit"):
+                DRAIN_OBSERVED.clear()
+                self.json_response({"acquired": UPDATE_LEASE == identifier})
+            elif self.command == "DELETE":
+                if UPDATE_LEASE == identifier:
+                    UPDATE_LEASE = None
+                self.json_response({"released": True})
+            else:
+                acquired = UPDATE_LEASE in (None, identifier)
+                if acquired:
+                    UPDATE_LEASE = identifier
+                self.json_response({"acquired": acquired})
             return
         if MODE != "frontend":
             self.json_response({}, 404)
@@ -130,6 +152,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Cookie") != "chengying_download_session=" + TOKEN:
             self.send_response(401)
             self.end_headers()
+            return
+        if self.path == "/api/native/activity":
+            self.json_response({"known": MODE != "activity_unknown", "busy": UPDATE_LEASE is not None})
+            if MODE == "update_drain" and UPDATE_LEASE is not None:
+                DRAIN_OBSERVED.set()
             return
         if self.path.startswith("/api/native/output?"):
             job = parse_qs(urlsplit(self.path).query).get("job_id", [""])[0]
@@ -255,5 +282,7 @@ else:
     print(json.dumps(ready), flush=True)
 sys.stdin.read()
 STOP.set()
+if MODE == "update_drain":
+    DRAIN_OBSERVED.wait(timeout=10)
 server.shutdown()
 server.server_close()

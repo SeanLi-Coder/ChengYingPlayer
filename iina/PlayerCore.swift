@@ -86,6 +86,7 @@ class PlayerCore: NSObject {
    */
   @discardableResult
   static func openURLs(_ urls: [URL]) -> Int? {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return nil }
     guard !urls.isEmpty else { return 0 }
     guard urls.allSatisfy(\.isFileURL) else {
       Utility.showAlert("local_media_only", style: .informational)
@@ -382,6 +383,7 @@ class PlayerCore: NSObject {
   // MARK: - Control
 
   private func open(_ url: URL?, shouldAutoLoad: Bool = false) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     guard let url = url else {
       log("empty file path or url", level: .error)
       return
@@ -417,6 +419,7 @@ class PlayerCore: NSObject {
    */
   @discardableResult
   func openURLs(_ urls: [URL], shouldAutoLoad autoLoad: Bool = true) -> Int? {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return nil }
     guard !urls.isEmpty else { return 0 }
     guard urls.allSatisfy(\.isFileURL) else {
       Utility.showAlert("local_media_only", style: .informational)
@@ -430,6 +433,7 @@ class PlayerCore: NSObject {
   /// Only call after ImageViewerCoordinator has removed standalone image inputs.
   @discardableResult
   func openMediaURLs(_ urls: [URL], shouldAutoLoad autoLoad: Bool = true) -> Int? {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return nil }
     guard !urls.isEmpty else { return 0 }
     guard urls.allSatisfy(\.isFileURL) else {
       Utility.showAlert("local_media_only", style: .informational)
@@ -483,6 +487,7 @@ class PlayerCore: NSObject {
   }
 
   func openURLString(_ str: String) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     if str == "-" {
       openMainWindow(path: str, url: URL(string: "stdin")!, isNetwork: false)
       return
@@ -799,6 +804,7 @@ class PlayerCore: NSObject {
   /// - Important: Although primary responsibility for ensuring the display link is running when playback is in progress belongs to
   ///     the `pauseChanged` method, this method calls `displayActive` to provide more time for the display link to start up.
   func resume() {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     log("Resuming playback")
     mainWindow.videoView.displayActive()
     // Restart playback when reached EOF
@@ -1321,6 +1327,7 @@ class PlayerCore: NSObject {
   }
 
   func loadExternalVideoFile(_ url: URL) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     guard url.isFileURL else { return }
     mpv.command(.videoAdd, args: [url.path], checkError: false) { code in
       if code < 0 {
@@ -1333,6 +1340,7 @@ class PlayerCore: NSObject {
   }
 
   func loadExternalAudioFile(_ url: URL) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     guard url.isFileURL else { return }
     mpv.command(.audioAdd, args: [url.path], checkError: false) { code in
       if code < 0 {
@@ -1518,6 +1526,7 @@ class PlayerCore: NSObject {
   ///     clicking in the playlist on the entry that is currently playing reloads that entry.
   /// - Parameter pos: Position of the entry in the playlist to be played.
   func playFileInPlaylist(_ pos: Int) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     mainWindow.videoView.displayActive()
     if !mpv.getFlag(MPVOption.PlaybackControl.pause) {
       log("Pausing playback before playing entry at index \(pos) in the playlist")
@@ -1542,6 +1551,7 @@ class PlayerCore: NSObject {
   ///     resumes playback.
   /// - Parameter nextMedia: When `true` play the next entry in the playlist; otherwise play the previous entry.
   func navigateInPlaylist(nextMedia: Bool) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     if nextMedia == false && (info.playlist.first?.isPlaying) ?? false {
       seek(absoluteSecond: 0)
     } else {

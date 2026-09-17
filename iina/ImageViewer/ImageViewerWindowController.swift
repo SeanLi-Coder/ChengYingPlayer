@@ -77,6 +77,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private static let intervalPreference = "ChengYing.ImageSlideshow.Interval"
   private static let loopPreference = "ChengYing.ImageSlideshow.Loop"
   var isSlideshowRunning: Bool { slideshow.isRunning }
+  var isActiveForUpdate: Bool { isBusy || slideshow.isRunning || wasSlideshowRunningBeforeMiniaturize }
   var slideshowInterval: TimeInterval { slideshow.interval }
   private let listQueue = DispatchQueue(label: "io.chengying.image.list", qos: .userInitiated)
   private let decodeQueue = DispatchQueue(label: "io.chengying.image.decode", qos: .userInitiated)
@@ -285,6 +286,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   func open(urls: [URL]) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     closed = false
     stopSlideshow()
     wasAnimatingBeforeMiniaturize = false
@@ -540,6 +542,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
 
   // Slideshow deadlines are independent of an animated image's per-frame timer.
   @objc private func toggleSlideshow() {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     if slideshow.isRunning || wasSlideshowRunningBeforeMiniaturize { stopSlideshow(); return }
     guard !closed, !isBusy, !isListing, files.count > 1, window?.attachedSheet == nil,
           window?.isMiniaturized != true else { return }
@@ -825,7 +828,9 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   func beginConversion(url: URL, format: ImageConversionFormat, frameIndex: Int?) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     guard !isBusy, !closed else { return }
+    guard let updateActivity = UpdateWorkAdmission.shared.beginActivity(reason: "busy.images") else { return }
     stopSlideshow()
     let token = ImageCancellationToken()
     conversionToken = token
@@ -837,6 +842,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     statusLabel.stringValue = "正在转换 \(url.lastPathComponent)…"
     updateControls()
     conversionQueue.async { [weak self] in
+      defer { UpdateWorkAdmission.shared.endActivity(updateActivity) }
       do {
         let output = try ImageConverter.convert(url: url, format: format, frameIndex: frameIndex, token: token) { value in
           DispatchQueue.main.async { [weak self] in

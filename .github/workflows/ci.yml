@@ -72,6 +72,9 @@ jobs:
           bash Tools/PlayerChromeLifecycleTests/run.sh
           bash Tools/PlayerChromeIntegrationTests/run.sh
 
+      - name: Test update activity barriers and helper shutdown
+        run: bash Tools/UpdateActivityTests/run.sh
+
       - name: Test DMG packaging safety
         run: |
           bash Tools/DMGPackagingTests/run.sh
@@ -237,6 +240,7 @@ jobs:
           -scheme iina
           -configuration Release
           -derivedDataPath "$RUNNER_TEMP/DerivedData"
+          -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages"
           ONLY_ACTIVE_ARCH=YES
           ARCHS=arm64
           CODE_SIGN_STYLE=Manual
@@ -402,6 +406,26 @@ jobs:
             fi
           done
 
+      - name: Test signed update archives and feed rejection
+        timeout-minutes: 5
+        run: >-
+          SPARKLE_TEST_ROOT="$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle"
+          bash Tools/SparkleUpdateTests/run.sh
+
+      - name: Test native update interface and state transitions
+        timeout-minutes: 5
+        run: >-
+          SPARKLE_FRAMEWORK_DIR="$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64"
+          bash Tools/AppUpdateTests/run.sh
+
+      - name: Test real signed update installation and relaunch
+        timeout-minutes: 5
+        run: |
+          export SPARKLE_TEST_ROOT="$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle"
+          export SPARKLE_INSTALLED_APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
+          python -B Tools/AppUpdateIntegrationTests/run.py
+          python -B Tools/AppUpdateIntegrationTests/run.py --scenario tampered-dmg
+
       - name: Test real application loop boundaries
         timeout-minutes: 5
         run: >-
@@ -426,6 +450,22 @@ jobs:
             echo "path=$dmg_path"
             echo "checksum=${dmg_path}.sha256"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Sign and independently verify the release update feed
+        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'SeanLi-Coder/ChengYingPlayer'
+        timeout-minutes: 15
+        id: appcast
+        env:
+          SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          python -B other/generate_update_feed.py \
+            --app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app" \
+            --archive "${{ steps.dmg.outputs.path }}" \
+            --output "$RUNNER_TEMP/appcast.xml" \
+            --tag "$GITHUB_REF_NAME" \
+            --sparkle-root "$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle"
+          echo "path=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_OUTPUT"
 
       - name: Package release source
         if: startsWith(github.ref, 'refs/tags/')
@@ -452,7 +492,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload verified release artifacts
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'SeanLi-Coder/ChengYingPlayer'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ChengYingPlayer-macOS-Release
@@ -462,17 +502,25 @@ jobs:
             ${{ steps.package.outputs.source_archive }}
             ${{ steps.package.outputs.source_checksum }}
             ${{ steps.package.outputs.source_manifest }}
+            ${{ steps.appcast.outputs.path }}
           if-no-files-found: error
           retention-days: 14
 
   publish-release:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'SeanLi-Coder/ChengYingPlayer'
     needs: [media-helper-tests, build-apple-silicon]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: chengying-release-publication
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
       - name: Download verified release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -489,8 +537,9 @@ jobs:
           dmgs=(dist/*-Apple-Silicon.dmg)
           checksums=(dist/*.sha256)
           manifests=(dist/*-Third-Party-Source-Manifest.txt)
-          if (( ${#archives[@]} != 1 || ${#dmgs[@]} != 1 || ${#checksums[@]} != 2 || ${#manifests[@]} != 1 )); then
-            echo "Expected one DMG, one release-source archive, both checksums, and one source manifest." >&2
+          appcasts=(dist/appcast.xml)
+          if (( ${#archives[@]} != 1 || ${#dmgs[@]} != 1 || ${#checksums[@]} != 2 || ${#manifests[@]} != 1 )) || [[ ! -s dist/appcast.xml ]]; then
+            echo "Expected one DMG, one release-source archive, both checksums, one source manifest, and a signed appcast." >&2
             find dist -maxdepth 2 -type f -print >&2
             exit 1
           fi
@@ -499,13 +548,23 @@ jobs:
             "ChengYingPlayer-${GITHUB_REF_NAME}-Apple-Silicon.dmg.sha256" \
             "ChengYingPlayer-${GITHUB_REF_NAME}-Release-Source.tar.gz" \
             "ChengYingPlayer-${GITHUB_REF_NAME}-Release-Source.tar.gz.sha256" \
-            "ChengYingPlayer-${GITHUB_REF_NAME}-Third-Party-Source-Manifest.txt"; do
+            "ChengYingPlayer-${GITHUB_REF_NAME}-Third-Party-Source-Manifest.txt" \
+            "appcast.xml"; do
             test -s "dist/$expected_asset"
           done
           for checksum in "${checksums[@]}"; do
             (cd dist && sha256sum --check "$(basename "$checksum")")
           done
-          release_assets=("${dmgs[@]}" "${archives[@]}" "${checksums[@]}" "${manifests[@]}")
+          release_assets=("${dmgs[@]}" "${archives[@]}" "${checksums[@]}" "${manifests[@]}" "${appcasts[@]}")
+
+          # Serialize publication and never move the stable feed to an older version.
+          latest_tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          gh api --method GET "repos/$GITHUB_REPOSITORY/contents/Configs/Deployment.xcconfig" \
+            -f "ref=$latest_tag" > "$RUNNER_TEMP/previous-release-config.json"
+          python3 -B other/validate_release_progress.py \
+            --previous-tag "$latest_tag" --tag "$GITHUB_REF_NAME" \
+            --previous-configuration "$RUNNER_TEMP/previous-release-config.json" \
+            --appcast dist/appcast.xml
 
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             if [[ "$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" != true ]]; then
@@ -518,6 +577,7 @@ jobs:
               "$(basename "${checksums[0]}")"
               "$(basename "${checksums[1]}")"
               "$(basename "${manifests[0]}")"
+              "appcast.xml"
             )
             mapfile -t existing_assets < <(
               gh release view "$GITHUB_REF_NAME" \
@@ -586,7 +646,7 @@ jobs:
           assets = release["assets"]
           if release.get("id") != int(sys.argv[2]) or release.get("tag_name") != sys.argv[3] or release.get("draft") is not True:
               raise SystemExit("The resolved release identity or draft state changed before verification.")
-          if len(expected) != 5 or len(assets) != len(expected) or {asset["name"] for asset in assets} != set(expected):
+          if len(expected) != 6 or len(assets) != len(expected) or {asset["name"] for asset in assets} != set(expected):
               raise SystemExit("The draft release does not contain exactly the verified asset set.")
           for asset in assets:
               path = expected[asset["name"]]
@@ -594,6 +654,6 @@ jobs:
                   digest = hashlib.file_digest(stream, "sha256").hexdigest()
               if asset["state"] != "uploaded" or asset["size"] != path.stat().st_size or asset.get("digest") != f"sha256:{digest}":
                   raise SystemExit(f"Uploaded release asset failed integrity verification: {path.name}")
-          print("All DMG, corresponding source, checksum and manifest assets are complete and verified.")
+          print("All DMG, corresponding source, checksum, manifest and signed appcast assets are complete and verified.")
           PY
           gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

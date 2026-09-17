@@ -632,11 +632,27 @@
 		</dict>
 	</array>
 	<key>SUAllowsAutomaticUpdates</key>
-	<false/>
+	<true/>
 	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
 	<false/>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/SeanLi-Coder/ChengYingPlayer/main/appcast.xml</string>
+	<string>https://github.com/SeanLi-Coder/ChengYingPlayer/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>vPLw62egDdxWcDUL2j8/OR3GH8wKO00zPPnuRZZM4CI=</string>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUSignedFeedFailureExpirationInterval</key>
+	<integer>0</integer>
+	<key>SUEnableSystemProfiling</key>
+	<false/>
+	<key>SUEnableJavaScript</key>
+	<false/>
+	<key>SUShowReleaseNotes</key>
+	<false/>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>

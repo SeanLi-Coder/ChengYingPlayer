@@ -45,6 +45,8 @@ final class DownloadCenterService {
   private var startupTimeout: DispatchWorkItem?
   private var receivedReady = false
   private var requests: [UUID: DownloadCenterRequest] = [:]
+  private var updateLease: UUID?
+  private var updateDrainingLease: UUID?
   private let locations: () throws -> Locations
   private let startupTimeoutInterval: TimeInterval
 
@@ -55,6 +57,7 @@ final class DownloadCenterService {
 
   func start() {
     precondition(Thread.isMainThread)
+    guard !UpdateWorkAdmission.shared.isHelperRestartBlocked else { return }
     guard !isRunning else { return }
     guard Self.supportsRuntime else { state = .failed(.unsupportedSystem); return }
     generation = UUID()
@@ -76,6 +79,142 @@ final class DownloadCenterService {
     requests.removeAll()
     queue.sync { stopProcess() }
     state = .idle
+  }
+
+  /// Nil means that the backend could not authoritatively report its activity.
+  func updateActivity(completion: @escaping (Bool?) -> Void) {
+    precondition(Thread.isMainThread)
+    switch state {
+    case .failed(.alreadyRunning):
+      // Another owner may still be writing the shared download store.
+      completion(nil)
+    case .idle, .failed:
+      let identifier = generation
+      queue.async { [weak self] in
+        let running = self?.process?.isRunning == true || UpdateWorkAdmission.shared.hasDrainingProcesses
+        DispatchQueue.main.async { [weak self] in
+          completion(self?.generation != identifier || running ? nil : false)
+        }
+      }
+    case .starting:
+      completion(nil)
+    case .ready:
+      updateRequest(path: "api/native/activity", method: "GET") { result in
+        guard let data = try? result.get(),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              value["known"] as? Bool == true, let busy = value["busy"] as? Bool else {
+          completion(nil); return
+        }
+        completion(busy)
+      }
+    }
+  }
+
+  func acquireUpdateLease(_ identifier: UUID, completion: @escaping (Bool) -> Void) {
+    precondition(Thread.isMainThread)
+    guard updateLease == nil else { completion(false); return }
+    updateLease = identifier
+    switch state {
+    case .idle, .failed:
+      updateActivity { [weak self] busy in
+        guard let self, self.updateLease == identifier, busy == false else { completion(false); return }
+        // A failed startup with a confirmed dead child has no backend left to lease.
+        self.state = .idle
+        completion(true)
+      }
+      return
+    case .starting:
+      completion(false)
+      return
+    case .ready:
+      break
+    }
+    updateRequest(path: "api/native/maintenance/\(identifier.uuidString.lowercased())", method: "PUT") { result in
+      guard let data = try? result.get(),
+            let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        completion(false); return
+      }
+      completion(value["acquired"] as? Bool == true)
+    }
+  }
+
+  func releaseUpdateLease(_ identifier: UUID) {
+    precondition(Thread.isMainThread)
+    guard updateLease == identifier else { return }
+    updateLease = nil
+    // EOF has committed this helper to exit. Reopening its backend admission now
+    // could accept a download just before the helper's shutdown cancels workers.
+    guard updateDrainingLease != identifier else { return }
+    releaseUpdateLeaseRequest(identifier, generation: generation)
+  }
+
+  private func releaseUpdateLeaseRequest(_ identifier: UUID, generation: UUID) {
+    guard self.generation == generation, case .ready = state else { return }
+    updateRequest(path: "api/native/maintenance/\(identifier.uuidString.lowercased())", method: "DELETE") { [weak self] result in
+      guard let self, self.generation == generation else { return }
+      if let data = try? result.get(),
+         let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+         value["released"] as? Bool == true { return }
+      // Retry an uncertain release using the same identity, never somebody else's lease.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        self?.releaseUpdateLeaseRequest(identifier, generation: generation)
+      }
+    }
+  }
+
+  func shutdownForUpdate(_ identifier: UUID, completion: @escaping (Bool) -> Void) {
+    precondition(Thread.isMainThread)
+    guard updateLease == identifier else { completion(false); return }
+    if case .idle = state { drainForUpdate(identifier, completion: completion); return }
+    updateRequest(path: "api/native/maintenance/\(identifier.uuidString.lowercased())/commit", method: "PUT") { [weak self] result in
+      guard let self, self.updateLease == identifier,
+            let data = try? result.get(),
+            let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            value["acquired"] as? Bool == true else { completion(false); return }
+      self.drainForUpdate(identifier, completion: completion)
+    }
+  }
+
+  private func drainForUpdate(_ identifier: UUID, completion: @escaping (Bool) -> Void) {
+    guard updateLease == identifier else { completion(false); return }
+    updateDrainingLease = identifier
+    generation = UUID()
+    let drainGeneration = generation
+    let reservation = UpdateProcessDrain.reserve()
+    queue.async { [weak self] in
+      guard let self else {
+        UpdateProcessDrain.wait(for: nil, reservation: reservation) { _ in completion(false) }
+        return
+      }
+      let child = self.process
+      // A held idle lease excludes both queued workers and new browser submissions.
+      // EOF is graceful; unlike normal shutdown this never schedules termination.
+      self.detachProcess()
+      UpdateProcessDrain.wait(for: child, reservation: reservation, onExit: { [weak self] in
+        guard let self else { return }
+        if self.updateDrainingLease == identifier { self.updateDrainingLease = nil }
+        guard self.generation == drainGeneration else { return }
+        self.state = .idle
+      }) { [weak self] success in
+        if !success, self?.generation == drainGeneration { self?.state = .failed(.timeout) }
+        completion(success)
+      }
+    }
+  }
+
+  private func updateRequest(path: String, method: String,
+                             completion: @escaping (Result<Data, Error>) -> Void) {
+    guard case .ready(let session) = state else { completion(.failure(DownloadCenterError.stopped)); return }
+    let identifier = generation
+    let requestID = UUID()
+    let request = DownloadCenterRequest(url: session.url.appendingPathComponent(path), session: session, method: method) { [weak self] result in
+      guard let self else { completion(.failure(DownloadCenterError.stopped)); return }
+      self.requests.removeValue(forKey: requestID)
+      guard self.generation == identifier else { completion(.failure(DownloadCenterError.stopped)); return }
+      completion(result)
+    }
+    requests[requestID] = request
+    request.start()
   }
 
   func resolveOutput(jobID: String, itemID: String, index: Int,
@@ -213,6 +352,8 @@ final class DownloadCenterService {
     // subprocess-tree cleanup; never kill arbitrary Chrome or Python processes.
     detachProcess()
     guard let child, child.isRunning else { return }
+    // Keep retired children visible to the updater after detaching their transport.
+    UpdateProcessDrain.wait(for: child) { _ in }
     DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5) {
       guard child.isRunning else { return }
       child.terminate()
@@ -228,9 +369,11 @@ private final class DownloadCenterRequest: NSObject, URLSessionDataDelegate {
   private var task: URLSessionDataTask?
   private var received = Data()
   private var acceptedResponse = false
+  private let method: String
 
-  init(url: URL, session: DownloadCenterSession, completion: @escaping (Result<Data, Error>) -> Void) {
+  init(url: URL, session: DownloadCenterSession, method: String = "GET", completion: @escaping (Result<Data, Error>) -> Void) {
     self.url = url
+    self.method = method
     credentials = session
     self.completion = completion
     super.init()
@@ -248,6 +391,7 @@ private final class DownloadCenterRequest: NSObject, URLSessionDataDelegate {
     let session = URLSession(configuration: configuration, delegate: self, delegateQueue: .main)
     connection = session
     var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+    request.httpMethod = method
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     request.setValue("\(DownloadCenterSession.cookieName)=\(credentials.token)", forHTTPHeaderField: "Cookie")
     task = session.dataTask(with: request)

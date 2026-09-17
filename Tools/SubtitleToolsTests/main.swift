@@ -28,6 +28,19 @@ try Data("Source fixture".utf8).write(to: source)
 let originalBytes = try Data(contentsOf: source)
 let transport = SubtitleTransportDouble()
 let service = SubtitleToolsService(transport: transport, hardware: supported)
+let updateBarrier = UUID()
+check(UpdateWorkAdmission.shared.acquire(updateBarrier), "Subtitle update fixture acquires native admission")
+service.refreshStatus()
+for operation in ["prepare", "subtitles"] {
+  do {
+    if operation == "prepare" { _ = try service.prepareModels() }
+    else { _ = try service.start(inputURL: source, language: "auto", burnSubtitles: false) }
+    fatalError("FAIL: Update barrier accepted subtitle work")
+  } catch SubtitleToolsError.busy {
+    check(service.task == nil, "Update barrier rejects subtitle work before creating a task")
+  }
+}
+UpdateWorkAdmission.shared.release(updateBarrier)
 let player = PlayerCore()
 player.info.currentURL = source
 let controller = SubtitleToolsViewController(player: player, service: service)

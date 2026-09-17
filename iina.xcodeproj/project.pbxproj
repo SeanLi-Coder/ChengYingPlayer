@@ -7,6 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D4F100010000000000000001 /* UpdatePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F100020000000000000001 /* UpdatePolicy.swift */; };
+		D4F100010000000000000002 /* AppUpdateWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F100020000000000000002 /* AppUpdateWindowController.swift */; };
+		D4F100010000000000000003 /* AppUpdateUserDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F100020000000000000003 /* AppUpdateUserDriver.swift */; };
+		D4F100010000000000000004 /* AppUpdateCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F100020000000000000004 /* AppUpdateCoordinator.swift */; };
+		D4F100010000000000000005 /* UpdateWorkAdmission.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F100020000000000000005 /* UpdateWorkAdmission.swift */; };
+		D4F100010000000000000006 /* UpdateActivityGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F100020000000000000006 /* UpdateActivityGate.swift */; };
+		D4F100010000000000000007 /* Updates.strings in Resources */ = {isa = PBXBuildFile; fileRef = D4F100040000000000000001 /* Updates.strings */; };
 		D4D100010000000000000001 /* MediaInfoModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4D100020000000000000001 /* MediaInfoModels.swift */; };
 		D4D100010000000000000002 /* MediaInfoLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4D100020000000000000002 /* MediaInfoLoader.swift */; };
 		D4D100010000000000000003 /* MediaInfoCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4D100020000000000000003 /* MediaInfoCoordinator.swift */; };
@@ -421,6 +428,15 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D4F100020000000000000001 /* UpdatePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatePolicy.swift; sourceTree = "<group>"; };
+		D4F100020000000000000002 /* AppUpdateWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateWindowController.swift; sourceTree = "<group>"; };
+		D4F100020000000000000003 /* AppUpdateUserDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateUserDriver.swift; sourceTree = "<group>"; };
+		D4F100020000000000000004 /* AppUpdateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateCoordinator.swift; sourceTree = "<group>"; };
+		D4F100020000000000000005 /* UpdateWorkAdmission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateWorkAdmission.swift; sourceTree = "<group>"; };
+		D4F100020000000000000006 /* UpdateActivityGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateActivityGate.swift; sourceTree = "<group>"; };
+		D4F100050000000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Updates.strings; sourceTree = "<group>"; };
+		D4F100050000000000000002 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Updates.strings"; sourceTree = "<group>"; };
+		D4F100050000000000000003 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Updates.strings"; sourceTree = "<group>"; };
 		D4D100020000000000000001 /* MediaInfoModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaInfoModels.swift; sourceTree = "<group>"; };
 		D4D100020000000000000002 /* MediaInfoLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaInfoLoader.swift; sourceTree = "<group>"; };
 		D4D100020000000000000003 /* MediaInfoCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaInfoCoordinator.swift; sourceTree = "<group>"; };
@@ -1922,6 +1938,19 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		D4F100030000000000000001 /* Updates */ = {
+			isa = PBXGroup;
+			children = (
+				D4F100020000000000000001 /* UpdatePolicy.swift */,
+				D4F100020000000000000002 /* AppUpdateWindowController.swift */,
+				D4F100020000000000000003 /* AppUpdateUserDriver.swift */,
+				D4F100020000000000000004 /* AppUpdateCoordinator.swift */,
+				D4F100020000000000000005 /* UpdateWorkAdmission.swift */,
+				D4F100020000000000000006 /* UpdateActivityGate.swift */,
+			);
+			path = Updates;
+			sourceTree = "<group>";
+		};
 		D4D100030000000000000001 /* MediaInfo */ = {
 			isa = PBXGroup;
 			children = (
@@ -2134,6 +2163,7 @@
 				84EB1EE01D2F51D3004FA5A1 /* Info.plist */,
 				845AC09E1E1AE6C10080B614 /* Localizable.strings */,
 				D4D100040000000000000001 /* MediaInfo.strings */,
+				D4F100040000000000000001 /* Updates.strings */,
 				D4C800302F6A000100000001 /* SubtitleTools.strings */,
 				D4CB00302F6A000100000001 /* DownloadCenter.strings */,
 				D4CA00302F6A000100000001 /* PlaylistBrowser.strings */,
@@ -2146,6 +2176,7 @@
 		84A0BAA31D2FAEA000BC8DA1 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				D4F100030000000000000001 /* Updates */,
 				D4C700202F6A000100000001 /* VideoTools */,
 				D4C800202F6A000100000001 /* SubtitleTools */,
 				D4CB00202F6A000100000001 /* DownloadCenter */,
@@ -2817,6 +2848,7 @@
 				849581F31F03D55A00D3B359 /* InitialWindowController.xib in Resources */,
 				845AC09C1E1AE6C10080B614 /* Localizable.strings in Resources */,
 				D4D100010000000000000007 /* MediaInfo.strings in Resources */,
+				D4F100010000000000000007 /* Updates.strings in Resources */,
 				D4C800052F6A000100000005 /* SubtitleTools.strings in Resources */,
 				D4CB00042F6A000100000004 /* DownloadCenter.strings in Resources */,
 				D4CA00042F6A000100000004 /* PlaylistBrowser.strings in Resources */,
@@ -2970,6 +3002,12 @@
 				D4C900012F6A000100000001 /* ChengYingStyle.swift in Sources */,
 				D4E100010000000000000001 /* PlayerEdgeControlsView.swift in Sources */,
 				D4E100010000000000000002 /* PlayerChromePolicy.swift in Sources */,
+				D4F100010000000000000001 /* UpdatePolicy.swift in Sources */,
+				D4F100010000000000000002 /* AppUpdateWindowController.swift in Sources */,
+				D4F100010000000000000003 /* AppUpdateUserDriver.swift in Sources */,
+				D4F100010000000000000004 /* AppUpdateCoordinator.swift in Sources */,
+				D4F100010000000000000005 /* UpdateWorkAdmission.swift in Sources */,
+				D4F100010000000000000006 /* UpdateActivityGate.swift in Sources */,
 				D4D100010000000000000001 /* MediaInfoModels.swift in Sources */,
 				D4D100010000000000000002 /* MediaInfoLoader.swift in Sources */,
 				D4D100010000000000000003 /* MediaInfoCoordinator.swift in Sources */,
@@ -3143,6 +3181,16 @@
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
+		D4F100040000000000000001 /* Updates.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				D4F100050000000000000001 /* en */,
+				D4F100050000000000000002 /* zh-Hans */,
+				D4F100050000000000000003 /* zh-Hant */,
+			);
+			name = Updates.strings;
+			sourceTree = "<group>";
+		};
 		D4D100040000000000000001 /* MediaInfo.strings */ = {
 			isa = PBXVariantGroup;
 			children = (
@@ -5032,7 +5080,7 @@
 			repositoryURL = "https://github.com/sparkle-project/Sparkle/";
 			requirement = {
 				kind = revision;
-				revision = 0ca3004e98712ea2b39dd881d28448630cce1c99;
+				revision = eef1a539a373c1f1a320624b1130fc5de7b2e100;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

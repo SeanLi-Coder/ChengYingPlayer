@@ -25,6 +25,8 @@ final class VideoToolsHelperClient {
   private var pendingRequests: [Data] = []
   private var isReady = false
   private var isStopping = false
+  private var uncertainActivity = false
+  var updateActivityIsUncertain: Bool { queue.sync { uncertainActivity && process?.isRunning == true } }
   private var terminationObserver: NSObjectProtocol?
 
   private init() {
@@ -74,6 +76,21 @@ final class VideoToolsHelperClient {
         process.terminate()
       }
       self.resetProcessState()
+    }
+  }
+
+  func shutdownForUpdate(completion: @escaping (Bool) -> Void) {
+    let reservation = UpdateProcessDrain.reserve()
+    queue.async {
+      let child = self.process
+      self.isStopping = true
+      if child?.isRunning == true,
+         let payload = try? self.encoder.encode(VideoToolsRequest.shutdown(id: UUID().uuidString)) + Data([0x0A]) {
+        try? self.write(payload)
+      }
+      try? self.inputHandle?.close()
+      self.inputHandle = nil
+      UpdateProcessDrain.wait(for: child, reservation: reservation, completion: completion)
     }
   }
 
@@ -235,6 +252,7 @@ final class VideoToolsHelperClient {
   }
 
   private func resetProcessState() {
+    uncertainActivity = false
     if let output = process?.standardOutput as? Pipe {
       output.fileHandleForReading.readabilityHandler = nil
     }
@@ -250,6 +268,7 @@ final class VideoToolsHelperClient {
   }
 
   private func reportFailure(_ error: Error) {
+    uncertainActivity = true
     DispatchQueue.main.async { [weak self] in
       self?.failureHandler?(error)
     }

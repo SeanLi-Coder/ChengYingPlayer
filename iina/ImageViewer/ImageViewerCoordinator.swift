@@ -54,6 +54,7 @@ final class ImageViewerCoordinator {
   private(set) var hasOpenedImages = false
 
   var isBusy: Bool { isOpening || (controller?.isBusy ?? false) }
+  var isActiveForUpdate: Bool { isBusy || (controller?.isActiveForUpdate ?? false) }
 
   static var blocksPlaybackMenu: Bool {
     blocksPlaybackMenu(keyWindow: NSApp.keyWindow, mainWindow: NSApp.mainWindow)
@@ -77,7 +78,7 @@ final class ImageViewerCoordinator {
   func openImages(in urls: [URL]) -> ImageOpenPlan {
     precondition(Thread.isMainThread, "Image windows must be opened on the main thread")
     let plan = ImageOpenPlan.make(urls, playbackExtensions: Set(Utility.playableFileExt))
-    guard !isShuttingDown, !plan.imageURLs.isEmpty else { return plan }
+    guard !UpdateWorkAdmission.shared.isBlocked, !isShuttingDown, !plan.imageURLs.isEmpty else { return plan }
     isOpening = true
     defer { isOpening = false }
     if let controller {

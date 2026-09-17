@@ -10,7 +10,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/playback_sources.sh"
 JUST_COMMIT="1824bf84cf52d11d69ae20cfb89f0ce5bffa5650"
 PROMISEKIT_COMMIT="8a98e31a47854d3180882c8068cc4d9381bf382d"
 GRMUSTACHE_COMMIT="6e9dcfb807959e19f2915be1928aeccf01babba5"
-SPARKLE_COMMIT="0ca3004e98712ea2b39dd881d28448630cce1c99"
+SPARKLE_COMMIT="eef1a539a373c1f1a320624b1130fc5de7b2e100"
 
 FFMPEG_VERSION="9.0.1"
 FFMPEG_SOURCE_FILE="ffmpeg-${FFMPEG_VERSION}.tar.xz"
@@ -118,7 +118,7 @@ third_party_source_records() {
     "grmustache" "$GRMUSTACHE_COMMIT" "GRMustache-$GRMUSTACHE_COMMIT.tar.gz" "https://github.com/groue/GRMustache.swift/archive/$GRMUSTACHE_COMMIT.tar.gz" \
     "382f070dd39429ff4c165060ce6975cd7e1ec506b978c3ad66e9127627538e47" \
     "sparkle" "$SPARKLE_COMMIT" "Sparkle-$SPARKLE_COMMIT.tar.gz" "https://github.com/sparkle-project/Sparkle/archive/$SPARKLE_COMMIT.tar.gz" \
-    "687e9327d7c08dfe745f09ce2ecd6df1566b4ee10d1989788722e0b3df18150b"
+    "fd2a5de329be3619111f9a73a1adeac9725a92292f0431c93679e5e2b0d48a04"
   playback_source_records
 }
 

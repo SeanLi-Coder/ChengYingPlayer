@@ -8,7 +8,6 @@
 
 import Cocoa
 import MediaPlayer
-import Sparkle
 
 let IINA_ENABLE_PLUGIN_SYSTEM = false
 
@@ -21,7 +20,7 @@ fileprivate let AlternativeMenuItemTag = 1
 
 
 @NSApplicationMain
-class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate {
 
   /// The `AppDelegate` singleton object.
   static var shared: AppDelegate { NSApp.delegate as! AppDelegate }
@@ -173,11 +172,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     }
   }
 
-  // MARK: - SPUUpdaterDelegate
-  @IBOutlet var updaterController: SPUStandardUpdaterController!
+  // MARK: - Application Updates
+  private(set) lazy var updateCoordinator = AppUpdateCoordinator(activity: UpdateActivityGate.shared)
 
-  func feedURLString(for updater: SPUUpdater) -> String? {
-    return Preference.bool(for: .receiveBetaUpdate) ? AppData.appcastBetaLink : AppData.appcastLink
+  @IBAction func checkForUpdates(_ sender: AnyObject) {
+    updateCoordinator.checkForUpdates(sender)
   }
 
   // MARK: - App Delegate
@@ -309,8 +308,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
     installVideoToolsShortcuts()
 
-    // see https://sparkle-project.org/documentation/api-reference/Classes/SPUUpdater.html#/c:objc(cs)SPUUpdater(im)clearFeedURLFromUserDefaults
-    updaterController.updater.clearFeedURLFromUserDefaults()
+    updateCoordinator.start()
 
     // show alpha in color panels
     NSColorPanel.shared.showsAlpha = true
@@ -426,6 +424,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard updateCoordinator.shouldAllowTerminationForUpdate() else { return .terminateCancel }
     Logger.log("App should terminate")
     isTerminating = true
     ImageViewerCoordinator.shared.cancelAndClose()
@@ -736,6 +735,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
    Therefore we must cache all possible calls and handle them together.
    */
   func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return false }
     openFileCalled = true
     openFileTimer?.invalidate()
     pendingFilesForOpenFile.append(filename)
@@ -746,6 +746,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   /** Handle pending file paths if `application(_:openFile:)` not being called again in `OpenFileRepeatTime`. */
   @objc
   func handleOpenFile() {
+    guard !UpdateWorkAdmission.shared.isBlocked else {
+      pendingFilesForOpenFile.removeAll()
+      return
+    }
     if !isReady {
       getReady()
     }
@@ -783,6 +787,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
   @objc
   func droppedText(_ pboard: NSPasteboard, userData:String, error: NSErrorPointer) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     if let url = pboard.string(forType: .string) {
       openFileCalled = true
       PlayerCore.active.openURLString(url)
@@ -811,6 +816,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   // MARK: - URL Scheme
 
   @objc func handleURLEvent(event: NSAppleEventDescriptor, withReplyEvent replyEvent: NSAppleEventDescriptor) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     openFileCalled = true
     guard let url = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue else { return }
     Logger.log("URL event received (\(urlEventLogSummary(url)))")
@@ -838,6 +844,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
      Options starting with `no-` are not supported.
    */
   private func parsePendingURL(_ url: String) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     guard let parsed = URLComponents(string: url) else {
       Logger.log("Cannot parse URL using URLComponents", level: .warning)
       return
@@ -939,6 +946,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   // MARK: - Menu actions
 
   @IBAction func openFile(_ sender: AnyObject) {
+    guard !UpdateWorkAdmission.shared.isBlocked else { return }
     Logger.log("Menu - Open file")
     let panel = NSOpenPanel()
     panel.title = NSLocalizedString("alert.choose_media_file.title", comment: "Choose Media File")
@@ -947,6 +955,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     panel.canChooseDirectories = true
     panel.allowsMultipleSelection = true
     if panel.runModal() == .OK {
+      guard !UpdateWorkAdmission.shared.isBlocked else { return }
       if Preference.bool(for: .recordRecentFiles) {
         for url in panel.urls {
           noteNewRecentDocumentURL(url)

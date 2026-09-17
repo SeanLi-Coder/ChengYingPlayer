@@ -236,6 +236,29 @@ private enum RotationCoordinatorTests {
       expect(!coordinator.state.hasQueuedRotation, "Launch errors must discard pending work")
     }
 
+    do {
+      let manager = RotationTaskDouble()
+      let coordinator = manager.coordinator(debounceInterval: 0.1)
+      let identifier = UUID()
+      expect(UpdateWorkAdmission.shared.acquire(identifier), "Update barrier can start while rotation is idle")
+      do {
+        try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
+        fatalError("Update barrier accepted a pending rotation")
+      } catch VideoToolsClientError.busy { checks += 1 }
+      expect(coordinator.state.phase == .idle && manager.requests.isEmpty,
+             "Blocked rotation leaves preview and export unchanged")
+      UpdateWorkAdmission.shared.release(identifier)
+      try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
+      expect(VideoToolsRotationCoordinator.hasPendingUpdateWork && manager.requests.isEmpty,
+             "Global activity sees debounced rotation before the export starts")
+      pump { manager.requests.count == 1 }
+      try coordinator.request(inputURL: source, clockwiseQuarterTurns: 1)
+      manager.finish(.completed)
+      expect(VideoToolsRotationCoordinator.hasPendingUpdateWork && coordinator.state.phase == .pending,
+             "Queued rotation remains busy across the completion-to-next-export gap")
+      coordinator.reset(cancelActive: false)
+      expect(!VideoToolsRotationCoordinator.hasPendingUpdateWork, "Reset clears pending activity")
+    }
     print("Rotation coordinator tests passed: \(checks) checks")
   }
 }

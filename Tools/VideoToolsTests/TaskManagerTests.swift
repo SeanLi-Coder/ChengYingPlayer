@@ -31,6 +31,15 @@ struct TaskManagerTests {
     let client = VideoToolsHelperClient.shared
     let source = URL(fileURLWithPath: "/tmp/source video.mov")
     let output = URL(fileURLWithPath: "/tmp/output folder", isDirectory: true)
+    let updateBarrier = UUID()
+    check(UpdateWorkAdmission.shared.acquire(updateBarrier), "An idle update barrier can be acquired")
+    do {
+      _ = try manager.start(operation: .convert, inputURL: source)
+      fatalError("FAIL: Update barrier accepted a new export")
+    } catch VideoToolsClientError.busy {
+      check(client.requests.isEmpty && manager.snapshot == nil, "Update barrier rejects export before any helper or task side effect")
+    }
+    UpdateWorkAdmission.shared.release(updateBarrier)
     let id = try manager.start(
       operation: .convert, inputURL: source, targetFormat: "mkv",
       conversionMode: "hevc", outputDirectory: output

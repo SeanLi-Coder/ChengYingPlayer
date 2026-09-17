@@ -20,6 +20,7 @@ final class SubtitleToolsService {
   private var lastModelRefresh = Date.distantPast
 
   var isReady: Bool { runtimeReady && models.allSatisfy(\.ready) }
+  var updateActivityIsUncertain: Bool { (transport as? SubtitleToolsHelperClient)?.updateActivityIsUncertain ?? true }
 
   init(transport: SubtitleToolsTransport, hardware: SubtitleToolsHardware) {
     self.transport = transport
@@ -30,6 +31,7 @@ final class SubtitleToolsService {
 
   func refreshStatus() {
     precondition(Thread.isMainThread)
+    guard !UpdateWorkAdmission.shared.isHelperRestartBlocked else { return }
     guard hardware.supportsRuntime, statusRequestID == nil else { return }
     let id = UUID().uuidString
     statusRequestID = id
@@ -73,8 +75,17 @@ final class SubtitleToolsService {
     transport.shutdown()
   }
 
+  func shutdownForUpdate(completion: @escaping (Bool) -> Void) {
+    precondition(Thread.isMainThread)
+    guard task?.isActive != true,
+          let client = transport as? SubtitleToolsHelperClient else { completion(false); return }
+    statusRequestID = nil
+    client.shutdownForUpdate(completion: completion)
+  }
+
   private func requireAvailable() throws {
     precondition(Thread.isMainThread)
+    guard !UpdateWorkAdmission.shared.isHelperRestartBlocked else { throw SubtitleToolsError.busy }
     guard hardware.supportsRuntime else { throw SubtitleToolsError.unsupportedHardware }
     guard task?.isActive != true else { throw SubtitleToolsError.busy }
   }
