@@ -69,11 +69,11 @@ final class VideoToolsTaskManager: VideoToolsRotationTaskManaging {
   var simulatesTaskLifecycle = false
   var startError: Error?
   @discardableResult
-  func start(operation: VideoToolsOperation, inputURL: URL, start: Double?, end: Double?, degrees: Int?, outputDirectory: URL?) throws -> String {
+  func start(operation: VideoToolsOperation, inputURL: URL, start: Double?, end: Double?, degrees: Int?, targetFormat: String? = nil, conversionMode: String? = nil, outputDirectory: URL?) throws -> String {
     if snapshot?.isActive == true { throw VideoToolsClientError.busy }
     if let startError { throw startError }
     let id = "test-\(requests.count + 1)"
-    let newRequest = VideoToolsRequest.start(id: id, operation: operation, inputURL: inputURL, start: start, end: end, degrees: degrees, outputDirectory: outputDirectory)
+    let newRequest = VideoToolsRequest.start(id: id, operation: operation, inputURL: inputURL, start: start, end: end, degrees: degrees, targetFormat: targetFormat, conversionMode: conversionMode, outputDirectory: outputDirectory)
     request = newRequest
     requests.append(newRequest)
     if simulatesTaskLifecycle {

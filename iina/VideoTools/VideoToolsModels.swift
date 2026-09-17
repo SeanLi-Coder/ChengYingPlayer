@@ -10,6 +10,7 @@ enum VideoToolsOperation: String, Codable {
   case clip
   case frames
   case rotate
+  case convert
 
   var localizedName: String {
     switch self {
@@ -21,6 +22,8 @@ enum VideoToolsOperation: String, Codable {
       return NSLocalizedString("videotools.operation.frames", comment: "Extract frames")
     case .rotate:
       return NSLocalizedString("videotools.operation.rotate", comment: "Rotate video")
+    case .convert:
+      return NSLocalizedString("videotools.operation.convert", comment: "Convert video format")
     }
   }
 }
@@ -43,6 +46,8 @@ struct VideoToolsRequest: Encodable {
   let start: Double?
   let end: Double?
   let degrees: Int?
+  let targetFormat: String?
+  let conversionMode: String?
   let outputDirectory: String?
   let targetID: String?
 
@@ -54,6 +59,8 @@ struct VideoToolsRequest: Encodable {
     case start
     case end
     case degrees
+    case targetFormat = "target_format"
+    case conversionMode = "conversion_mode"
     case outputDirectory = "output_directory"
     case targetID = "target_id"
   }
@@ -65,6 +72,8 @@ struct VideoToolsRequest: Encodable {
     start: Double? = nil,
     end: Double? = nil,
     degrees: Int? = nil,
+    targetFormat: String? = nil,
+    conversionMode: String? = nil,
     outputDirectory: URL? = nil
   ) -> VideoToolsRequest {
     VideoToolsRequest(
@@ -75,6 +84,8 @@ struct VideoToolsRequest: Encodable {
       start: start,
       end: end,
       degrees: degrees,
+      targetFormat: targetFormat,
+      conversionMode: conversionMode,
       outputDirectory: outputDirectory?.path,
       targetID: nil
     )
@@ -89,6 +100,8 @@ struct VideoToolsRequest: Encodable {
       start: nil,
       end: nil,
       degrees: nil,
+      targetFormat: nil,
+      conversionMode: nil,
       outputDirectory: nil,
       targetID: targetID
     )
@@ -103,6 +116,8 @@ struct VideoToolsRequest: Encodable {
       start: nil,
       end: nil,
       degrees: nil,
+      targetFormat: nil,
+      conversionMode: nil,
       outputDirectory: nil,
       targetID: nil
     )

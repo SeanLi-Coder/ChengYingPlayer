@@ -12,6 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from conversion import (
+    SUPPORTED_CONVERSION_FORMATS,
+    SUPPORTED_CONVERSION_MODES,
+    ConversionManager,
+)
 from media import (
     MAX_FRAME_EXTRACTION_SECONDS,
     SUPPORTED_ROTATION_DEGREES,
@@ -25,7 +30,7 @@ from media import (
 )
 
 PROTOCOL_VERSION = 1
-HELPER_VERSION = "1.0.0"
+HELPER_VERSION = "1.1.0"
 HELPER_NAME = "chengying-video-tools-helper"
 MAX_REQUEST_BYTES = 1024 * 1024
 POLL_INTERVAL_SECONDS = 0.2
@@ -97,6 +102,18 @@ def _optional_output_directory(request: dict[str, Any], source_path: Path) -> Pa
     if not isinstance(value, str) or not value.strip():
         raise RequestError("output_directory must be a non-empty string")
     return Path(value).expanduser().resolve()
+
+
+def _conversion_options(request: dict[str, Any]) -> tuple[str, str]:
+    target_format = request.get("target_format", "mp4")
+    mode = request.get("conversion_mode", "copy")
+    if not isinstance(target_format, str) or target_format not in SUPPORTED_CONVERSION_FORMATS:
+        raise RequestError("target_format must be mp4, mkv, or mov")
+    if not isinstance(mode, str) or mode not in SUPPORTED_CONVERSION_MODES:
+        raise RequestError("conversion_mode must be copy, h264, or hevc")
+    if any(request.get(key) is not None for key in ("start", "end", "degrees")):
+        raise RequestError("convert processes the complete video; range and rotation fields are not supported")
+    return target_format, mode
 
 
 def _json_safe(value: Any) -> Any:
@@ -189,6 +206,7 @@ class ProtocolServer:
             "frames": "frames",
             "extract_frames": "frames",
             "rotate": "rotate",
+            "convert": "convert",
         }
         normalized = aliases.get(operation)
         if normalized is None:
@@ -425,6 +443,9 @@ class ProtocolServer:
 
     def _run_task(self, task: ActiveTask) -> None:
         try:
+            conversion_options = (
+                _conversion_options(task.request) if task.operation == "convert" else None
+            )
             source = self._source_for_task(task)
             if task.operation == "probe":
                 if task.cancel_event.is_set():
@@ -490,6 +511,20 @@ class ProtocolServer:
                     cancel_event=task.cancel_event,
                 )
                 job = manager.create(source, degrees=task.request["degrees"])
+            elif task.operation == "convert":
+                assert conversion_options is not None
+                target_format, mode = conversion_options
+                manager = ConversionManager(
+                    ffmpeg=self.ffmpeg,
+                    ffprobe=self.ffprobe,
+                    cancel_event=task.cancel_event,
+                )
+                job = manager.create(
+                    source,
+                    target_format=target_format,
+                    mode=mode,
+                    output_directory=_optional_output_directory(task.request, source.path),
+                )
             else:
                 raise RequestError(f"Unsupported operation: {task.operation}")
 
@@ -609,10 +644,12 @@ class ProtocolServer:
                 "type": "ready",
                 "helper": HELPER_NAME,
                 "helper_version": HELPER_VERSION,
-                "operations": ["probe", "clip", "frames", "rotate"],
+                "operations": ["probe", "clip", "frames", "rotate", "convert"],
                 "max_frame_extraction_seconds": MAX_FRAME_EXTRACTION_SECONDS,
                 "default_frame_extraction_seconds": MAX_FRAME_EXTRACTION_SECONDS,
                 "supported_rotation_degrees": sorted(SUPPORTED_ROTATION_DEGREES),
+                "supported_conversion_formats": sorted(SUPPORTED_CONVERSION_FORMATS),
+                "supported_conversion_modes": sorted(SUPPORTED_CONVERSION_MODES),
             }
         )
 

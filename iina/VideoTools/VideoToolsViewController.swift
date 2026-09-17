@@ -9,6 +9,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private static let maximumFrameRange = 5.0
   private static let maximumTimestampSeconds = 359_999_999.0
   private static let playbackSpeeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 8.0, 16.0]
+  private static let conversionFormats = ["mp4", "mkv", "mov"]
+  private static let conversionModes = ["copy", "h264", "hevc"]
 
   private weak var player: PlayerCore?
   private weak var mainWindow: MainWindowController?
@@ -51,6 +53,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       NSLocalizedString("videotools.operation.clip", comment: "Clip video"),
       NSLocalizedString("videotools.operation.frames", comment: "Extract frames"),
       NSLocalizedString("videotools.operation.rotate", comment: "Rotate video"),
+      NSLocalizedString("videotools.operation.convert", comment: "Convert video format"),
     ],
     trackingMode: .selectOne,
     target: nil,
@@ -86,6 +89,9 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     action: nil
   )
   private let shortcutRotationLabel = NSTextField(labelWithString: "")
+  private let conversionFormatPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+  private let conversionModePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+  private let conversionHintLabel = NSTextField(wrappingLabelWithString: "")
   private let outputField = NSTextField(string: "")
   private let chooseOutputButton = NSButton(
     title: NSLocalizedString("videotools.choose", comment: "Choose"),
@@ -113,6 +119,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   private var timeGroup: NSStackView!
   private var rotationGroup: NSStackView!
+  private var conversionGroup: NSStackView!
+  private var playbackGroup: NSView!
   private var outputGroup: NSStackView!
   private var previewTimer: Timer?
   private var playbackControlsTimer: Timer?
@@ -242,7 +250,48 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     rotationGroup = makeVerticalGroup([ChengYingStyle.card(rotationContent)], spacing: 0)
     stack.addArrangedSubview(rotationGroup)
 
-    stack.addArrangedSubview(ChengYingStyle.card(makePlaybackControls()))
+    conversionFormatPopup.addItems(withTitles: Self.conversionFormats.map { $0.uppercased() })
+    conversionFormatPopup.selectItem(at: 0)
+    conversionFormatPopup.setAccessibilityLabel(NSLocalizedString(
+      "videotools.conversion.format", comment: "Output format"
+    ))
+    conversionModePopup.addItems(withTitles: Self.conversionModes.map {
+      NSLocalizedString("videotools.conversion.mode.\($0)", comment: "Conversion mode")
+    })
+    conversionModePopup.selectItem(at: 0)
+    conversionModePopup.target = self
+    conversionModePopup.action = #selector(conversionModeChanged(_:))
+    conversionModePopup.setAccessibilityLabel(NSLocalizedString(
+      "videotools.conversion.mode", comment: "Conversion mode"
+    ))
+    for popup in [conversionFormatPopup, conversionModePopup] {
+      popup.controlSize = .large
+      popup.font = .systemFont(ofSize: 12, weight: .medium)
+      popup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+    conversionHintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+    conversionHintLabel.textColor = .secondaryLabelColor
+    conversionHintLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    let conversionScopeLabel = NSTextField(wrappingLabelWithString: NSLocalizedString(
+      "videotools.conversion.scope_hint", comment: "Conversion processes the full source and preserves all tracks"
+    ))
+    conversionScopeLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+    conversionScopeLabel.textColor = .secondaryLabelColor
+    conversionScopeLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    let conversionContent = makeVerticalGroup([
+      makeCaption(NSLocalizedString("videotools.conversion.format", comment: "Output format")),
+      conversionFormatPopup,
+      makeCaption(NSLocalizedString("videotools.conversion.mode", comment: "Conversion mode")),
+      conversionModePopup,
+      conversionHintLabel,
+      conversionScopeLabel,
+    ], spacing: 10)
+    conversionGroup = makeVerticalGroup([ChengYingStyle.card(conversionContent)], spacing: 0)
+    stack.addArrangedSubview(conversionGroup)
+    updateConversionHint()
+
+    playbackGroup = ChengYingStyle.card(makePlaybackControls())
+    stack.addArrangedSubview(playbackGroup)
 
     outputField.isEditable = false
     outputField.isSelectable = true
@@ -434,8 +483,10 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     }
     do {
       try rotationCoordinator?.request(inputURL: inputURL, clockwiseQuarterTurns: clockwiseQuarterTurns)
+      ownedTaskID = nil
       modeControl.selectedSegment = 2
       updateModeUI(resetFrameEnd: false)
+      updateTaskUI()
       updatePlaybackControls()
     } catch {
       showValidationError(error.localizedDescription)
@@ -545,6 +596,10 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     updateModeUI(resetFrameEnd: selectedOperation == .frames)
   }
 
+  @objc private func conversionModeChanged(_ sender: NSPopUpButton) {
+    updateConversionHint()
+  }
+
   @objc private func setStartToCurrentTime(_ sender: NSButton) {
     guard player?.info.state.loaded == true else { return }
     player?.pause()
@@ -652,6 +707,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
         start: start,
         end: end,
         degrees: operation == .rotate ? selectedRotation : nil,
+        targetFormat: operation == .convert ? selectedConversionFormat : nil,
+        conversionMode: operation == .convert ? selectedConversionMode : nil,
         outputDirectory: operation == .rotate ? nil : outputDirectoryURL
       )
       updateTaskUI()
@@ -818,12 +875,30 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     switch modeControl.selectedSegment {
     case 1: return .frames
     case 2: return .rotate
+    case 3: return .convert
     default: return .clip
     }
   }
 
   private var selectedRotation: Int {
     [90, 180, 270, 360][max(0, rotationControl.selectedSegment)]
+  }
+
+  private var selectedConversionFormat: String {
+    let index = conversionFormatPopup.indexOfSelectedItem
+    return Self.conversionFormats.indices.contains(index) ? Self.conversionFormats[index] : "mp4"
+  }
+
+  private var selectedConversionMode: String {
+    let index = conversionModePopup.indexOfSelectedItem
+    return Self.conversionModes.indices.contains(index) ? Self.conversionModes[index] : "copy"
+  }
+
+  private func updateConversionHint() {
+    conversionHintLabel.stringValue = NSLocalizedString(
+      "videotools.conversion.hint.\(selectedConversionMode)", comment: "Conversion quality and compatibility"
+    )
+    if isViewLoaded { view.needsLayout = true }
   }
 
   private var currentLocalMediaURL: URL? {
@@ -926,9 +1001,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   private func updateModeUI(resetFrameEnd: Bool) {
     let operation = selectedOperation
-    timeGroup.isHidden = operation == .rotate
+    timeGroup.isHidden = operation != .clip && operation != .frames
     frameHintLabel.isHidden = operation != .frames
     rotationGroup.isHidden = operation != .rotate
+    conversionGroup.isHidden = operation != .convert
+    playbackGroup.isHidden = operation == .convert
     outputGroup.isHidden = operation == .rotate
     if resetFrameEnd, let start = parseTimestamp(startField.stringValue) {
       setDefaultEnd(after: start)
@@ -940,10 +1017,13 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       runButton.title = NSLocalizedString("videotools.run_frames", comment: "Extract frames")
     case .rotate:
       runButton.title = NSLocalizedString("videotools.run_rotate", comment: "Create rotated video")
+    case .convert:
+      runButton.title = NSLocalizedString("videotools.run_convert", comment: "Convert entire video")
     case .probe:
       runButton.title = NSLocalizedString("videotools.run", comment: "Run")
     }
     updatePreviewButtons()
+    view.needsLayout = true
   }
 
   private func updateTaskUI() {
@@ -957,6 +1037,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     }
     let ownsActiveTask = active && taskManager.snapshot?.id == ownedTaskID
     runButton.isEnabled = currentLocalMediaURL != nil && !active && !hasActiveShortcutRotation
+    conversionFormatPopup.isEnabled = !active && !hasActiveShortcutRotation
+    conversionModePopup.isEnabled = !active && !hasActiveShortcutRotation
     cancelButton.isHidden = !ownsActiveTask && !hasActiveShortcutRotation
     cancelButton.isEnabled = taskManager.snapshot?.phase != .cancelling
     revealButton.isHidden = taskManager.snapshot?.outputURL == nil
@@ -969,7 +1051,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       return
     }
     if let state = rotationCoordinator?.state, state.task == nil,
-       state.phase == .cancelled || state.phase == .failed {
+       state.phase == .cancelled || state.phase == .failed,
+       ownedTaskID == nil || taskManager.snapshot?.id != ownedTaskID {
       progressIndicator.doubleValue = 0
       statusLabel.textColor = state.phase == .failed ? .systemRed : .secondaryLabelColor
       statusLabel.stringValue = state.error?.localizedDescription ?? NSLocalizedString(

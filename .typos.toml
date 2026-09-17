@@ -13,6 +13,8 @@ ignore-hidden = false
 extend-ignore-re = [
     # Exact upstream FFmpeg makefile extension and Rust crate identifiers.
     '(?:config|\*)\.mak\b',
+    # Exact x265 content-light-level metadata parameter.
+    '\bmax-cll=',
     '"(?:name|package|filename)": "writeable(?:-[^"]+)?"',
     "\\bBig Sur\\b",
     '(firstItem|secondItem|id|destination|headerView)="[0-9A-Za-z]+-[0-9A-Za-z]+-[0-9A-Za-z]+"',

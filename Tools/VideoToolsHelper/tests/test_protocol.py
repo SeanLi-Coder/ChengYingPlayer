@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import select
 import subprocess
@@ -89,7 +90,9 @@ def helper_process(ffmpeg: str, ffprobe: str) -> Iterator[subprocess.Popen[str]]
     ready = _read_event(process)
     assert ready["type"] == "ready"
     assert ready["protocol_version"] == 1
-    assert ready["operations"] == ["probe", "clip", "frames", "rotate"]
+    assert ready["operations"] == ["probe", "clip", "frames", "rotate", "convert"]
+    assert ready["supported_conversion_formats"] == ["mkv", "mov", "mp4"]
+    assert ready["supported_conversion_modes"] == ["copy", "h264", "hevc"]
     try:
         yield process
     finally:
@@ -188,6 +191,91 @@ def test_invalid_request_is_rejected_without_stopping_service(
     assert event["type"] == "pong"
 
 
+@pytest.mark.parametrize(
+    ("target_format", "mode"),
+    [(None, None), ("mkv", "copy"), ("mov", "h264"), ("mp4", "hevc")],
+)
+def test_conversion_round_trip_preserves_source_and_processes_full_video(
+    helper_process: subprocess.Popen[str],
+    sample_video: Path,
+    ffprobe: str,
+    target_format: str | None,
+    mode: str | None,
+) -> None:
+    original_digest = hashlib.sha256(sample_video.read_bytes()).hexdigest()
+    request = {
+        "id": "convert-video",
+        "command": "start",
+        "operation": "convert",
+        "input_path": str(sample_video),
+    }
+    if target_format is not None:
+        request["target_format"] = target_format
+    if mode is not None:
+        request["conversion_mode"] = mode
+    _send(helper_process, request)
+    events = _events_until_terminal(helper_process, request_id="convert-video", timeout=120)
+    assert events[0]["type"] == "accepted"
+    assert events[-1]["type"] == "completed", events
+    assert events[-1]["operation"] == "convert"
+    assert events[-1]["progress"] == 100.0
+    assert events[-1]["eta_seconds"] == 0.0
+    output_path = Path(events[-1]["output_path"])
+    assert output_path.is_absolute() and output_path.is_file()
+    assert output_path.parent == sample_video.parent
+    assert output_path != sample_video
+    assert output_path.suffix == f".{target_format or 'mp4'}"
+    assert hashlib.sha256(sample_video.read_bytes()).hexdigest() == original_digest
+    metadata = helper_module.probe_video(output_path, ffprobe=ffprobe)
+    assert metadata["duration"] == pytest.approx(6.0, abs=0.1)
+    assert metadata["width"] == 320 and metadata["height"] == 180
+    assert metadata["has_audio"] is True
+    assert all(event["progress"] < 100.0 for event in events if event["type"] == "progress")
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"target_format": "avi"},
+        {"target_format": "../mp4"},
+        {"target_format": None},
+        {"target_format": ["mp4"]},
+        {"conversion_mode": "fast"},
+        {"conversion_mode": True},
+        {"start": 0},
+        {"end": 1},
+        {"degrees": 90},
+    ],
+)
+def test_conversion_rejects_invalid_options_before_reading_media(
+    monkeypatch: pytest.MonkeyPatch,
+    fields: dict,
+) -> None:
+    server = helper_module.ProtocolServer(ffmpeg="/bin/echo", ffprobe="/bin/echo")
+    events: list[dict] = []
+    monkeypatch.setattr(server, "emit", lambda event: events.append(dict(event)))
+
+    def unexpected_probe(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Invalid conversion options must be rejected before media probing")
+
+    monkeypatch.setattr(helper_module, "probe_video", unexpected_probe)
+    task = helper_module.ActiveTask(
+        request_id="bad-convert",
+        operation="convert",
+        request={"input_path": "/missing/video.mp4", **fields},
+    )
+    server._run_task(task)
+    assert len(events) == 1
+    assert events[0]["type"] == "failed"
+    assert events[0]["error_code"] == "invalid_request"
+    assert events[0]["operation"] == "convert"
+    assert "output_path" not in events[0]
+
+
+def test_conversion_defaults_are_lossless_mp4() -> None:
+    assert helper_module._conversion_options({}) == ("mp4", "copy")
+
+
 def test_multiple_requests_in_one_pipe_write_are_not_buffered(
     helper_process: subprocess.Popen[str],
 ) -> None:
@@ -282,9 +370,11 @@ def test_probe_subprocess_is_cancelled_promptly(
             process.wait(timeout=15)
 
 
+@pytest.mark.parametrize("operation", ["probe", "convert"])
 def test_busy_and_cancel_requests_are_deterministic(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    operation: str,
 ) -> None:
     source = tmp_path / "source.mov"
     source.touch()
@@ -311,7 +401,7 @@ def test_busy_and_cancel_requests_are_deterministic(
         {
             "id": "slow-probe",
             "command": "start",
-            "operation": "probe",
+            "operation": operation,
             "input_path": str(source),
         }
     )

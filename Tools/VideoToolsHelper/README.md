@@ -8,8 +8,10 @@ The helper supports:
 
 - media probing;
 - frame-accurate high-fidelity clipping;
-- lossless still-frame extraction for ranges up to five seconds; and
-- permanent clockwise rotation by 90, 180, 270, or 360 degrees.
+- lossless still-frame extraction for ranges up to five seconds;
+- permanent clockwise rotation by 90, 180, 270, or 360 degrees; and
+- whole-video MP4 / MKV / MOV conversion, with lossless stream copy by default or
+  explicit high-quality H.264 / HEVC video re-encoding.
 
 All operations write to owned partial output, preserve the source file, choose a unique
 destination name, validate the result, and publish only after verification. This helper
@@ -17,7 +19,7 @@ contains no AI, model download, proxy, Windows, or web-server code.
 
 ## Runtime design
 
-`helper.py` and `media.py` use only the Python standard library. A release build freezes
+`helper.py`, `media.py`, and `conversion.py` use only the Python standard library. A release build freezes
 them into a standalone Mach-O executable with PyInstaller, so an installed app does not
 depend on a system Python installation. FFmpeg and FFprobe remain separate executables
 and their absolute paths are always passed explicitly by the app.
@@ -30,10 +32,10 @@ See [PROTOCOL.md](PROTOCOL.md) for the complete versioned protocol.
 
 ## Build
 
-Use a dedicated Python 3.11-or-newer environment:
+Use the checksum-pinned CPython 3.13.2 build environment:
 
 ```bash
-python3 -m pip install -r Tools/VideoToolsHelper/requirements-build.txt
+python3 -m pip install --require-hashes --only-binary=:all: -r Tools/VideoToolsHelper/requirements-build.txt
 HELPER_PYTHON=python3 Tools/VideoToolsHelper/build_helper.sh
 ```
 
@@ -60,10 +62,16 @@ Install the development requirements, then run the media and protocol suites:
 python3 -m pip install -r Tools/VideoToolsHelper/requirements-dev.txt
 cd Tools/VideoToolsHelper
 python3 -m pytest -q
-python3 -m ruff check helper.py media.py tests/test_media.py tests/test_protocol.py
+python3 -m ruff check helper.py media.py conversion.py tests
 ```
 
 The integration tests require FFmpeg and FFprobe on `PATH`. They create synthetic video
-fixtures and verify clipping, image extraction, rotation, cancellation, cleanup,
+fixtures and verify clipping, image extraction, rotation, conversion, cancellation, cleanup,
 metadata preservation, and protocol framing. The build script separately verifies the
 frozen helper against bundled FFmpeg and FFprobe executables.
+
+Conversion uses the already bundled FFmpeg build and adds no external application,
+download, codec library, or network request. It maps every supported source track
+explicitly and does not transcode audio or subtitles implicitly. Unsupported target
+containers, dynamic HDR, or unsafe pixel-format changes fail without publishing an
+incomplete output. Video re-encoding is lossy even at the selected high-quality preset.

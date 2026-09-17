@@ -87,6 +87,16 @@
 "videotools.operation.clip" = "Clip";
 "videotools.operation.frames" = "Frames";
 "videotools.operation.rotate" = "Rotate";
+"videotools.operation.convert" = "Convert";
+"videotools.conversion.format" = "OUTPUT FORMAT";
+"videotools.conversion.mode" = "CONVERSION MODE";
+"videotools.conversion.mode.copy" = "Lossless Remux";
+"videotools.conversion.mode.h264" = "H.264 · High Quality";
+"videotools.conversion.mode.hevc" = "H.265 / HEVC · High Quality";
+"videotools.conversion.hint.copy" = "Changes the container without re-encoding. Original video and audio quality is preserved. The source codecs must be compatible with the selected format.";
+"videotools.conversion.hint.h264" = "High-quality H.264 software encoding for broad compatibility. Keeps the original dimensions and timing. Re-encoding can change image quality and takes longer.";
+"videotools.conversion.hint.hevc" = "High-quality H.265 software encoding for efficient compression. Keeps the original dimensions and timing. Re-encoding can change image quality and may take a long time.";
+"videotools.conversion.scope_hint" = "Converts the whole source, independent of A/B markers, playback speed, zoom or preview rotation. Audio and subtitles are copied unchanged; incompatible tracks stop the task instead of being dropped. Try MKV for more compatibility. Saves a new, automatically named file without overwriting the original.";
 "videotools.start" = "Start";
 "videotools.end" = "End";
 "videotools.use_current" = "Current";
@@ -103,6 +113,7 @@
 "videotools.run_clip" = "Create Clip";
 "videotools.run_frames" = "Extract Every Frame";
 "videotools.run_rotate" = "Create Rotated Video";
+"videotools.run_convert" = "Convert Entire Video";
 "videotools.reveal" = "Show in Finder";
 "videotools.no_local_video" = "Open a local video to use these tools.";
 "videotools.status.ready" = "Ready";

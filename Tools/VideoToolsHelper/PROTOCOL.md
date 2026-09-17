@@ -15,7 +15,7 @@ allows one active media task at a time.
 After validating both executable paths, the helper emits a `ready` event:
 
 ```json
-{"type":"ready","protocol_version":1,"helper":"chengying-video-tools-helper","helper_version":"1.0.0","operations":["probe","clip","frames","rotate"],"max_frame_extraction_seconds":5.0,"default_frame_extraction_seconds":5.0,"supported_rotation_degrees":[90,180,270,360]}
+{"type":"ready","protocol_version":1,"helper":"chengying-video-tools-helper","helper_version":"1.1.0","operations":["probe","clip","frames","rotate","convert"],"max_frame_extraction_seconds":5.0,"default_frame_extraction_seconds":5.0,"supported_rotation_degrees":[90,180,270,360],"supported_conversion_formats":["mkv","mov","mp4"],"supported_conversion_modes":["copy","h264","hevc"]}
 ```
 
 An invalid executable path produces one `failed` event with `error_code` set to
@@ -55,6 +55,28 @@ Permanently rotate a video clockwise:
 
 Rotation always creates a uniquely named file beside the source. It rejects an
 `output_directory` field. Supported values are 90, 180, 270, and 360.
+
+Convert the complete video to another container or video codec:
+
+```json
+{"id":"convert-1","command":"start","operation":"convert","input_path":"/absolute/input.mov","target_format":"mp4","conversion_mode":"copy"}
+```
+
+`target_format` is `mp4` (the default), `mkv`, or `mov`. `conversion_mode` is `copy`
+(the default), `h264`, or `hevc`. The operation converts the entire file and rejects
+non-null `start`, `end`, and `degrees`; playback loops, speed, zoom, and preview
+rotation do not alter the export. The optional `output_directory` defaults to the
+source directory. The generated name is `source_converted_<mode>.<format>` with a
+collision-safe suffix when needed.
+
+`copy` changes the container without re-encoding media. `h264` / `hevc` use the
+bundled libx264 / libx265 high-quality CRF 18 slow preset; they are lossy video
+re-encoding, not a guarantee of identical pixels or a smaller file. Audio and
+subtitles are copied unchanged in every mode. Incompatible tracks, multiple video
+tracks, unsupported attachments or data tracks, and unsafe color / geometry
+conversions fail explicitly instead of dropping tracks. Choose another container
+when the destination cannot carry a source track. Dynamic HDR is currently
+rejected because its complete metadata preservation has not been verified.
 
 Cancel the active task by using its task id:
 
@@ -114,4 +136,6 @@ owned partial file or directory, validates dimensions, codecs, pixel depth, colo
 metadata, audio parameters, duration, and rotation as applicable, and publishes only
 after verification. Cancellation and failure remove owned partial output.
 Dynamic HDR formats whose per-frame metadata cannot be preserved safely are rejected
-before clipping or rotation; they are never silently converted to static HDR or SDR.
+before clipping, rotation, or conversion; they are never silently converted to static
+HDR or SDR. Conversion also verifies track count, supported track metadata,
+audio/video timeline, and chapters before publishing.

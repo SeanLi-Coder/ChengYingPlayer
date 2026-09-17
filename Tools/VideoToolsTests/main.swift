@@ -81,7 +81,7 @@ if let captureDirectory = ProcessInfo.processInfo.environment["CHENGYING_CAPTURE
       try png.write(to: directory.appendingPathComponent("video-tools-\(language)-\(name)-\(height).png"))
     }
     panel.setContentSize(NSSize(width: 320, height: 600))
-    for (index, operation) in [(1, "frames"), (2, "rotate")] {
+    for (index, operation) in [(1, "frames"), (2, "rotate"), (3, "convert")] {
       modes.selectedSegment = index
       action(modes)
       controller.view.layoutSubtreeIfNeeded()
@@ -379,6 +379,85 @@ controller.refreshCurrentMedia(force: true)
 controller.requestPermanentRotation(clockwiseQuarterTurns: -1)
 check(player.mpv.getInt("rotation") == 270, "Reloading the same path begins a fresh cumulative rotation generation")
 action(cancel)
+
+// Conversion is a whole-file operation, even when a keyboard loop remains active.
+let conversionFormat = property("conversionFormatPopup", as: NSPopUpButton.self)
+let conversionMode = property("conversionModePopup", as: NSPopUpButton.self)
+let conversionHint = property("conversionHintLabel", as: NSTextField.self)
+let conversionGroup = property("conversionGroup", as: NSStackView.self)
+let timeGroup = property("timeGroup", as: NSStackView.self)
+let rotationGroup = property("rotationGroup", as: NSStackView.self)
+let playbackGroup = property("playbackGroup", as: NSView.self)
+let outputGroup = property("outputGroup", as: NSStackView.self)
+check(modes.segmentCount == 4, "Conversion is the fourth native tool mode")
+modes.selectedSegment = 3; action(modes)
+check(!conversionGroup.isHidden && timeGroup.isHidden && rotationGroup.isHidden && playbackGroup.isHidden && !outputGroup.isHidden,
+      "Whole-file conversion hides range, rotation and playback settings while retaining the output folder")
+check(run.title == localized("videotools.run_convert"), "Conversion action explicitly says it processes the entire video")
+check(conversionFormat.itemTitles == ["MP4", "MKV", "MOV"] && conversionFormat.indexOfSelectedItem == 0,
+      "Only supported containers are offered and MP4 is the default")
+check(conversionMode.numberOfItems == 3 && conversionMode.indexOfSelectedItem == 0,
+      "Lossless remux is the default among the three conversion modes")
+check(conversionHint.stringValue == localized("videotools.conversion.hint.copy"),
+      "The default conversion hint explains lossless stream copying")
+player.mpv.values["time"] = 10.0
+controller.setLoopMarker(isEnd: false)
+player.mpv.values["time"] = 15.0
+controller.setLoopMarker(isEnd: true)
+player.mpv.values["speed"] = 2.0
+start.stringValue = "invalid range"
+end.stringValue = "not a time"
+action(run)
+check(taskManager.request?.operation == .convert && taskManager.request?.targetFormat == "mp4" && taskManager.request?.conversionMode == "copy",
+      "The UI dispatches MP4 lossless conversion without requiring a valid A/B selection")
+check(taskManager.request?.start == nil && taskManager.request?.end == nil && taskManager.request?.degrees == nil,
+      "Conversion requests never carry clip markers or preview rotation")
+check(taskManager.request?.outputDirectory == player.info.currentURL?.deletingLastPathComponent().path,
+      "Conversion defaults to the original file's parent directory")
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 10, end: 15) && player.mpv.getDouble("speed") == 2,
+      "Starting conversion preserves the player's independent loop and speed")
+check(!run.isEnabled && !cancel.isHidden && !conversionFormat.isEnabled && !conversionMode.isEnabled,
+      "Active conversion exposes cancellation and locks conversion options")
+check(status.stringValue.contains(VideoToolsOperation.convert.localizedName) && !status.stringValue.contains(localized("videotools.status.cancelled")),
+      "A previous cancelled shortcut rotation cannot hide the new conversion task status")
+let conversionRequestData = try JSONEncoder().encode(taskManager.request!)
+let conversionRequestJSON = try JSONSerialization.jsonObject(with: conversionRequestData) as! [String: Any]
+check(conversionRequestJSON["operation"] as? String == "convert" && conversionRequestJSON["target_format"] as? String == "mp4" && conversionRequestJSON["conversion_mode"] as? String == "copy",
+      "Conversion request fields use the helper's snake-case protocol names")
+check(conversionRequestJSON["start"] == nil && conversionRequestJSON["end"] == nil && conversionRequestJSON["degrees"] == nil,
+      "Whole-file conversion omits unrelated JSON fields")
+let cancelledConversionID = taskManager.snapshot!.id
+action(cancel)
+check(taskManager.cancellations.last == cancelledConversionID && taskManager.snapshot?.phase == .cancelling,
+      "The conversion panel cancels its own helper task")
+taskManager.finishTask(.cancelled)
+check(run.isEnabled && conversionFormat.isEnabled && conversionMode.isEnabled,
+      "Cancelled conversion restores the settings and run action")
+for (formatIndex, formatName) in [(1, "mkv"), (2, "mov")] {
+  conversionFormat.selectItem(at: formatIndex)
+  for (modeIndex, modeName) in [(1, "h264"), (2, "hevc")] {
+    conversionMode.selectItem(at: modeIndex); action(conversionMode)
+    check(conversionHint.stringValue == localized("videotools.conversion.hint.\(modeName)"),
+          "\(modeName) selection explains quality and encoding cost")
+    action(run)
+    check(taskManager.request?.targetFormat == formatName && taskManager.request?.conversionMode == modeName,
+          "\(formatName) / \(modeName) settings reach the helper request")
+    taskManager.finishTask(.completed, outputURL: URL(fileURLWithPath: "/tmp/converted output.\(formatName)"))
+    check(!reveal.isHidden && cancel.isHidden && run.isEnabled,
+          "Completed \(formatName) / \(modeName) conversion exposes its output and unlocks the panel")
+  }
+}
+let cancelRequestData = try JSONEncoder().encode(VideoToolsRequest.cancel(id: "cancel", targetID: "convert"))
+let cancelRequestJSON = try JSONSerialization.jsonObject(with: cancelRequestData) as! [String: Any]
+check(cancelRequestJSON["target_format"] == nil && cancelRequestJSON["conversion_mode"] == nil,
+      "Cancel requests do not leak conversion settings")
+let shutdownRequestData = try JSONEncoder().encode(VideoToolsRequest.shutdown(id: "shutdown"))
+let shutdownRequestJSON = try JSONSerialization.jsonObject(with: shutdownRequestData) as! [String: Any]
+check(shutdownRequestJSON["target_format"] == nil && shutdownRequestJSON["conversion_mode"] == nil,
+      "Shutdown requests do not leak conversion settings")
+modes.selectedSegment = 0; action(modes)
+check(conversionGroup.isHidden && !timeGroup.isHidden && !playbackGroup.isHidden,
+      "Switching back to clip restores the range and playback controls")
 
 runVideoToolsShortcutTests()
 runVideoToolsLoopTests()

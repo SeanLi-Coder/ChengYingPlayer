@@ -87,6 +87,16 @@
 "videotools.operation.clip" = "剪辑";
 "videotools.operation.frames" = "逐帧截图";
 "videotools.operation.rotate" = "永久旋转";
+"videotools.operation.convert" = "格式转换";
+"videotools.conversion.format" = "目标格式";
+"videotools.conversion.mode" = "转换方式";
+"videotools.conversion.mode.copy" = "无损换封装";
+"videotools.conversion.mode.h264" = "H.264 · 高质量";
+"videotools.conversion.mode.hevc" = "H.265 / HEVC · 高质量";
+"videotools.conversion.hint.copy" = "只更换文件封装，不重新编码，保持原始视频和音频清晰度。原视频的编码必须与目标格式兼容。";
+"videotools.conversion.hint.h264" = "使用高质量 H.264 软件编码，兼容性更广。保持原始尺寸和时间轴；重新编码仍可能改变画质，耗时也更长。";
+"videotools.conversion.hint.hevc" = "使用高质量 H.265 软件编码，压缩效率更高。保持原始尺寸和时间轴；重新编码仍可能改变画质，耗时可能较长。";
+"videotools.conversion.scope_hint" = "转换整个原视频，不受 A/B 区间、播放速度、缩放或预览旋转影响。音轨与字幕原样保留；不兼容时会停止，不会悄悄丢弃，可尝试 MKV。自动命名生成新文件，不覆盖原视频。";
 "videotools.start" = "起点";
 "videotools.end" = "终点";
 "videotools.use_current" = "当前时间";
@@ -103,6 +113,7 @@
 "videotools.run_clip" = "确定并剪辑";
 "videotools.run_frames" = "逐帧截图";
 "videotools.run_rotate" = "生成旋转视频";
+"videotools.run_convert" = "转换整个视频";
 "videotools.reveal" = "在 Finder 中显示";
 "videotools.no_local_video" = "请先打开一个本地视频。";
 "videotools.status.ready" = "准备就绪";

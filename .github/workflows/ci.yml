@@ -50,7 +50,7 @@ jobs:
       - name: Test media helper
         working-directory: Tools/VideoToolsHelper
         run: |
-          python -m ruff check helper.py media.py tests
+          python -m ruff check helper.py media.py conversion.py tests ../VideoToolsTests/app_conversion_smoke.py
           python -m pytest -q
 
       - name: Test native playback controls
@@ -378,6 +378,12 @@ jobs:
         timeout-minutes: 5
         run: >-
           python Tools/VideoToolsTests/app_loop_smoke.py
+          --app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
+
+      - name: Test packaged video conversion
+        timeout-minutes: 5
+        run: >-
+          python Tools/VideoToolsTests/app_conversion_smoke.py
           --app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
 
       - name: Package and verify Apple Silicon DMG
