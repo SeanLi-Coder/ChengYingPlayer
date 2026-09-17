@@ -36,128 +36,18 @@ private final class WelcomeBackdropView: NSView {
   }
 }
 
-private final class WelcomeRecentRow: NSTableRowView {
-  override func drawSelection(in dirtyRect: NSRect) {
-    guard selectionHighlightStyle != .none else { return }
-    ChengYingStyle.accent.withAlphaComponent(0.13).setFill()
-    NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 10, yRadius: 10).fill()
-  }
-}
-
-private final class WelcomeRecentCell: NSTableCellView {
-  private let filename = welcomeLabel("", size: 13, weight: .medium)
-  private let folder = welcomeLabel("", size: 11, color: .secondaryLabelColor)
-  private let fileIcon = NSImageView()
-
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
-    fileIcon.image = ChengYingStyle.symbol("film", fallback: NSImage.multipleDocumentsName)
-    fileIcon.contentTintColor = ChengYingStyle.accent
-    fileIcon.translatesAutoresizingMaskIntoConstraints = false
-    filename.lineBreakMode = .byTruncatingMiddle
-    folder.lineBreakMode = .byTruncatingMiddle
-    filename.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    folder.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    [fileIcon, filename, folder].forEach(addSubview)
-    NSLayoutConstraint.activate([
-      fileIcon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-      fileIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
-      fileIcon.widthAnchor.constraint(equalToConstant: 22),
-      fileIcon.heightAnchor.constraint(equalToConstant: 22),
-      filename.leadingAnchor.constraint(equalTo: fileIcon.trailingAnchor, constant: 12),
-      filename.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-      filename.topAnchor.constraint(equalTo: topAnchor, constant: 9),
-      folder.leadingAnchor.constraint(equalTo: filename.leadingAnchor),
-      folder.trailingAnchor.constraint(equalTo: filename.trailingAnchor),
-      folder.topAnchor.constraint(equalTo: filename.bottomAnchor, constant: 3)
-    ])
-  }
-
-  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-  func configure(url: URL) {
-    fileIcon.image = ChengYingStyle.symbol(ImageFileSupport.isImageURL(url) ? "photo" : "film",
-                                          fallback: NSImage.multipleDocumentsName)
-    filename.stringValue = url.lastPathComponent
-    folder.stringValue = url.deletingLastPathComponent().lastPathComponent
-    toolTip = url.path
-    setAccessibilityLabel("\(url.lastPathComponent), \(folder.stringValue)")
-  }
-}
-
-private final class WelcomeResumeButtonCell: NSButtonCell {
-  override func drawBezel(withFrame frame: NSRect, in controlView: NSView) {
-    let fill = ChengYingStyle.accent.withAlphaComponent(isHighlighted ? 0.18 : 0.085)
-    fill.setFill()
-    let path = NSBezierPath(roundedRect: frame.insetBy(dx: 1, dy: 1), xRadius: 10, yRadius: 10)
-    path.fill()
-    if state == .on {
-      ChengYingStyle.accent.withAlphaComponent(0.5).setStroke()
-      path.lineWidth = 1
-      path.stroke()
-    }
-  }
-
-  override func drawInterior(withFrame frame: NSRect, in controlView: NSView) {
-    let lines = title.components(separatedBy: "\n")
-    let paragraph = NSMutableParagraphStyle()
-    paragraph.lineBreakMode = .byTruncatingMiddle
-    for (index, text) in lines.prefix(3).enumerated() {
-      let font = NSFont.systemFont(ofSize: index == 1 ? 13 : 10,
-                                   weight: index < 2 ? .medium : .regular)
-      let color: NSColor = index == 0 ? ChengYingStyle.accent :
-        (index == 1 ? .labelColor : .secondaryLabelColor)
-      let rect = NSRect(x: frame.minX + 16, y: frame.minY + 10 + CGFloat(index) * 19,
-                        width: frame.width - 48, height: 18)
-      (text as NSString).draw(in: rect, withAttributes: [.font: font, .foregroundColor: color,
-                                                       .paragraphStyle: paragraph])
-    }
-    ("›" as NSString).draw(in: NSRect(x: frame.maxX - 26, y: frame.midY - 13,
-                                     width: 16, height: 26),
-                           withAttributes: [.font: NSFont.systemFont(ofSize: 22),
-                                            .foregroundColor: ChengYingStyle.accent])
-  }
-}
-
-final class WelcomeResumeButton: NSButton {
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
-    cell = WelcomeResumeButtonCell(textCell: "")
-    setButtonType(.momentaryPushIn)
-  }
-
-  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-}
-
 class InitialWindowController: NSWindowController {
   override var windowNibName: NSNib.Name { NSNib.Name("InitialWindowController") }
 
   weak var player: PlayerCore!
   var loaded = false
-  let recentFilesTableView = NSTableView()
   let primaryOpenButton = NSButton()
   let downloadCenterButton = NSButton()
-  let resumeButton = WelcomeResumeButton()
-  private let recentScrollView = NSScrollView()
-  private let recentHeading = welcomeLabel(welcomeString("welcome.recent"), size: 17, weight: .semibold)
-  private let recentCount = welcomeLabel("", size: 11, weight: .medium, color: .secondaryLabelColor)
-  private let emptyState = NSView()
-  private var resumeHeight: NSLayoutConstraint!
-  private var resumeBottomSpacing: NSLayoutConstraint!
-  private var lastPlaybackURL: URL?
-  private let observedPrefKeys: [Preference.Key] = [
-    .themeMaterial, .recordRecentFiles, .resumeLastPosition,
-    .iinaLastPlayedFilePath, .iinaLastPlayedFilePosition
-  ]
+  private let observedPrefKeys: [Preference.Key] = [.themeMaterial]
   private var isObservingPreferences = false
-  private let recentDocumentsProvider: () -> [URL]
 
-  lazy var recentDocuments: [URL] = makeRecentDocumentsList()
-
-  init(playerCore: PlayerCore,
-       recentDocumentsProvider: @escaping () -> [URL] = { NSDocumentController.shared.recentDocumentURLs }) {
+  init(playerCore: PlayerCore) {
     self.player = playerCore
-    self.recentDocumentsProvider = recentDocumentsProvider
     super.init(window: nil)
   }
 
@@ -177,8 +67,8 @@ class InitialWindowController: NSWindowController {
     window.titlebarAppearsTransparent = true
     window.titleVisibility = .hidden
     window.isMovableByWindowBackground = true
-    window.setContentSize(NSSize(width: 900, height: 600))
-    window.contentMinSize = NSSize(width: 860, height: 600)
+    window.setContentSize(NSSize(width: 580, height: 620))
+    window.contentMinSize = NSSize(width: 560, height: 600)
     content.registerForDraggedTypes([.nsFilenames, .nsURL, .string])
     buildWelcomeLayout(in: content)
     setMaterial(Preference.enum(for: .themeMaterial))
@@ -186,29 +76,18 @@ class InitialWindowController: NSWindowController {
       UserDefaults.standard.addObserver(self, forKeyPath: $0.rawValue, options: .new, context: nil)
     }
     isObservingPreferences = true
-    reloadData()
     window.initialFirstResponder = content
     window.makeFirstResponder(content)
-  }
-
-  override func showWindow(_ sender: Any?) {
-    super.showWindow(sender)
-    if loaded { reloadData() }
   }
 
   override func observeValue(forKeyPath keyPath: String?, of object: Any?,
                              change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
     guard let keyPath, observedPrefKeys.contains(where: { $0.rawValue == keyPath }) else { return }
     let theme = (change?[.newKey] as? Int).flatMap(Preference.Theme.init(rawValue:))
-    let update = { [weak self] in
-      guard let self else { return }
-      if keyPath == Preference.Key.themeMaterial.rawValue {
-        self.setMaterial(theme)
-      } else {
-        self.reloadData()
-      }
+    let update: () -> Void = { [weak self] in
+      self?.setMaterial(theme)
     }
-    // Preference writes may originate in playback or history worker queues.
+    // Theme changes may arrive from a background preference update.
     if Thread.isMainThread {
       update()
     } else {
@@ -220,7 +99,6 @@ class InitialWindowController: NSWindowController {
     guard let window, let theme else { return }
     window.appearance = NSAppearance(iinaTheme: theme)
     window.contentView?.needsDisplay = true
-    recentFilesTableView.needsDisplay = true
   }
 
   private func buildWelcomeLayout(in content: NSView) {
@@ -235,20 +113,15 @@ class InitialWindowController: NSWindowController {
     ])
 
     let hero = makeHero()
-    let library = makeLibrary()
-    [hero, library].forEach {
-      $0.translatesAutoresizingMaskIntoConstraints = false
-      backdrop.addSubview($0)
-    }
+    hero.translatesAutoresizingMaskIntoConstraints = false
+    backdrop.addSubview(hero)
     NSLayoutConstraint.activate([
-      hero.leadingAnchor.constraint(equalTo: backdrop.leadingAnchor, constant: 42),
-      hero.topAnchor.constraint(equalTo: backdrop.topAnchor, constant: 68),
-      hero.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor, constant: -32),
-      hero.widthAnchor.constraint(equalToConstant: 328),
-      library.leadingAnchor.constraint(equalTo: hero.trailingAnchor, constant: 34),
-      library.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor, constant: -32),
-      library.topAnchor.constraint(equalTo: backdrop.topAnchor, constant: 58),
-      library.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor, constant: -32)
+      hero.centerXAnchor.constraint(equalTo: backdrop.centerXAnchor),
+      hero.topAnchor.constraint(equalTo: backdrop.topAnchor, constant: 58),
+      hero.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor, constant: -28),
+      hero.widthAnchor.constraint(equalToConstant: 440),
+      hero.leadingAnchor.constraint(greaterThanOrEqualTo: backdrop.leadingAnchor, constant: 40),
+      hero.trailingAnchor.constraint(lessThanOrEqualTo: backdrop.trailingAnchor, constant: -40)
     ])
   }
 
@@ -263,11 +136,34 @@ class InitialWindowController: NSWindowController {
     let brand = welcomeLabel(welcomeString("welcome.brand"), size: 27, weight: .semibold)
     let eyebrow = welcomeLabel(welcomeString("welcome.eyebrow"), size: 11, weight: .medium,
                                color: .secondaryLabelColor)
+    let brandText = NSView()
+    brandText.translatesAutoresizingMaskIntoConstraints = false
+    brandText.addSubview(brand)
+    brandText.addSubview(eyebrow)
+    // Give both localized labels explicit edges without nested stack gravity constraints.
+    let brandTextWidth = ceil(max(brand.intrinsicContentSize.width, eyebrow.intrinsicContentSize.width))
+    NSLayoutConstraint.activate([
+      brandText.widthAnchor.constraint(equalToConstant: brandTextWidth),
+      brand.leadingAnchor.constraint(equalTo: brandText.leadingAnchor),
+      brand.trailingAnchor.constraint(equalTo: brandText.trailingAnchor),
+      brand.topAnchor.constraint(equalTo: brandText.topAnchor),
+      eyebrow.leadingAnchor.constraint(equalTo: brandText.leadingAnchor),
+      eyebrow.trailingAnchor.constraint(equalTo: brandText.trailingAnchor),
+      eyebrow.topAnchor.constraint(equalTo: brand.bottomAnchor, constant: 5),
+      eyebrow.bottomAnchor.constraint(equalTo: brandText.bottomAnchor)
+    ])
+    let header = NSStackView(views: [icon, brandText])
+    header.orientation = .horizontal
+    header.alignment = .centerY
+    header.spacing = 14
+    header.translatesAutoresizingMaskIntoConstraints = false
     let title = welcomeLabel(welcomeString("welcome.headline"), size: 30, weight: .semibold)
+    title.alignment = .center
     title.maximumNumberOfLines = 2
     title.cell?.wraps = true
     let description = welcomeLabel(welcomeString("welcome.description"), size: 13,
                                     color: .secondaryLabelColor)
+    description.alignment = .center
     description.maximumNumberOfLines = 3
     description.cell?.wraps = true
 
@@ -297,39 +193,43 @@ class InitialWindowController: NSWindowController {
     let build = info.buildType == .release ? "" : " · \(info.buildType.description)"
     let versionLabel = welcomeLabel("ChengYing View  \(version)\(build)", size: 10, color: .tertiaryLabelColor)
 
-    [icon, brand, eyebrow, title, description, primaryOpenButton, downloadCenterButton, dragHint, features, privacy, versionLabel]
+    [header, title, description, primaryOpenButton, downloadCenterButton, dragHint, features, privacy, versionLabel]
       .forEach(hero.addSubview)
     NSLayoutConstraint.activate([
-      icon.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
-      icon.topAnchor.constraint(equalTo: hero.topAnchor),
       icon.widthAnchor.constraint(equalToConstant: 66),
       icon.heightAnchor.constraint(equalToConstant: 66),
-      brand.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
-      brand.topAnchor.constraint(equalTo: icon.topAnchor, constant: 8),
-      eyebrow.leadingAnchor.constraint(equalTo: brand.leadingAnchor),
-      eyebrow.topAnchor.constraint(equalTo: brand.bottomAnchor, constant: 5),
+      header.centerXAnchor.constraint(equalTo: hero.centerXAnchor),
+      header.topAnchor.constraint(equalTo: hero.topAnchor),
+      header.leadingAnchor.constraint(greaterThanOrEqualTo: hero.leadingAnchor),
+      header.trailingAnchor.constraint(lessThanOrEqualTo: hero.trailingAnchor),
       title.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
       title.trailingAnchor.constraint(equalTo: hero.trailingAnchor),
-      title.topAnchor.constraint(equalTo: icon.bottomAnchor, constant: 32),
+      title.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 24),
       description.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
       description.trailingAnchor.constraint(equalTo: hero.trailingAnchor),
-      description.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 16),
+      description.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 12),
       primaryOpenButton.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
       primaryOpenButton.trailingAnchor.constraint(equalTo: hero.trailingAnchor),
-      primaryOpenButton.topAnchor.constraint(equalTo: description.bottomAnchor, constant: 26),
+      primaryOpenButton.topAnchor.constraint(equalTo: description.bottomAnchor, constant: 22),
       primaryOpenButton.heightAnchor.constraint(equalToConstant: 46),
       downloadCenterButton.leadingAnchor.constraint(equalTo: primaryOpenButton.leadingAnchor),
       downloadCenterButton.trailingAnchor.constraint(equalTo: primaryOpenButton.trailingAnchor),
       downloadCenterButton.topAnchor.constraint(equalTo: primaryOpenButton.bottomAnchor, constant: 8),
-      downloadCenterButton.heightAnchor.constraint(equalToConstant: 34),
+      downloadCenterButton.heightAnchor.constraint(equalToConstant: 36),
       dragHint.centerXAnchor.constraint(equalTo: primaryOpenButton.centerXAnchor),
+      dragHint.leadingAnchor.constraint(greaterThanOrEqualTo: hero.leadingAnchor),
+      dragHint.trailingAnchor.constraint(lessThanOrEqualTo: hero.trailingAnchor),
       dragHint.topAnchor.constraint(equalTo: downloadCenterButton.bottomAnchor, constant: 10),
-      features.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
-      features.trailingAnchor.constraint(equalTo: hero.trailingAnchor),
-      features.topAnchor.constraint(equalTo: dragHint.bottomAnchor, constant: 26),
-      privacy.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
+      features.centerXAnchor.constraint(equalTo: hero.centerXAnchor),
+      features.leadingAnchor.constraint(greaterThanOrEqualTo: hero.leadingAnchor),
+      features.trailingAnchor.constraint(lessThanOrEqualTo: hero.trailingAnchor),
+      features.topAnchor.constraint(equalTo: dragHint.bottomAnchor, constant: 22),
+      features.bottomAnchor.constraint(lessThanOrEqualTo: privacy.topAnchor, constant: -24),
+      privacy.centerXAnchor.constraint(equalTo: hero.centerXAnchor),
+      privacy.leadingAnchor.constraint(greaterThanOrEqualTo: hero.leadingAnchor),
+      privacy.trailingAnchor.constraint(lessThanOrEqualTo: hero.trailingAnchor),
       privacy.bottomAnchor.constraint(equalTo: versionLabel.topAnchor, constant: -6),
-      versionLabel.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
+      versionLabel.centerXAnchor.constraint(equalTo: hero.centerXAnchor),
       versionLabel.bottomAnchor.constraint(equalTo: hero.bottomAnchor)
     ])
     return hero
@@ -364,223 +264,17 @@ class InitialWindowController: NSWindowController {
     NSApp.sendAction(NSSelectorFromString("menuShowDownloadCenter:"), to: NSApp.delegate, from: self)
   }
 
-  private func makeLibrary() -> NSView {
-    let body = NSView()
-    recentCount.alignment = .right
-    let divider = NSBox()
-    divider.boxType = .separator
-    divider.translatesAutoresizingMaskIntoConstraints = false
-
-    resumeButton.identifier = NSUserInterfaceItemIdentifier("welcome.resume")
-    resumeButton.target = self
-    resumeButton.action = #selector(resumeLastPlayback)
-    resumeButton.alignment = .left
-    resumeButton.cell?.wraps = true
-    resumeButton.cell?.lineBreakMode = .byTruncatingMiddle
-    resumeButton.translatesAutoresizingMaskIntoConstraints = false
-    ChengYingStyle.secondaryButton(resumeButton)
-
-    let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("recentFile"))
-    column.resizingMask = .autoresizingMask
-    recentFilesTableView.addTableColumn(column)
-    recentFilesTableView.headerView = nil
-    recentFilesTableView.rowHeight = 54
-    recentFilesTableView.intercellSpacing = NSSize(width: 0, height: 2)
-    recentFilesTableView.backgroundColor = .clear
-    if #available(macOS 11.0, *) { recentFilesTableView.style = .plain }
-    recentFilesTableView.selectionHighlightStyle = .regular
-    recentFilesTableView.allowsMultipleSelection = false
-    recentFilesTableView.allowsColumnReordering = false
-    recentFilesTableView.delegate = self
-    recentFilesTableView.dataSource = self
-    recentFilesTableView.target = self
-    recentFilesTableView.action = #selector(onTableClicked)
-    recentFilesTableView.setAccessibilityLabel(welcomeString("welcome.recent"))
-    recentScrollView.documentView = recentFilesTableView
-    recentScrollView.drawsBackground = false
-    recentScrollView.hasVerticalScroller = true
-    recentScrollView.autohidesScrollers = true
-    recentScrollView.borderType = .noBorder
-    recentScrollView.translatesAutoresizingMaskIntoConstraints = false
-    let keyHint = welcomeLabel(welcomeString("welcome.keyboard"), size: 10,
-                              color: .tertiaryLabelColor)
-    keyHint.alignment = .right
-    configureEmptyState()
-
-    [recentHeading, recentCount, divider, resumeButton, recentScrollView, emptyState, keyHint]
-      .forEach(body.addSubview)
-    resumeHeight = resumeButton.heightAnchor.constraint(equalToConstant: 76)
-    resumeBottomSpacing = recentScrollView.topAnchor.constraint(equalTo: resumeButton.bottomAnchor,
-                                                               constant: 12)
-    NSLayoutConstraint.activate([
-      recentHeading.leadingAnchor.constraint(equalTo: body.leadingAnchor),
-      recentHeading.topAnchor.constraint(equalTo: body.topAnchor, constant: 2),
-      recentCount.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-      recentCount.centerYAnchor.constraint(equalTo: recentHeading.centerYAnchor),
-      divider.leadingAnchor.constraint(equalTo: body.leadingAnchor),
-      divider.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-      divider.topAnchor.constraint(equalTo: recentHeading.bottomAnchor, constant: 18),
-      resumeButton.leadingAnchor.constraint(equalTo: body.leadingAnchor),
-      resumeButton.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-      resumeButton.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 16),
-      resumeHeight,
-      resumeBottomSpacing,
-      recentScrollView.leadingAnchor.constraint(equalTo: body.leadingAnchor),
-      recentScrollView.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-      recentScrollView.bottomAnchor.constraint(equalTo: keyHint.topAnchor, constant: -12),
-      keyHint.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-      keyHint.bottomAnchor.constraint(equalTo: body.bottomAnchor),
-      emptyState.leadingAnchor.constraint(equalTo: recentScrollView.leadingAnchor),
-      emptyState.trailingAnchor.constraint(equalTo: recentScrollView.trailingAnchor),
-      emptyState.topAnchor.constraint(equalTo: recentScrollView.topAnchor),
-      emptyState.bottomAnchor.constraint(equalTo: recentScrollView.bottomAnchor)
-    ])
-    return ChengYingStyle.card(body, insets: NSEdgeInsets(top: 24, left: 22, bottom: 18, right: 22))
-  }
-
-  private func configureEmptyState() {
-    emptyState.identifier = NSUserInterfaceItemIdentifier("welcome.empty")
-    emptyState.translatesAutoresizingMaskIntoConstraints = false
-    let image = NSImageView(image: ChengYingStyle.symbol("play.rectangle", fallback: NSImage.multipleDocumentsName))
-    image.contentTintColor = .tertiaryLabelColor
-    image.imageScaling = .scaleProportionallyUpOrDown
-    image.translatesAutoresizingMaskIntoConstraints = false
-    let title = welcomeLabel(welcomeString("welcome.empty.title"), size: 15, weight: .medium)
-    let hint = welcomeLabel(welcomeString("welcome.empty.hint"), size: 12, color: .secondaryLabelColor)
-    hint.maximumNumberOfLines = 3
-    hint.cell?.wraps = true
-    hint.alignment = .center
-    [image, title, hint].forEach(emptyState.addSubview)
-    NSLayoutConstraint.activate([
-      image.centerXAnchor.constraint(equalTo: emptyState.centerXAnchor),
-      image.centerYAnchor.constraint(equalTo: emptyState.centerYAnchor, constant: -38),
-      image.widthAnchor.constraint(equalToConstant: 48),
-      image.heightAnchor.constraint(equalToConstant: 40),
-      title.centerXAnchor.constraint(equalTo: emptyState.centerXAnchor),
-      title.topAnchor.constraint(equalTo: image.bottomAnchor, constant: 18),
-      hint.centerXAnchor.constraint(equalTo: emptyState.centerXAnchor),
-      hint.leadingAnchor.constraint(greaterThanOrEqualTo: emptyState.leadingAnchor, constant: 24),
-      hint.trailingAnchor.constraint(lessThanOrEqualTo: emptyState.trailingAnchor, constant: -24),
-      hint.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 9)
-    ])
-  }
-
-  private func makeRecentDocumentsList() -> [URL] {
-    guard Preference.bool(for: .recordRecentFiles) else { return [] }
-    return recentDocumentsProvider().filter {
-      $0.isFileURL && $0.resolvingSymlinksInPath() != lastPlaybackURL?.resolvingSymlinksInPath()
-    }
-  }
-
-  func loadLastPlaybackInfo() {
-    if Preference.bool(for: .recordRecentFiles),
-       Preference.bool(for: .resumeLastPosition),
-       let lastFile = Preference.url(for: .iinaLastPlayedFilePath),
-       lastFile.isFileURL, !ImageFileSupport.isImageURL(lastFile),
-       FileManager.default.fileExists(atPath: lastFile.path) {
-      lastPlaybackURL = lastFile
-      let position = VideoTime(Preference.double(for: .iinaLastPlayedFilePosition)).stringRepresentation
-      resumeButton.title = String(format: welcomeString("welcome.resume"), lastFile.lastPathComponent, position)
-      resumeButton.toolTip = lastFile.path
-      resumeButton.setAccessibilityLabel(resumeButton.title)
-      resumeButton.isHidden = false
-      resumeHeight.constant = 76
-      resumeBottomSpacing.constant = 12
-    } else {
-      lastPlaybackURL = nil
-      resumeButton.isHidden = true
-      resumeHeight.constant = 0
-      resumeBottomSpacing.constant = 0
-    }
-  }
-
-  func reloadData() {
-    guard loaded else { return }
-    loadLastPlaybackInfo()
-    recentDocuments = makeRecentDocumentsList()
-    recentFilesTableView.reloadData()
-    recentCount.stringValue = recentDocuments.isEmpty ? "" : String(recentDocuments.count)
-    emptyState.isHidden = !recentDocuments.isEmpty || lastPlaybackURL != nil
-    recentScrollView.isHidden = recentDocuments.isEmpty
-    if lastPlaybackURL == nil && !recentDocuments.isEmpty {
-      recentFilesTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-    } else {
-      recentFilesTableView.deselectAll(nil)
-    }
-    updateLastFileButtonHighlight()
-  }
-
   @objc func openLocalFile() { AppDelegate.shared.openFile(self) }
-
-  @objc func resumeLastPlayback() {
-    guard let url = lastPlaybackURL else { return }
-    player.openURL(url)
-  }
-
-  @objc func onTableClicked() { openRecentItemFromTable(recentFilesTableView.clickedRow) }
-
-  private func openRecentItemFromTable(_ row: Int) {
-    guard let url = recentDocuments[at: row] else { return }
-    player.openURL(url)
-  }
-
-  func updateLastFileButtonHighlight() {
-    resumeButton.state = recentFilesTableView.selectedRow < 0 && lastPlaybackURL != nil ? .on : .off
-    resumeButton.needsDisplay = true
-  }
 
   override func keyDown(with event: NSEvent) {
     let key = KeyCodeHelper.keyMap[event.keyCode]?.0
     switch key {
     case "ENTER", "KP_ENTER":
-      if recentFilesTableView.selectedRow >= 0 {
-        openRecentItemFromTable(recentFilesTableView.selectedRow)
-      } else if lastPlaybackURL != nil {
-        resumeLastPlayback()
-      } else if !recentDocuments.isEmpty {
-        openRecentItemFromTable(0)
-      }
-    case "DOWN":
-      let next = recentFilesTableView.selectedRow + 1
-      if next < recentDocuments.count {
-        recentFilesTableView.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
-        recentFilesTableView.scrollRowToVisible(next)
-      } else {
-        super.keyDown(with: event)
-      }
-    case "UP":
-      let previous = recentFilesTableView.selectedRow - 1
-      if previous >= 0 {
-        recentFilesTableView.selectRowIndexes(IndexSet(integer: previous), byExtendingSelection: false)
-        recentFilesTableView.scrollRowToVisible(previous)
-      } else if lastPlaybackURL != nil {
-        recentFilesTableView.deselectAll(nil)
-      } else {
-        super.keyDown(with: event)
-      }
+      openLocalFile()
     default:
       super.keyDown(with: event)
     }
   }
-}
-
-extension InitialWindowController: NSTableViewDelegate, NSTableViewDataSource {
-  func numberOfRows(in tableView: NSTableView) -> Int { recentDocuments.count }
-
-  func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-    WelcomeRecentRow()
-  }
-
-  func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-    let identifier = NSUserInterfaceItemIdentifier("welcome.recentCell")
-    let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? WelcomeRecentCell ??
-      WelcomeRecentCell()
-    cell.identifier = identifier
-    cell.configure(url: recentDocuments[row])
-    return cell
-  }
-
-  func tableViewSelectionDidChange(_ notification: Notification) { updateLastFileButtonHighlight() }
 }
 
 class InitialWindowContentView: NSView {

@@ -15,10 +15,10 @@
         <customObject id="-3" userLabel="Application" customClass="NSObject"/>
         <window title="ChengYing" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="YES" releasedWhenClosed="NO" frameAutosaveName="IINAWelcomeWindow" animationBehavior="default" titlebarAppearsTransparent="YES" id="F0z-JX-Cv5">
             <windowStyleMask key="styleMask" titled="YES" closable="YES" miniaturizable="YES" resizable="YES" fullSizeContentView="YES"/>
-            <rect key="contentRect" x="600" y="400" width="900" height="600"/>
+            <rect key="contentRect" x="600" y="400" width="580" height="620"/>
             <rect key="screenRect" x="0.0" y="0.0" width="2560" height="1415"/>
             <view key="contentView" wantsLayer="YES" id="se5-gp-TjO" customClass="InitialWindowContentView" customModule="IINA" customModuleProvider="target">
-                <rect key="frame" x="0.0" y="0.0" width="900" height="600"/>
+                <rect key="frame" x="0.0" y="0.0" width="580" height="620"/>
                 <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
             </view>
             <connections>

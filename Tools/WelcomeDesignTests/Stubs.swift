@@ -7,10 +7,18 @@ final class PlayerCore {
   func openFromPasteboard(_ sender: NSDraggingInfo) -> Bool { true }
 }
 
-final class AppDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
   static let shared = AppDelegate()
-  var openedFilePanel = false
-  func openFile(_ sender: Any?) { openedFilePanel = true }
+  var openedFilePanels = 0
+  var openedDownloadCenters = 0
+  func openFile(_ sender: Any?) { openedFilePanels += 1 }
+  @objc func menuShowDownloadCenter(_ sender: Any?) { openedDownloadCenters += 1 }
+}
+
+// Shadow the AppKit boundary so a regression can never inspect the user's real history.
+final class NSDocumentController {
+  static var shared: NSDocumentController { fatalError("Welcome must not access document history") }
+  var recentDocumentURLs: [URL] { fatalError("Welcome must not read recent document URLs") }
 }
 
 enum Preference {
@@ -20,10 +28,11 @@ enum Preference {
   }
   enum Theme: Int { case dark, light, system }
   static var values: [Key: Any] = [.recordRecentFiles: true, .resumeLastPosition: true]
-  static func bool(for key: Key) -> Bool { values[key] as? Bool ?? false }
-  static func url(for key: Key) -> URL? { values[key] as? URL }
-  static func double(for key: Key) -> Double { values[key] as? Double ?? 0 }
-  static func `enum`(for key: Key) -> Theme { .dark }
+  static var reads: [Key] = []
+  static func bool(for key: Key) -> Bool { reads.append(key); return values[key] as? Bool ?? false }
+  static func url(for key: Key) -> URL? { reads.append(key); return values[key] as? URL }
+  static func double(for key: Key) -> Double { reads.append(key); return values[key] as? Double ?? 0 }
+  static func `enum`(for key: Key) -> Theme { reads.append(key); return values[key] as? Theme ?? .dark }
 }
 
 struct InfoDictionary {
@@ -42,7 +51,8 @@ struct VideoTime {
 }
 
 enum KeyCodeHelper {
-  static let keyMap: [UInt16: (String, String)] = [36: ("ENTER", ""), 125: ("DOWN", ""), 126: ("UP", "")]
+  static let keyMap: [UInt16: (String, String)] = [36: ("ENTER", ""), 76: ("KP_ENTER", ""),
+                                               125: ("DOWN", ""), 126: ("UP", "")]
 }
 
 extension Array {
@@ -61,11 +71,6 @@ extension NSAppearance {
 }
 
 final class WelcomeHarness: InitialWindowController {
-  override func reloadData() {
-    precondition(Thread.isMainThread, "Welcome UI updates must run on the main thread")
-    super.reloadData()
-  }
-
   override func loadWindow() {
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
                           styleMask: [.titled, .closable, .resizable, .fullSizeContentView],

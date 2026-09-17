@@ -376,17 +376,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
-  private func showWelcomeWindow(checkingForUpdatedData: Bool = false) {
+  private func showWelcomeWindow() {
     let actionRawValue = Preference.integer(for: .actionAfterLaunch)
     let action: Preference.ActionAfterLaunch = Preference.ActionAfterLaunch(rawValue: actionRawValue) ?? .welcomeWindow
     switch action {
     case .welcomeWindow:
       let window = PlayerCore.first.initialWindow!
       window.showWindow(nil)
-      if checkingForUpdatedData {
-        window.loadLastPlaybackInfo()
-        window.reloadData()
-      }
     case .openPanel:
       openFile(self)
     default:
@@ -675,7 +671,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     guard !isTerminating else { return false }
     guard !flag else { return true }
     Logger.log("Handle reopen")
-    showWelcomeWindow(checkingForUpdatedData: true)
+    showWelcomeWindow()
     return true
   }
 
@@ -1139,13 +1135,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @IBAction
   func clearRecentDocuments(_ sender: Any?) {
     NSDocumentController.shared.clearRecentDocuments(sender)
-    // Clearing recent files must also remove the welcome page's separate resume entry.
+    // An explicit history-clear action also removes the last-played file metadata.
     Preference.set(nil, for: .iinaLastPlayedFilePath)
     Preference.set(nil, for: .iinaLastPlayedFilePosition)
     saveRecentDocuments()
-    for player in PlayerCore.playerCores where player.initialWindow.loaded {
-      player.initialWindow.reloadData()
-    }
   }
 
   /// Adds or replaces an Open Recent menu item corresponding to the data located by the URL.

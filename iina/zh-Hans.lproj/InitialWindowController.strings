@@ -11,9 +11,4 @@
 "welcome.feature.rotate" = "永久旋转";
 "welcome.feature.subtitle" = "AI 字幕";
 "welcome.privacy" = "本机处理 · 你的影像不会上传";
-"welcome.recent" = "最近打开";
-"welcome.keyboard" = "↑↓  选择       ↩  打开";
-"welcome.empty.title" = "这里还很安静";
-"welcome.empty.hint" = "打开视频或图片，\n最近文件会显示在这里。";
-"welcome.resume" = "继续上次\n%@\n从 %@ 继续播放";
 "welcome.download" = "下载网络视频";

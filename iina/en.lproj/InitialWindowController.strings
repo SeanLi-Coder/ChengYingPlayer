@@ -11,9 +11,4 @@
 "welcome.feature.rotate" = "Permanent rotation";
 "welcome.feature.subtitle" = "AI subtitles";
 "welcome.privacy" = "LOCAL PROCESSING  ·  NO MEDIA UPLOADS";
-"welcome.recent" = "Recently opened";
-"welcome.keyboard" = "↑↓  Navigate       ↩  Open";
-"welcome.empty.title" = "Ready for your next discovery";
-"welcome.empty.hint" = "Open a video or image and your recent files\nwill appear here.";
-"welcome.resume" = "CONTINUE WATCHING\n%@\nContinue from %@";
 "welcome.download" = "Download online videos";
