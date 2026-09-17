@@ -12,9 +12,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   var openedFilePanels = 0
   var openedDownloadCenters = 0
   var openedFileAccessGuides = 0
+  var openedSummaryTools = 0
   func openFile(_ sender: Any?) { openedFilePanels += 1 }
   @objc func menuShowDownloadCenter(_ sender: Any?) { openedDownloadCenters += 1 }
   @objc func showFileAccessGuide(_ sender: Any?) { openedFileAccessGuides += 1 }
+  @objc func menuShowSummaryTools(_ sender: Any?) { openedSummaryTools += 1 }
 }
 
 // Shadow the AppKit boundary so a regression can never inspect the user's real history.

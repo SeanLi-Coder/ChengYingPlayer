@@ -149,6 +149,7 @@ class HelperTests(unittest.TestCase):
             self.assertEqual(command[-2], "--request-json")
             self.assertEqual(env["HF_HUB_OFFLINE"], "1")
             self.assertEqual(env["TRANSFORMERS_OFFLINE"], "1")
+            self.assertEqual(env["HF_DEACTIVATE_ASYNC_LOAD"], "1")
             self.assertEqual(payload["models"]["asr"], str(self.root / "models/asr"))
             on_stderr('{"type":"failed","error":"This is a diagnostic, not a protocol event."}')
             output(json.dumps({"type": "completed", "outputs": {"srt": "/output.srt"}, "partial": True, "warnings": ["Burn skipped."]}))

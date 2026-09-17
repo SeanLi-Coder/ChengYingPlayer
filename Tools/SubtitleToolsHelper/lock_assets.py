@@ -77,6 +77,7 @@ def main() -> None:
         requirements.append(f"{name}=={version} --hash=sha256:{digest}")
     result = {
         "schema_version": 1,
+        "legacy_runtime_manifests": {"e23bef21b5297f8a2305d46198c21c4a0cc7d43a75d0b8df2026db66f36dea2e": "5098096ba19c515ebb991ad451da646a68baaa55368ef60cef6ce2c0dfb42d30"},
         "runtime": {
             "id": "chengying-subtitles-macos14-arm64-py313-v1",
             "python_executable": "python/bin/python3",
@@ -93,6 +94,7 @@ def main() -> None:
             model("asr", "Qwen3-ASR 1.7B BF16", "Qwen/Qwen3-ASR-1.7B-hf"),
             model("aligner", "Qwen3-ForcedAligner 0.6B BF16", "Qwen/Qwen3-ForcedAligner-0.6B-hf"),
             model("translator", "Hy-MT2 30B-A3B BF16", "tencent/Hy-MT2-30B-A3B"),
+            model("summarizer", "Qwen3.8 27B BF16", "Qwen/Qwen3.8-27B"),
         ],
     }
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)

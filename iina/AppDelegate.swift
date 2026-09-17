@@ -67,6 +67,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   lazy var logWindow: LogWindowController = LogWindowController()
   lazy var downloadCenterWindow = DownloadCenterWindowController()
   lazy var fileAccessGuide = FileAccessGuideCoordinator()
+  lazy var summaryToolsWindow = SummaryToolsWindowController(openDownloadCenter: {
+    NSApp.sendAction(#selector(AppDelegate.menuShowDownloadCenter(_:)), to: NSApp.delegate, from: nil)
+  })
 
   lazy var preferenceWindowController: PreferenceWindowController = {
     let list: [NSViewController & PreferenceWindowEmbeddable] = [
@@ -422,6 +425,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   ///     terminate the application.
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     guard !ImageViewerCoordinator.shared.isBusy else { return false }
+    guard SubtitleToolsService.shared.task?.isActive != true else { return false }
     // A download task is independent of player-window lifetime.
     guard !DownloadCenterService.shared.isRunning else { return false }
     // If the user has not enabled the setting then no need to check anything else.
@@ -436,6 +440,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard updateCoordinator.shouldAllowTerminationForUpdate() else { return .terminateCancel }
+    guard SummaryToolsLifecycle.mayTerminate(task: SubtitleToolsService.shared.task, confirmation: {
+      let alert = NSAlert()
+      alert.messageText = summaryToolsString("quit.title")
+      alert.informativeText = summaryToolsString("quit.detail")
+      alert.addButton(withTitle: summaryToolsString("quit.continue"))
+      alert.addButton(withTitle: summaryToolsString("quit.stop"))
+      return alert.runModal() == .alertSecondButtonReturn
+    }) else { return .terminateCancel }
     Logger.log("App should terminate")
     isTerminating = true
     fileAccessGuide.cancelLaunchOffer()
@@ -707,6 +719,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @objc func menuShowDownloadCenter(_ sender: Any?) {
     guard !isTerminating else { return }
     downloadCenterWindow.showWindow(sender)
+  }
+
+  @objc func menuShowSummaryTools(_ sender: Any?) {
+    guard !isTerminating else { return }
+    summaryToolsWindow.showWindow(sender)
   }
 
   @objc func menuShowMediaInfo(_ sender: Any?) {

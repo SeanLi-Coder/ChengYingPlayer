@@ -11,9 +11,18 @@ from pathlib import Path
 
 from .common import PipelineError, check_cancelled
 
+REMOTE_FORMATS = "mov,matroska,webm,ogg,mp3,wav,flac"
+REMOTE_FORMAT_NAMES = {"mov", "mp4", "m4a", "3gp", "3g2", "mj2", "matroska", "webm", "ogg", "mp3", "wav", "flac"}
 
-def probe(path: Path, ffprobe: str) -> dict:
-    result = subprocess.run([ffprobe, "-v", "error", "-show_streams", "-show_format",
+
+def remote_input_options(restricted: bool) -> list[str]:
+    # Remote audio is inert media, never a playlist that can open other URLs or
+    # local files. Keep the existing local-video pipeline unrestricted.
+    return ["-protocol_whitelist", "file", "-format_whitelist", REMOTE_FORMATS] if restricted else []
+
+
+def probe(path: Path, ffprobe: str, *, require_video: bool = True, restricted: bool = False) -> dict:
+    result = subprocess.run([ffprobe, *remote_input_options(restricted), "-v", "error", "-show_streams", "-show_format",
                              "-of", "json", str(path)], capture_output=True, text=True, timeout=60, check=False)
     if result.returncode:
         raise PipelineError("Cannot inspect the selected media: " + result.stderr[-1500:].strip())
@@ -21,15 +30,19 @@ def probe(path: Path, ffprobe: str) -> dict:
     video = [s for s in payload.get("streams", []) if s.get("codec_type") == "video"
              and not s.get("disposition", {}).get("attached_pic")]
     audio = [s for s in payload.get("streams", []) if s.get("codec_type") == "audio"]
-    if not video:
+    if restricted:
+        formats = set(str(payload.get("format", {}).get("format_name", "")).split(","))
+        if video or not formats or not formats.issubset(REMOTE_FORMAT_NAMES):
+            raise PipelineError("The remote summary source must be audio in a supported inert container")
+    if not video and require_video:
         raise PipelineError("The selected file has no video stream")
     if not audio:
         raise PipelineError("The selected video has no audio track")
-    payload["video"] = next((s for s in video if s.get("disposition", {}).get("default")), video[0])
+    payload["video"] = next((s for s in video if s.get("disposition", {}).get("default")), video[0] if video else {})
     payload["audio"] = audio
     payload["selected_audio"] = next((s for s in audio if s.get("disposition", {}).get("default")), audio[0])
     try:
-        duration = float(payload.get("format", {}).get("duration", payload["video"].get("duration", 0)))
+        duration = float(payload.get("format", {}).get("duration", (payload["video"] or payload["selected_audio"]).get("duration", 0)))
     except (ValueError, TypeError):
         duration = 0
     if not math.isfinite(duration) or duration <= 0:
@@ -87,8 +100,8 @@ def run_ffmpeg(command: list[str], duration: float, callback, cancelled, cwd: Pa
             process.stdout.close()
 
 
-def extract_audio(source: Path, destination: Path, info: dict, ffmpeg: str, progress, cancelled) -> None:
-    command = [ffmpeg, "-n", "-i", str(source), "-map", f"0:{info['selected_audio']['index']}",
+def extract_audio(source: Path, destination: Path, info: dict, ffmpeg: str, progress, cancelled, *, restricted: bool = False) -> None:
+    command = [ffmpeg, "-n", *remote_input_options(restricted), "-i", str(source), "-map", f"0:{info['selected_audio']['index']}",
                "-vn", "-af", "aresample=async=1:first_pts=0", "-ar", "16000", "-ac", "1",
                "-c:a", "pcm_s16le", str(destination)]
     run_ffmpeg(command, info["duration"],

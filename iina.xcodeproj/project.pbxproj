@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D4F400010000000000000001 /* SummaryToolsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F400020000000000000001 /* SummaryToolsModels.swift */; };
+		D4F400010000000000000002 /* SummaryToolsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F400020000000000000002 /* SummaryToolsWindowController.swift */; };
+		D4F400010000000000000003 /* SummaryTools.strings in Resources */ = {isa = PBXBuildFile; fileRef = D4F400040000000000000001 /* SummaryTools.strings */; };
 		D4F200010000000000000001 /* FileAccessGuideCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F200020000000000000001 /* FileAccessGuideCoordinator.swift */; };
 		D4F200010000000000000002 /* FileAccessGuideWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F200020000000000000002 /* FileAccessGuideWindowController.swift */; };
 		D4F200010000000000000003 /* FileAccess.strings in Resources */ = {isa = PBXBuildFile; fileRef = D4F200040000000000000001 /* FileAccess.strings */; };
@@ -431,6 +434,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D4F400020000000000000001 /* SummaryToolsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryToolsModels.swift; sourceTree = "<group>"; };
+		D4F400020000000000000002 /* SummaryToolsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryToolsWindowController.swift; sourceTree = "<group>"; };
+		D4F400030000000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/SummaryTools.strings; sourceTree = "<group>"; };
+		D4F400030000000000000002 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/SummaryTools.strings"; sourceTree = "<group>"; };
 		D4F200020000000000000001 /* FileAccessGuideCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileAccessGuideCoordinator.swift; sourceTree = "<group>"; };
 		D4F200020000000000000002 /* FileAccessGuideWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileAccessGuideWindowController.swift; sourceTree = "<group>"; };
 		D4F200030000000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/FileAccess.strings; sourceTree = "<group>"; };
@@ -2002,6 +2009,8 @@
 				D4C800112F6A000100000002 /* SubtitleToolsHelperClient.swift */,
 				D4C800122F6A000100000003 /* SubtitleToolsService.swift */,
 				D4C800132F6A000100000004 /* SubtitleToolsViewController.swift */,
+				D4F400020000000000000001 /* SummaryToolsModels.swift */,
+				D4F400020000000000000002 /* SummaryToolsWindowController.swift */,
 			);
 			path = SubtitleTools;
 			sourceTree = "<group>";
@@ -2172,6 +2181,7 @@
 				D4D100040000000000000001 /* MediaInfo.strings */,
 				D4F100040000000000000001 /* Updates.strings */,
 				D4C800302F6A000100000001 /* SubtitleTools.strings */,
+				D4F400040000000000000001 /* SummaryTools.strings */,
 				D4CB00302F6A000100000001 /* DownloadCenter.strings */,
 				D4F200040000000000000001 /* FileAccess.strings */,
 				D4CA00302F6A000100000001 /* PlaylistBrowser.strings */,
@@ -2860,6 +2870,7 @@
 				D4D100010000000000000007 /* MediaInfo.strings in Resources */,
 				D4F100010000000000000007 /* Updates.strings in Resources */,
 				D4C800052F6A000100000005 /* SubtitleTools.strings in Resources */,
+				D4F400010000000000000003 /* SummaryTools.strings in Resources */,
 				D4CB00042F6A000100000004 /* DownloadCenter.strings in Resources */,
 				D4F200010000000000000003 /* FileAccess.strings in Resources */,
 				D4CA00042F6A000100000004 /* PlaylistBrowser.strings in Resources */,
@@ -3012,6 +3023,8 @@
 				D4C800022F6A000100000002 /* SubtitleToolsHelperClient.swift in Sources */,
 				D4C800032F6A000100000003 /* SubtitleToolsService.swift in Sources */,
 				D4C800042F6A000100000004 /* SubtitleToolsViewController.swift in Sources */,
+				D4F400010000000000000001 /* SummaryToolsModels.swift in Sources */,
+				D4F400010000000000000002 /* SummaryToolsWindowController.swift in Sources */,
 				D4C900012F6A000100000001 /* ChengYingStyle.swift in Sources */,
 				D4E100010000000000000001 /* PlayerEdgeControlsView.swift in Sources */,
 				D4E100010000000000000002 /* PlayerChromePolicy.swift in Sources */,
@@ -3194,6 +3207,15 @@
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
+		D4F400040000000000000001 /* SummaryTools.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				D4F400030000000000000001 /* en */,
+				D4F400030000000000000002 /* zh-Hans */,
+			);
+			name = SummaryTools.strings;
+			sourceTree = "<group>";
+		};
 		D4F200040000000000000001 /* FileAccess.strings */ = {
 			isa = PBXVariantGroup;
 			children = (

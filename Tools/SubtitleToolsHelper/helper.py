@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 
@@ -42,7 +43,7 @@ def load_manifest(path: Path) -> tuple[dict, str]:
     specs = [runtime.get("archive", {}), *runtime["wheels"]]
     model_ids: set[str] = set()
     for model in manifest["models"]:
-        if model.get("id") in model_ids or model.get("id") not in {"asr", "aligner", "translator"}:
+        if model.get("id") in model_ids or model.get("id") not in {"asr", "aligner", "translator", "summarizer"}:
             raise AssetError("Invalid or duplicate model identifier.")
         model_ids.add(model["id"])
         relative_path(model.get("directory", ""))
@@ -59,7 +60,7 @@ def load_manifest(path: Path) -> tuple[dict, str]:
             if not artifact.url.startswith(prefix):
                 raise AssetError("Model URLs must refer to their pinned official repository revision.")
         specs.extend(model["artifacts"])
-    if model_ids != {"asr", "aligner", "translator"}:
+    if not {"asr", "aligner", "translator"}.issubset(model_ids):
         raise AssetError("The manifest must contain the complete high-quality subtitle pipeline.")
     artifacts = [Artifact.from_dict(spec) for spec in specs]
     if len({item.path for item in artifacts}) != len(artifacts) or len({item.id for item in artifacts}) != len(artifacts):
@@ -71,7 +72,7 @@ def load_manifest(path: Path) -> tuple[dict, str]:
 
 
 class Supervisor:
-    def __init__(self, manifest: dict, fingerprint: str, data_dir: Path, resources: Path, ffmpeg: str, ffprobe: str, emit: Callable[[dict], None]) -> None:
+    def __init__(self, manifest: dict, fingerprint: str, data_dir: Path, resources: Path, ffmpeg: str, ffprobe: str, emit: Callable[[dict], None], *, downloader_helper: str | None = None, downloader_data_dir: str | None = None) -> None:
         self.manifest = manifest
         self.store = ArtifactStore(data_dir)
         self.runtime = Runtime(self.store.root, manifest, fingerprint)
@@ -79,6 +80,8 @@ class Supervisor:
         self.ffmpeg = ffmpeg
         self.ffprobe = ffprobe
         self.emit = emit
+        self.downloader_helper = downloader_helper
+        self.downloader_data_dir = downloader_data_dir
         self.artifacts = [Artifact.from_dict(manifest["runtime"]["archive"])]
         self.artifacts += [Artifact.from_dict(item) for item in manifest["runtime"]["wheels"]]
         self.models = [(model, [Artifact.from_dict(item) for item in model["artifacts"]]) for model in manifest["models"]]
@@ -128,7 +131,7 @@ class Supervisor:
             self.close()
             self.emit({"type": "completed", "id": identifier, "message": "Subtitle tools stopped."})
             return
-        if command not in {"prepare", "start"}:
+        if command not in {"prepare", "start", "summarize"}:
             self.emit({"type": "failed", "id": identifier, "error": "Unknown command."})
             return
         with self._lock:
@@ -136,16 +139,18 @@ class Supervisor:
                 self.emit({"type": "failed", "id": identifier, "error": "Another subtitle operation is already running."})
                 return
             self._active_id = identifier
-            self._active_operation = "prepare" if command == "prepare" else "subtitles"
+            self._active_operation = {"prepare": "prepare", "start": "subtitles", "summarize": "summary"}[command]
             self._cancel = threading.Event()
             self.emit({"type": "accepted", "id": identifier, "operation": self._active_operation})
             self._thread = threading.Thread(target=self._run, args=(identifier, command, dict(request)), daemon=True)
             self._thread.start()
 
     def _run(self, identifier: str, command: str, request: dict) -> None:
-        operation = "prepare" if command == "prepare" else "subtitles"
+        operation = {"prepare": "prepare", "start": "subtitles", "summarize": "summary"}[command]
         last_emit = 0.0
         terminal_event: dict | None = None
+        selected = self.artifacts
+        total_bytes = self.total_bytes
 
         def emit(event: dict) -> None:
             nonlocal terminal_event
@@ -161,27 +166,46 @@ class Supervisor:
             if now - last_emit < 0.2 and count < artifact.size:
                 return
             last_emit = now
-            downloaded = sum(self.store.downloaded(item) for item in self.artifacts)
-            verified = sum(item.size for item in self.artifacts if self.store.ready(item))
-            done = downloaded if phase == "download" else min(self.total_bytes, verified + count)
-            remaining = self.total_bytes - downloaded if phase == "download" else artifact.size - count
+            if command != "prepare":
+                emit({"type": "progress", "stage": "verify", "artifact_id": artifact.id,
+                      "progress": count / max(1, artifact.size), "message": f"Verifying {artifact.id}.",
+                      "downloaded_bytes": count, "total_bytes": artifact.size, "bytes_per_second": rate,
+                      "eta_seconds": (artifact.size - count) / rate if rate and rate > 0 else None,
+                      "eta_scope": "current_file_verification"})
+                return
+            downloaded = sum(self.store.downloaded(item) for item in selected)
+            verified = sum(item.size for item in selected if self.store.ready(item))
+            done = downloaded if phase == "download" else min(total_bytes, verified + count)
+            remaining = total_bytes - downloaded if phase == "download" else artifact.size - count
             emit({"type": "progress", "stage": phase, "artifact_id": artifact.id,
-                  "progress": done / self.total_bytes, "message": f"{'Downloading' if phase == 'download' else 'Verifying'} {artifact.id}.",
-                  "downloaded_bytes": downloaded, "total_bytes": self.total_bytes,
+                  "progress": done / max(1, total_bytes), "message": f"{'Downloading' if phase == 'download' else 'Verifying'} {artifact.id}.",
+                  "downloaded_bytes": downloaded, "total_bytes": total_bytes,
                   "bytes_per_second": rate, "eta_seconds": remaining / rate if rate and rate > 0 else None,
                   "eta_scope": "remaining_download" if phase == "download" else "current_file_verification"})
 
         try:
             with operation_lock(self.store.root):
                 if command == "prepare":
-                    remaining = sum(item.size - self.store.downloaded(item) for item in self.artifacts)
+                    purpose = request.get("purpose", "subtitles")
+                    if purpose not in {"subtitles", "summary"}:
+                        raise AssetError("Unsupported model preparation purpose.")
+                    identifiers = {"asr", "aligner", "summarizer" if purpose == "summary" else "translator"}
+                    if not identifiers.issubset({model["id"] for model, _ in self.models}):
+                        raise AssetError("The requested model pipeline is not bundled.")
+                    selected = [Artifact.from_dict(self.manifest["runtime"]["archive"])]
+                    selected += [Artifact.from_dict(item) for item in self.manifest["runtime"]["wheels"]]
+                    selected += [item for model, artifacts in self.models if model["id"] in identifiers for item in artifacts]
+                    total_bytes = sum(item.size for item in selected)
+                    remaining = sum(item.size - self.store.downloaded(item) for item in selected)
                     install_space = 0 if self.runtime.ready() else sum(item["size"] for item in self.manifest["runtime"]["wheels"]) * 3 + self.manifest["runtime"]["archive"]["size"] * 4
                     ensure_space(self.store.root, remaining + install_space)
-                    for artifact in self.artifacts:
+                    for artifact in selected:
                         self.store.ensure(artifact, self._cancel, download_progress)
                     self.runtime.ensure(self._cancel, lambda event: emit({"type": "progress", **event}))
                     check_cancelled(self._cancel)
-                    emit({**self.status(), "type": "completed", "stage": "complete", "progress": 1.0, "message": "All subtitle models and the offline runtime are verified and ready."})
+                    emit({**self.status(), "type": "completed", "stage": "complete", "progress": 1.0, "purpose": purpose, "message": "The requested models and offline runtime are verified and ready."})
+                elif command == "summarize":
+                    self._summarize(request, emit, download_progress)
                 else:
                     self._start(request, emit, download_progress)
         except Cancelled:
@@ -211,7 +235,9 @@ class Supervisor:
             raise AssetError("The subtitle burn option must be a boolean.")
         if not self.runtime.ready():
             raise AssetError("Prepare the isolated subtitle runtime before starting a task.")
-        for _, artifacts in self.models:
+        for model, artifacts in self.models:
+            if model["id"] not in {"asr", "aligner", "translator"}:
+                continue
             for artifact in artifacts:
                 if not self.store.verify(artifact, self._cancel, download_progress):
                     raise AssetError("A subtitle model is missing or unverified. Prepare the models first.")
@@ -219,6 +245,77 @@ class Supervisor:
         payload = {"input_path": str(video), "language": language, "burn_subtitles": burn,
                    "ffmpeg": self.ffmpeg, "ffprobe": self.ffprobe, "data_dir": str(self.store.root),
                    "models": model_paths, "model_paths": {"qwen-asr": model_paths["asr"], "qwen-aligner": model_paths["aligner"], "hy-mt": model_paths["translator"]}}
+        self._worker(payload, emit)
+
+    def _summarize(self, request: dict, emit: Callable[[dict], None], download_progress: Callable) -> None:
+        from subtitle_worker.common import physical_memory_bytes
+        from subtitle_worker.summary import read_source
+
+        source_url = request.get("source_url")
+        if not isinstance(source_url, str) or not 8 <= len(source_url) <= 4096:
+            raise AssetError("Enter one Bilibili or YouTube video link.")
+        if physical_memory_bytes() < 96 * 1024**3:
+            raise AssetError("Qwen3.8-27B BF16 summarization requires at least 96 GiB of unified memory.")
+        if not self.runtime.ready():
+            raise AssetError("Prepare the isolated AI runtime before starting a summary.")
+        if (not self.downloader_helper or not Path(self.downloader_helper).is_absolute()
+                or not os.access(self.downloader_helper, os.X_OK)
+                or not self.downloader_data_dir or not Path(self.downloader_data_dir).is_absolute()):
+            raise AssetError("The bundled summary source helper is unavailable.")
+        def verify_models(identifiers: set[str]) -> None:
+            if not identifiers.issubset({model["id"] for model, _ in self.models}):
+                raise AssetError("The required local summary models are not bundled.")
+            for model, artifacts in self.models:
+                if model["id"] in identifiers:
+                    for artifact in artifacts:
+                        if not self.store.verify(artifact, self._cancel, download_progress):
+                            raise AssetError("A required summary model is missing or unverified. Prepare summary models first.")
+        verify_models({"summarizer"})
+        identifier = request.get("id", "")
+        try:
+            if str(uuid.UUID(identifier)) != identifier.lower():
+                raise ValueError("Not a canonical UUID")
+        except (ValueError, AttributeError) as exc:
+            raise AssetError("Summary requests require a canonical UUID identifier.") from exc
+        folder = safe_path(self.store.root, f"summaries/{identifier}", parents=True)
+        folder.mkdir(mode=0o700, exist_ok=False)
+        source_folder = safe_path(folder, "source")
+        source_folder.mkdir(mode=0o700)
+        terminal: dict | None = None
+        def source_event(line: str) -> None:
+            nonlocal terminal
+            try:
+                event = json.loads(line)
+            except ValueError:
+                return
+            if not isinstance(event, dict) or event.get("id") != identifier:
+                return
+            if event.get("type") in {"completed", "failed", "cancelled"}:
+                terminal = event
+            elif event.get("type") == "progress":
+                emit(event)
+        emit({"type": "progress", "stage": "reading_source", "message": "Reading video metadata and available subtitles."})
+        command = [self.downloader_helper, "--summary-source", "--stdio", "--data-dir", self.downloader_data_dir,
+                   "--download-dir", str(source_folder), "--ffmpeg", self.ffmpeg, "--ffprobe", self.ffprobe]
+        code = run_process(command, self._cancel, source_event, on_stderr=lambda _: None,
+                           stdin_payload=json.dumps({"id": identifier, "source_url": source_url}))
+        check_cancelled(self._cancel)
+        if terminal and (terminal.get("type") == "cancelled" or terminal.get("code") == "cancelled"):
+            raise Cancelled("Summary source acquisition cancelled.")
+        if code != 0 or not terminal or terminal.get("type") != "completed":
+            raise AssetError(str((terminal or {}).get("message") or "The video source could not be prepared."))
+        source_path = safe_path(source_folder, "source.json")
+        if terminal.get("source_path") != str(source_path):
+            raise AssetError("The source helper returned an unexpected output path.")
+        source = read_source(source_path, folder)
+        if source["content_source"] == "audio":
+            verify_models({"asr", "aligner"})
+        model_paths = {model["id"]: str(safe_path(self.store.root, model["directory"])) for model, _ in self.models}
+        self._worker({"operation": "summary", "source_path": str(source_path), "output_dir": str(folder),
+                      "data_dir": str(self.store.root), "ffmpeg": self.ffmpeg, "ffprobe": self.ffprobe,
+                      "model_paths": model_paths}, emit)
+
+    def _worker(self, payload: dict, emit: Callable[[dict], None]) -> None:
         folder = safe_path(self.store.root, "requests/.request-check", parents=True).parent
         descriptor, filename = tempfile.mkstemp(prefix="subtitle-", suffix=".json", dir=folder)
         path = Path(filename)
@@ -246,7 +343,7 @@ class Supervisor:
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as destination:
                 json.dump(payload, destination, ensure_ascii=False)
-            environment = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_DATASETS_OFFLINE="1", PYTHONNOUSERSITE="1", PYTHONUTF8="1", PYTHONUNBUFFERED="1", TOKENIZERS_PARALLELISM="false")
+            environment = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_DATASETS_OFFLINE="1", PYTHONNOUSERSITE="1", PYTHONUTF8="1", PYTHONUNBUFFERED="1", TOKENIZERS_PARALLELISM="false", HF_DEACTIVATE_ASYNC_LOAD="1")
             for key in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
                 environment.pop(key, None)
             code = run_process([str(self.runtime.python()), "-I", str(self.resources / "subtitle_worker" / "worker.py"), "--request-json", str(path)], self._cancel, output, env=environment, on_stderr=diagnostic)
@@ -276,6 +373,8 @@ def main() -> int:
     parser.add_argument("--ffmpeg", required=True)
     parser.add_argument("--ffprobe", required=True)
     parser.add_argument("--data-dir", required=True)
+    parser.add_argument("--downloader-helper")
+    parser.add_argument("--downloader-data-dir")
     parser.add_argument("--stdio", action="store_true", required=True)
     arguments = parser.parse_args()
     output_lock = threading.Lock()
@@ -295,7 +394,8 @@ def main() -> int:
     try:
         resources = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
         manifest, fingerprint = load_manifest(resources / "assets.json")
-        supervisor = Supervisor(manifest, fingerprint, Path(arguments.data_dir).expanduser(), resources, arguments.ffmpeg, arguments.ffprobe, emit)
+        supervisor = Supervisor(manifest, fingerprint, Path(arguments.data_dir).expanduser(), resources, arguments.ffmpeg, arguments.ffprobe, emit,
+                                downloader_helper=arguments.downloader_helper, downloader_data_dir=arguments.downloader_data_dir)
         emit({"type": "ready", "message": "Local subtitle tools are ready.", "protocol_version": 1})
         for line in sys.stdin:
             if len(line) > 1024**2:

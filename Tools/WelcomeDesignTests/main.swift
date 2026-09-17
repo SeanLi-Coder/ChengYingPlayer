@@ -57,6 +57,8 @@ controller.downloadCenterButton.performClick(nil)
 check(AppDelegate.shared.openedDownloadCenters == 1, "The download action still routes through the app delegate")
 controller.fileAccessButton.performClick(nil)
 check(AppDelegate.shared.openedFileAccessGuides == 1, "The optional file-access guide remains reachable after skipping onboarding")
+controller.summaryButton.performClick(nil)
+check(AppDelegate.shared.openedSummaryTools == 1, "The summary entry opens its native tool without opening media")
 check((content as? InitialWindowContentView)?.player === player, "The drop view retains its existing player routing")
 
 func sendKey(_ code: UInt16) {
@@ -128,6 +130,8 @@ func checkLayout() {
   }
   let accessFrame = controller.fileAccessButton.convert(controller.fileAccessButton.bounds, to: content)
   check(content.bounds.contains(accessFrame), "The file-access link stays within the welcome window")
+  let summaryFrame = controller.summaryButton.convert(controller.summaryButton.bounds, to: content)
+  check(content.bounds.contains(summaryFrame) && !summaryFrame.intersects(accessFrame), "Summary and file-access links remain separate and visible")
   let ambiguous = views.filter { $0.hasAmbiguousLayout }
   let ambiguousDescription = ambiguous.map { view in
     "\(type(of: view)) \(view.frame) \((view as? NSTextField)?.stringValue ?? "")"

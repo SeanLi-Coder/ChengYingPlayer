@@ -29,7 +29,7 @@
 "action.close" = "Close";
 "busy.playback" = "A video or audio session is open. Close its player window when finished.";
 "busy.videoTask" = "A video editing or export task is still running.";
-"busy.subtitles" = "Subtitle processing or model preparation is still running.";
+"busy.subtitles" = "A local AI subtitle, video summary, model preparation, or summary export is still running.";
 "busy.images" = "An image task or slideshow is still running.";
 "busy.downloads" = "A download or browser request is still running.";
 "busy.unknown" = "Task status could not be confirmed. The update will wait safely.";

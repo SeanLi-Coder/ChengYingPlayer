@@ -10,7 +10,7 @@ protocol SubtitleToolsTransport: AnyObject {
 final class SubtitleToolsService {
   static let shared = SubtitleToolsService(transport: SubtitleToolsHelperClient(), hardware: .current)
   let hardware: SubtitleToolsHardware
-  private(set) var models = SubtitleToolsModel.fixedModels
+  private(set) var models = SubtitleToolsModel.allModels
   private(set) var runtimeReady = false
   private(set) var task: SubtitleToolsTask?
   private(set) var statusError: String?
@@ -18,13 +18,19 @@ final class SubtitleToolsService {
   private var statusRequestID: String?
   private var existingSiblingNames = Set<String>()
   private var lastModelRefresh = Date.distantPast
+  private let dataDirectory: () throws -> URL
 
-  var isReady: Bool { runtimeReady && models.allSatisfy(\.ready) }
+  var subtitleModels: [SubtitleToolsModel] { models.filter { $0.id != "summarizer" } }
+  var summaryModels: [SubtitleToolsModel] { models.filter { $0.id != "translator" } }
+  var isReady: Bool { runtimeReady && subtitleModels.allSatisfy(\.ready) }
+  var summaryReady: Bool { runtimeReady && models.first { $0.id == "summarizer" }?.ready == true }
   var updateActivityIsUncertain: Bool { (transport as? SubtitleToolsHelperClient)?.updateActivityIsUncertain ?? true }
 
-  init(transport: SubtitleToolsTransport, hardware: SubtitleToolsHardware) {
+  init(transport: SubtitleToolsTransport, hardware: SubtitleToolsHardware,
+       dataDirectory: @escaping () throws -> URL = SummaryToolsFiles.dataDirectory) {
     self.transport = transport
     self.hardware = hardware
+    self.dataDirectory = dataDirectory
     transport.eventHandler = { [weak self] in self?.handle($0) }
     transport.failureHandler = { [weak self] in self?.handleFailure($0) }
   }
@@ -43,6 +49,21 @@ final class SubtitleToolsService {
   func prepareModels() throws -> String {
     try requireAvailable()
     return try launch(operation: .prepare, inputURL: nil, language: nil, burnSubtitles: nil)
+  }
+
+  @discardableResult
+  func prepareSummaryModels() throws -> String {
+    try requireAvailable()
+    return try launch(operation: .prepare, inputURL: nil, language: nil, burnSubtitles: nil, purpose: "summary")
+  }
+
+  @discardableResult
+  func summarize(source: String) throws -> String {
+    try requireAvailable()
+    guard hardware.canGenerate else { throw SummaryToolsError.insufficientMemory }
+    let url = try SummaryToolsSource.normalized(source)
+    guard summaryReady else { throw SubtitleToolsError.modelsNotReady }
+    return try launch(operation: .summary, inputURL: nil, language: nil, burnSubtitles: nil, sourceURL: url)
   }
 
   @discardableResult
@@ -90,16 +111,20 @@ final class SubtitleToolsService {
     guard task?.isActive != true else { throw SubtitleToolsError.busy }
   }
 
-  private func launch(operation: SubtitleToolsOperation, inputURL: URL?, language: String?, burnSubtitles: Bool?) throws -> String {
+  private func launch(operation: SubtitleToolsOperation, inputURL: URL?, language: String?, burnSubtitles: Bool?,
+                      sourceURL: URL? = nil, purpose: String? = nil) throws -> String {
     let id = UUID().uuidString
     task = SubtitleToolsTask(id: id, operation: operation, inputURL: inputURL)
     task?.burnSubtitles = burnSubtitles == true
+    task?.sourceURL = sourceURL
+    task?.purpose = purpose
     statusError = nil
     notify()
     do {
       try transport.send(SubtitleToolsRequest(
-        id: id, command: operation == .prepare ? "prepare" : "start",
-        inputPath: inputURL?.path, language: language, burnSubtitles: burnSubtitles
+        id: id, command: operation == .prepare ? "prepare" : operation == .summary ? "summarize" : "start",
+        inputPath: inputURL?.path, language: language, burnSubtitles: burnSubtitles,
+        sourceURL: sourceURL?.absoluteString, purpose: purpose
       ))
     } catch {
       handleFailure(error)
@@ -144,14 +169,26 @@ final class SubtitleToolsService {
     }
     guard var current = task, current.isActive, event.id == current.id else { return }
     if let operation = event.operation, operation != current.operation { return }
+    if (current.operation == .summary || current.purpose == "summary"),
+       let stage = event.stage, stage != current.stage {
+      current.downloadedBytes = 0
+      current.totalBytes = 0
+    }
     current.stage = event.stage ?? current.stage
     current.message = event.message ?? current.message
-    if let progress = event.progress, progress.isFinite { current.progress = min(1, max(0, progress)) }
+    if current.operation == .summary || current.purpose == "summary" {
+      // Missing progress means unknown, including when the next stage has no denominator.
+      current.progress = event.progress.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil }
+    } else if let progress = event.progress, progress.isFinite { current.progress = min(1, max(0, progress)) }
     if let bytes = event.downloadedBytes { current.downloadedBytes = max(0, bytes) }
     if let bytes = event.totalBytes { current.totalBytes = max(0, bytes) }
     current.bytesPerSecond = event.bytesPerSecond.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
     current.etaSeconds = event.etaSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
     current.etaScope = event.etaScope
+    current.tokensGenerated = event.tokensGenerated.flatMap { $0 >= 0 ? $0 : nil }
+    current.chunkIndex = event.chunkIndex.flatMap { $0 >= 0 ? $0 : nil }
+    current.chunkCount = event.chunkCount.flatMap { $0 > 0 ? $0 : nil }
+    current.elapsedSeconds = event.elapsedSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
     switch event.type {
     case .accepted, .progress:
       if current.phase != .cancelling { current.phase = .running }
@@ -174,6 +211,21 @@ final class SubtitleToolsService {
           current.assURL = nil
           current.srtURL = nil
           current.videoURL = nil
+        }
+      } else if current.operation == .summary {
+        do {
+          let result = try SummaryToolsFiles.readResult(event, taskID: current.id, dataDirectory: dataDirectory())
+          current.summaryText = result.text
+          current.summaryURL = result.summary
+          current.transcriptURL = result.transcript
+          current.summaryTitle = event.title.map { String($0.prefix(512)) }
+          current.contentSource = event.contentSource.map { String($0.prefix(128)) }
+          current.warnings = event.warnings ?? []
+          current.phase = .completed
+          current.progress = 1
+        } catch {
+          current.phase = .failed
+          current.error = error.localizedDescription
         }
       } else {
         current.phase = .completed

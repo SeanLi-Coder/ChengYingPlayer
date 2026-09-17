@@ -27,6 +27,7 @@ MAX_COMMAND_BYTES = 65_536
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stdio", action="store_true", required=True)
+    parser.add_argument("--summary-source", action="store_true")
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--download-dir", type=Path, required=True)
     parser.add_argument("--ffmpeg", type=Path, required=True)
@@ -151,6 +152,10 @@ def main(argv=None):
 
         return run()
     args = parse_arguments(argv)
+    if args.summary_source:
+        from summary_source import main as summary_main
+
+        return summary_main(args)
     protocol_output = sys.stdout
     output_lock = threading.Lock()
 

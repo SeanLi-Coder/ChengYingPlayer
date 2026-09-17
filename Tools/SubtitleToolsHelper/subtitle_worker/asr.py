@@ -94,11 +94,15 @@ def transcribe(audio_path: Path, paths: dict, language_hint: str, progress, canc
             started = time.monotonic()
             for index, chunk in enumerate(chunks, 1):
                 check_cancelled(cancelled)
+                streaming = {}
+                if hasattr(progress, "token_streamer"):
+                    progress.start_chunk("recognizing", index, len(chunks))
+                    streaming["streamer"] = progress.token_streamer("recognizing")
                 inputs = processor.apply_transcription_request(audio=_read_chunk(audio, chunk), language=language)
                 inputs = inputs.to(model.device, model.dtype)
                 with torch.inference_mode():
                     output = model.generate(**inputs, max_new_tokens=4096, do_sample=False,
-                                            stopping_criteria=criteria)
+                                            stopping_criteria=criteria, **streaming)
                 check_cancelled(cancelled)
                 generated = output[:, inputs["input_ids"].shape[1]:]
                 if generated.shape[-1] >= 4096:

@@ -308,8 +308,8 @@ final class SubtitleToolsViewController: NSViewController {
     languagePopup.isEnabled = !active
     burnCheckbox.isEnabled = !active
     prepareButton.isEnabled = service.hardware.supportsRuntime && !active
-    let partial = service.models.contains { $0.downloadedBytes > 0 && !$0.ready }
-    let completeBytes = service.models.allSatisfy { $0.totalBytes > 0 && $0.downloadedBytes >= $0.totalBytes }
+    let partial = service.subtitleModels.contains { $0.downloadedBytes > 0 && !$0.ready }
+    let completeBytes = service.subtitleModels.allSatisfy { $0.totalBytes > 0 && $0.downloadedBytes >= $0.totalBytes }
     prepareButton.title = subtitleToolsString(service.isReady || completeBytes ? "models.verify" : partial ? "models.resume" : "models.download")
     cancelButton.isHidden = !active
     cancelButton.isEnabled = task?.phase != .cancelling

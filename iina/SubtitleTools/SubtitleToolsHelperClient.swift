@@ -2,6 +2,28 @@ import Cocoa
 import Darwin
 
 final class SubtitleToolsHelperClient: SubtitleToolsTransport {
+  struct Locations {
+    let helper: URL
+    let ffmpeg: URL
+    let ffprobe: URL
+    let data: URL
+    let downloader: URL
+    let downloaderData: URL
+
+    static func bundled() throws -> Locations {
+      guard let directory = Bundle.main.executableURL?.deletingLastPathComponent() else {
+        throw SubtitleToolsError.helper("The application executable directory is unavailable.")
+      }
+      let data = try SummaryToolsFiles.dataDirectory()
+      // Keep the nested app and shared settings directory identical to DownloadCenterService.
+      return Locations(helper: directory.appendingPathComponent("chengying-subtitle-tools-helper"),
+                       ffmpeg: directory.appendingPathComponent("ffmpeg"),
+                       ffprobe: directory.appendingPathComponent("ffprobe"), data: data,
+                       downloader: directory.deletingLastPathComponent()
+                         .appendingPathComponent("Helpers/DownloadCenter.app/Contents/MacOS/chengying-download-center-helper"),
+                       downloaderData: data.deletingLastPathComponent().appendingPathComponent("DownloadCenter", isDirectory: true))
+    }
+  }
   var eventHandler: ((SubtitleToolsEvent) -> Void)?
   var failureHandler: ((Error) -> Void)?
   private let queue = DispatchQueue(label: "com.chengying.subtitle-tools-helper", qos: .utility)
@@ -14,8 +36,10 @@ final class SubtitleToolsHelperClient: SubtitleToolsTransport {
   private var failureReported = false
   var updateActivityIsUncertain: Bool { queue.sync { failureReported && process?.isRunning == true } }
   private var terminationObserver: NSObjectProtocol?
+  private let locations: () throws -> Locations
 
-  init() {
+  init(locations: @escaping () throws -> Locations = Locations.bundled) {
+    self.locations = locations
     queue.setSpecific(key: queueIdentity, value: true)
     terminationObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.willTerminateNotification, object: nil, queue: nil
@@ -70,22 +94,20 @@ final class SubtitleToolsHelperClient: SubtitleToolsTransport {
   private func launchIfNeeded() throws {
     if process?.isRunning == true { return }
     reset()
-    guard let directory = Bundle.main.executableURL?.deletingLastPathComponent() else {
-      throw SubtitleToolsError.helper("The application executable directory is unavailable.")
-    }
-    let helper = directory.appendingPathComponent("chengying-subtitle-tools-helper")
-    let ffmpeg = directory.appendingPathComponent("ffmpeg")
-    let ffprobe = directory.appendingPathComponent("ffprobe")
-    for url in [helper, ffmpeg, ffprobe] where !FileManager.default.isExecutableFile(atPath: url.path) {
+    let paths = try locations()
+    for url in [paths.helper, paths.ffmpeg, paths.ffprobe] where !FileManager.default.isExecutableFile(atPath: url.path) {
       throw SubtitleToolsError.helper("Missing bundled executable: \(url.lastPathComponent)")
     }
-    let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-    let dataDirectory = support.appendingPathComponent("io.github.SeanLi-Coder.ChengYingPlayer/SubtitleTools", isDirectory: true)
-    try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: paths.data, withIntermediateDirectories: true)
+    // A first-time summary must work before the download-center window has ever been opened.
+    // Only create the app-owned directory; do not initialize settings, cookies, or download jobs.
+    try FileManager.default.createDirectory(at: paths.downloaderData, withIntermediateDirectories: true)
     let child = Process()
     let stdinPipe = Pipe(), stdoutPipe = Pipe(), stderrPipe = Pipe()
-    child.executableURL = helper
-    child.arguments = ["--ffmpeg", ffmpeg.path, "--ffprobe", ffprobe.path, "--data-dir", dataDirectory.path, "--stdio"]
+    child.executableURL = paths.helper
+    child.arguments = ["--ffmpeg", paths.ffmpeg.path, "--ffprobe", paths.ffprobe.path,
+                       "--data-dir", paths.data.path, "--stdio", "--downloader-helper", paths.downloader.path,
+                       "--downloader-data-dir", paths.downloaderData.path]
     child.standardInput = stdinPipe
     child.standardOutput = stdoutPipe
     child.standardError = stderrPipe

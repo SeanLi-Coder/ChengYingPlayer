@@ -7,6 +7,7 @@ func subtitleToolsString(_ key: String) -> String {
 enum SubtitleToolsOperation: String, Codable {
   case prepare
   case subtitles
+  case summary
 }
 
 struct SubtitleToolsRequest: Encodable {
@@ -16,9 +17,12 @@ struct SubtitleToolsRequest: Encodable {
   var language: String? = nil
   var burnSubtitles: Bool? = nil
   var targetID: String? = nil
+  var sourceURL: String? = nil
+  var purpose: String? = nil
 
   enum CodingKeys: String, CodingKey {
-    case id, command, language
+    case id, command, language, purpose
+    case sourceURL = "source_url"
     case inputPath = "input_path"
     case burnSubtitles = "burn_subtitles"
     case targetID = "target_id"
@@ -43,12 +47,18 @@ struct SubtitleToolsModel: Decodable, Equatable {
     SubtitleToolsModel(id: "aligner", name: "Qwen3-ForcedAligner 0.6B BF16", totalBytes: 0, downloadedBytes: 0, ready: false),
     SubtitleToolsModel(id: "translator", name: "HY-MT2 30B-A3B BF16", totalBytes: 0, downloadedBytes: 0, ready: false),
   ]
+  static let summarizer = SubtitleToolsModel(id: "summarizer", name: "Qwen3.8 27B BF16",
+                                             totalBytes: 0, downloadedBytes: 0, ready: false)
+  static var allModels: [SubtitleToolsModel] { fixedModels + [summarizer] }
+  static var summaryModels: [SubtitleToolsModel] { fixedModels.filter { $0.id != "translator" } + [summarizer] }
 }
 
 struct SubtitleToolsOutputs: Decodable {
-  let srt: String?
-  let ass: String?
-  let video: String?
+  var srt: String? = nil
+  var ass: String? = nil
+  var video: String? = nil
+  var summary: String? = nil
+  var transcript: String? = nil
 }
 
 struct SubtitleToolsEvent: Decodable {
@@ -73,6 +83,14 @@ struct SubtitleToolsEvent: Decodable {
   var warnings: [String]? = nil
   var partial: Bool? = nil
   var error: String? = nil
+  var summaryText: String? = nil
+  var title: String? = nil
+  var sourceURL: String? = nil
+  var contentSource: String? = nil
+  var tokensGenerated: Int? = nil
+  var chunkIndex: Int? = nil
+  var chunkCount: Int? = nil
+  var elapsedSeconds: Double? = nil
 
   enum CodingKeys: String, CodingKey {
     case type, id, operation, stage, progress, message, models, outputs, warnings, partial, error
@@ -83,6 +101,14 @@ struct SubtitleToolsEvent: Decodable {
     case etaSeconds = "eta_seconds"
     case etaScope = "eta_scope"
     case runtimeReady = "runtime_ready"
+    case summaryText = "summary_text"
+    case title
+    case sourceURL = "source_url"
+    case contentSource = "content_source"
+    case tokensGenerated = "tokens_generated"
+    case chunkIndex = "chunk_index"
+    case chunkCount = "chunk_count"
+    case elapsedSeconds = "elapsed_seconds"
   }
 }
 
@@ -139,6 +165,17 @@ struct SubtitleToolsTask {
   var error: String?
   var burnSubtitles = false
   var warnings = [String]()
+  var purpose: String?
+  var sourceURL: URL?
+  var summaryText: String?
+  var summaryURL: URL?
+  var transcriptURL: URL?
+  var summaryTitle: String?
+  var contentSource: String?
+  var tokensGenerated: Int?
+  var chunkIndex: Int?
+  var chunkCount: Int?
+  var elapsedSeconds: Double?
   var isActive: Bool { phase == .starting || phase == .running || phase == .cancelling }
 }
 

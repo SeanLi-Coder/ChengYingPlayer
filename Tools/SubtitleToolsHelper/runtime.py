@@ -21,7 +21,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from downloads import (
+    Artifact,
+    ArtifactStore,
     AssetError,
+    Cancelled,
     check_cancelled,
     ensure_space,
     relative_path,
@@ -65,10 +68,10 @@ def stop_process(process: subprocess.Popen) -> None:
         pass
 
 
-def run_process(command: list[str], cancel: threading.Event, on_line: Callable[[str], None], *, env: dict | None = None, on_stderr: Callable[[str], None] | None = None) -> int:
+def run_process(command: list[str], cancel: threading.Event, on_line: Callable[[str], None], *, env: dict | None = None, on_stderr: Callable[[str], None] | None = None, stdin_payload: str | None = None) -> int:
     check_cancelled(cancel)
     process = subprocess.Popen(
-        command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        command, stdin=subprocess.PIPE if stdin_payload is not None else subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE if on_stderr is not None else subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace",
         start_new_session=True, env=env,
@@ -89,6 +92,13 @@ def run_process(command: list[str], cancel: threading.Event, on_line: Callable[[
     for reader in readers:
         reader.start()
     try:
+        if stdin_payload is not None:
+            # The owned source helper treats EOF as cancellation. Keep this pipe
+            # open until exit, but never expose private configuration in argv.
+            if len(stdin_payload.encode("utf-8")) > 65536:
+                raise AssetError("The child request is too large.")
+            process.stdin.write(stdin_payload + "\n")
+            process.stdin.flush()
         finished = 0
         while finished < len(readers):
             check_cancelled(cancel)
@@ -110,6 +120,8 @@ def run_process(command: list[str], cancel: threading.Event, on_line: Callable[[
         return process.returncode
     finally:
         stop_process(process)
+        if process.stdin is not None:
+            process.stdin.close()
         for reader in readers:
             reader.join(timeout=1)
         for stream, _ in streams:
@@ -189,7 +201,11 @@ class Runtime:
     def __init__(self, root: Path, manifest: dict, fingerprint: str) -> None:
         self.root = root
         self.spec = manifest["runtime"]
-        self.fingerprint = fingerprint
+        self.fingerprint = hashlib.sha256(json.dumps(self.spec, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        migrations = manifest.get("legacy_runtime_manifests", {})
+        if not isinstance(migrations, dict):
+            raise AssetError("Invalid runtime migration manifest.")
+        self.legacy_fingerprints = {fingerprint, *(old for old, current in migrations.items() if current == self.fingerprint)}
         identifier = self.spec.get("id", "")
         if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", identifier):
             raise AssetError("Invalid runtime identifier.")
@@ -220,11 +236,15 @@ class Runtime:
             payload = json.loads(marker.read_text(encoding="utf-8"))
             executable = self.python()
             return payload.get("validation_version") == 1 and payload.get("manifest_sha256") == self.fingerprint and payload.get("python_sha256") == hashlib.sha256(executable.read_bytes()).hexdigest()
+        except Cancelled:
+            raise
         except (OSError, ValueError, AssetError):
             return False
 
     def ensure(self, cancel: threading.Event, progress: Callable[[dict], None]) -> None:
         if self.ready():
+            return
+        if self._migrate_marker(cancel, progress):
             return
         parent = safe_path(self.root, "runtime/.parent-check", parents=True).parent
         staging = Path(tempfile.mkdtemp(prefix=".installing-", dir=parent))
@@ -279,3 +299,34 @@ class Runtime:
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
+
+    def _migrate_marker(self, cancel: threading.Event, progress: Callable[[dict], None]) -> bool:
+        """Retain an existing validated runtime only after verifying its lock inputs."""
+        try:
+            marker = safe_path(self.root, f"runtime/{self.spec['id']}/.ready.json")
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+            if (payload.get("validation_version") != 1
+                    or payload.get("manifest_sha256") not in self.legacy_fingerprints
+                    or payload.get("python_sha256") != hashlib.sha256(self.python().read_bytes()).hexdigest()):
+                return False
+            progress({"stage": "runtime_validate", "message": "Verifying the existing runtime before updating its model-independent lock."})
+            store = ArtifactStore(self.root)
+            for specification in [self.spec["archive"], *self.spec["wheels"]]:
+                if not store.verify(Artifact.from_dict(specification), cancel, lambda *_: None):
+                    return False
+            check_cancelled(cancel)
+            payload["manifest_sha256"] = self.fingerprint
+            descriptor, temporary = tempfile.mkstemp(prefix=".ready-", dir=marker.parent)
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    json.dump(payload, stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, marker)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+            return True
+        except Cancelled:
+            raise
+        except (OSError, ValueError, AssetError):
+            return False

@@ -1,6 +1,7 @@
 /* Native welcome window copy. */
 "welcome.window_title" = "ChengYing View";
 "welcome.file_access" = "File Access Settings…";
+"welcome.summary" = "Summarize a Bilibili / YouTube video…";
 "welcome.brand" = "ChengYing View";
 "welcome.eyebrow" = "YOUR LOCAL VISUAL STUDIO";
 "welcome.headline" = "Every frame.\nA wider view.";

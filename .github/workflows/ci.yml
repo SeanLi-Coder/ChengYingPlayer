@@ -121,11 +121,14 @@ jobs:
           bash Tools/ImageSlideshowTests/run.sh
           bash Tools/ImageSlideshowUITests/run.sh
 
-      - name: Test local subtitle tools
+      - name: Test local subtitle and summary tools
         run: |
-          python -m ruff check Tools/SubtitleToolsHelper
+          python -m ruff check Tools/SubtitleToolsHelper Tools/SummarySourceTests
           python -m pytest -q Tools/SubtitleToolsHelper/tests
           ./Tools/SubtitleToolsTests/run.sh
+          bash Tools/SummaryToolsTests/run.sh
+          python Tools/SummarySourceTests/media_smoke.py \
+            --ffmpeg "$(command -v ffmpeg)" --ffprobe "$(command -v ffprobe)"
 
       - name: Test preserved downloader engine
         run: python Tools/DownloaderHelper/run_upstream_tests.py
@@ -136,6 +139,9 @@ jobs:
           python -m ruff check Tools/DownloaderHelper --exclude vendor
           python -m pytest -q Tools/DownloaderHelper/tests
           python Tools/DownloaderHelper/smoke_helper.py \
+            --helper Tools/DownloaderHelper/helper.py \
+            --ffmpeg "$(command -v ffmpeg)" --ffprobe "$(command -v ffprobe)"
+          python Tools/SummarySourceTests/smoke_helper.py \
             --helper Tools/DownloaderHelper/helper.py \
             --ffmpeg "$(command -v ffmpeg)" --ffprobe "$(command -v ffprobe)"
           bash Tools/DownloadCenterTests/run.sh
@@ -311,6 +317,13 @@ jobs:
           PATH="$download_center/Contents/MacOS:$PATH" "$download_center/Contents/MacOS/chengying-download-center-helper" --self-test
           python Tools/DownloaderHelper/smoke_helper.py \
             --helper "$download_center/Contents/MacOS/chengying-download-center-helper" \
+            --ffmpeg "$app_path/Contents/MacOS/ffmpeg" \
+            --ffprobe "$app_path/Contents/MacOS/ffprobe"
+          python Tools/SummarySourceTests/smoke_helper.py \
+            --helper "$download_center/Contents/MacOS/chengying-download-center-helper" \
+            --ffmpeg "$app_path/Contents/MacOS/ffmpeg" \
+            --ffprobe "$app_path/Contents/MacOS/ffprobe"
+          python Tools/SummarySourceTests/media_smoke.py \
             --ffmpeg "$app_path/Contents/MacOS/ffmpeg" \
             --ffprobe "$app_path/Contents/MacOS/ffprobe"
           if [[ -n "$(find "$download_center" -type d -name '__pycache__' -print -quit)" ]]; then

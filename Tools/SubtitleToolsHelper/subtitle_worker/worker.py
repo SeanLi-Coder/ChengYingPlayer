@@ -15,6 +15,10 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+# Transformers' asynchronous dtype conversion can crash native MPS loading.
+# Serialize checkpoint materialization without changing model precision.
+# https://github.com/huggingface/transformers/issues/48029
+os.environ["HF_DEACTIVATE_ASYNC_LOAD"] = "1"
 # Unsupported Metal operations may run on CPU with the identical full model.
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
@@ -23,6 +27,7 @@ if __package__ in {None, ""}:
 
 from subtitle_worker.common import Cancelled
 from subtitle_worker.pipeline import run_pipeline
+from subtitle_worker.summary import run_summary
 
 
 def main() -> int:
@@ -53,7 +58,7 @@ def main() -> int:
         if not isinstance(request, dict):
             raise TypeError("The worker request must be a JSON object")
         request_id = request.get("id")
-        emit(run_pipeline(request, emit))
+        emit((run_summary if request.get("operation") == "summary" else run_pipeline)(request, emit))
         return 0
     except BaseException as exc:  # noqa: BLE001 - The process boundary must emit exactly one terminal event.
         traceback.print_exc(file=sys.stderr)

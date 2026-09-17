@@ -29,7 +29,7 @@
 "action.close" = "关闭";
 "busy.playback" = "视频或音频仍处于打开状态，请在观看结束后关闭播放窗口。";
 "busy.videoTask" = "视频剪辑或导出任务仍在运行。";
-"busy.subtitles" = "字幕处理或模型准备仍在运行。";
+"busy.subtitles" = "本地 AI 字幕、视频总结、模型准备或总结导出仍在运行。";
 "busy.images" = "图片任务或幻灯片仍在运行。";
 "busy.downloads" = "下载任务或浏览器请求仍在运行。";
 "busy.unknown" = "暂时无法确认任务状态，更新会继续安全等待。";
