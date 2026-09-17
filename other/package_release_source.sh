@@ -81,7 +81,7 @@ install -m 644 "$PROJECT_ROOT/Tools/DownloaderHelper/runtime-artifacts.json" \
   printf '%s\n' "See NOTICE.md and Legal/THIRD_PARTY_NOTICES.md before building or redistributing a binary."
 } > "$PACKAGE_DIR/RELEASE_SOURCE_README.txt"
 
-tar -czf "$WORK_DIR/release-source.tar.gz" -C "$WORK_DIR" "$PACKAGE_NAME"
+COPYFILE_DISABLE=1 tar -czf "$WORK_DIR/release-source.tar.gz" -C "$WORK_DIR" "$PACKAGE_NAME"
 tar -tzf "$WORK_DIR/release-source.tar.gz" >/dev/null
 # Publish without a race between the initial existence check and the completed archive.
 # The temporary archive is complete; a concurrently created destination is never replaced.
