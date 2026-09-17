@@ -25,6 +25,7 @@ func prepare(_ entries: [MPVPlaylistItem], selected: IndexSet = IndexSet(integer
   player.inactiveSnapshotCount = 0
   player.info.playlist = entries
   player.livePlaylist = entries
+  controller.displayedPlaylist = entries
   player.removedIDs = []
   controller.playlistTableView.selectedIndexes = selected
   controller.playlistTableView.clickedIndex = selected.first ?? -1
@@ -150,9 +151,12 @@ check(player.info.matchedSubs.isEmpty, "Finishing a subtitle panel cannot mutate
 prepare([first])
 let pasteboard = NSPasteboard(name: NSPasteboard.Name("PlaylistActions-\(UUID().uuidString)"))
 defer { pasteboard.releaseGlobally() }
-controller.copyToPasteboard(controller.playlistTableView, writeRowsWith: IndexSet([0, 8]), to: pasteboard)
+check(!controller.copyToPasteboard(controller.playlistTableView, writeRowsWith: IndexSet([0, 8]), to: pasteboard),
+      "A partially stale visible selection fails closed before changing the pasteboard")
+check(controller.copyToPasteboard(controller.playlistTableView, writeRowsWith: IndexSet(integer: 0), to: pasteboard),
+      "A valid visible selection can still be copied")
 check(pasteboard.propertyList(forType: .nsFilenames) as? [String] == [first.filename],
-      "Copying a selection after list shrink ignores out-of-range rows without crashing")
+      "Copying a valid visible selection preserves the exact file path")
 let archivedRows = try NSKeyedUnarchiver.unarchivedObject(ofClass: NSIndexSet.self,
                                                         from: pasteboard.data(forType: .iinaPlaylistItem)!)
 check(archivedRows as IndexSet? == IndexSet(integer: 0), "The drag archive and copied file paths use the same validated rows")

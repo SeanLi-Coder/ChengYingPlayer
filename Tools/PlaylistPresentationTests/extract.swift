@@ -47,9 +47,12 @@ import Cocoa
 final class PlaylistActionsUnderTest: NSObject {
   let player: PlayerCore! = PlayerCore()
   let playlistTableView = ActionTableView()
+  var displayedPlaylist: [MPVPlaylistItem] = []
   func buildMenu() -> NSMenu { NSMenu() }
   func buildMenu(forRows rows: IndexSet) -> NSMenu { NSMenu() }
+\(section("  // MARK: - Visible playlist identity mapping", "  // MARK: - Visible playlist presentation"))
 \(section("  // MARK: - Context menu", "  private func buildMenu("))
+  @discardableResult
 \(section("  func copyToPasteboard(", "  func tableView(_ tableView: NSTableView, writeRowsWith"))
 }
 \(section("class SubPopoverViewController:", "class ChapterTableCellView:"))

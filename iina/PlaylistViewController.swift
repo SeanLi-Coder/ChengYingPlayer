@@ -42,6 +42,11 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   private var lifecycleObservers: [NSObjectProtocol] = []
   private var playlistReloadWork: DispatchWorkItem?
   private let sortControls = PlaylistSortControls()
+  private let tagFilterControls = PlaylistTagFilterControls()
+  private let filterEmptyLabel = NSTextField(wrappingLabelWithString: playlistBrowserString("filter.empty"))
+  private var tagFilter: PlaylistTagFilter = .all
+  private var displayedPlaylist: [MPVPlaylistItem] = []
+  private var draggedPlaylistSnapshot: [MPVPlaylistItem] = []
   private var sortKey: PlaylistFileSortKey = .name
   private var sortAscending = true
   private var sortFolder: String?
@@ -215,6 +220,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
         sortKey = .name
         sortAscending = true
         pendingSortIDs = nil
+        tagFilter = .all
       }
       sortFolder = folder
       sortContextEntryIDs = entryIDs
@@ -222,7 +228,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
         self.pendingSortIDs = nil
       }
       refreshFileMetadata(force: replacedList)
-      playlistTableView.reloadData()
+      rebuildDisplayedPlaylist()
       updateSortControls()
     }
     if chapters {
@@ -239,17 +245,91 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     }
     NSLayoutConstraint.deactivate(topConstraints)
     sortControls.translatesAutoresizingMaskIntoConstraints = false
+    tagFilterControls.translatesAutoresizingMaskIntoConstraints = false
     container.addSubview(sortControls)
+    container.addSubview(tagFilterControls)
+    filterEmptyLabel.translatesAutoresizingMaskIntoConstraints = false
+    filterEmptyLabel.font = .systemFont(ofSize: 12)
+    filterEmptyLabel.textColor = .secondaryLabelColor
+    filterEmptyLabel.alignment = .center
+    filterEmptyLabel.isHidden = true
+    container.addSubview(filterEmptyLabel)
     NSLayoutConstraint.activate([
       sortControls.topAnchor.constraint(equalTo: container.topAnchor),
       sortControls.leadingAnchor.constraint(equalTo: container.leadingAnchor),
       sortControls.trailingAnchor.constraint(equalTo: container.trailingAnchor),
       sortControls.heightAnchor.constraint(equalToConstant: 38),
-      scrollView.topAnchor.constraint(equalTo: sortControls.bottomAnchor)
+      tagFilterControls.topAnchor.constraint(equalTo: sortControls.bottomAnchor),
+      tagFilterControls.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+      tagFilterControls.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+      tagFilterControls.heightAnchor.constraint(equalToConstant: 38),
+      scrollView.topAnchor.constraint(equalTo: tagFilterControls.bottomAnchor),
+      filterEmptyLabel.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor, constant: 16),
+      filterEmptyLabel.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor, constant: -16),
+      filterEmptyLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor)
     ])
     sortControls.onSortChange = { [weak self] key, ascending in self?.requestSort(key: key, ascending: ascending) }
     sortControls.onRefresh = { [weak self] in self?.refreshFileMetadata(force: true) }
+    tagFilterControls.onFilterChange = { [weak self] filter in self?.requestTagFilter(filter) }
   }
+
+  // MARK: - Visible playlist identity mapping
+
+  /// Keep a display snapshot so a late backend mutation cannot retarget a visible row.
+  private func playlistIndex(forVisibleRow row: Int, in playlist: [MPVPlaylistItem]) -> Int? {
+    guard displayedPlaylist.indices.contains(row) else { return nil }
+    let target = displayedPlaylist[row]
+    guard target.entryID >= 0 else { return nil }
+    return playlist.firstIndex { $0.entryID == target.entryID && $0.filename == target.filename }
+  }
+
+  private func playlistRows(forVisibleRows rows: IndexSet, in playlist: [MPVPlaylistItem]) -> IndexSet? {
+    var result = IndexSet()
+    for row in rows {
+      guard let index = playlistIndex(forVisibleRow: row, in: playlist) else { return nil }
+      result.insert(index)
+    }
+    return result
+  }
+
+  private func playlistInsertionIndex(forVisibleRow row: Int, in playlist: [MPVPlaylistItem]) -> Int? {
+    guard row >= 0, row <= displayedPlaylist.count else { return nil }
+    if row < displayedPlaylist.count { return playlistIndex(forVisibleRow: row, in: playlist) }
+    guard !displayedPlaylist.isEmpty else { return playlist.count }
+    return playlistIndex(forVisibleRow: row - 1, in: playlist).map { $0 + 1 }
+  }
+
+  // MARK: - Visible playlist presentation
+
+  private func requestTagFilter(_ filter: PlaylistTagFilter) {
+    guard let player, player.info.state.active else { return }
+    tagFilter = filter
+    rebuildDisplayedPlaylist()
+  }
+
+  private func rebuildDisplayedPlaylist() {
+    var selectedNamesByID: [Int64: Set<String>] = [:]
+    for row in playlistTableView.selectedRowIndexes where displayedPlaylist.indices.contains(row) {
+      let item = displayedPlaylist[row]
+      selectedNamesByID[item.entryID, default: []].insert(item.filename)
+    }
+    displayedPlaylist = player.info.playlist.filter { tagFilter.includes(fileMetadata[$0.filename]) }
+    playlistTableView.reloadData()
+    let selectedRows = IndexSet(displayedPlaylist.indices.filter { row in
+      let item = displayedPlaylist[row]
+      return selectedNamesByID[item.entryID]?.contains(item.filename) == true
+    })
+    playlistTableView.selectRowIndexes(selectedRows, byExtendingSelection: false)
+    updateTagFilterControls()
+  }
+
+  private func updateTagFilterControls() {
+    tagFilterControls.update(filter: tagFilter, matchingCount: displayedPlaylist.count,
+                             totalCount: player.info.playlist.count, busy: metadataLoading)
+    filterEmptyLabel.isHidden = tagFilter == .all || !displayedPlaylist.isEmpty || metadataLoading
+  }
+
+  // MARK: - Playlist metadata and sorting
 
   private func metadataForSort(_ items: [MPVPlaylistItem]) -> [PlaylistFileMetadata] {
     items.map { item in
@@ -263,6 +343,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     let indices = PlaylistFileMetadata.sortedIndices(for: metadataForSort(items), by: sortKey, ascending: sortAscending)
     let manual = pendingSortIDs == nil && indices != Array(items.indices)
     sortControls.update(key: sortKey, ascending: sortAscending, manual: manual, busy: metadataLoading)
+    updateTagFilterControls()
   }
 
   private func refreshFileMetadata(force: Bool = false) {
@@ -281,6 +362,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     updateSortControls()
     guard !paths.isEmpty else {
       pendingSortIDs = nil
+      rebuildDisplayedPlaylist()
       return
     }
     let operation = BlockOperation()
@@ -306,7 +388,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
             self.applySort()
           }
         }
-        self.playlistTableView.reloadData()
+        self.rebuildDisplayedPlaylist()
         self.updateSortControls()
       }
     }
@@ -331,13 +413,10 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   private func applySort() {
     guard let player, player.info.state.active else { return }
     let items = player.info.playlist
-    let selectedIDs = Set(playlistTableView.selectedRowIndexes.compactMap { items.indices.contains($0) ? items[$0].entryID : nil })
     let indices = PlaylistFileMetadata.sortedIndices(for: metadataForSort(items), by: sortKey, ascending: sortAscending)
     guard player.playlistReorder(newPlaylist: indices.map { items[$0] }) else { return }
     player.getPlaylist()
-    playlistTableView.reloadData()
-    let selection = IndexSet(player.info.playlist.indices.filter { selectedIDs.contains(player.info.playlist[$0].entryID) })
-    playlistTableView.selectRowIndexes(selection, byExtendingSelection: false)
+    rebuildDisplayedPlaylist()
   }
 
   private func cancelMetadataRefresh() {
@@ -347,6 +426,9 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     pendingSortIDs = nil
     metadataPaths.removeAll()
     fileMetadata.removeAll()
+    displayedPlaylist.removeAll()
+    playlistTableView.reloadData()
+    filterEmptyLabel.isHidden = true
   }
 
   private func showTotalLength() {
@@ -354,7 +436,8 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     totalLengthLabel.isHidden = false
     if playlistTableView.numberOfSelectedRows > 0 {
       let info = player.info
-      let selectedDuration = info.calculateTotalDuration(playlistTableView.selectedRowIndexes)
+      let rows = playlistRows(forVisibleRows: playlistTableView.selectedRowIndexes, in: info.playlist) ?? []
+      let selectedDuration = info.calculateTotalDuration(rows)
       totalLengthLabel.stringValue = String(format: NSLocalizedString("playlist.total_length_with_selected", comment: "%@ of %@ selected"),
                                             VideoTime(selectedDuration).stringRepresentation,
                                             VideoTime(playlistTotalLength).stringRepresentation)
@@ -439,7 +522,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
 
   func numberOfRows(in tableView: NSTableView) -> Int {
     if tableView == playlistTableView {
-      return player.info.$playlist.withLock { $0.count }
+      return displayedPlaylist.count
     } else if tableView == chapterTableView {
       return player.info.chapters.count
     } else {
@@ -449,26 +532,29 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
 
   // MARK: - Drag and Drop
 
-  func copyToPasteboard(_ tableView: NSTableView, writeRowsWith rowIndexes: IndexSet, to pboard: NSPasteboard) {
+  @discardableResult
+  func copyToPasteboard(_ tableView: NSTableView, writeRowsWith rowIndexes: IndexSet, to pboard: NSPasteboard) -> Bool {
     do {
       let selection = player.info.$playlist.withLock { playlist in
-        let validRows = IndexSet(rowIndexes.filter { playlist.indices.contains($0) })
+        let validRows = playlistRows(forVisibleRows: rowIndexes, in: playlist) ?? []
         return (validRows, validRows.map { playlist[$0].filename })
       }
-      guard !selection.0.isEmpty else { return }
+      guard !selection.0.isEmpty else { return false }
       let indexesData = try NSKeyedArchiver.archivedData(withRootObject: selection.0, requiringSecureCoding: true)
       pboard.declareTypes([.iinaPlaylistItem, .nsFilenames], owner: tableView)
-      pboard.setData(indexesData, forType: .iinaPlaylistItem)
-      pboard.setPropertyList(selection.1, forType: .nsFilenames)
+      return pboard.setData(indexesData, forType: .iinaPlaylistItem) &&
+        pboard.setPropertyList(selection.1, forType: .nsFilenames)
     } catch {
       // Internal error, archivedData should not fail.
       Logger.log("Failed to copy from playlist to pasteboard: \(error)", level: .error,
                  subsystem: player.subsystem)
+      return false
     }
   }
 
   @discardableResult
   func pasteFromPasteboard(row: Int, from pboard: NSPasteboard) -> Bool {
+    let pathsToAdd: [String]
     if let paths = pboard.propertyList(forType: .nsFilenames) as? [String] {
       let playableFiles = Utility.resolveURLs(player.getPlayableFiles(in: paths.compactMap {
         $0.hasPrefix("/") ? URL(fileURLWithPath: $0) : URL(string: $0)
@@ -476,22 +562,27 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
       if playableFiles.count == 0 {
         return false
       }
-      player.addToPlaylist(paths: playableFiles.map { $0.isFileURL ? $0.path : $0.absoluteString }, at: row)
+      pathsToAdd = playableFiles.map { $0.isFileURL ? $0.path : $0.absoluteString }
     } else if let urls = pboard.propertyList(forType: .nsURL) as? [String] {
-      player.addToPlaylist(paths: urls, at: row)
+      pathsToAdd = urls
     } else if let droppedString = pboard.string(forType: .string), Regex.url.matches(droppedString) {
-      player.addToPlaylist(paths: [droppedString], at: row)
+      pathsToAdd = [droppedString]
     } else {
       return false
     }
+    player.playlistMutationLock.lock()
+    defer { player.playlistMutationLock.unlock() }
+    guard player.info.state.active, let playlist = player.playlistSnapshot(),
+          let insertion = playlistInsertionIndex(forVisibleRow: row, in: playlist) else { return false }
+    player.addToPlaylist(paths: pathsToAdd, at: insertion)
     player.postNotification(.iinaPlaylistChanged)
     return true
   }
 
   func tableView(_ tableView: NSTableView, writeRowsWith rowIndexes: IndexSet, to pboard: NSPasteboard) -> Bool {
     if tableView == playlistTableView {
-      copyToPasteboard(tableView, writeRowsWith: rowIndexes, to: pboard)
-      return true
+      draggedPlaylistSnapshot = player.info.playlist
+      return copyToPasteboard(tableView, writeRowsWith: rowIndexes, to: pboard)
     }
     return false
   }
@@ -500,16 +591,26 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
     playlistTableView.setDropRow(row, dropOperation: .above)
     if info.draggingSource as? NSTableView === tableView {
-      return .move
+      return tagFilter == .all ? .move : []
     }
     return player.acceptFromPasteboard(info, isPlaylist: true)
   }
 
   func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
-    if info.draggingSource as? NSTableView === tableView,
-      let rowData = info.draggingPasteboard.data(forType: .iinaPlaylistItem),
-      let indexSet = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSIndexSet.self, from: rowData) as? IndexSet {
+    if info.draggingSource as? NSTableView === tableView {
+      guard let rowData = info.draggingPasteboard.data(forType: .iinaPlaylistItem),
+            let indexSet = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSIndexSet.self, from: rowData) as? IndexSet else { return false }
       // Drag & drop within playlistTableView
+      // Hidden entries make a visual insertion ambiguous; clear the filter to reorder.
+      player.playlistMutationLock.lock()
+      defer { player.playlistMutationLock.unlock() }
+      guard tagFilter == .all, player.info.state.active, let playlist = player.playlistSnapshot(),
+            row >= 0, row <= playlist.count, !indexSet.isEmpty,
+            indexSet.allSatisfy({ playlist.indices.contains($0) }),
+            playlist.count == draggedPlaylistSnapshot.count,
+            zip(playlist, draggedPlaylistSnapshot).allSatisfy({ $0.entryID == $1.entryID && $0.filename == $1.filename }),
+            playlist.count == displayedPlaylist.count,
+            zip(playlist, displayedPlaylist).allSatisfy({ $0.entryID == $1.entryID && $0.filename == $1.filename }) else { return false }
       var oldIndexOffset = 0, newIndexOffset = 0
       for oldIndex in indexSet {
         if oldIndex < row {
@@ -549,8 +650,9 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   }
 
   @objc func cut(_ sender: NSMenuItem) {
-    copy(sender)
-    delete(sender)
+    if copyToPasteboard(playlistTableView, writeRowsWith: playlistTableView.selectedRowIndexes, to: .general) {
+      delete(sender)
+    }
   }
 
   @objc func paste(_ sender: NSMenuItem) {
@@ -560,7 +662,16 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
 
 
   @objc func delete(_ sender: NSMenuItem) {
-    player.playlistRemove(playlistTableView.selectedRowIndexes)
+    removeSelectedPlaylistItems()
+  }
+
+  private func removeSelectedPlaylistItems() {
+    player.playlistMutationLock.lock()
+    defer { player.playlistMutationLock.unlock() }
+    guard player.info.state.active, let playlist = player.playlistSnapshot(),
+          let rows = playlistRows(forVisibleRows: playlistTableView.selectedRowIndexes, in: playlist),
+          !rows.isEmpty else { return }
+    player.playlistRemove(rows)
   }
 
   // MARK: - private methods
@@ -577,7 +688,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   }
 
   @IBAction func removeBtnAction(_ sender: NSButton) {
-    player.playlistRemove(playlistTableView.selectedRowIndexes)
+    removeSelectedPlaylistItems()
   }
 
   @IBAction func addFileAction(_ sender: AnyObject) {
@@ -619,7 +730,11 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   @objc func performDoubleAction(sender: AnyObject) {
     guard let tv = sender as? NSTableView, tv.numberOfSelectedRows > 0 else { return }
     if tv == playlistTableView {
-      player.playFileInPlaylist(tv.selectedRow)
+      player.playlistMutationLock.lock()
+      defer { player.playlistMutationLock.unlock() }
+      guard player.info.state.active, let playlist = player.playlistSnapshot(),
+            let row = playlistIndex(forVisibleRow: tv.selectedRow, in: playlist) else { return }
+      player.playFileInPlaylist(row)
     } else {
       let index = tv.selectedRow
       player.playChapter(index)
@@ -636,7 +751,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     let row = playlistTableView.row(for: sender)
     guard let vc = subPopover.contentViewController as? SubPopoverViewController else { return }
     guard let filename = player.info.$playlist.withLock({ playlist in
-      playlist.indices.contains(row) ? playlist[row].filename : nil
+      playlistIndex(forVisibleRow: row, in: playlist).map { playlist[$0].filename }
     }) else { return }
     vc.filePath = filename
     vc.tableView.reloadData()
@@ -689,8 +804,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     // playlist
     if tableView == playlistTableView {
       let item: MPVPlaylistItem? = info.$playlist.withLock { playlist in
-        guard playlist.indices.contains(row) else { return nil }
-        return playlist[row]
+        playlistIndex(forVisibleRow: row, in: playlist).map { playlist[$0] }
       }
       guard let item else { return nil }
 
@@ -763,7 +877,9 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
                 self.refreshTotalLength()
                 DispatchQueue.main.async {
                   guard cellView.configurationToken == configurationToken,
-                        let currentRow = self.player.info.playlist.firstIndex(where: { $0.entryID == item.entryID }) else { return }
+                        let currentRow = self.displayedPlaylist.firstIndex(where: {
+                          $0.entryID == item.entryID && $0.filename == item.filename
+                        }) else { return }
                   self.playlistTableView.reloadData(forRowIndexes: IndexSet(integer: currentRow), columnIndexes: IndexSet(integersIn: 0...1))
                 }
               }
@@ -848,11 +964,9 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
 
     // A menu can remain open while automatic loading or sorting changes row positions.
     // Capture identities and paths now; actions must never retarget a later occupant of a row.
-    contextMenuTargets = player.info.$playlist.withLock { playlist in
-      target.compactMap { row in
-        guard playlist.indices.contains(row), playlist[row].entryID >= 0 else { return nil }
-        return (playlist[row].entryID, playlist[row].filename)
-      }
+    contextMenuTargets = target.compactMap { row in
+      guard displayedPlaylist.indices.contains(row), displayedPlaylist[row].entryID >= 0 else { return nil }
+      return (displayedPlaylist[row].entryID, displayedPlaylist[row].filename)
     }
     menu.removeAllItems()
     let items = buildMenu().items
@@ -1244,9 +1358,8 @@ class SubPopoverViewController: NSViewController, NSTableViewDelegate, NSTableVi
   @IBAction func wrongSubBtnAction(_ sender: AnyObject) {
     player.info.$matchedSubs.withLock { $0[filePath]?.removeAll() }
     tableView.reloadData()
-    if let row = player.info.$playlist.withLock({ $0.firstIndex(where: { $0.filename == filePath }) }) {
-      playlistTableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integersIn: 0...1))
-    }
+    // Every visible occurrence may use this file, and backend rows can be filtered out.
+    playlistTableView.reloadData()
   }
 }
 

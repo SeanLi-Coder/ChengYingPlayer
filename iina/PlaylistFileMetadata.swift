@@ -17,6 +17,30 @@ enum PlaylistFileSortKey: String, CaseIterable {
   case name, size, modified, created
 }
 
+/// Color matching uses Finder metadata, never the user-editable tag name.
+enum PlaylistTagFilter: Equatable, CaseIterable {
+  case all
+  case untagged
+  case color(Int)
+
+  static let allCases: [PlaylistTagFilter] = [
+    .all, .color(6), .color(7), .color(5), .color(2),
+    .color(4), .color(3), .color(1), .color(0), .untagged,
+  ]
+
+  func includes(_ metadata: PlaylistFileMetadata?) -> Bool {
+    switch self {
+    case .all:
+      return true
+    case .untagged:
+      return metadata?.tags.isEmpty ?? false
+    case .color(let index):
+      guard (0...7).contains(index), let metadata else { return false }
+      return metadata.tags.contains { $0.colorIndex == index }
+    }
+  }
+}
+
 /// A read-only snapshot, independent of playback state and playlist item identity.
 struct PlaylistFileMetadata: Equatable {
   let url: URL
@@ -52,15 +76,12 @@ struct PlaylistFileMetadata: Equatable {
     // Tags are intentionally read separately; unsupported tag metadata must never
     // discard otherwise available size or date values.
     let tags: [PlaylistFileTag]
-    if let storedTags = readStoredTags(from: freshURL) {
+    if let storedTags = readStoredTags(from: freshURL), !storedTags.isEmpty {
       tags = storedTags
     } else {
-      let tagValues = try? freshURL.resourceValues(forKeys: [.tagNamesKey, .labelNumberKey])
-      let names = tagValues?.tagNames ?? []
-      let fallbackColor = tagValues?.labelNumber ?? 0
-      tags = names.map {
-        PlaylistFileTag(name: $0, colorIndex: names.count == 1 ? fallbackColor : 0)
-      }
+      let tagValues = try? freshURL.resourceValues(forKeys: [.tagNamesKey, .labelNumberKey, .localizedLabelKey])
+      tags = Self.tags(fromResourceNames: tagValues?.tagNames ?? [], labelNumber: tagValues?.labelNumber ?? 0,
+                       localizedLabel: tagValues?.localizedLabel)
     }
 
     return PlaylistFileMetadata(
@@ -119,6 +140,28 @@ struct PlaylistFileMetadata: Equatable {
       }
       return PlaylistFileTag(name: storedName)
     }
+  }
+
+  /// Older Finder labels may have a color without the modern named-tag attribute.
+  /// Preserve that color while avoiding a synthetic tag for an unlabeled file.
+  static func tags(fromResourceNames names: [String], labelNumber: Int,
+                   localizedLabel: String?) -> [PlaylistFileTag] {
+    let nonemptyNames = names.filter { !$0.isEmpty }
+    if !nonemptyNames.isEmpty {
+      return nonemptyNames.map {
+        PlaylistFileTag(name: $0, colorIndex: nonemptyNames.count == 1 ? labelNumber : 0)
+      }
+    }
+    guard (1...7).contains(labelNumber) else { return [] }
+    let colorNames = [
+      ("gray", "Gray"), ("green", "Green"), ("purple", "Purple"), ("blue", "Blue"),
+      ("yellow", "Yellow"), ("red", "Red"), ("orange", "Orange"),
+    ]
+    let colorName = colorNames[labelNumber - 1]
+    let fallbackName = NSLocalizedString("filter." + colorName.0, tableName: "PlaylistBrowser", bundle: .main,
+                                        value: colorName.1, comment: "Finder label color")
+    let label = localizedLabel.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+    return [PlaylistFileTag(name: label ?? fallbackName, colorIndex: labelNumber)]
   }
 
   private var sortPath: String {

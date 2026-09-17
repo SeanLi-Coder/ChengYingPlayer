@@ -107,6 +107,7 @@ jobs:
           bash Tools/PlaylistMetadataTests/run.sh
           bash Tools/PlaylistPlaybackTests/run.sh
           bash Tools/PlaylistPresentationTests/run.sh
+          bash Tools/PlaylistFilterTests/run.sh
 
       - name: Test native image viewing and conversion
         run: |

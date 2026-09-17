@@ -27,8 +27,8 @@ func action(_ control: NSControl) {
   check(control.sendAction(selector, to: control.target), "The production control delivers its action")
 }
 
-let canvas = PresentationCanvas(frame: NSRect(x: 0, y: 0, width: 270, height: 230))
-let window = NSWindow(contentRect: NSRect(x: -5000, y: -5000, width: 270, height: 230),
+let canvas = PresentationCanvas(frame: NSRect(x: 0, y: 0, width: 270, height: 270))
+let window = NSWindow(contentRect: NSRect(x: -5000, y: -5000, width: 270, height: 270),
                       styleMask: [.titled], backing: .buffered, defer: false)
 window.contentView = canvas
 let controls = PlaylistSortControls(frame: NSRect(x: 0, y: 16, width: 270, height: 40))
@@ -82,6 +82,83 @@ controls.update(key: .name, ascending: true, manual: false, busy: false)
 controls.refreshButton.performClick(nil)
 check(refreshes == 2 && controls.refreshButton.isEnabled, "The refresh action becomes usable after completion")
 
+let filterControls = PlaylistTagFilterControls(frame: NSRect(x: 0, y: 58, width: 270, height: 38))
+canvas.addSubview(filterControls)
+let filterLabel = descendants(filterControls).first {
+  $0.identifier?.rawValue == "playlist.tag-filter.label"
+} as! NSTextField
+let filterCount = descendants(filterControls).first {
+  $0.identifier?.rawValue == "playlist.tag-filter.count"
+} as! NSTextField
+let expectedFilters: [PlaylistTagFilter] = [
+  .all, .color(6), .color(7), .color(5), .color(2), .color(4), .color(3), .color(1), .color(0), .untagged,
+]
+check(PlaylistTagFilter.allCases == expectedFilters,
+      "The menu offers all files, Finder colors in familiar order, uncolored tags, and no tags")
+check(filterControls.intrinsicContentSize.height == 38, "The filter row advertises a compact 38-point native height")
+check(filterControls.filterPopup.itemTitles == expectedFilters.map(\.title),
+      "The real filter popup uses localized color names, not arbitrary Finder tag names")
+check(filterControls.filterPopup.selectedItem?.title == PlaylistTagFilter.all.title && filterCount.stringValue == "0/0",
+      "New filter controls start with all files and an empty count")
+check(filterControls.filterPopup.accessibilityLabel() == playlistBrowserString("filter.label"),
+      "The color selector exposes its localized accessible label")
+var filterChanges = [PlaylistTagFilter]()
+filterControls.onFilterChange = { filter in
+  filterChanges.append(filter)
+  filterControls.update(filter: filter, matchingCount: 3, totalCount: 24, busy: false)
+}
+for (index, filter) in expectedFilters.enumerated() {
+  filterControls.filterPopup.selectItem(at: index)
+  action(filterControls.filterPopup)
+  check(filterChanges.last == filter, "Selecting filter item \(index) delivers the matching stored-color filter")
+  check(filterControls.filterPopup.toolTip?.contains(filter.title) == true,
+        "The selected filter title is available without opening the menu")
+  check(filterControls.filterPopup.item(at: index)?.image != nil || filter == .all || filter == .untagged,
+        "Every actual Finder color menu item has a native image")
+}
+let beforeFilterUpdate = filterChanges.count
+filterControls.update(filter: .color(6), matchingCount: 12_345, totalCount: 98_765, busy: true)
+check(filterChanges.count == beforeFilterUpdate, "Refreshing filter counts does not dispatch a new filter request")
+check(filterControls.filterPopup.isEnabled, "Reading metadata never disables the color selector")
+check(filterCount.toolTip?.contains(playlistBrowserString("filter.busy")) == true &&
+      filterControls.filterPopup.accessibilityHelp()?.contains(playlistBrowserString("filter.busy")) == true,
+      "Reading metadata is explained in both tooltip and accessibility")
+check(filterControls.toolTip?.contains(playlistBrowserString("filter.scope")) == true &&
+      filterControls.filterPopup.toolTip?.contains(playlistBrowserString("filter.scope")) == true,
+      "The filter explicitly explains that the underlying playback queue stays unchanged")
+let fullNumberFormatter = NumberFormatter()
+fullNumberFormatter.numberStyle = .decimal
+check(filterCount.accessibilityLabel()?.contains(fullNumberFormatter.string(from: 12_345)!) == true &&
+      filterCount.accessibilityLabel()?.contains(fullNumberFormatter.string(from: 98_765)!) == true,
+      "Abbreviated visual counts retain complete matching and total numbers for accessibility")
+check(filterCount.stringValue.contains("k") && filterCount.stringValue.count < 12,
+      "Large lists use compact visual counts")
+filterControls.filterPopup.selectItem(at: 2)
+action(filterControls.filterPopup)
+check(filterChanges.count == beforeFilterUpdate + 1 && filterChanges.last == .color(7),
+      "A real popup action can change the selected filter while metadata is busy")
+check(filterCount.toolTip?.contains(playlistBrowserString("filter.busy")) == false,
+      "Completed metadata refresh removes the previous busy description")
+filterControls.filterPopup.select(nil)
+let beforeMissingSelection = filterChanges.count
+action(filterControls.filterPopup)
+check(filterChanges.count == beforeMissingSelection, "An absent menu selection cannot deliver an invalid filter")
+filterControls.update(filter: .color(99), matchingCount: -4, totalCount: -8, busy: false)
+check(filterControls.filterPopup.indexOfSelectedItem == 0 && filterCount.stringValue == "0/0",
+      "Unsupported filter state and transient negative counts fall back safely")
+filterControls.update(filter: .untagged, matchingCount: 999, totalCount: 2, busy: false)
+check(filterCount.stringValue == "2/2", "A transient stale matching count cannot exceed the current total")
+filterControls.update(filter: .color(0), matchingCount: 0, totalCount: 42, busy: false)
+check(filterCount.stringValue == "0/42" && filterControls.filterPopup.selectedItem?.title == PlaylistTagFilter.color(0).title,
+      "A zero-match filter keeps its distinct uncolored-tag selection visible")
+let language = Bundle.main.preferredLocalizations.first ?? "en"
+let expectedFilterTitles = language == "zh-Hans"
+  ? ["全部文件", "红色", "橙色", "黄色", "绿色", "蓝色", "紫色", "灰色", "无色标签", "无标签"]
+  : ["All files", "Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Gray", "Uncolored tags", "No tags"]
+check(filterControls.filterPopup.itemTitles == expectedFilterTitles &&
+      playlistBrowserString("filter.empty") != "filter.empty",
+      "The full menu and empty-list message are translated in \(language)")
+
 let multicolor = [
   PlaylistFileTag(name: "Project review", colorIndex: 6),
   PlaylistFileTag(name: "已完成", colorIndex: 2),
@@ -94,7 +171,7 @@ let overflow = [
   PlaylistFileTag(name: "Third tag", colorIndex: 7),
 ]
 let tagViews = [multicolor, uncolored, overflow].enumerated().map { index, tags in
-  let view = PlaylistTagListView(frame: NSRect(x: 12, y: 88 + index * 38, width: 246, height: 20))
+  let view = PlaylistTagListView(frame: NSRect(x: 12, y: 120 + index * 38, width: 246, height: 20))
   view.setTags(tags)
   canvas.addSubview(view)
   return view
@@ -143,16 +220,35 @@ for appearance in [NSAppearance.Name.aqua, .darkAqua] {
     }
     check(found, "Actual rendering includes stored Finder color \(tag.colorIndex) in \(appearance.rawValue)")
   }
+  for (index, filter) in expectedFilters.enumerated() {
+    guard case .color(let colorIndex) = filter,
+          let image = filterControls.filterPopup.item(at: index)?.image else { continue }
+    let imageView = NSImageView(frame: NSRect(x: 0, y: 0, width: 12, height: 12))
+    imageView.image = image
+    imageView.appearance = NSAppearance(named: appearance)
+    let menuBitmap = snapshot(imageView)
+    if colorIndex > 0 {
+      let expected = labelColors[colorIndex]
+      let found = (0..<menuBitmap.pixelsWide).contains { x in
+        menuBitmap.colorAt(x: x, y: menuBitmap.pixelsHigh / 2).map { close($0, expected) } ?? false
+      }
+      check(found, "The real menu image renders stored Finder color \(colorIndex) in \(appearance.rawValue)")
+    } else {
+      let middle = menuBitmap.colorAt(x: menuBitmap.pixelsWide / 2, y: menuBitmap.pixelsHigh / 2)
+      check((middle?.alphaComponent ?? 1) < 0.1,
+            "The uncolored-tag menu image keeps its center hollow in \(appearance.rawValue)")
+    }
+  }
 }
 
 let artifactDirectory = ProcessInfo.processInfo.environment["CHENGYING_CAPTURE_DIR"].map {
   URL(fileURLWithPath: $0, isDirectory: true)
 }
 if let artifactDirectory { try FileManager.default.createDirectory(at: artifactDirectory, withIntermediateDirectories: true) }
-let language = Bundle.main.preferredLocalizations.first ?? "en"
 for width in [240, 270, 360, 800] {
-  window.setContentSize(NSSize(width: width, height: 230))
+  window.setContentSize(NSSize(width: width, height: 270))
   controls.frame.size.width = CGFloat(width)
+  filterControls.frame.size.width = CGFloat(width)
   tagViews.forEach { $0.frame.size.width = CGFloat(width - 24) }
   for (theme, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
     window.appearance = NSAppearance(named: appearance)
@@ -169,6 +265,22 @@ for width in [240, 270, 360, 800] {
     check(popupFrame.maxX <= directionFrame.minX && directionFrame.maxX <= refreshFrame.minX,
           "Sort and refresh controls do not overlap at \(width) points in \(theme) mode")
     check(tagViews.allSatisfy { canvas.bounds.contains($0.frame) }, "All tag rows remain within the \(width)-point sidebar")
+    for (matching, total) in [(3, 24), (12_345, 98_765), (Int.max, Int.max)] {
+      filterControls.update(filter: .color(6), matchingCount: matching, totalCount: total, busy: false)
+      filterControls.layoutSubtreeIfNeeded()
+      for control in [filterLabel, filterControls.filterPopup, filterCount] as [NSView] {
+        let rect = control.convert(control.bounds, to: filterControls)
+        check(rect.width > 0 && rect.height > 0 && filterControls.bounds.insetBy(dx: -0.5, dy: -0.5).contains(rect),
+              "The filter \(type(of: control)) remains inside its 38-point row at \(width) points for \(total) files")
+        check(!control.hasAmbiguousLayout, "The filter \(type(of: control)) has unambiguous layout in \(theme) mode")
+      }
+      let labelFrame = filterLabel.convert(filterLabel.bounds, to: filterControls)
+      let popupFrame = filterControls.filterPopup.convert(filterControls.filterPopup.bounds, to: filterControls)
+      let countFrame = filterCount.convert(filterCount.bounds, to: filterControls)
+      check(labelFrame.maxX <= popupFrame.minX && popupFrame.maxX <= countFrame.minX,
+            "The filter label, popup and count never overlap at \(width) points for \(total) files")
+    }
+    filterControls.update(filter: .color(6), matchingCount: 3, totalCount: 24, busy: false)
     let bitmap = snapshot(canvas)
     check(bitmap.pixelsWide >= width && bitmap.pixelsHigh > 0, "The complete native playlist presentation renders in \(theme) mode at \(width) points")
     if let artifactDirectory, let image = bitmap.representation(using: .png, properties: [:]) {

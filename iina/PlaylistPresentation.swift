@@ -8,6 +8,148 @@ extension PlaylistFileSortKey {
   var title: String { playlistBrowserString("sort.\(rawValue)") }
 }
 
+extension PlaylistTagFilter {
+  var title: String {
+    let key: String
+    switch self {
+    case .all: key = "filter.all"
+    case .untagged: key = "filter.untagged"
+    case .color(let index):
+      switch index {
+      case 0: key = "filter.uncolored"
+      case 1: key = "filter.gray"
+      case 2: key = "filter.green"
+      case 3: key = "filter.purple"
+      case 4: key = "filter.blue"
+      case 5: key = "filter.yellow"
+      case 6: key = "filter.red"
+      case 7: key = "filter.orange"
+      default: key = "filter.all"
+      }
+    }
+    return playlistBrowserString(key)
+  }
+}
+
+/// Filters the visible file list without changing the underlying playback queue.
+final class PlaylistTagFilterControls: NSView {
+  let filterPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+  var onFilterChange: ((PlaylistTagFilter) -> Void)?
+  private let countLabel = NSTextField(labelWithString: "")
+  private let filters = PlaylistTagFilter.allCases
+
+  override var intrinsicContentSize: NSSize {
+    NSSize(width: NSView.noIntrinsicMetric, height: 38)
+  }
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    let label = NSTextField(labelWithString: playlistBrowserString("filter.label"))
+    label.identifier = NSUserInterfaceItemIdentifier("playlist.tag-filter.label")
+    label.font = .systemFont(ofSize: 11, weight: .medium)
+    label.textColor = .secondaryLabelColor
+    filterPopup.font = .systemFont(ofSize: 12)
+    filterPopup.controlSize = .small
+    filterPopup.target = self
+    filterPopup.action = #selector(changeFilter)
+    filterPopup.setAccessibilityLabel(playlistBrowserString("filter.label"))
+    filterPopup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    for filter in filters {
+      filterPopup.addItem(withTitle: filter.title)
+      filterPopup.lastItem?.image = Self.colorImage(for: filter)
+    }
+    countLabel.identifier = NSUserInterfaceItemIdentifier("playlist.tag-filter.count")
+    countLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+    countLabel.textColor = .secondaryLabelColor
+    countLabel.alignment = .right
+    countLabel.lineBreakMode = .byTruncatingMiddle
+    countLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    for view in [label, filterPopup, countLabel] as [NSView] {
+      view.translatesAutoresizingMaskIntoConstraints = false
+      addSubview(view)
+      view.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
+    }
+    NSLayoutConstraint.activate([
+      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+      label.widthAnchor.constraint(equalToConstant: 50),
+      filterPopup.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 6),
+      filterPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 88),
+      filterPopup.trailingAnchor.constraint(equalTo: countLabel.leadingAnchor, constant: -6),
+      countLabel.widthAnchor.constraint(equalToConstant: 48),
+      countLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+    ])
+    update(filter: .all, matchingCount: 0, totalCount: 0, busy: false)
+  }
+
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  func update(filter: PlaylistTagFilter, matchingCount: Int, totalCount: Int, busy: Bool) {
+    filterPopup.selectItem(at: filters.firstIndex(of: filter) ?? 0)
+    // Metadata refreshes must never lock the user into their previous filter.
+    filterPopup.isEnabled = true
+    let total = max(0, totalCount)
+    let matching = max(0, min(matchingCount, total))
+    countLabel.stringValue = "\(Self.compactCount(matching))/\(Self.compactCount(total))"
+    let numberFormatter = NumberFormatter()
+    numberFormatter.numberStyle = .decimal
+    let fullCount = String(format: playlistBrowserString("filter.count"),
+                           numberFormatter.string(from: NSNumber(value: matching)) ?? String(matching),
+                           numberFormatter.string(from: NSNumber(value: total)) ?? String(total))
+    let status = busy ? playlistBrowserString("filter.busy") + "\n" : ""
+    let explanation = status + fullCount + "\n" + playlistBrowserString("filter.scope")
+    toolTip = explanation
+    countLabel.toolTip = explanation
+    countLabel.setAccessibilityLabel(status + fullCount)
+    filterPopup.toolTip = (filterPopup.selectedItem?.title ?? filter.title) + "\n" + explanation
+    filterPopup.setAccessibilityHelp(explanation)
+  }
+
+  @objc private func changeFilter() {
+    guard filters.indices.contains(filterPopup.indexOfSelectedItem) else { return }
+    onFilterChange?(filters[filterPopup.indexOfSelectedItem])
+  }
+
+  private static func compactCount(_ count: Int) -> String {
+    guard count >= 1_000 else { return String(count) }
+    let divisor: Double
+    let suffix: String
+    if count >= 1_000_000_000 {
+      divisor = 1_000_000_000
+      suffix = "B"
+    } else if count >= 1_000_000 {
+      divisor = 1_000_000
+      suffix = "M"
+    } else {
+      divisor = 1_000
+      suffix = "k"
+    }
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.maximumFractionDigits = 1
+    formatter.usesGroupingSeparator = false
+    let value = formatter.string(from: NSNumber(value: Double(count) / divisor)) ?? String(count)
+    return value + suffix
+  }
+
+  private static func colorImage(for filter: PlaylistTagFilter) -> NSImage? {
+    guard case .color(let index) = filter else { return nil }
+    // Use the stored Finder index, including a hollow dot for uncolored tags.
+    return NSImage(size: NSSize(width: 12, height: 12), flipped: false) { _ in
+      let dot = NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 8, height: 8))
+      let colors = NSWorkspace.shared.fileLabelColors
+      if index > 0 && index < colors.count {
+        colors[index].setFill()
+        dot.fill()
+      } else {
+        NSColor.secondaryLabelColor.setStroke()
+        dot.lineWidth = 1
+        dot.stroke()
+      }
+      return true
+    }
+  }
+}
+
 /// Compact controls sized for the player's 240-point minimum sidebar width.
 final class PlaylistSortControls: NSView {
   let keyPopup = NSPopUpButton(frame: .zero, pullsDown: false)

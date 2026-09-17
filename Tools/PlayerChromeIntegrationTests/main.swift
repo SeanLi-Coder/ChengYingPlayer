@@ -78,7 +78,7 @@ for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), N
               "\(label): rebuilt icons remain inside a nonzero toolbar instead of clipping outside an empty stack")
         check(buttons.count == 4 && buttons.suffix(2).map(\.tag) == [Preference.ToolBarButton.settings.rawValue, Preference.ToolBarButton.playlist.rawValue],
               "\(label): toolbar has one information entry and settings/file-list at the right")
-        check(controller.sideBarView.frame.height <= 400.6 && controller.sideBarView.frame.height >= 139.4,
+        check(controller.sideBarView.frame.height <= 400.6 && controller.sideBarView.frame.height >= 179.4,
               "\(label): sidebar height stays within its intended bounds")
         check(controller.sideBarView.frame.minY >= footer.frame.maxY + 5.4,
               "\(label): sidebar cannot extend into the footer or below the video")
@@ -86,16 +86,16 @@ for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), N
               "\(label): sidebar stays below the corner toolbar")
         check(!controller.sideBarView.hasAmbiguousLayout && !footer.hasAmbiguousLayout && !corner.hasAmbiguousLayout,
               "\(label): the integrated edge layout has no ambiguous containers")
-        check(window.contentMinSize == NSSize(width: 320, height: 280) && content.bounds.width >= 320 && content.bounds.height >= 280,
+        check(window.contentMinSize == NSSize(width: 320, height: 320) && content.bounds.width >= 320 && content.bounds.height >= 320,
               "\(label): switching to edge mode expands undersized windows to the production content minimum")
-        check(content.bounds.width <= max(320, size.width) + 0.6 && content.bounds.height <= max(280, size.height) + 0.6,
+        check(content.bounds.width <= max(320, size.width) + 0.6 && content.bounds.height <= max(320, size.height) + 0.6,
               "\(label): preferred sidebar height never expands the requested video window beyond its minimum")
         let visibleHeight = playlist.playlistTableView.enclosingScrollView!.contentView.bounds.height
         print("PLAYLIST \(label): sidebar=\(controller.sideBarView.frame.height) header=\(playlist.tabHeightConstraint.constant) listViewport=\(visibleHeight) row=\(playlist.playlistTableView.rowHeight)")
         check(playlist.useCompactTabHeight && near(playlist.tabHeightConstraint.constant, 32),
               "\(label): edge mode uses the actual compact playlist header")
         check(visibleHeight >= playlist.playlistTableView.rowHeight,
-              "\(label): the real playlist headers, sorting controls, and footer leave at least one full row")
+              "\(label): playlist headers, sorting, color filtering, and footer leave at least one full row")
         if !fullscreen {
           try snapshot(content, name: "player-chrome-integrated-\(Int(size.width))-\(Int(size.height))")
         }

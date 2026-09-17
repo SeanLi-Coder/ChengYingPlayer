@@ -151,6 +151,8 @@ final class LayoutController: NSWindowController {
 
 final class PlaylistLayoutController: NSViewController, NSTableViewDataSource {
   let sortControls = PlaylistSortControls()
+  let tagFilterControls = PlaylistTagFilterControls()
+  let filterEmptyLabel = NSTextField(wrappingLabelWithString: playlistBrowserString("filter.empty"))
   var playlistTableView: NSTableView!
   var tabHeightConstraint: NSLayoutConstraint!
   var buttonTopConstraint: NSLayoutConstraint!
@@ -172,6 +174,7 @@ final class PlaylistLayoutController: NSViewController, NSTableViewDataSource {
   required init?(coder: NSCoder) { fatalError("Use init(fixture:)") }
   func requestSort(key: PlaylistFileSortKey, ascending: Bool) {}
   func refreshFileMetadata(force: Bool) {}
+  func requestTagFilter(_ filter: PlaylistTagFilter) {}
   func numberOfRows(in tableView: NSTableView) -> Int { 20 }
   func tableView(_ tableView: NSTableView, objectValueFor tableColumn: NSTableColumn?, row: Int) -> Any? {
     "Sample Video \(row + 1).mp4"

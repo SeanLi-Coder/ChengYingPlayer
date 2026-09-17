@@ -162,8 +162,71 @@ controller.installSortControls()
 controller.view.layoutSubtreeIfNeeded()
 check(!originalTop.isActive, "Installing the actual sort toolbar removes the previous scroll-view top constraint")
 check(abs(controller.sortControls.frame.maxY - controller.view.bounds.maxY) < 0.5 &&
-      abs(scrollView.frame.maxY - controller.sortControls.frame.minY) < 0.5,
-      "The actual sort toolbar reserves its own row above the playlist without overlapping the scroll view")
+      abs(controller.tagFilterControls.frame.maxY - controller.sortControls.frame.minY) < 0.5 &&
+      abs(scrollView.frame.maxY - controller.tagFilterControls.frame.minY) < 0.5,
+      "The actual sort and filter toolbars reserve separate rows without overlapping the playlist")
+
+func writeTags(_ names: [String], to url: URL) throws {
+  let data = try PropertyListSerialization.data(fromPropertyList: names, format: .binary, options: 0)
+  let result = data.withUnsafeBytes { bytes in
+    url.withUnsafeFileSystemRepresentation { path in
+      setxattr(path!, "com.apple.metadata:_kMDItemUserTags", bytes.baseAddress, bytes.count, 0, 0)
+    }
+  }
+  check(result == 0, "Finder tags are written only to the temporary integration fixture")
+}
+try writeTags(["Project review\n6", "Shared\n2"], to: large)
+try writeTags(["Client\n4"], to: small)
+setPlaylist(controller, original)
+playback.info.currentURL = large
+controller.reloadData(playlist: true, chapters: false)
+drain(until: { !controller.metadataLoading }, message: "Initial filter metadata finishes before the real popup action")
+let filterReorderCount = playback.reorderCount
+controller.tagFilterControls.filterPopup.selectItem(at: PlaylistTagFilter.allCases.firstIndex(of: .color(6))!)
+NSApp.sendAction(controller.tagFilterControls.filterPopup.action!, to: controller.tagFilterControls.filterPopup.target,
+                 from: controller.tagFilterControls.filterPopup)
+check(controller.tagFilter == .color(6) && controller.displayedPlaylist.map(\.filename) == [large.path],
+      "The installed native filter callback displays only matching real Finder metadata")
+check(playback.reorderCount == filterReorderCount && playback.info.playlist.map(\.entryID) == original.map(\.entryID),
+      "Filtering never reorders or removes the underlying playback queue")
+controller.requestTagFilter(.color(2))
+check(controller.displayedPlaylist.map(\.filename) == [large.path], "A second color of a multi-tag file also matches")
+controller.requestTagFilter(.color(3))
+check(controller.displayedPlaylist.isEmpty && !controller.filterEmptyLabel.isHidden,
+      "A finished zero-match filter exposes the localized empty-list explanation")
+controller.requestTagFilter(.all)
+check(controller.displayedPlaylist.count == 2 && controller.filterEmptyLabel.isHidden,
+      "Clearing the filter restores all entries and removes the empty-result message")
+
+try writeTags(["Changed\n4"], to: large)
+try writeTags(["Changed\n6"], to: small)
+controller.requestTagFilter(.color(6))
+controller.metadataQueue.isSuspended = true
+controller.refreshFileMetadata(force: true)
+controller.requestTagFilter(.color(4))
+controller.metadataQueue.isSuspended = false
+drain(until: { !controller.metadataLoading }, message: "Finder retagging refresh completes after changing the active filter")
+check(controller.tagFilter == .color(4) && controller.displayedPlaylist.map(\.filename) == [large.path],
+      "Queued metadata completion uses the current filter, not the filter at request time")
+check(playback.reorderCount == filterReorderCount, "Refreshing tag colors does not change playback order")
+controller.requestSort(key: .name, ascending: true)
+check(controller.tagFilter == .color(4) && controller.displayedPlaylist.map(\.filename) == [large.path],
+      "Sorting the actual playback queue preserves the active color filter")
+setPlaylist(controller, items([replacement], firstID: 500))
+controller.metadataQueue.isSuspended = true
+controller.reloadData(playlist: true, chapters: false)
+check(controller.tagFilter == .all && controller.displayedPlaylist.map(\.filename) == [replacement.path],
+      "A completely replaced queue clears the old folder's filter")
+controller.requestTagFilter(.untagged)
+check(controller.displayedPlaylist.isEmpty && controller.filterEmptyLabel.isHidden,
+      "Unknown metadata is not temporarily classified as untagged while loading")
+controller.metadataQueue.isSuspended = false
+drain(until: { !controller.metadataLoading }, message: "New folder tag metadata finishes")
+check(controller.displayedPlaylist.map(\.filename) == [replacement.path],
+      "Confirmed untagged files appear once the metadata read finishes")
+controller.cancelMetadataRefresh()
+check(controller.displayedPlaylist.isEmpty && controller.filterEmptyLabel.isHidden,
+      "Stopping metadata work clears stale filtered rows")
 
 var disposableController: PlaylistControllerUnderTest? = PlaylistControllerUnderTest()
 disposableController!.player = playback

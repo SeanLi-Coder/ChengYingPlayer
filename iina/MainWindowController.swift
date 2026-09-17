@@ -68,7 +68,7 @@ class MainWindowController: PlayerWindowController {
   // MARK: - Constants
 
   /** Minimum window size. */
-  var minSize: NSSize { isUsingEdgeControls ? NSMakeSize(320, 280) : NSMakeSize(285, 120) }
+  var minSize: NSSize { isUsingEdgeControls ? NSMakeSize(320, 320) : NSMakeSize(285, 120) }
 
   /** For Force Touch. */
   let minimumPressDuration: TimeInterval = 0.5
@@ -1029,7 +1029,7 @@ class MainWindowController: PlayerWindowController {
         sideBarView.topAnchor.constraint(greaterThanOrEqualTo: content.topAnchor, constant: 8),
         sideBarView.bottomAnchor.constraint(lessThanOrEqualTo: footer.topAnchor, constant: -6),
         sideBarView.heightAnchor.constraint(lessThanOrEqualToConstant: 400),
-        sideBarView.heightAnchor.constraint(greaterThanOrEqualToConstant: 140),
+        sideBarView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
       ]
       NSLayoutConstraint.activate(edgeSidebarConstraints)
       sideBarView.roundCorners(withRadius: 10)

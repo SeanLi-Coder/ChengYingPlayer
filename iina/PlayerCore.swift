@@ -2669,7 +2669,7 @@ class PlayerCore: NSObject {
     case .playlist:
       DispatchQueue.main.async {
         if self.isPlaylistVisible {
-          self.mainWindow.playlistView.playlistTableView.reloadData()
+          self.mainWindow.playlistView.reloadData(playlist: true, chapters: false)
         }
       }
 
