@@ -48,7 +48,13 @@ class PackagingTests(unittest.TestCase):
             path = self.application / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(self.native, path)
-            command("codesign", "--force", "--sign", "-", str(path))
+            arguments = ["codesign", "--force", "--sign", "-"]
+            if path.name in PACKAGER.FROZEN_HELPERS:
+                arguments.extend([
+                    "--options", "runtime", "--entitlements",
+                    str(PROJECT_ROOT / "Tools/VideoToolsHelper/runtime-entitlements.plist"),
+                ])
+            command(*arguments, str(path))
         resources = self.application / "Contents/Resources"
         resources.mkdir(parents=True)
         (resources / "fixture.txt").write_text(
@@ -279,6 +285,42 @@ class PackagingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "overwrite"):
             PACKAGER.package(self.application, output)
         self.assertTrue(output.is_symlink())
+
+    def test_16_parent_entitlement_does_not_replace_child_entitlements(self):
+        for name in PACKAGER.FROZEN_HELPERS:
+            with self.subTest(helper=name):
+                child = self.application / "Contents/MacOS" / name
+                # Re-copy an unsigned fixture to remove any previous entitlement.
+                shutil.copy2(self.native, child)
+                command("codesign", "--force", "--sign", "-", "--options", "runtime", str(child))
+                command(
+                    "codesign", "--force", "--sign", "-", "--options", "runtime",
+                    "--entitlements", str(PROJECT_ROOT / "iina/IINA.entitlements"),
+                    str(self.application),
+                )
+                command("codesign", "--verify", "--deep", "--strict", str(self.application))
+                with self.assertRaisesRegex(ValueError, "helper library-loading entitlement"):
+                    PACKAGER.validate_application(self.application)
+                command(
+                    "codesign", "--force", "--sign", "-", "--options", "runtime",
+                    "--entitlements", str(PROJECT_ROOT / "Tools/VideoToolsHelper/runtime-entitlements.plist"),
+                    str(child),
+                )
+                self.sign()
+
+    def test_17_false_or_string_helper_entitlement_is_rejected(self):
+        for value in (False, "true", 1):
+            with self.subTest(value=value):
+                entitlements = self.work / "invalid-entitlements.plist"
+                entitlements.write_bytes(plistlib.dumps({PACKAGER.LIBRARY_VALIDATION_ENTITLEMENT: value}))
+                command(
+                    "codesign", "--force", "--sign", "-", "--options", "runtime",
+                    "--entitlements", str(entitlements),
+                    str(self.application / "Contents/MacOS/chengying-video-tools-helper"),
+                )
+                self.sign()
+                with self.assertRaisesRegex(ValueError, "helper library-loading entitlement"):
+                    PACKAGER.validate_application(self.application)
 
 
 if __name__ == "__main__":

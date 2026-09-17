@@ -78,6 +78,7 @@ PYINSTALLER_ARGS=(
   --distpath "$DIST_DIR"
   --workpath "$WORK_DIR/work"
   --specpath "$WORK_DIR/spec"
+  --osx-entitlements-file "$SCRIPT_DIR/runtime-entitlements.plist"
 )
 
 if [[ "$HELPER_KIND" == "subtitle" ]]; then
@@ -121,6 +122,15 @@ elif [[ " $BUILT_ARCHS " != *" $EXPECTED_ARCH "* ]]; then
 fi
 
 codesign --verify --strict "$BUILT_HELPER"
+
+# Each frozen process loads its own extracted Python library. The containing app's
+# entitlement does not apply to that process, including after Xcode signs on copy.
+ENTITLEMENTS_OUTPUT="$WORK_DIR/helper-entitlements.plist"
+codesign --display --entitlements - --xml "$BUILT_HELPER" > "$ENTITLEMENTS_OUTPUT"
+if [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.disable-library-validation' "$ENTITLEMENTS_OUTPUT")" != "true" ]]; then
+  echo "The frozen helper signature is missing its library validation entitlement." >&2
+  exit 4
+fi
 
 BUNDLED_FFMPEG="$OUTPUT_DIR/ffmpeg"
 BUNDLED_FFPROBE="$OUTPUT_DIR/ffprobe"

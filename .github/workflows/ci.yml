@@ -183,6 +183,12 @@ jobs:
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/SubtitleToolsHelper/build_helper.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/DownloaderHelper/build_helper.sh
 
+      - name: Verify frozen helper signing after Xcode-style copying
+        run: |
+          sw_vers
+          csrutil status
+          bash Tools/HelperSigningTests/run.sh
+
       - name: Test nested download-center signing
         run: |
           python Tools/DownloaderHelper/smoke_signing.py \
@@ -250,6 +256,8 @@ jobs:
           done
 
           codesign --verify --deep --strict --verbose=2 "$app_path"
+
+          PYTHONPATH=other python -c 'import sys; from pathlib import Path; from package_dmg import validate_frozen_helper_signatures; validate_frozen_helper_signatures(Path(sys.argv[1]))' "$app_path"
 
           app_entitlements="$RUNNER_TEMP/app-entitlements.plist"
           codesign -d --entitlements :- "$app_path" > "$app_entitlements" 2>/dev/null

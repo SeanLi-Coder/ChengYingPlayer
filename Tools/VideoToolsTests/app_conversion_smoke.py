@@ -71,6 +71,8 @@ def smoke(tools_directory: Path) -> None:
             def receive(timeout: float = 60) -> dict[str, Any]:
                 event = events.get(timeout=timeout)
                 if isinstance(event, BaseException):
+                    detail = (root / "helper.stderr").read_text(encoding="utf-8", errors="replace")[-6000:]
+                    event.add_note(f"Frozen helper stderr: {detail}")
                     raise event
                 return event
 

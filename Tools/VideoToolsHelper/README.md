@@ -47,12 +47,25 @@ deps/executable/chengying-video-tools-helper
 
 The generated executable is intentionally ignored by Git. Set
 `HELPER_TARGET_ARCH=arm64`, `x86_64`, or `universal2` when the selected Python
-distribution supports that target. The app release pipeline is responsible for signing
-the nested helper together with the rest of the app bundle. Release builds should set
-`HELPER_CODESIGN_IDENTITY` and `HELPER_REQUIRE_SIGNING=1`; the script passes the identity
-into PyInstaller so embedded Python libraries are signed, verifies the requested Mach-O
-architecture and signature, runs a frozen ready/ping smoke test when the bundled FFmpeg
-tools exist, and atomically publishes the verified executable.
+distribution supports that target. The shared builder also builds the subtitle helper.
+Both helpers always receive `runtime-entitlements.plist`, containing only
+`com.apple.security.cs.disable-library-validation=true`. A frozen helper is a separate
+process that loads its extracted Python library; it does not inherit the containing
+application's entitlement. Without this per-process entitlement, an ad-hoc helper
+re-signed with hardened runtime can pass signature verification but fail to load Python
+on a Mac enforcing library validation.
+
+Xcode's Copy Files signing preserves the helpers' embedded entitlements while enabling
+hardened runtime. The build script checks the signed executable's entitlement before
+running the frozen ready/ping smoke test and atomically publishing the helper. The final
+application packaging step checks each helper again after Xcode signing. This narrowly
+scoped application entitlement does not change SIP, Gatekeeper, or system settings.
+
+The current public build uses ad-hoc signatures; it is not Developer ID signed or
+notarized. A build with an available signing certificate can set
+`HELPER_CODESIGN_IDENTITY` and `HELPER_REQUIRE_SIGNING=1`. The script passes that identity
+to PyInstaller to sign the embedded Python libraries and retain hardened runtime signing,
+but this setting alone does not perform notarization or certify distribution trust.
 
 ## Test
 

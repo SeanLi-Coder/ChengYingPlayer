@@ -46,6 +46,11 @@ REQUIRED_NOTICES = (
     "THIRD_PARTY_NOTICES.md",
     "SOURCE_MANIFEST.txt",
 )
+FROZEN_HELPERS = (
+    "chengying-video-tools-helper",
+    "chengying-subtitle-tools-helper",
+)
+LIBRARY_VALIDATION_ENTITLEMENT = "com.apple.security.cs.disable-library-validation"
 
 
 def require(condition, message):
@@ -138,6 +143,25 @@ def expand_path(value, loader, executable):
     return Path(value).resolve() if value.startswith("/") else None
 
 
+def validate_frozen_helper_signatures(application):
+    """Each frozen child needs its own library-loading entitlement, not its parent's."""
+    for name in FROZEN_HELPERS:
+        executable = application / "Contents/MacOS" / name
+        data = run(
+            ["codesign", "--display", "--entitlements", "-", "--xml", str(executable)],
+            capture=True,
+        )
+        try:
+            entitlements = plistlib.loads(data)
+        except (ValueError, plistlib.InvalidFileException) as exc:
+            raise ValueError(f"Missing frozen helper library-loading entitlement: {name}") from exc
+        require(
+            isinstance(entitlements, dict)
+            and entitlements.get(LIBRARY_VALIDATION_ENTITLEMENT) is True,
+            f"Missing frozen helper library-loading entitlement: {name}",
+        )
+
+
 def validate_application(application):
     root = application.resolve(strict=True)
     require(
@@ -175,6 +199,7 @@ def validate_application(application):
             path.is_file() and path.stat().st_size > 0,
             f"Missing legal notice: {relative}",
         )
+    validate_frozen_helper_signatures(root)
 
     binaries = {}
     for path in root.rglob("*"):
