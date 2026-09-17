@@ -6,6 +6,7 @@ test_dir="$(mktemp -d "${TMPDIR:-/tmp}/chengying-image-slideshow-ui.XXXXXX")"
 trap 'rm -rf "$test_dir"' EXIT
 
 xcrun swiftc -o "$test_dir/ImageSlideshowUITests" \
+  "$project_root/iina/MediaInfo/MediaInfoModels.swift" \
   "$project_root/iina/PlaylistFileMetadata.swift" \
   "$project_root/iina/ImageViewer/ImageSlideshowPolicy.swift" \
   "$project_root/iina/ImageViewer/ImageCanvasView.swift" \

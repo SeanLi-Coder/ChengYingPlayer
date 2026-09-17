@@ -681,6 +681,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    MediaInfoCoordinator.shared.close()
     ImageViewerCoordinator.shared.cancelAndClose()
     SubtitleToolsService.shared.shutdown()
     DownloadCenterService.shared.shutdown()
@@ -695,6 +696,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   @objc func menuShowDownloadCenter(_ sender: Any?) {
     guard !isTerminating else { return }
     downloadCenterWindow.showWindow(sender)
+  }
+
+  @objc func menuShowMediaInfo(_ sender: Any?) {
+    guard !isTerminating else { return }
+    MediaInfoCoordinator.shared.showMediaInfo(sender)
   }
 
   @objc func menuShowSubtitleTools(_ sender: NSMenuItem) {

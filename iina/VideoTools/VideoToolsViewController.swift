@@ -17,6 +17,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private let taskManager = VideoToolsTaskManager.shared
 
   private let sourceLabel = NSTextField(labelWithString: "")
+  private let mediaInfoButton = NSButton(title: mediaInfoText("action.info", "Info"), target: nil, action: nil)
   private let playbackPositionLabel = NSTextField(labelWithString: "")
   private let loopStatusLabel = NSTextField(labelWithString: "")
   private let clearLoopButton = NSButton(
@@ -181,8 +182,18 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     sourceLabel.textColor = .secondaryLabelColor
     sourceLabel.font = .systemFont(ofSize: 11)
     sourceLabel.maximumNumberOfLines = 1
+    mediaInfoButton.target = self
+    mediaInfoButton.action = #selector(showMediaInfo)
+    mediaInfoButton.toolTip = mediaInfoText("action.info_hint", "Original media details (Command-I)")
+    mediaInfoButton.setAccessibilityLabel(mediaInfoText("action.media_info", "Media Information…"))
+    ChengYingStyle.secondaryButton(mediaInfoButton)
+    mediaInfoButton.setContentHuggingPriority(.required, for: .horizontal)
+    mediaInfoButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+    let titleRow = makeHorizontalGroup([
+      ChengYingStyle.heading(NSLocalizedString("videotools.title", comment: "Local video tools")), mediaInfoButton,
+    ], spacing: 8)
     let header = makeVerticalGroup([
-      ChengYingStyle.heading(NSLocalizedString("videotools.title", comment: "Local video tools")),
+      titleRow,
       sourceLabel,
     ], spacing: 5)
     stack.addArrangedSubview(header)
@@ -430,6 +441,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   func refreshCurrentMedia(force: Bool = false) {
     guard isViewLoaded else { return }
     let newURL = currentLocalMediaURL
+    mediaInfoButton.isEnabled = newURL != nil
     if let coordinator = rotationCoordinator,
        coordinator.state.inputURL != newURL?.standardizedFileURL ||
         rotationMediaGeneration != player?.videoToolsMediaGeneration {
@@ -459,6 +471,10 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     }
     updateTaskUI()
     updatePlaybackControls()
+  }
+
+  @objc private func showMediaInfo() {
+    NSApp.sendAction(NSSelectorFromString("menuShowMediaInfo:"), to: NSApp.delegate, from: mediaInfoButton)
   }
 
   func stopPreview() {

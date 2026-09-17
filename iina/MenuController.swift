@@ -125,6 +125,7 @@ class MenuController: NSObject, NSMenuDelegate {
   private var videoToolsMenuItem: NSMenuItem?
   private var subtitleToolsMenuItem: NSMenuItem?
   private var downloadCenterMenuItem: NSMenuItem?
+  private var mediaInfoMenuItem: NSMenuItem?
   @IBOutlet weak var cycleVideoTracks: NSMenuItem!
   @IBOutlet weak var videoTrack: NSMenuItem!
   @IBOutlet weak var videoTrackMenu: NSMenu!
@@ -207,6 +208,14 @@ class MenuController: NSObject, NSMenuDelegate {
     // File menu
 
     fileMenu.delegate = self
+    if mediaInfoMenuItem == nil {
+      let item = NSMenuItem(title: mediaInfoText("action.media_info", "Media Information…"),
+                            action: #selector(MediaInfoCoordinator.showMediaInfo(_:)), keyEquivalent: "i")
+      item.keyEquivalentModifierMask = [.command]
+      item.target = MediaInfoCoordinator.shared
+      fileMenu.insertItem(item, at: fileMenu.index(of: showCurrentFileInFinder))
+      mediaInfoMenuItem = item
+    }
     if downloadCenterMenuItem == nil {
       let item = NSMenuItem(title: downloadCenterString("menu.show"),
                             action: #selector(AppDelegate.menuShowDownloadCenter(_:)), keyEquivalent: "")

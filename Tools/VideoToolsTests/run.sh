@@ -9,12 +9,14 @@ mkdir -p "$test_bundle/MacOS" "$test_bundle/Resources"
 for language in en zh-Hans zh-Hant; do
   mkdir -p "$test_bundle/Resources/$language.lproj"
   cp "$project_root/iina/$language.lproj/Localizable.strings" "$test_bundle/Resources/$language.lproj/"
+  cp "$project_root/iina/$language.lproj/MediaInfo.strings" "$test_bundle/Resources/$language.lproj/"
 done
 
 # Compile the actual AppKit controller and bridge against small playback doubles.
 xcrun swiftc -o "$test_bundle/MacOS/NativeControlsTests" \
   "$project_root/Tools/VideoToolsTests/Stubs.swift" \
   "$project_root/iina/ChengYingStyle.swift" \
+  "$project_root/iina/MediaInfo/MediaInfoModels.swift" \
   "$project_root/iina/VideoTools/VideoToolsModels.swift" \
   "$project_root/iina/VideoTools/VideoToolsShortcuts.swift" \
   "$project_root/iina/VideoTools/VideoToolsLoopPolicy.swift" \

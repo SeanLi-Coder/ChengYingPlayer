@@ -532,6 +532,7 @@ class PlayerCore: NSObject {
     invalidateThumbnails()
     info.currentURL = url
     info.isNetworkResource = isNetwork
+    postNotification(.chengyingMediaSourceChanged)
     info.audioTracks = []
     info.chapters = []
     info.playlist = []
@@ -1961,6 +1962,7 @@ class PlayerCore: NSObject {
       URL(string: path.addingPercentEncoding(withAllowedCharacters: .urlAllowed) ?? path) :
       URL(fileURLWithPath: path)
     info.isNetworkResource = !info.currentURL!.isFileURL
+    postNotification(.chengyingMediaSourceChanged)
 
     // set "date last opened" attribute
     if let url = info.currentURL, url.isFileURL {

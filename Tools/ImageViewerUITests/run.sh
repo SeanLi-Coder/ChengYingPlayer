@@ -6,6 +6,7 @@ test_dir="$(mktemp -d "${TMPDIR:-/tmp}/chengying-image-ui.XXXXXX")"
 trap 'rm -rf "$test_dir"' EXIT
 
 xcrun swiftc -o "$test_dir/ImageViewerUITests" \
+  "$project_root/iina/MediaInfo/MediaInfoModels.swift" \
   "$project_root/iina/ImageViewer/ImageSlideshowPolicy.swift" \
   "$project_root/iina/PlaylistFileMetadata.swift" \
   "$project_root/iina/ImageViewer/ImageCanvasView.swift" \
@@ -16,6 +17,7 @@ xcrun swiftc -o "$test_dir/ImageViewerUITests" \
 "$test_dir/ImageViewerUITests"
 
 xcrun swiftc -o "$test_dir/RealImageViewerSmoke" \
+  "$project_root/iina/MediaInfo/MediaInfoModels.swift" \
   "$project_root/iina/ImageViewer/ImageSlideshowPolicy.swift" \
   "$project_root/iina/PlaylistFileMetadata.swift" \
   "$project_root/iina/ImageViewer/ImageFileSupport.swift" \
@@ -29,6 +31,7 @@ xcrun swiftc -o "$test_dir/RealImageViewerSmoke" \
 
 # Verify the real backend contract on the oldest supported Intel deployment target.
 xcrun swiftc -typecheck -target x86_64-apple-macosx10.15 \
+  "$project_root/iina/MediaInfo/MediaInfoModels.swift" \
   "$project_root/iina/ImageViewer/ImageSlideshowPolicy.swift" \
   "$project_root/iina/PlaylistFileMetadata.swift" \
   "$project_root/iina/ImageViewer/ImageFileSupport.swift" \

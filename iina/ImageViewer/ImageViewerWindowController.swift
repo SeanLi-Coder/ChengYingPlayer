@@ -19,6 +19,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   let statusLabel = NSTextField(labelWithString: "打开图片，开始浏览")
   let frameLabel = NSTextField(labelWithString: "")
   let zoomLabel = NSTextField(labelWithString: "适应窗口")
+  let mediaInfoButton = NSButton(title: mediaInfoText("action.info", "Info"), target: nil, action: nil)
   let animationButton = NSButton(title: "播放动图", target: nil, action: nil)
   let previousButton = NSButton(title: "上一张", target: nil, action: nil)
   let nextButton = NSButton(title: "下一张", target: nil, action: nil)
@@ -123,9 +124,14 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     infoLabel.font = .systemFont(ofSize: 11)
     infoLabel.textColor = .secondaryLabelColor
     let heading = stack([titleLabel, infoLabel], vertical: true, spacing: 3)
+    mediaInfoButton.bezelStyle = .rounded
+    mediaInfoButton.target = self
+    mediaInfoButton.action = #selector(showMediaInfo)
+    mediaInfoButton.toolTip = mediaInfoText("action.info_hint", "Original media details (Command-I)")
+    mediaInfoButton.setAccessibilityLabel(mediaInfoText("action.media_info", "Media Information…"))
     let top = stack([heading, spacer(), button("−", #selector(zoomOut)),
                      zoomLabel, button("+", #selector(zoomIn)),
-                     button("适应窗口", #selector(fit)), button("100%", #selector(actualSize))])
+                     button("适应窗口", #selector(fit)), button("100%", #selector(actualSize)), mediaInfoButton])
     content.addSubview(top)
 
     sortPicker.addItems(withTitles: ["名称", "文件大小", "修改日期", "创建日期"])
@@ -351,6 +357,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     frameGeneration = UUID()
     let generation = sourceGeneration
     selectedURL = url
+    NotificationCenter.default.post(name: .chengyingImageSourceChanged, object: self)
     frameIndex = 0
     completedLoops = 0
     framePending = true
@@ -811,6 +818,10 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       guard let self, !self.closed, self.sourceGeneration == source, response == .alertFirstButtonReturn else { return }
       self.beginConversion(url: url, format: format, frameIndex: currentOnly ? index : nil)
     }
+  }
+
+  @objc private func showMediaInfo() {
+    NSApp.sendAction(NSSelectorFromString("menuShowMediaInfo:"), to: NSApp.delegate, from: mediaInfoButton)
   }
 
   func beginConversion(url: URL, format: ImageConversionFormat, frameIndex: Int?) {

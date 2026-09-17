@@ -189,6 +189,9 @@ jobs:
           csrutil status
           bash Tools/HelperSigningTests/run.sh
 
+      - name: Test native media information with bundled FFprobe
+        run: bash Tools/MediaInfoTests/run.sh
+
       - name: Test nested download-center signing
         run: |
           python Tools/DownloaderHelper/smoke_signing.py \

@@ -44,6 +44,12 @@ let modes = property("modeControl", as: NSSegmentedControl.self)
 let run = property("runButton", as: NSButton.self)
 let faster = property("fasterButton", as: NSButton.self)
 let slower = property("slowerButton", as: NSButton.self)
+let mediaInfo = property("mediaInfoButton", as: NSButton.self)
+check(mediaInfo.title == mediaInfoText("action.info", "Info") && mediaInfo.isEnabled,
+      "The local video information entry is localized and enabled")
+let mediaInfoRect = controller.view.convert(mediaInfo.bounds, from: mediaInfo)
+check(mediaInfoRect.minX >= 0 && mediaInfoRect.maxX <= 320 && mediaInfoRect.width < 100,
+      "The information entry stays compact inside the narrow native sidebar")
 
 // Capture the actual AppKit hierarchy in both appearances without changing test behavior.
 if let captureDirectory = ProcessInfo.processInfo.environment["CHENGYING_CAPTURE_DIR"] {
