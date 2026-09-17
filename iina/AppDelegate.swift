@@ -173,7 +173,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   // MARK: - Application Updates
-  private(set) lazy var updateCoordinator = AppUpdateCoordinator(activity: UpdateActivityGate.shared)
+  @MainActor private(set) lazy var updateCoordinator = AppUpdateCoordinator(activity: UpdateActivityGate.shared)
 
   @IBAction func checkForUpdates(_ sender: AnyObject) {
     updateCoordinator.checkForUpdates(sender)

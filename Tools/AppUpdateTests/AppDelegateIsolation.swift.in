@@ -1,0 +1,24 @@
+// Typecheck the actual update entry points under the application's Swift 5 settings.
+import AppKit
+
+@MainActor
+final class UpdateActivityGate: UpdateActivityChecking {
+  static let shared = UpdateActivityGate()
+  var installationBarrierIsSafe: Bool { true }
+  func readiness(completion: @escaping (UpdateReadiness) -> Void) { completion(.ready) }
+  func acquireInstallationBarrier(completion: @escaping (UpdateReadiness) -> Void) { completion(.ready) }
+  func releaseInstallationBarrier() {}
+}
+
+@NSApplicationMain
+final class AppDelegate: NSObject, NSApplicationDelegate {
+  // APP_UPDATE_SOURCE_SECTION
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    updateCoordinator.start()
+  }
+
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    updateCoordinator.shouldAllowTerminationForUpdate() ? .terminateNow : .terminateCancel
+  }
+}
