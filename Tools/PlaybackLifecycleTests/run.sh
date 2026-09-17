@@ -10,6 +10,7 @@ xcrun swift "$project_root/Tools/PlaybackLifecycleTests/extract.swift" "$source_
 sources=(
   "$project_root/Tools/PlaybackLifecycleTests/Stubs.swift"
   "$project_root/iina/PlayerState.swift"
+  "$project_root/iina/MediaInfo/MediaInfoModels.swift"
   "$test_dir/Player.swift"
   "$test_dir/Controller.swift"
   "$project_root/Tools/PlaybackLifecycleTests/main.swift"

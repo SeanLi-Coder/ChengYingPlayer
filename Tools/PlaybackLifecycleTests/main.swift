@@ -13,9 +13,35 @@ func drain(until condition: () -> Bool) {
   check(condition(), "Main-queue completion reaches the expected state")
 }
 
+final class SourceChangeRecorder {
+  struct Change {
+    let url: URL?
+    let isNetworkResource: Bool
+    let generation: UInt64
+    let isMainThread: Bool
+  }
+  private var observer: NSObjectProtocol?
+  var changes = [Change]()
+
+  init(player: PlayerUnderTest) {
+    observer = NotificationCenter.default.addObserver(forName: .chengyingMediaSourceChanged,
+                                                      object: nil, queue: nil) { [weak self, weak player] notification in
+      guard let self, let player, let sender = notification.object as? PlayerUnderTest,
+            sender === player else { return }
+      self.changes.append(Change(url: player.info.currentURL, isNetworkResource: player.info.isNetworkResource,
+                                 generation: player.videoToolsMediaGeneration, isMainThread: Thread.isMainThread))
+    }
+  }
+
+  deinit {
+    if let observer { NotificationCenter.default.removeObserver(observer) }
+  }
+}
+
 func lifecycleChecks() {
   for shuttingDown in [false, true] {
     let player = PlayerUnderTest()
+    let sourceChanges = SourceChangeRecorder(player: player)
     let firstEntered = DispatchSemaphore(value: 0)
     let releaseFirst = DispatchSemaphore(value: 0)
     let secondEntered = DispatchSemaphore(value: 0)
@@ -30,8 +56,17 @@ func lifecycleChecks() {
       }
     }
     player.fileStarted(path: "/nonexistent-chengying-test/first.mp4")
+    check(sourceChanges.changes.count == 1 &&
+          sourceChanges.changes.first?.url?.path == "/nonexistent-chengying-test/first.mp4",
+          "The first source notification identifies the real player and its newly assigned URL")
     check(firstEntered.wait(timeout: .now() + 5) == .success, "First real background task starts")
     player.fileStarted(path: "/nonexistent-chengying-test/second.mp4")
+    check(sourceChanges.changes.count == 2 &&
+          sourceChanges.changes.last?.url?.path == "/nonexistent-chengying-test/second.mp4" &&
+          sourceChanges.changes.last?.generation == 2,
+          "A new source is announced before the previous background task finishes")
+    check(sourceChanges.changes.allSatisfy { $0.isMainThread && !$0.isNetworkResource },
+          "Local source notifications reach observers on the main thread with current resource flags")
     releaseFirst.signal()
     check(secondEntered.wait(timeout: .now() + 5) == .success, "Second task runs before the old main-queue completion")
     drain { player.finishedTasks == 1 }
@@ -59,6 +94,7 @@ func lifecycleChecks() {
     check(!player.backgroundTaskInUse, "Ownership is released after the last completion")
     check(shuttingDown ? player.mpv.quit == 1 : player.mpv.stopped == 1,
           "The deferred stop or quit command runs exactly once")
+    check(sourceChanges.changes.count == 2, "Old task completion and deferred stop do not duplicate source-change events")
   }
 
   let stopped = PlayerUnderTest()
@@ -67,6 +103,37 @@ func lifecycleChecks() {
   stopped.stop()
   check(!stopped.backgroundTaskInUse && stopped.mpv.stopped == 0,
         "Late file-start and stop callbacks remain harmless after shutdown")
+
+  sourceChangeChecks()
+}
+
+func sourceChangeChecks() {
+  let player = PlayerUnderTest()
+  player.info.shouldAutoLoadFiles = false
+  let recorder = SourceChangeRecorder(player: player)
+  let path = "/nonexistent-chengying-test/reused.mp4"
+  player.fileStarted(path: path)
+  player.fileStarted(path: path)
+  check(recorder.changes.count == 2 && recorder.changes.allSatisfy { $0.url?.path == path },
+        "Reopening the same path still announces each new media generation")
+  check(recorder.changes.map(\.generation) == [1, 2], "Observers can distinguish repeated paths by their generation")
+  player.fileStarted(path: "https://example.invalid/video.mp4")
+  check(recorder.changes.count == 3 && recorder.changes.last?.isNetworkResource == true &&
+        recorder.changes.last?.url?.absoluteString == "https://example.invalid/video.mp4",
+        "Network source notifications expose the updated URL and eligibility flag without opening the resource")
+  drain { player.finishedTasks == 3 }
+  check(recorder.changes.count == 3, "Background completion does not announce an obsolete source")
+
+  for state: PlayerState in [.stopping, .idle, .shuttingDown, .shutDown] {
+    let inactive = PlayerUnderTest()
+    inactive.info.state = state
+    let observer = SourceChangeRecorder(player: inactive)
+    inactive.fileStarted(path: path)
+    check(observer.changes.isEmpty && inactive.info.currentURL == nil && inactive.videoToolsMediaGeneration == 0,
+          "Inactive file-start callbacks do not publish or mutate source state: \(state)")
+    check(!inactive.backgroundTaskInUse && inactive.ffmpegController.cancellations == 0,
+          "Inactive callbacks never start background ownership or thumbnail work: \(state)")
+  }
 }
 
 func filterReadFailureChecks() {

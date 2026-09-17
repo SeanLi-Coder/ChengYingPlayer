@@ -18,6 +18,7 @@ let declarations = section(player, "  @Atomic var backgroundQueueTicket", "  var
 let start = section(player, "  func fileStarted(path:", "  /// A [MPV_EVENT_FILE_LOADED]")
 let stop = section(player, "  func stop() {", "  func toggleMute(")
 let shutdown = section(player, "  func shutdown() {", "  /// Respond to the mpv core shutting down.")
+let postNotification = section(player, "  func postNotification(_ name:", "  /// Observer for changes to the macOS Touch Bar settings.")
 let invalidateThumbnails = player.contains("  private func invalidateThumbnails() {")
   ? section(player, "  private func invalidateThumbnails() {", "  func generateThumbnails() {") : ""
 let thumbnailGenerationFallback = declarations.contains("var thumbnailGeneration:")
@@ -31,6 +32,7 @@ final class PlayerUnderTest: PlayerFixture {
 \(start)
 \(stop)
 \(shutdown)
+\(postNotification)
 \(invalidateThumbnails)
   func checkTicket(_ ticket: Int) throws {
     if backgroundQueueTicket != ticket { throw TicketExpiredError.ticketExpired }
