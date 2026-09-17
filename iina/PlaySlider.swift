@@ -103,6 +103,9 @@ final class PlaySlider: NSSlider {
   /// - Important: _DO NOT REMOVE_ this function thinking it is not needed. Read issue #5768.
   /// - Parameter event: An object encapsulating information about the mouse-down event.
   override func mouseDown(with event: NSEvent) {
+    let owner = window?.windowController as? MainWindowController
+    owner?.beginControlInteraction()
+    defer { owner?.endControlInteraction() }
     super.mouseDown(with: event)
   }
 

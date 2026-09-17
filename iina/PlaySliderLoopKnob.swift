@@ -47,6 +47,9 @@ final class PlaySliderLoopKnob: NSView {
 
   private var slider: PlaySlider!
 
+  private weak var interactionOwner: MainWindowController?
+  private var interactionWindowObserver: NSObjectProtocol?
+
   /// The knob's x coordinate associated with the current value.
   ///
   /// The x coordinate is calculated based on the current knob value and the current usable width of the slider's bar. When the OSC's
@@ -99,6 +102,28 @@ final class PlaySliderLoopKnob: NSView {
   }
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  deinit { endControlInteraction() }
+
+  override func viewDidHide() {
+    super.viewDidHide()
+    endControlInteraction()
+  }
+
+  override func viewWillMove(toWindow newWindow: NSWindow?) {
+    if window !== newWindow { endControlInteraction() }
+    super.viewWillMove(toWindow: newWindow)
+  }
+
+  private func endControlInteraction() {
+    let owner = interactionOwner
+    interactionOwner = nil
+    if let observer = interactionWindowObserver {
+      NotificationCenter.default.removeObserver(observer)
+      interactionWindowObserver = nil
+    }
+    owner?.endControlInteraction()
+  }
 
   /// Constrain the x coordinate to insure the knob stays within the bar.
   /// - Parameter x: The proposed x coordinate.
@@ -154,6 +179,16 @@ final class PlaySliderLoopKnob: NSView {
   /// Begin dragging the knob.
   /// - Parameter event: An object encapsulating information about the mouse-down event initiating the drag.
   func beginDragging(with event: NSEvent) {
+    if interactionOwner == nil, let owner = window?.windowController as? MainWindowController {
+      endControlInteraction()
+      interactionOwner = owner
+      owner.beginControlInteraction()
+      interactionWindowObserver = NotificationCenter.default.addObserver(
+        forName: NSWindow.willCloseNotification, object: window, queue: .main
+      ) { [weak self] _ in
+        self?.endControlInteraction()
+      }
+    }
     let clickLocation = slider.convert(event.locationInWindow, from: nil)
     lastDragLocation = constrainX(clickLocation.x)
   }
@@ -194,5 +229,10 @@ final class PlaySliderLoopKnob: NSView {
     x += newDragLocation.x - lastDragLocation
     lastDragLocation = constrainX(newDragLocation.x)
     NotificationCenter.default.post(Notification(name: .iinaPlaySliderLoopKnobChanged, object: self))
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    endControlInteraction()
+    super.mouseUp(with: event)
   }
 }

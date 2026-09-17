@@ -112,6 +112,17 @@ run("filtered_end") {
   title.scrollWheel(with: event(phase: .cancelled))
   check(title.player.resumes == 1, "Cancellation over the title bar releases the seek pause")
 
+  let corner = MainWindowUnderTest()
+  corner.hitView = corner.cornerControls
+  corner.scrollWheel(with: event(x: 4, y: 4))
+  check(corner.player.seeks.isEmpty && corner.player.volumes.isEmpty,
+        "The upper-corner toolbar never changes video time or volume while scrolling")
+  corner.hitView = corner.fragSliderView
+  corner.scrollWheel(with: event(x: 4, phase: .began))
+  corner.hitView = corner.cornerControls
+  corner.scrollWheel(with: event(phase: .ended))
+  check(corner.player.resumes == 1, "Ending a seek over the corner toolbar still releases its pause")
+
   let interactive = MainWindowUnderTest()
   interactive.scrollWheel(with: event(x: 4, phase: .began))
   interactive.isInInteractiveMode = true

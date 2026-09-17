@@ -14,6 +14,13 @@ class VolumeSlider: NSSlider {
 
   // MARK: - Mouse / Trackpad events
 
+  override func mouseDown(with event: NSEvent) {
+    let owner = window?.windowController as? MainWindowController
+    owner?.beginControlInteraction()
+    defer { owner?.endControlInteraction() }
+    super.mouseDown(with: event)
+  }
+
   /// The user is scrolling while the cursor is within the slider.
   ///
   /// With certain kinds of input devices, such as a mouse with a scroll wheel that spins freely, it is easy to accidentally move the cursor

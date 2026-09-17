@@ -1073,6 +1073,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
   private func registerUserDefaultValues() {
     UserDefaults.standard.register(defaults: [String: Any](uniqueKeysWithValues: Preference.defaultPreference.map { ($0.0.rawValue, $0.1) }))
+    PlayerChromePolicy.migratePreferences(.standard)
   }
 
   // MARK: - FFmpeg version parsing

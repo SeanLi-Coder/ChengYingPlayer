@@ -799,9 +799,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
   }
 
   internal func isMouseEvent(_ event: NSEvent, inAnyOf views: [NSView?]) -> Bool {
-    return views.filter { $0 != nil }.reduce(false, { (result, view) in
-      return result || view!.isMousePoint(view!.convert(event.locationInWindow, from: nil), in: view!.bounds)
-    })
+    views.contains { PlayerChromePolicy.contains(event.locationInWindow, in: $0, window: event.window) }
   }
 
   // MARK: - Utils

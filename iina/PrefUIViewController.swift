@@ -99,11 +99,33 @@ class PrefUIViewController: PreferenceViewController, PreferenceWindowEmbeddable
     case 1:
       name = "osc_top"
     case 2:
-      name = "osc_bottom"
+      oscPreviewImageView.image = edgeControlsPreview()
+      return
     default:
       name = "osc_float"
     }
     oscPreviewImageView.image = NSImage(named: name)
+  }
+
+  private func edgeControlsPreview() -> NSImage {
+    NSImage(size: NSSize(width: 240, height: 135), flipped: false) { bounds in
+      NSColor(srgbRed: 0.06, green: 0.09, blue: 0.13, alpha: 1).setFill()
+      NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
+      NSGradient(starting: .black, ending: .clear)?.draw(in: NSRect(x: 0, y: 0, width: 240, height: 34), angle: 90)
+      NSColor.white.withAlphaComponent(0.3).setFill()
+      NSBezierPath(roundedRect: NSRect(x: 12, y: 9, width: 216, height: 2), xRadius: 1, yRadius: 1).fill()
+      ChengYingStyle.accent.setFill()
+      NSBezierPath(roundedRect: NSRect(x: 12, y: 9, width: 88, height: 2), xRadius: 1, yRadius: 1).fill()
+      NSColor.white.setFill()
+      NSRect(x: 98, y: 6, width: 2, height: 8).fill()
+      for (index, symbol) in ["backward.fill", "play.fill", "forward.fill"].enumerated() {
+        ChengYingStyle.symbol(symbol).tinted(.white).draw(in: NSRect(x: CGFloat(12 + index * 16), y: 20, width: 10, height: 10))
+      }
+      for (index, symbol) in ["info.circle", "pip", "gearshape", "list.bullet"].enumerated() {
+        ChengYingStyle.symbol(symbol).tinted(.white).draw(in: NSRect(x: CGFloat(168 + index * 16), y: 112, width: 11, height: 11))
+      }
+      return true
+    }
   }
 
   @IBAction func updateGeometryValue(_ sender: AnyObject) {

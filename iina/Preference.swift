@@ -400,7 +400,7 @@ struct Preference {
     case top
     case bottom
 
-    static var defaultValue = OSCPosition.floating
+    static var defaultValue = OSCPosition.bottom
 
     init?(key: Key) {
       self.init(rawValue: Preference.integer(for: key))
@@ -845,7 +845,7 @@ struct Preference {
     .controlBarAutoHideTimeout: Float(2.5),
     .enableControlBarAutoHide: true,
     .controlBarToolbarButtons: [ToolBarButton.pip.rawValue, ToolBarButton.playlist.rawValue, ToolBarButton.settings.rawValue],
-    .oscPosition: OSCPosition.floating.rawValue,
+    .oscPosition: OSCPosition.bottom.rawValue,
     .disablePlaySliderScrolling: false,
     .disableVolumeSliderScrolling: false,
     .playlistWidth: 270,
@@ -890,7 +890,7 @@ struct Preference {
     .initialWindowSizePosition: "",
     .resizeWindowTiming: ResizeWindowTiming.onlyWhenOpen.rawValue,
     .resizeWindowOption: ResizeWindowOption.videoSize10.rawValue,
-    .showRemainingTime: false,
+    .showRemainingTime: true,
     .scaleRemainingTime: false,
     .timeDisplayPrecision: 0,
     .touchbarShowRemainingTime: true,

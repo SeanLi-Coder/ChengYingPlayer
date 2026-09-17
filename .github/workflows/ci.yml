@@ -65,6 +65,13 @@ jobs:
           ./Tools/VideoToolsTests/run.sh
           bash Tools/VideoViewportTests/run.sh
 
+      - name: Test edge player controls and visibility lifecycle
+        run: |
+          bash Tools/PlayerChromeTests/run.sh
+          bash Tools/PlayerChromeInteractionTests/run.sh
+          bash Tools/PlayerChromeLifecycleTests/run.sh
+          bash Tools/PlayerChromeIntegrationTests/run.sh
+
       - name: Test DMG packaging safety
         run: |
           bash Tools/DMGPackagingTests/run.sh
@@ -210,6 +217,9 @@ jobs:
 
       - name: Test live filter node safety
         run: bash Tools/PlaybackLifecycleTests/run_live.sh
+
+      - name: Test silent video opening before audio output
+        run: PATH="$PWD/deps/executable:$PATH" bash Tools/SilentVideoOpenTests/run.sh
 
       - name: Test real thumbnail decoding and cancellation
         run: bash Tools/ThumbnailDecoderTests/run.sh

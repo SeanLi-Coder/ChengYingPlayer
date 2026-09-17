@@ -68,7 +68,7 @@ class MainWindowController: PlayerWindowController {
   // MARK: - Constants
 
   /** Minimum window size. */
-  let minSize = NSMakeSize(285, 120)
+  var minSize: NSSize { isUsingEdgeControls ? NSMakeSize(320, 280) : NSMakeSize(285, 120) }
 
   /** For Force Touch. */
   let minimumPressDuration: TimeInterval = 0.5
@@ -177,6 +177,69 @@ class MainWindowController: PlayerWindowController {
 
   /** Views that will show/hide when cursor moving in/out the window. */
   var fadeableViews: [NSView] = []
+  private var edgeControls: PlayerEdgeControlsView?
+  private var cornerControls: PlayerCornerControlsView?
+  private var cornerTopConstraint: NSLayoutConstraint?
+  private var originalSidebarVerticalConstraints: [NSLayoutConstraint] = []
+  private var edgeSidebarConstraints: [NSLayoutConstraint] = []
+  private var chromeAnimationGeneration: UInt64 = 0
+  private var sidebarAnimationGeneration: UInt64 = 0
+  private var sidebarAutoHidden = false
+  private var controlInteractionDepth = 0
+
+  private var isUsingEdgeControls: Bool { oscPosition == .bottom }
+
+  private var visibleChromeViews: [NSView] {
+    fadeableViews + (isUsingEdgeControls && sideBarStatus != .hidden ? [sideBarView] : [])
+  }
+
+  private var controlInteractionViews: [NSView?] {
+    [fragSliderView, fragControlView, fragVolumeView, fragToolbarView, cornerControls, titleBarView,
+     sideBarView, subPopoverView]
+  }
+
+  private var pointerIsOverControls: Bool {
+    guard let window else { return false }
+    return controlInteractionViews.contains {
+      PlayerChromePolicy.contains(window.mouseLocationOutsideOfEventStream, in: $0, window: window)
+    }
+  }
+
+  var isSidebarVisible: Bool {
+    sideBarStatus != .hidden && !sideBarView.isHiddenOrHasHiddenAncestor && sideBarView.alphaValue > 0.01
+  }
+
+  private var isEditingSidebar: Bool {
+    guard isSidebarVisible, let editor = window?.firstResponder as? NSTextView else { return false }
+    if editor.isDescendant(of: sideBarView) { return true }
+    return (editor.delegate as? NSView)?.isDescendant(of: sideBarView) == true
+  }
+
+  func beginControlInteraction() {
+    controlInteractionDepth += 1
+    destroyTimer()
+    showUI()
+  }
+
+  func endControlInteraction() {
+    controlInteractionDepth = max(0, controlInteractionDepth - 1)
+    if controlInteractionDepth == 0, window?.isVisible == true { updateTimer() }
+  }
+
+  private func invalidateChromeOnClose() {
+    destroyTimer()
+    chromeAnimationGeneration &+= 1
+    sidebarAnimationGeneration &+= 1
+    controlInteractionDepth = 0
+    sidebarAutoHidden = false
+    sidebarAnimationState = .hidden
+    sideBarStatus = .hidden
+    sideBarView.subviews.forEach { $0.removeFromSuperview() }
+    sideBarView.isHidden = true
+    sideBarView.alphaValue = 1
+    sideBarRightConstraint.constant = -sideBarWidthConstraint.constant
+    animationState = .hidden
+  }
 
   // Left and right arrow buttons
 
@@ -368,7 +431,7 @@ class MainWindowController: PlayerWindowController {
     switch keyPath {
     case PK.oscPosition.rawValue:
       if let newValue = change[.newKey] as? Int {
-        setupOnScreenController(withPosition: Preference.OSCPosition(rawValue: newValue) ?? .floating)
+        setupOnScreenController(withPosition: Preference.OSCPosition(rawValue: newValue) ?? .bottom)
       }
     case PK.showChapterPos.rawValue:
       if let newValue = change[.newKey] as? Bool {
@@ -511,7 +574,7 @@ class MainWindowController: PlayerWindowController {
   var videoViewConstraints: [NSLayoutConstraint.Attribute: NSLayoutConstraint] = [:]
   private var oscFloatingLeadingTrailingConstraint: [NSLayoutConstraint]?
 
-  override var mouseActionDisabledViews: [NSView?] {[sideBarView, currentControlBar, titleBarView, subPopoverView]}
+  override var mouseActionDisabledViews: [NSView?] { controlInteractionViews }
 
   // MARK: - PIP
 
@@ -636,7 +699,7 @@ class MainWindowController: PlayerWindowController {
     bottomView.isHidden = true
     pipOverlayView.isHidden = true
     
-    if player.disableUI { hideUI() }
+    if player.disableUI { hideUI(force: true) }
 
     // add user default observers
     observedPrefKeys.append(contentsOf: localObservedPrefKeys)
@@ -744,14 +807,38 @@ class MainWindowController: PlayerWindowController {
   }
 
   private func setupOSCToolbarButtons(_ buttons: [Preference.ToolBarButton]) {
-    let buttons = buttons.filter(\.isAvailable)
+    var buttons = buttons.filter(\.isAvailable)
+    if isUsingEdgeControls {
+      // Keep essential entry points present and the file list at the far right.
+      buttons.removeAll { $0 == .playlist || $0 == .settings }
+      buttons += [.settings, .playlist]
+    }
     fragToolbarView.views.forEach { fragToolbarView.removeView($0) }
+    fragToolbarView.spacing = isUsingEdgeControls ? 6 : 0
+    if isUsingEdgeControls {
+      let info = NSButton(image: ChengYingStyle.symbol("info.circle"), target: self,
+                          action: #selector(showEdgeMediaInformation(_:)))
+      info.isBordered = false
+      info.refusesFirstResponder = true
+      info.toolTip = mediaInfoText("window.title", "Media Information")
+      info.setAccessibilityLabel(info.toolTip)
+      info.translatesAutoresizingMaskIntoConstraints = false
+      NSLayoutConstraint.activate([info.widthAnchor.constraint(equalToConstant: 24),
+                                   info.heightAnchor.constraint(equalToConstant: 24)])
+      fragToolbarView.addView(info, in: .trailing)
+    }
     for buttonType in buttons {
       let button = NSButton()
       OSCToolbarButton.setStyle(of: button, buttonType: buttonType, reducedWidth: buttons.count > 4)
+      button.target = self
       button.action = #selector(self.toolBarButtonAction(_:))
+      button.setAccessibilityLabel(buttonType.description())
       fragToolbarView.addView(button, in: .trailing)
     }
+  }
+
+  @objc private func showEdgeMediaInformation(_ sender: NSButton) {
+    MediaInfoCoordinator.shared.showMediaInfo(sender)
   }
 
   private func setupOnScreenController(withPosition newPosition: Preference.OSCPosition) {
@@ -767,6 +854,9 @@ class MainWindowController: PlayerWindowController {
       // remove current osc view from fadeable views
       fadeableViews = fadeableViews.filter { $0 != cb }
     }
+    if let cornerControls { fadeableViews.removeAll { $0 === cornerControls } }
+    NSLayoutConstraint.deactivate(edgeSidebarConstraints)
+    edgeSidebarConstraints.removeAll()
 
     // reset
     ([controlBarFloating, controlBarBottom, oscTopMainView] as [NSView]).forEach { $0.isHidden = true }
@@ -781,8 +871,14 @@ class MainWindowController: PlayerWindowController {
       }
     }
     [fragSliderView, fragControlView, fragToolbarView, fragVolumeView].forEach {
-        $0!.removeFromSuperview()
+      $0!.removeFromSuperview()
+      // Legacy stack views may leave detached fragments hidden after a layout change.
+      $0!.isHidden = false
     }
+    edgeControls?.removeFromSuperview()
+    cornerControls?.removeFromSuperview()
+    edgeControls = nil
+    cornerControls = nil
 
     let isInFullScreen = fsState.isFullscreen
 
@@ -809,6 +905,14 @@ class MainWindowController: PlayerWindowController {
     }
 
     oscPosition = newPosition
+    if let window {
+      window.contentMinSize = minSize
+      if !fsState.isFullscreen, let size = window.contentView?.bounds.size,
+         size.width < minSize.width || size.height < minSize.height {
+        window.setContentSize(NSSize(width: max(size.width, minSize.width),
+                                     height: max(size.height, minSize.height)))
+      }
+    }
 
     // add fragment views
     switch oscPosition {
@@ -849,23 +953,44 @@ class MainWindowController: PlayerWindowController {
       oscTopMainView.setVisibilityPriority(.detachEarly, for: fragVolumeView)
       oscTopMainView.setVisibilityPriority(.detachEarlier, for: fragToolbarView)
     case .bottom:
-      currentControlBar = controlBarBottom
       fragControlView.setVisibilityPriority(.notVisible, for: fragControlViewLeftView)
       fragControlView.setVisibilityPriority(.notVisible, for: fragControlViewRightView)
-      oscBottomMainView.addView(fragVolumeView, in: .trailing)
-      oscBottomMainView.addView(fragToolbarView, in: .trailing)
-      oscBottomMainView.addView(fragControlView, in: .leading)
-      oscBottomMainView.addView(fragSliderView, in: .leading)
-      oscBottomMainView.setClippingResistancePriority(.defaultLow, for: .horizontal)
-      oscBottomMainView.setVisibilityPriority(.mustHold, for: fragSliderView)
-      oscBottomMainView.setVisibilityPriority(.detachEarly, for: fragVolumeView)
-      oscBottomMainView.setVisibilityPriority(.detachEarlier, for: fragToolbarView)
+      guard let content = window?.contentView else { return }
+      let footer = PlayerEdgeControlsView(timeline: fragSliderView, transport: fragControlView,
+                                          volume: fragVolumeView)
+      let corner = PlayerCornerControlsView(toolbar: fragToolbarView)
+      content.addSubview(footer, positioned: .above, relativeTo: controlBarBottom)
+      content.addSubview(corner, positioned: .above, relativeTo: sideBarView)
+      let top = corner.topAnchor.constraint(equalTo: content.topAnchor, constant: 28)
+      NSLayoutConstraint.activate([
+        footer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+        footer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+        footer.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+        footer.heightAnchor.constraint(equalToConstant: 62),
+        corner.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -8), top,
+      ])
+      edgeControls = footer
+      cornerControls = corner
+      cornerTopConstraint = top
+      currentControlBar = footer
+      fadeableViews.append(corner)
     }
+
+    for constraint in fragSliderView.constraints where
+      constraint.identifier == "edge-timeline-top" || constraint.identifier == "edge-timeline-bottom" ||
+      (constraint.firstItem === playSlider && constraint.firstAttribute == .top) ||
+      (constraint.secondItem === playSlider && constraint.secondAttribute == .bottom) {
+      constraint.constant = isUsingEdgeControls ? 3 : 6
+    }
+    setupSidebarPanelLayout()
+    let buttons = (Preference.array(for: .controlBarToolbarButtons) as? [Int] ?? [])
+      .compactMap(Preference.ToolBarButton.init(rawValue:))
+    setupOSCToolbarButtons(buttons)
 
     if currentControlBar != nil {
       fadeableViews.append(currentControlBar!)
     }
-    showUI()
+    showUI(force: true)
 
     if isFloating {
       fragControlViewMiddleButtons1Constraint.constant = 24
@@ -880,6 +1005,64 @@ class MainWindowController: PlayerWindowController {
         controlBarFloating.superview?.removeConstraints(constraints)
         oscFloatingLeadingTrailingConstraint = nil
       }
+    }
+    updateEdgeControlsLayout()
+    updateTimer()
+  }
+
+  private func setupSidebarPanelLayout() {
+    guard let content = window?.contentView else { return }
+    if originalSidebarVerticalConstraints.isEmpty {
+      originalSidebarVerticalConstraints = content.constraints.filter {
+        ($0.firstItem === sideBarView && $0.firstAttribute == .top) ||
+        ($0.secondItem === sideBarView && $0.secondAttribute == .bottom)
+      }
+    }
+    if isUsingEdgeControls, let corner = cornerControls, let footer = edgeControls {
+      NSLayoutConstraint.deactivate(originalSidebarVerticalConstraints)
+      let preferredHeight = sideBarView.heightAnchor.constraint(equalToConstant: 400)
+      preferredHeight.priority = .defaultLow
+      let belowToolbar = sideBarView.topAnchor.constraint(equalTo: corner.bottomAnchor, constant: 6)
+      belowToolbar.priority = .init(999)
+      edgeSidebarConstraints = [
+        belowToolbar, preferredHeight,
+        sideBarView.topAnchor.constraint(greaterThanOrEqualTo: content.topAnchor, constant: 8),
+        sideBarView.bottomAnchor.constraint(lessThanOrEqualTo: footer.topAnchor, constant: -6),
+        sideBarView.heightAnchor.constraint(lessThanOrEqualToConstant: 400),
+        sideBarView.heightAnchor.constraint(greaterThanOrEqualToConstant: 140),
+      ]
+      NSLayoutConstraint.activate(edgeSidebarConstraints)
+      sideBarView.roundCorners(withRadius: 10)
+      sideBarView.material = .popover
+      sideBarView.appearance = NSAppearance(named: .darkAqua)
+    } else {
+      NSLayoutConstraint.activate(originalSidebarVerticalConstraints)
+      sideBarView.roundCorners(withRadius: 0)
+      sideBarView.material = .sidebar
+      sideBarView.appearance = nil
+    }
+    if sideBarStatus != .hidden {
+      sideBarRightConstraint.constant = isUsingEdgeControls ? 8 : 0
+      sideBarView.isHidden = false
+      sideBarView.alphaValue = 1
+      let shift: CGFloat = isUsingEdgeControls ? 0 : titleBarHeightConstraint.constant
+      switch sideBarStatus {
+      case .settings: quickSettingView.downShift = shift
+      case .playlist:
+        playlistView.downShift = shift
+        playlistView.useCompactTabHeight = isUsingEdgeControls
+      case .plugins: pluginView.downShift = shift
+      case .hidden: break
+      }
+    }
+    sidebarAutoHidden = false
+  }
+
+  private func updateEdgeControlsLayout() {
+    guard isUsingEdgeControls else { return }
+    cornerTopConstraint?.constant = fsState.isFullscreen ? 10 : 28
+    if sideBarStatus != .hidden {
+      sideBarWidthConstraint.constant = min(sideBarWidthConstraint.constant, sidebarMaxWidth)
     }
   }
 
@@ -949,7 +1132,7 @@ class MainWindowController: PlayerWindowController {
     // record current mouse pos
     mousePosRelatedToWindow = event.locationInWindow
     // playlist resizing
-    if sideBarStatus == .playlist {
+    if sideBarStatus == .playlist && isSidebarVisible {
       if NSPointInRect(mousePosRelatedToWindow!, playlistDraggingRect) {
         isResizingSidebar = true
         shouldCallSuper = false
@@ -971,7 +1154,7 @@ class MainWindowController: PlayerWindowController {
       // resize sidebar
       let currentLocation = event.locationInWindow
       let newWidth = videoView.userInterfaceLayoutDirection == .rightToLeft ?
-          currentLocation.x - 2 : window!.frame.width - currentLocation.x - 2
+          currentLocation.x - 2 : window!.frame.width - currentLocation.x - 2 - (isUsingEdgeControls ? 8 : 0)
       let maxWidth = min(sidebarMaxWidth, PlaylistMaxWidth)
       sideBarWidthConstraint.constant = newWidth.clamped(to: PlaylistMinWidth...maxWidth)
     } else if !fsState.isFullscreen {
@@ -1105,7 +1288,7 @@ class MainWindowController: PlayerWindowController {
     } else if isMouseEvent(event, inAnyOf: [fragVolumeView]) && volumeSlider.isEnabled {
       volumeOverride = true
     } else {
-      guard !isMouseEvent(event, inAnyOf: [currentControlBar]) else { return }
+      guard !isMouseEvent(event, inAnyOf: [currentControlBar, cornerControls]) else { return }
     }
 
     guard !isMouseEvent(event, inAnyOf: [sideBarView, titleBarView, subPopoverView])
@@ -1173,7 +1356,7 @@ class MainWindowController: PlayerWindowController {
       showUI()
     }
     // check whether mouse is in osc
-    if isMouseEvent(event, inAnyOf: [currentControlBar, titleBarView]) {
+    if isMouseEvent(event, inAnyOf: controlInteractionViews) {
       destroyTimer()
     } else {
       updateTimer()
@@ -1297,6 +1480,7 @@ class MainWindowController: PlayerWindowController {
   }
 
   func windowWillClose(_ notification: Notification) {
+    invalidateChromeOnClose()
     shouldApplyInitialWindowSize = true
     // Close PIP
     if pipStatus == .inPIP {
@@ -1406,6 +1590,7 @@ class MainWindowController: PlayerWindowController {
   func windowDidEnterFullScreen(_ notification: Notification) {
     log("Entered full screen mode")
     fsState.finishAnimating()
+    updateEdgeControlsLayout()
 
     titleTextField?.alphaValue = 1
     removeStandardButtonsFromFadeableViews()
@@ -1444,6 +1629,7 @@ class MainWindowController: PlayerWindowController {
     }
     
     updateAdditionalInfo()
+    refreshChromeAfterWindowTransition()
     player.events.emit(.windowFullscreenChanged, data: true)
   }
 
@@ -1467,6 +1653,7 @@ class MainWindowController: PlayerWindowController {
     // will correctly set the state to windowed.
     fsState = .animating(toFullscreen: false, legacy: legacy, priorWindowedFrame: priorWindowedFrame)
     fsState.finishAnimating()
+    updateEdgeControlsLayout()
 
     if oscPosition == .top {
       oscTopMainViewTopConstraint.constant = OSCTopMainViewMarginTop
@@ -1486,6 +1673,7 @@ class MainWindowController: PlayerWindowController {
     videoView.needsLayout = true
     videoView.layoutSubtreeIfNeeded()
     forceDraw("failed to enter full screen mode")
+    refreshChromeAfterWindowTransition()
   }
 
   /// The window is about to exit full screen mode.
@@ -1570,6 +1758,7 @@ class MainWindowController: PlayerWindowController {
     window?.titlebarAppearsTransparent = true
 
     fsState.finishAnimating()
+    updateEdgeControlsLayout()
 
     if Preference.bool(for: .blackOutMonitor) {
       removeBlackWindow()
@@ -1589,8 +1778,7 @@ class MainWindowController: PlayerWindowController {
     // Must not access mpv while it is asynchronously processing stop and quit commands.
     // See comments in windowWillExitFullScreen for details.
     guard player.info.state.active else { return }
-    showUI()
-    updateTimer()
+    refreshChromeAfterWindowTransition()
 
     videoView.needsLayout = true
     videoView.layoutSubtreeIfNeeded()
@@ -1631,6 +1819,7 @@ class MainWindowController: PlayerWindowController {
     // will correctly set the state to  full screen mode.
     fsState = .animating(toFullscreen: true, legacy: legacy, priorWindowedFrame: priorWindowedFrame)
     fsState.finishAnimating()
+    updateEdgeControlsLayout()
 
     if oscPosition == .top {
       oscTopMainViewTopConstraint.constant = OSCTopMainViewMarginTopInFullScreen
@@ -1645,6 +1834,7 @@ class MainWindowController: PlayerWindowController {
     videoView.needsLayout = true
     videoView.layoutSubtreeIfNeeded()
     forceDraw("failed to exit full screen mode")
+    refreshChromeAfterWindowTransition()
   }
 
   func toggleWindowFullScreen() {
@@ -1789,6 +1979,7 @@ class MainWindowController: PlayerWindowController {
 
   func windowDidResize(_ notification: Notification) {
     guard let window = window else { return }
+    updateEdgeControlsLayout()
     
     if case .animating(_, _, _) = fsState {
       forceDraw("window resized during animated enter or exit full screen")
@@ -1970,29 +2161,55 @@ class MainWindowController: PlayerWindowController {
 
   // MARK: - UI: Show / Hide
 
-  @objc func hideUIAndCursor() {
-    // don't hide UI when dragging control bar
-    if controlBarFloating.isDragging { return }
-    hideUI()
-    NSCursor.setHiddenUntilMouseMoves(true)
+  private func refreshChromeAfterWindowTransition() {
+    // Fullscreen changes the membership of fadeableViews while an old fade may still complete.
+    guard player.info.state.active else { return }
+    if player.disableUI {
+      animationState = .shown
+      hideUI(force: true)
+    } else {
+      showUI(force: true)
+      updateTimer()
+    }
   }
 
-  private func hideUI(force: Bool = false) {
+  @objc func hideUIAndCursor() {
+    if hideUI() { NSCursor.setHiddenUntilMouseMoves(true) }
+  }
+
+  @discardableResult
+  private func hideUI(force: Bool = false) -> Bool {
     // Don't hide UI when in PIP
     guard pipStatus == .notInPIP || animationState == .hidden else {
-      return
+      return false
     }
     // Don't hide UI when auto hide control bar is disabled
-    guard force || Preference.bool(for: .enableControlBarAutoHide) else { return }
+    guard force || Preference.bool(for: .enableControlBarAutoHide) else { return false }
+    if !force {
+      guard !isInInteractiveMode, !controlBarFloating.isDragging, !isResizingSidebar,
+            controlInteractionDepth == 0, NSEvent.pressedMouseButtons == 0,
+            window?.attachedSheet == nil, !pointerIsOverControls, !isEditingSidebar,
+            sidebarAnimationState != .willShow && sidebarAnimationState != .willHide else {
+        updateTimer()
+        return false
+      }
+    }
+    guard animationState != .hidden && animationState != .willHide else { return true }
 
+    chromeAnimationGeneration &+= 1
+    let generation = chromeAnimationGeneration
+    let views = visibleChromeViews
+    sidebarAutoHidden = isUsingEdgeControls && sideBarStatus != .hidden
     animationState = .willHide
     player.refreshSyncUITimer()
-    fadeableViews.forEach { (v) in
+    timePreviewWhenSeek.isHidden = true
+    thumbnailPeekView.isHidden = true
+    views.forEach { (v) in
       v.isHidden = false
     }
     NSAnimationContext.runAnimationGroup({ (context) in
       context.duration = AccessibilityPreferences.adjustedDuration(UIAnimationDuration)
-      fadeableViews.forEach { (v) in
+      views.forEach { (v) in
         v.animator().alphaValue = 0
       }
       if !self.fsState.isFullscreen {
@@ -2000,8 +2217,8 @@ class MainWindowController: PlayerWindowController {
       }
     }) {
       // if no interrupt then hide animation
-      if self.animationState == .willHide {
-        self.fadeableViews.forEach { (v) in
+      if self.chromeAnimationGeneration == generation && self.animationState == .willHide {
+        views.forEach { (v) in
           if let btn = v as? NSButton, self.standardWindowButtons.contains(btn) {
             v.alphaValue = 1e-100
           } else {
@@ -2009,14 +2226,21 @@ class MainWindowController: PlayerWindowController {
           }
         }
         self.animationState = .hidden
+        self.window?.resetCursorRects()
       }
     }
+    return true
   }
 
-  private func showUI() {
+  private func showUI(force: Bool = false) {
     if player.disableUI { return }
+    guard force || (animationState != .shown && animationState != .willShow) || sidebarAutoHidden else { return }
+    chromeAnimationGeneration &+= 1
+    let generation = chromeAnimationGeneration
+    let views = visibleChromeViews
+    sidebarAutoHidden = false
     animationState = .willShow
-    fadeableViews.forEach { (v) in
+    views.forEach { (v) in
       v.isHidden = false
     }
     // The OSC may not have been updated while it was hidden to avoid wasting energy. Make sure it
@@ -2025,7 +2249,7 @@ class MainWindowController: PlayerWindowController {
     standardWindowButtons.forEach { $0.isEnabled = true }
     NSAnimationContext.runAnimationGroup({ (context) in
       context.duration = AccessibilityPreferences.adjustedDuration(UIAnimationDuration)
-      fadeableViews.forEach { (v) in
+      views.forEach { (v) in
         v.animator().alphaValue = 1
       }
       if !fsState.isFullscreen {
@@ -2033,8 +2257,9 @@ class MainWindowController: PlayerWindowController {
       }
     }) {
       // if no interrupt then hide animation
-      if self.animationState == .willShow {
+      if self.chromeAnimationGeneration == generation && self.animationState == .willShow {
         self.animationState = .shown
+        self.window?.resetCursorRects()
       }
     }
   }
@@ -2056,8 +2281,10 @@ class MainWindowController: PlayerWindowController {
 
   private func createTimer() {
     // create new timer
-    let timeout = Preference.float(for: .controlBarAutoHideTimeout)
-    hideControlTimer = Timer.scheduledTimer(timeInterval: TimeInterval(timeout), target: self, selector: #selector(self.hideUIAndCursor), userInfo: nil, repeats: false)
+    guard Preference.bool(for: .enableControlBarAutoHide), !player.disableUI,
+          controlInteractionDepth == 0 else { return }
+    let timeout = PlayerChromePolicy.hideDelay(Double(Preference.float(for: .controlBarAutoHideTimeout)))
+    hideControlTimer = Timer.scheduledTimer(timeInterval: timeout, target: self, selector: #selector(self.hideUIAndCursor), userInfo: nil, repeats: false)
   }
 
   // MARK: - UI: Title
@@ -2269,7 +2496,13 @@ class MainWindowController: PlayerWindowController {
     guard let view = (viewController as? NSViewController)?.view else {
         Logger.fatal("viewController is not a NSViewController")
     }
+    sidebarAnimationGeneration &+= 1
+    let generation = sidebarAnimationGeneration
     sidebarAnimationState = .willShow
+    sideBarStatus = type
+    sidebarAutoHidden = false
+    showUI(force: true)
+    destroyTimer()
     let width = type.width().clamped(to: 0...sidebarMaxWidth)
     sideBarWidthConstraint.constant = width
     // The macOS setting could change at any point in time. Remember which type of animation is
@@ -2277,20 +2510,24 @@ class MainWindowController: PlayerWindowController {
     // malfunction if used with a short duration.
     let useFade = AccessibilityPreferences.motionReductionEnabled &&
                   !Preference.bool(for: PK.disableAnimations)
+    let inset: CGFloat = isUsingEdgeControls ? 8 : 0
+    sideBarView.alphaValue = 1
     if useFade {
-      sideBarRightConstraint.constant = 0
+      sideBarRightConstraint.constant = inset
     } else {
       sideBarRightConstraint.constant = -width
       sideBarView.isHidden = false
     }
     // add view and constraints
+    sideBarView.subviews.forEach { $0.removeFromSuperview() }
     sideBarView.addSubview(view)
     let constraintsH = NSLayoutConstraint.constraints(withVisualFormat: "H:|[v]|", options: [], metrics: nil, views: ["v": view])
     let constraintsV = NSLayoutConstraint.constraints(withVisualFormat: "V:|[v]|", options: [], metrics: nil, views: ["v": view])
     NSLayoutConstraint.activate(constraintsH)
     NSLayoutConstraint.activate(constraintsV)
     var viewController = viewController
-    viewController.downShift = titleBarView.frame.height
+    viewController.downShift = isUsingEdgeControls ? 0 : titleBarHeightConstraint.constant
+    if type == .playlist { playlistView.useCompactTabHeight = isUsingEdgeControls }
     // show sidebar
     NSAnimationContext.runAnimationGroup({ (context) in
       context.duration = AccessibilityPreferences.adjustedDuration(SideBarAnimationDuration)
@@ -2298,16 +2535,23 @@ class MainWindowController: PlayerWindowController {
       if useFade {
         sideBarView.animator().isHidden = false
       } else {
-        sideBarRightConstraint.animator().constant = 0
+        sideBarRightConstraint.animator().constant = inset
       }
     }) {
+      guard self.sidebarAnimationGeneration == generation else { return }
       self.sidebarAnimationState = .shown
-      self.sideBarStatus = type
       self.window?.resetCursorRects()
+      self.updateTimer()
     }
   }
 
   func hideSideBar(animate: Bool = true, after: @escaping () -> Void = { }) {
+    sidebarAnimationGeneration &+= 1
+    let generation = sidebarAnimationGeneration
+    chromeAnimationGeneration &+= 1
+    sidebarAutoHidden = false
+    // Invalidate any captured auto-hide completion before explicitly closing the panel.
+    showUI(force: true)
     sidebarAnimationState = .willHide
     let currWidth = sideBarWidthConstraint.constant
     // The macOS setting could change at any point in time. Remember which type of animation is
@@ -2324,9 +2568,9 @@ class MainWindowController: PlayerWindowController {
         sideBarRightConstraint.animator().constant = -currWidth
       }
     }) {
-      if self.sidebarAnimationState == .willHide {
+      if self.sidebarAnimationGeneration == generation && self.sidebarAnimationState == .willHide {
         self.sideBarStatus = .hidden
-        self.sideBarView.subviews.removeAll()
+        self.sideBarView.subviews.forEach { $0.removeFromSuperview() }
         self.sideBarView.isHidden = true
         // When in full screen mode with both the additional info view and the sidebar displayed the
         // info view will be positioned to avoid overlapping the sidebar. While hidden the sidebar
@@ -2334,12 +2578,11 @@ class MainWindowController: PlayerWindowController {
         // with the edge of the window. When reduce motion is not enabled the sidebar slides out of
         // the window. But when the sidebar fades out of view, the constraint must be adjusted to
         // put the sidebar outside of the window once it is hidden.
-        if useFade {
-          self.sideBarRightConstraint.constant = -currWidth
-          self.sideBarView.alphaValue = 1
-        }
+        self.sideBarRightConstraint.constant = -currWidth
+        self.sideBarView.alphaValue = 1
         self.sidebarAnimationState = .hidden
         after()
+        self.updateTimer()
       }
       self.window?.resetCursorRects()
     }
@@ -3178,7 +3421,7 @@ class MainWindowController: PlayerWindowController {
   }
 
   func showSettingsSidebar(tab: QuickSettingViewController.TabViewType? = nil, force: Bool = false, hideIfAlreadyShown: Bool = true) {
-    if !force && sidebarAnimationState == .willShow || sidebarAnimationState == .willHide {
+    if !force && (sidebarAnimationState == .willShow || sidebarAnimationState == .willHide) {
       return  // do not interrupt other actions while it is animating
     }
     let view = quickSettingView
@@ -3207,7 +3450,7 @@ class MainWindowController: PlayerWindowController {
   }
 
   func showPlaylistSidebar(tab: PlaylistViewController.TabViewType? = nil, force: Bool = false, hideIfAlreadyShown: Bool = true) {
-    if !force && sidebarAnimationState == .willShow || sidebarAnimationState == .willHide {
+    if !force && (sidebarAnimationState == .willShow || sidebarAnimationState == .willHide) {
       return  // do not interrupt other actions while it is animating
     }
     let view = playlistView
@@ -3237,7 +3480,7 @@ class MainWindowController: PlayerWindowController {
 
   func showPluginSidebar(tab: String?, force: Bool = false, hideIfAlreadyShown: Bool = true) {
     guard IINA_ENABLE_PLUGIN_SYSTEM else { return }
-    if !force && sidebarAnimationState == .willShow || sidebarAnimationState == .willHide {
+    if !force && (sidebarAnimationState == .willShow || sidebarAnimationState == .willHide) {
       return  // do not interrupt other actions while it is animating
     }
     let view = pluginView

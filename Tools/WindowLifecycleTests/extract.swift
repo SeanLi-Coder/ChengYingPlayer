@@ -55,6 +55,7 @@ final class MainWindowUnderTest: ScrollControllerUnderTest {
   let fragSliderView = NSView()
   let fragVolumeView = NSView()
   let currentControlBar = NSView()
+  let cornerControls = NSView()
   let sideBarView = NSView()
   let titleBarView = NSView()
   let subPopoverView = NSView()

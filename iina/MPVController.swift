@@ -538,6 +538,9 @@ class MPVController: NSObject {
     // Initialize an uninitialized mpv instance. If the mpv instance is already running, an error is returned.
     chkErr(mpv_initialize(mpv))
 
+    // Register before any load command, including playlist navigation performed by mpv itself.
+    addSilentVideoOpenHook()
+
     // The option watch-later-options is not available until after the mpv instance is initialized.
     // Workaround for mpv issue #14417, watch-later-options missing secondary subtitle delay and sid.
     if var watchLaterOptions = getString(MPVOption.WatchLater.watchLaterOptions) {
@@ -954,6 +957,22 @@ class MPVController: NSObject {
   }
 
   // MARK: - Hooks
+
+  /// Start each newly loaded video silently, before mpv creates its audio decoder or output.
+  /// Pure audio and album art keep their existing volume. A file-local option restores that
+  /// volume when the video closes, without changing saved preferences or the system volume.
+  /// Seeks, pause/resume, speed changes, and A-B loops do not invoke this loading hook.
+  private func addSilentVideoOpenHook() {
+    addHook(MPVHook.onPreLoaded, priority: 100, hook: MPVHookValue(withBlock: { [weak self] next in
+      defer { next() }
+      guard let self = self,
+            let tracks = self.getNode(MPVProperty.trackList) as? [[String: Any?]],
+            tracks.contains(where: {
+              $0["type"] as? String == "video" && $0["albumart"] as? Bool != true
+            }) else { return }
+      self.chkErr(self.setString("file-local-options/\(MPVOption.Audio.volume)", "0", level: .verbose))
+    }))
+  }
 
   func addHook(_ name: MPVHook, priority: Int32 = 0, hook: MPVHookValue) {
     $hooks.withLock {
