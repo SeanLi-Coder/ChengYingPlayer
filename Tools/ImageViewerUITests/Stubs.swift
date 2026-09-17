@@ -6,6 +6,18 @@ enum ImageFileSupport {
 }
 
 final class ImageDocument {
+  static func validateDimensions(_ width: Int, _ height: Int, depth: Int = 8) throws {
+    guard width > 0, height > 0, width <= 131_072, height <= 131_072 else {
+      throw ImageProcessingError.tooLarge
+    }
+    let (pixels, overflow) = width.multipliedReportingOverflow(by: height)
+    let bytesPerPixel = depth > 16 ? 16 : (depth > 8 ? 8 : 4)
+    let budget = min(UInt64(1_073_741_824), ProcessInfo.processInfo.physicalMemory / 8)
+    guard !overflow, pixels <= 256_000_000, UInt64(pixels) <= budget / UInt64(bytesPerPixel) else {
+      throw ImageProcessingError.tooLarge
+    }
+  }
+
   static let lock = NSLock()
   static var mainThreadDecodeCount = 0
   private static var startedURLs: [URL] = []
@@ -55,15 +67,31 @@ enum ImageConversionFormat: CaseIterable {
   static var available: [Self] { allCases }
 }
 
+enum ImageProcessingError: LocalizedError {
+  case invalid(String), unsupported, tooLarge, cancelled, exportFailed
+
+  var errorDescription: String? {
+    switch self {
+    case .invalid(let message): return message
+    case .unsupported: return "The image fixture is unsupported."
+    case .tooLarge: return "The image fixture exceeds its safety limit."
+    case .cancelled: return "The image fixture operation was cancelled."
+    case .exportFailed: return "The image fixture export failed."
+    }
+  }
+}
+
 final class ImageCancellationToken {
   private let lock = NSLock()
   private var cancelled = false
   var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
   func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+  func check() throws { if isCancelled { throw ImageProcessingError.cancelled } }
 }
 enum ImageConverter {
   static func convert(url: URL, format: ImageConversionFormat, frameIndex: Int?,
-                      token: ImageCancellationToken, progress: @escaping (Double) -> Void) throws -> URL {
+                      editPlan: ImageEditPlan? = nil, token: ImageCancellationToken,
+                      progress: @escaping (Double) -> Void) throws -> URL {
     for index in 0...10 {
       if token.isCancelled { throw NSError(domain: "ImageFixture", code: 2) }
       Thread.sleep(forTimeInterval: 0.01)

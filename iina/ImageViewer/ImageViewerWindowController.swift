@@ -27,6 +27,8 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   let nextFrameButton = NSButton(title: "下一帧 / 页", target: nil, action: nil)
   let formatPicker = NSPopUpButton(frame: .zero, pullsDown: false)
   let convertButton = NSButton(title: "转换并另存", target: nil, action: nil)
+  let editButton = NSButton(title: "裁剪与编辑", target: nil, action: nil)
+  let editingPanel = ImageEditingPanel(frame: .zero)
   let cancelButton = NSButton(title: "取消转换", target: nil, action: nil)
   let revealButton = NSButton(title: "在 Finder 显示", target: nil, action: nil)
   let viewOutputButton = NSButton(title: "查看结果", target: nil, action: nil)
@@ -42,11 +44,17 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private let directionButton = NSButton(title: "↑", target: nil, action: nil)
   private let titleLabel = NSTextField(labelWithString: "图片")
   private let infoLabel = NSTextField(labelWithString: "")
+  private var browsingControls: [NSView] = []
   private(set) var files: [PlaylistFileMetadata] = []
   private(set) var selectedURL: URL?
   private(set) var frameIndex = 0
   private(set) var isAnimating = false
   private(set) var isBusy = false
+  private(set) var isEditingImage = false
+  private(set) var editPreviewPending = false
+  private var editOriginal: CGImage?
+  private var editPreviewGeneration = UUID()
+  private var editPreviewToken = ImageCancellationToken()
   private(set) var lastOutputURL: URL?
   private var details: Details?
   private var sourceGeneration = UUID()
@@ -77,7 +85,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private static let intervalPreference = "ChengYing.ImageSlideshow.Interval"
   private static let loopPreference = "ChengYing.ImageSlideshow.Loop"
   var isSlideshowRunning: Bool { slideshow.isRunning }
-  var isActiveForUpdate: Bool { isBusy || slideshow.isRunning || wasSlideshowRunningBeforeMiniaturize }
+  var isActiveForUpdate: Bool { isBusy || isEditingImage || slideshow.isRunning || wasSlideshowRunningBeforeMiniaturize }
   var slideshowInterval: TimeInterval { slideshow.interval }
   private let listQueue = DispatchQueue(label: "io.chengying.image.list", qos: .userInitiated)
   private let decodeQueue = DispatchQueue(label: "io.chengying.image.decode", qos: .userInitiated)
@@ -130,9 +138,13 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     mediaInfoButton.action = #selector(showMediaInfo)
     mediaInfoButton.toolTip = mediaInfoText("action.info_hint", "Original media details (Command-I)")
     mediaInfoButton.setAccessibilityLabel(mediaInfoText("action.media_info", "Media Information…"))
+    editButton.target = self
+    editButton.action = #selector(toggleImageEditing)
+    editButton.bezelStyle = .rounded
+    editButton.toolTip = "按原始像素裁剪、旋转、翻转和调整尺寸，另存新图片。"
     let top = stack([heading, spacer(), button("−", #selector(zoomOut)),
                      zoomLabel, button("+", #selector(zoomIn)),
-                     button("适应窗口", #selector(fit)), button("100%", #selector(actualSize)), mediaInfoButton])
+                     button("适应窗口", #selector(fit)), button("100%", #selector(actualSize)), editButton, mediaInfoButton])
     content.addSubview(top)
 
     sortPicker.addItems(withTitles: ["名称", "文件大小", "修改日期", "创建日期"])
@@ -214,6 +226,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     let slideshowBar = stack([slideshowButton, NSTextField(labelWithString: "每张"), intervalField,
                                NSTextField(labelWithString: "秒"), intervalStepper, intervalSlider,
                                loopSlideshowButton, spacer(), fullscreenButton])
+    browsingControls = [navigation, slideshowBar]
     updateIntervalControls()
     convertButton.action = #selector(confirmConversion)
     cancelButton.action = #selector(cancelConversion)
@@ -234,7 +247,8 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       "原图不覆盖，保存到同级目录。跨格式可能改变位深、HDR、色彩并移除 EXIF / GPS。JXL、PSD、RAW 等仅供读取；可转换格式取决于系统与内置编码器。")
     note.font = .systemFont(ofSize: 10)
     note.textColor = .secondaryLabelColor
-    let footer = stack([navigation, slideshowBar, conversion, statusLabel, note], vertical: true, spacing: 8)
+    editingPanel.isHidden = true
+    let footer = stack([editingPanel, navigation, slideshowBar, conversion, statusLabel, note], vertical: true, spacing: 8)
     footer.alignment = .leading
     content.addSubview(footer)
     navigation.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
@@ -242,6 +256,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     conversion.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
     statusLabel.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
     note.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
+    editingPanel.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
     NSLayoutConstraint.activate([
       top.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
       top.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
@@ -262,6 +277,18 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     canvas.onToggleAnimation = { [weak self] in self?.toggleAnimation() }
     canvas.onToggleSlideshow = { [weak self] in self?.toggleSlideshow() }
     canvas.onDropURLs = { urls in _ = PlayerCore.openURLs(urls) }
+    canvas.onCropSelectionChanged = { [weak self] selection in
+      guard let self, self.isEditingImage else { return }
+      self.editingPanel.cropDidChange(selection)
+    }
+    editingPanel.onOrientationChanged = { [weak self] plan in self?.renderEditOrientation(plan) }
+    editingPanel.onRatioChanged = { [weak self] ratio in
+      guard let self else { return }
+      self.canvas.cropAspectRatio = ratio
+      self.editingPanel.cropDidChange(self.canvas.cropSelection)
+    }
+    editingPanel.onResetCrop = { [weak self] in self?.canvas.resetCropSelection() }
+    editingPanel.onExit = { [weak self] in self?.stopImageEditing() }
     updateControls()
     window.center()
   }
@@ -347,6 +374,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   private func load(_ url: URL) {
+    stopImageEditing(restoreImage: false)
     slideshowTimer?.invalidate()
     slideshowTimer = nil
     slideshow.imageWillLoad()
@@ -430,7 +458,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   private func requestFrame(_ index: Int) {
-    guard let details, (0..<details.frameCount).contains(index), !closed else { return }
+    guard let details, (0..<details.frameCount).contains(index), !closed, !isEditingImage else { return }
     framePending = true
     frameGeneration = UUID()
     let request = frameGeneration
@@ -473,8 +501,91 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private func validDuration(_ duration: TimeInterval) -> TimeInterval {
     duration.isFinite && duration > 0 ? max(duration, 0.001) : 0.1
   }
+
+  @objc private func toggleImageEditing() {
+    guard !closed, !isBusy, !framePending, !editPreviewPending,
+          !UpdateWorkAdmission.shared.isBlocked, window?.attachedSheet == nil else { return }
+    if isEditingImage { stopImageEditing(); return }
+    guard let image = canvas.image, let details else { return }
+    stopSlideshow()
+    stopAnimation()
+    wasAnimatingBeforeMiniaturize = false
+    frameToken.cancel()
+    frameGeneration = UUID()
+    editOriginal = image
+    isEditingImage = true
+    editingPanel.configure(source: image)
+    editingPanel.isHidden = false
+    canvas.cropAspectRatio = nil
+    canvas.cropEnabled = true
+    canvas.resetCropSelection()
+    editingPanel.cropDidChange(canvas.cropSelection)
+    let preferred: ImageConversionFormat = details.isAnimated ? .apng : (details.frameCount > 1 ? .tiff : .png)
+    if let index = formats.firstIndex(of: preferred) { formatPicker.selectItem(at: index) }
+    statusLabel.stringValue = "编辑预览 · 按原图像素另存；原文件不会被修改。"
+    updateControls()
+    window?.makeFirstResponder(canvas)
+  }
+
+  private func stopImageEditing(restoreImage: Bool = true) {
+    let wasEditing = isEditingImage
+    editPreviewToken.cancel()
+    editPreviewGeneration = UUID()
+    editPreviewPending = false
+    isEditingImage = false
+    canvas.cropEnabled = false
+    editingPanel.isHidden = true
+    if wasEditing, restoreImage, !closed, let editOriginal {
+      canvas.display(editOriginal, resetZoom: true)
+      statusLabel.stringValue = "已退出编辑；原图未修改。"
+    }
+    editOriginal = nil
+    updateControls()
+  }
+
+  private func renderEditOrientation(_ plan: ImageEditPlan) {
+    guard isEditingImage, !closed, !isBusy, let original = editOriginal,
+          let activity = UpdateWorkAdmission.shared.beginActivity(reason: "busy.images") else { return }
+    editPreviewToken.cancel()
+    editPreviewToken = ImageCancellationToken()
+    let token = editPreviewToken
+    editPreviewGeneration = UUID()
+    let request = editPreviewGeneration
+    let source = sourceGeneration
+    editPreviewPending = true
+    statusLabel.stringValue = "正在按原图像素生成编辑预览…"
+    updateControls()
+    decodeQueue.async { [weak self] in
+      defer { UpdateWorkAdmission.shared.endActivity(activity) }
+      do {
+        try token.check()
+        let image = try ImageEditor.orientedImage(original, plan: plan, token: token)
+        try token.check()
+        DispatchQueue.main.async { [weak self] in
+          guard let self, !self.closed, self.isEditingImage, self.sourceGeneration == source,
+                self.editPreviewGeneration == request, !token.isCancelled else { return }
+          self.canvas.display(image, resetZoom: true)
+          self.canvas.cropAspectRatio = self.editingPanel.selectedRatio
+          self.canvas.resetCropSelection()
+          self.editingPanel.cropDidChange(self.canvas.cropSelection)
+          self.editPreviewPending = false
+          self.statusLabel.stringValue = "编辑预览已更新 · 旋转或翻转后裁剪区域已重置。"
+          self.updateControls()
+        }
+      } catch {
+        DispatchQueue.main.async { [weak self] in
+          guard let self, !self.closed, self.isEditingImage, self.sourceGeneration == source,
+                self.editPreviewGeneration == request, !token.isCancelled else { return }
+          // Never export a changed plan against an old preview after a failed transform.
+          self.stopImageEditing()
+          self.statusLabel.stringValue = "无法生成编辑预览：\(error.localizedDescription)；原图未修改。"
+        }
+      }
+    }
+  }
+
   private func startAnimation() {
-    guard let details, details.isAnimated, !closed else { return }
+    guard let details, details.isAnimated, !closed, !isEditingImage else { return }
     if window?.isMiniaturized == true { wasAnimatingBeforeMiniaturize = true; return }
     let shouldReplay = details.loopCount > 0 && completedLoops >= details.loopCount
     isAnimating = true
@@ -520,21 +631,27 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
 
   private func updateControls() {
     let index = files.firstIndex { $0.url == selectedURL }
-    previousButton.isEnabled = index.map { $0 > 0 } ?? false
-    nextButton.isEnabled = index.map { $0 + 1 < files.count } ?? false
-    previousFrameButton.isEnabled = details != nil && frameIndex > 0 && !framePending
-    nextFrameButton.isEnabled = details.map { frameIndex + 1 < $0.frameCount } == true && !framePending
-    animationButton.isEnabled = details?.isAnimated == true
+    browsingControls.forEach { $0.isHidden = isEditingImage }
+    previousButton.isEnabled = !isEditingImage && (index.map { $0 > 0 } ?? false)
+    nextButton.isEnabled = !isEditingImage && (index.map { $0 + 1 < files.count } ?? false)
+    previousFrameButton.isEnabled = !isEditingImage && details != nil && frameIndex > 0 && !framePending
+    nextFrameButton.isEnabled = !isEditingImage && details.map { frameIndex + 1 < $0.frameCount } == true && !framePending
+    animationButton.isEnabled = !isEditingImage && details?.isAnimated == true
     animationButton.title = isAnimating ? "暂停动图" : "播放动图"
     frameLabel.stringValue = details.map { "\(frameIndex + 1) / \($0.frameCount) \($0.isAnimated ? "帧" : "页")" } ?? ""
-    convertButton.isEnabled = details != nil && !isBusy && !formats.isEmpty && !framePending
+    convertButton.isEnabled = details != nil && !isBusy && !formats.isEmpty && !framePending && !editPreviewPending
+    convertButton.title = isEditingImage ? "编辑并另存" : "转换并另存"
+    editButton.isEnabled = details != nil && !isBusy && !framePending && !editPreviewPending
+    editButton.title = isEditingImage ? "退出编辑" : "裁剪与编辑"
+    editingPanel.setControlsEnabled(!isBusy && !editPreviewPending)
+    canvas.cropInteractionEnabled = !isBusy && !editPreviewPending
     formatPicker.isEnabled = !isBusy && !formats.isEmpty
     cancelButton.isHidden = !isBusy
     progressIndicator.isHidden = !isBusy
     revealButton.isHidden = isBusy || lastOutputURL == nil
     viewOutputButton.isHidden = isBusy || lastOutputURL == nil
     slideshowButton.title = slideshow.isRunning ? "暂停幻灯片" : "播放幻灯片"
-    slideshowButton.isEnabled = !closed && !isBusy && (slideshow.isRunning || (!isListing && files.count > 1))
+    slideshowButton.isEnabled = !closed && !isBusy && !isEditingImage && (slideshow.isRunning || (!isListing && files.count > 1))
     let folder = directoryURL?.lastPathComponent
     folderLabel.stringValue = "\(folder.map { "当前文件夹：\($0)" } ?? "已选图片") · \(isListing ? "读取中…" : "\(files.count) 张")"
     folderLabel.toolTip = directoryURL?.path ?? "仅浏览显式选择的图片；打开单张图片会自动列出同目录图片。"
@@ -542,7 +659,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
 
   // Slideshow deadlines are independent of an animated image's per-frame timer.
   @objc private func toggleSlideshow() {
-    guard !UpdateWorkAdmission.shared.isBlocked else { return }
+    guard !UpdateWorkAdmission.shared.isBlocked, !isEditingImage else { return }
     if slideshow.isRunning || wasSlideshowRunningBeforeMiniaturize { stopSlideshow(); return }
     guard !closed, !isBusy, !isListing, files.count > 1, window?.attachedSheet == nil,
           window?.isMiniaturized != true else { return }
@@ -656,7 +773,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   private func navigate(_ offset: Int) {
-    guard let index = files.firstIndex(where: { $0.url == selectedURL }), files.indices.contains(index + offset) else { return }
+    guard !isEditingImage, let index = files.firstIndex(where: { $0.url == selectedURL }), files.indices.contains(index + offset) else { return }
     load(files[index + offset].url)
   }
   @objc private func previousImage() { navigate(-1) }
@@ -750,6 +867,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   func numberOfRows(in tableView: NSTableView) -> Int { files.count }
   func tableViewSelectionDidChange(_ notification: Notification) {
     guard !selectingRow, files.indices.contains(tableView.selectedRow) else { return }
+    guard !isEditingImage else { selectCurrentRow(); return }
     let url = files[tableView.selectedRow].url
     if url != selectedURL { load(url) }
   }
@@ -799,27 +917,51 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   @objc private func confirmConversion() {
-    guard !isBusy, let url = selectedURL, let details, formats.indices.contains(formatPicker.indexOfSelectedItem), let window else { return }
+    guard !UpdateWorkAdmission.shared.isBlocked, !isBusy, !editPreviewPending, !framePending,
+          let url = selectedURL, let details, formats.indices.contains(formatPicker.indexOfSelectedItem),
+          let window, window.attachedSheet == nil else { return }
+    guard window.makeFirstResponder(canvas) else { return }
+    let editPlan: ImageEditPlan?
+    do {
+      editPlan = isEditingImage ? try editingPanel.makePlan(crop: canvas.cropSelection) : nil
+      if let editPlan, let editOriginal { _ = try ImageEditor.outputSize(for: editOriginal, plan: editPlan) }
+    } catch {
+      statusLabel.stringValue = error.localizedDescription
+      return
+    }
     stopSlideshow()
     let format = formats[formatPicker.indexOfSelectedItem]
     let canPreserve = format == .tiff || (details.isAnimated && format.supportsAnimation)
     let currentOnly = details.frameCount > 1 && !canPreserve
     let source = sourceGeneration
+    let editRequest = editPreviewGeneration
     let index = frameIndex
     stopAnimation()
     let alert = NSAlert()
-    alert.messageText = "转换为 \(format.title)？"
+    alert.messageText = "\(editPlan == nil ? "转换" : "编辑并另存")为 \(format.title)？"
     var message = "生成新文件到原图同级目录，不覆盖已有文件。"
+    if let editPlan, let editOriginal, let size = try? ImageEditor.outputSize(for: editOriginal, plan: editPlan) {
+      message += "\n按原图像素处理，输出 \(size.width) × \(size.height) 像素。"
+      if details.frameCount > 1 && !currentOnly {
+        message += "\n同一编辑将应用到全部 \(details.frameCount) \(details.isAnimated ? "帧" : "页")；尺寸不一致时会停止并提示。"
+      }
+    }
     if currentOnly { message += "\n此格式不能保留原图的所有\(details.isAnimated ? "动画帧" : "页面")，将仅导出当前第 \(index + 1) \(details.isAnimated ? "帧" : "页")。" }
     if details.isAnimated && format == .tiff { message += "\n所有动画帧将保存为多页静态图片，不再自动播放，原动画时序不会保留。" }
     if details.hasAlpha && !format.supportsAlpha { message += "\n透明区域将填充白色。" }
     message += "\n跨格式可能改变位深、HDR 和色彩。为保护隐私，输出不会保留原图 EXIF / GPS 信息。"
     alert.informativeText = message
-    alert.addButton(withTitle: currentOnly ? "仅导出当前帧 / 页" : "转换并另存")
+    alert.addButton(withTitle: currentOnly ? "仅导出当前帧 / 页" : (editPlan == nil ? "转换并另存" : "编辑并另存"))
     alert.addButton(withTitle: "取消")
+    statusLabel.stringValue = "请确认另存设置；原图不会被覆盖。"
     alert.beginSheetModal(for: window) { [weak self] response in
-      guard let self, !self.closed, self.sourceGeneration == source, response == .alertFirstButtonReturn else { return }
-      self.beginConversion(url: url, format: format, frameIndex: currentOnly ? index : nil)
+      guard let self, !self.closed, self.sourceGeneration == source,
+            self.editPreviewGeneration == editRequest else { return }
+      guard response == .alertFirstButtonReturn else {
+        self.statusLabel.stringValue = self.isEditingImage ? "已取消保存，编辑预览已保留。" : "已取消保存，原图未修改。"
+        return
+      }
+      self.beginConversion(url: url, format: format, frameIndex: currentOnly ? index : nil, editPlan: editPlan)
     }
   }
 
@@ -827,7 +969,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     NSApp.sendAction(NSSelectorFromString("menuShowMediaInfo:"), to: NSApp.delegate, from: mediaInfoButton)
   }
 
-  func beginConversion(url: URL, format: ImageConversionFormat, frameIndex: Int?) {
+  func beginConversion(url: URL, format: ImageConversionFormat, frameIndex: Int?, editPlan: ImageEditPlan? = nil) {
     guard !UpdateWorkAdmission.shared.isBlocked else { return }
     guard !isBusy, !closed else { return }
     guard let updateActivity = UpdateWorkAdmission.shared.beginActivity(reason: "busy.images") else { return }
@@ -839,12 +981,12 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     let generation = conversionGeneration
     isBusy = true
     progressIndicator.doubleValue = 0
-    statusLabel.stringValue = "正在转换 \(url.lastPathComponent)…"
+    statusLabel.stringValue = "正在\(editPlan == nil ? "转换" : "编辑导出") \(url.lastPathComponent)…"
     updateControls()
     conversionQueue.async { [weak self] in
       defer { UpdateWorkAdmission.shared.endActivity(updateActivity) }
       do {
-        let output = try ImageConverter.convert(url: url, format: format, frameIndex: frameIndex, token: token) { value in
+        let output = try ImageConverter.convert(url: url, format: format, frameIndex: frameIndex, editPlan: editPlan, token: token) { value in
           DispatchQueue.main.async { [weak self] in
             guard let self, !self.closed, self.conversionGeneration == generation, value.isFinite else { return }
             self.progressIndicator.doubleValue = min(max(value, 0), 1) * 100
@@ -887,6 +1029,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private func tearDown() {
     guard !closed else { return }
     closed = true
+    stopImageEditing(restoreImage: false)
     stopSlideshow()
     wasAnimatingBeforeMiniaturize = false
     isListing = false

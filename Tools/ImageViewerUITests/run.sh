@@ -10,6 +10,9 @@ xcrun swiftc -o "$test_dir/ImageViewerUITests" \
   "$project_root/iina/MediaInfo/MediaInfoModels.swift" \
   "$project_root/iina/ImageViewer/ImageSlideshowPolicy.swift" \
   "$project_root/iina/PlaylistFileMetadata.swift" \
+  "$project_root/iina/ImageViewer/ImageEditing.swift" \
+  "$project_root/iina/ImageViewer/ImageCropGeometry.swift" \
+  "$project_root/iina/ImageViewer/ImageEditingPanel.swift" \
   "$project_root/iina/ImageViewer/ImageCanvasView.swift" \
   "$project_root/iina/ImageViewer/ImageViewerWindowController.swift" \
   "$project_root/Tools/ImageViewerUITests/AppStubs.swift" \
@@ -24,6 +27,9 @@ xcrun swiftc -o "$test_dir/RealImageViewerSmoke" \
   "$project_root/iina/PlaylistFileMetadata.swift" \
   "$project_root/iina/ImageViewer/ImageFileSupport.swift" \
   "$project_root/iina/ImageViewer/ImageDocument.swift" \
+  "$project_root/iina/ImageViewer/ImageEditing.swift" \
+  "$project_root/iina/ImageViewer/ImageCropGeometry.swift" \
+  "$project_root/iina/ImageViewer/ImageEditingPanel.swift" \
   "$project_root/iina/ImageViewer/ImageConverter.swift" \
   "$project_root/iina/ImageViewer/ImageCanvasView.swift" \
   "$project_root/iina/ImageViewer/ImageViewerWindowController.swift" \
@@ -39,6 +45,9 @@ xcrun swiftc -typecheck -target x86_64-apple-macosx10.15 \
   "$project_root/iina/PlaylistFileMetadata.swift" \
   "$project_root/iina/ImageViewer/ImageFileSupport.swift" \
   "$project_root/iina/ImageViewer/ImageDocument.swift" \
+  "$project_root/iina/ImageViewer/ImageEditing.swift" \
+  "$project_root/iina/ImageViewer/ImageCropGeometry.swift" \
+  "$project_root/iina/ImageViewer/ImageEditingPanel.swift" \
   "$project_root/iina/ImageViewer/ImageConverter.swift" \
   "$project_root/iina/ImageViewer/ImageCanvasView.swift" \
   "$project_root/iina/ImageViewer/ImageViewerWindowController.swift" \

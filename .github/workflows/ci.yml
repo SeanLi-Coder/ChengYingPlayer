@@ -116,6 +116,8 @@ jobs:
           bash other/build_image_codec.sh
           bash Tools/ImageCodecHelper/run.sh
           bash Tools/ImageViewerTests/run.sh
+          bash Tools/ImageEditingTests/run.sh
+          bash Tools/ImageCropTests/run.sh
           bash Tools/ImageViewerUITests/run.sh
           bash Tools/ImageRoutingTests/run.sh
           bash Tools/ImageSlideshowTests/run.sh

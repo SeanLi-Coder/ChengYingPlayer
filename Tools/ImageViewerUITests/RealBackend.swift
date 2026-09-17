@@ -77,6 +77,50 @@ struct RealImageViewerSmoke {
     viewer.canvas.actualSize()
     expect(abs(viewer.canvas.imageRect.width * viewer.canvas.backingScale - 32) < 0.001,
            "Real pixels use physical 100 percent scale")
+    let stillBytes = try Data(contentsOf: still)
+    viewer.editButton.performClick(nil)
+    expect(viewer.isEditingImage && viewer.isActiveForUpdate, "Real editor begins a protected session")
+    viewer.editingPanel.rotateRightButton.performClick(nil)
+    waitFor("Real rotation preview finishes") { !viewer.editPreviewPending }
+    expect(viewer.canvas.image?.width == 24 && viewer.canvas.image?.height == 32,
+           "Real orientation preview swaps pixel dimensions")
+    viewer.canvas.cropSelection = ImagePixelRect(x: 2, y: 3, width: 12, height: 8)
+    viewer.editingPanel.widthField.stringValue = "6"
+    NSApp.sendAction(viewer.editingPanel.widthField.action!, to: viewer.editingPanel.widthField.target,
+                     from: viewer.editingPanel.widthField)
+    viewer.convertButton.performClick(nil)
+    waitFor("Real editing opens confirmation") { viewer.window?.attachedSheet != nil }
+    let editSheet = viewer.window!.attachedSheet!
+    viewer.window?.endSheet(editSheet, returnCode: .alertFirstButtonReturn)
+    editSheet.orderOut(nil)
+    waitFor("Real UI editing exports a file") { !viewer.isBusy && viewer.lastOutputURL != nil }
+    let editedOutput = viewer.lastOutputURL!
+    let editVerificationQueue = DispatchQueue(label: "io.chengying.tests.image.edit.verify")
+    try editVerificationQueue.sync {
+      let edited = try ImageDocument(url: editedOutput)
+      expect(edited.width == 6 && edited.height == 4, "Real UI passes crop and resize to the full-resolution encoder")
+    }
+    expect(editedOutput.lastPathComponent.contains("_edited") && editedOutput != still,
+           "Real edited output uses a separate sibling filename")
+    let afterEditing = try Data(contentsOf: still)
+    expect(afterEditing == stillBytes, "Real editing leaves the original PNG untouched")
+    expect(viewer.isEditingImage, "A successful export retains the editable preview")
+    let retainedSelection = viewer.canvas.cropSelection
+    let retainedPlan = try viewer.editingPanel.makePlan(crop: retainedSelection)
+    var invalidPlan = retainedPlan
+    invalidPlan.outputWidth = Int.max
+    viewer.beginConversion(url: still, format: .png, frameIndex: nil, editPlan: invalidPlan)
+    waitFor("A real editing error completes without an output") { !viewer.isBusy }
+    expect(viewer.lastOutputURL == nil && viewer.statusLabel.stringValue.contains("失败"),
+           "Failed editing cannot report a successful file")
+    expect(viewer.isEditingImage && viewer.canvas.cropSelection == retainedSelection,
+           "An export error retains the editable selection")
+    viewer.beginConversion(url: still, format: .png, frameIndex: nil, editPlan: retainedPlan)
+    waitFor("Real editing can retry after an export error") { !viewer.isBusy && viewer.lastOutputURL != nil }
+    expect(viewer.lastOutputURL != editedOutput && FileManager.default.fileExists(atPath: editedOutput.path),
+           "Retry preserves the previously edited output")
+    viewer.editButton.performClick(nil)
+    expect(viewer.canvas.image?.width == 32 && !viewer.isEditingImage, "Exit restores the real original image")
     viewer.nextButton.performClick(nil)
     waitFor("Real GIF auto-plays") { viewer.isAnimating }
     waitFor("Real finite GIF finishes") { !viewer.isAnimating && viewer.frameIndex == 2 }

@@ -73,7 +73,8 @@ enum ImageConverter {
   /// Exports from full-resolution decoding, never the displayed image. GPS/EXIF user
   /// metadata is deliberately not copied; the decoded color profile remains attached.
   static func convert(url: URL, format: ImageConversionFormat, frameIndex: Int?,
-                      token: ImageCancellationToken, progress: @escaping (Double) -> Void) throws -> URL {
+                      editPlan: ImageEditPlan? = nil, token: ImageCancellationToken,
+                      progress: @escaping (Double) -> Void) throws -> URL {
     try token.check()
     let document = try ImageDocument(url: url)
     let indices: [Int]
@@ -102,7 +103,7 @@ enum ImageConverter {
     progress(0)
     if format == .webp {
       try encodeWebP(document, indices: indices, scratch: scratch, output: temporary,
-                     token: token, progress: progress)
+                     token: token, editPlan: editPlan, progress: progress)
     } else {
       guard ImageConversionFormat.available.contains(format),
             let destination = CGImageDestinationCreateWithURL(temporary as CFURL,
@@ -121,7 +122,9 @@ enum ImageConverter {
         try token.check()
         try autoreleasepool {
           let original = try document.frame(at: index)
-          let image = format.supportsAlpha ? original : try flatten(original)
+          let edited = try editPlan.map { try ImageEditor.render(original, plan: $0, token: token) } ?? original
+          try token.check()
+          let image = format.supportsAlpha ? edited : try flatten(edited)
           var properties: [CFString: Any] = [
             kCGImagePropertyOrientation: 1,
             // AVIF 1.0 requests an unsupported lossless mode on current ImageIO.
@@ -145,7 +148,8 @@ enum ImageConverter {
       throw ImageProcessingError.exportFailed
     }
     progress(0.95)
-    let result = try publish(temporary, beside: url, fileExtension: format.fileExtension, token: token)
+    let result = try publish(temporary, beside: url, fileExtension: format.fileExtension,
+                             edited: editPlan != nil, token: token)
     progress(1)
     return result
   }
@@ -166,11 +170,15 @@ enum ImageConverter {
   }
 
   private static func encodeWebP(_ document: ImageDocument, indices: [Int], scratch: URL, output: URL,
-                                token: ImageCancellationToken, progress: @escaping (Double) -> Void) throws {
+                                token: ImageCancellationToken, editPlan: ImageEditPlan?,
+                                progress: @escaping (Double) -> Void) throws {
     guard let helper = webPHelperURL else {
       throw ImageProcessingError.invalid("应用缺少 WebP 编码器，请使用完整构建，或选择 PNG / TIFF。")
     }
-    let firstFrame = try document.frame(at: indices[0])
+    let firstFrame: CGImage = try autoreleasepool {
+      let original = try document.frame(at: indices[0])
+      return try editPlan.map { try ImageEditor.render(original, plan: $0, token: token) } ?? original
+    }
     let width = firstFrame.width, height = firstFrame.height
     let frameBytes = UInt64(width) * UInt64(height) * 4
     guard width <= 16_383, height <= 16_383, indices.count <= 10_000,
@@ -185,7 +193,13 @@ enum ImageConverter {
     for (offset, index) in indices.enumerated() {
       try token.check()
       try autoreleasepool {
-        let image = offset == 0 ? firstFrame : try document.frame(at: index)
+        let image: CGImage
+        if offset == 0 { image = firstFrame }
+        else {
+          let original = try document.frame(at: index)
+          image = try editPlan.map { try ImageEditor.render(original, plan: $0, token: token) } ?? original
+        }
+        try token.check()
         guard image.width == width, image.height == height else {
           throw ImageProcessingError.invalid("WebP 动画的所有帧必须尺寸一致。")
         }
@@ -250,14 +264,15 @@ enum ImageConverter {
   }
 
   private static func publish(_ temporary: URL, beside source: URL, fileExtension: String,
-                              token: ImageCancellationToken) throws -> URL {
+                              edited: Bool, token: ImageCancellationToken) throws -> URL {
     var stem = source.deletingPathExtension().lastPathComponent
     while stem.utf8.count > 150 { stem.removeLast() }
     let directory = source.deletingLastPathComponent()
     for index in 1...10_000 {
       try token.check()
       let suffix = index == 1 ? "" : "_\(index)"
-      let output = directory.appendingPathComponent("\(stem)_converted\(suffix).\(fileExtension)")
+      let operation = edited ? "edited" : "converted"
+      let output = directory.appendingPathComponent("\(stem)_\(operation)\(suffix).\(fileExtension)")
       // link(2) is an atomic no-replace operation on the same volume, including
       // removable APFS/exFAT media where Foundation move may replace a target.
       if link(temporary.path, output.path) == 0 { return output }

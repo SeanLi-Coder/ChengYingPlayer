@@ -34,6 +34,9 @@
 		D4CC00010005000000000001 /* ImageViewerWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC00020005000000000001 /* ImageViewerWindowController.swift */; };
 		D4CC00010006000000000001 /* ImageViewerCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC00020006000000000001 /* ImageViewerCoordinator.swift */; };
 		D4CC00010008000000000001 /* ImageSlideshowPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC00020008000000000001 /* ImageSlideshowPolicy.swift */; };
+		D4CC00010009000000000001 /* ImageEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC00020009000000000001 /* ImageEditing.swift */; };
+		D4CC0001000A000000000001 /* ImageCropGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC0002000A000000000001 /* ImageCropGeometry.swift */; };
+		D4CC0001000B000000000001 /* ImageEditingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CC0002000B000000000001 /* ImageEditingPanel.swift */; };
 		D4CC00010007000000000001 /* chengying-image-codec in Copy Video Tools */ = {isa = PBXBuildFile; fileRef = D4CC00020007000000000001 /* chengying-image-codec */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		D4CB00012F6A000100000001 /* DownloadCenterModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CB00112F6A000100000001 /* DownloadCenterModels.swift */; };
 		D4CB00022F6A000100000002 /* DownloadCenterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CB00122F6A000100000002 /* DownloadCenterService.swift */; };
@@ -467,6 +470,9 @@
 		D4CC00020005000000000001 /* ImageViewerWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewerWindowController.swift; sourceTree = "<group>"; };
 		D4CC00020006000000000001 /* ImageViewerCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewerCoordinator.swift; sourceTree = "<group>"; };
 		D4CC00020008000000000001 /* ImageSlideshowPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageSlideshowPolicy.swift; sourceTree = "<group>"; };
+		D4CC00020009000000000001 /* ImageEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageEditing.swift; sourceTree = "<group>"; };
+		D4CC0002000A000000000001 /* ImageCropGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCropGeometry.swift; sourceTree = "<group>"; };
+		D4CC0002000B000000000001 /* ImageEditingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageEditingPanel.swift; sourceTree = "<group>"; };
 		D4CC00020007000000000001 /* chengying-image-codec */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = "chengying-image-codec"; path = "deps/executable/chengying-image-codec"; sourceTree = SOURCE_ROOT; };
 		D4CB00112F6A000100000001 /* DownloadCenterModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterModels.swift; sourceTree = "<group>"; };
 		D4CB00122F6A000100000002 /* DownloadCenterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterService.swift; sourceTree = "<group>"; };
@@ -1988,6 +1994,9 @@
 				D4CC00020005000000000001 /* ImageViewerWindowController.swift */,
 				D4CC00020006000000000001 /* ImageViewerCoordinator.swift */,
 				D4CC00020008000000000001 /* ImageSlideshowPolicy.swift */,
+				D4CC00020009000000000001 /* ImageEditing.swift */,
+				D4CC0002000A000000000001 /* ImageCropGeometry.swift */,
+				D4CC0002000B000000000001 /* ImageEditingPanel.swift */,
 			);
 			path = ImageViewer;
 			sourceTree = "<group>";
@@ -3018,6 +3027,9 @@
 				D4CC00010005000000000001 /* ImageViewerWindowController.swift in Sources */,
 				D4CC00010006000000000001 /* ImageViewerCoordinator.swift in Sources */,
 				D4CC00010008000000000001 /* ImageSlideshowPolicy.swift in Sources */,
+				D4CC00010009000000000001 /* ImageEditing.swift in Sources */,
+				D4CC0001000A000000000001 /* ImageCropGeometry.swift in Sources */,
+				D4CC0001000B000000000001 /* ImageEditingPanel.swift in Sources */,
 				D4CB00022F6A000100000002 /* DownloadCenterService.swift in Sources */,
 				D4CB00032F6A000100000003 /* DownloadCenterWindowController.swift in Sources */,
 				D4C800022F6A000100000002 /* SubtitleToolsHelperClient.swift in Sources */,

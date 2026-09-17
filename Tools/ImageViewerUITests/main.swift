@@ -82,6 +82,60 @@ expect(!viewer.canvas.hasAmbiguousLayout, "Canvas layout is determined")
 expect(viewer.nextButton.visibleRect.width > 20 && viewer.nextButton.visibleRect.height > 10, "Navigation controls are visible")
 expect(viewer.convertButton.visibleRect.width > 20 && viewer.convertButton.visibleRect.height > 10, "Conversion controls are visible")
 viewer.window?.setFrame(frame, display: true)
+
+viewer.editButton.performClick(nil)
+expect(viewer.isEditingImage && viewer.canvas.cropEnabled && !viewer.editingPanel.isHidden,
+       "Editor opens inside the native image window")
+expect(viewer.isActiveForUpdate, "An editing session prevents automatic update installation")
+expect(viewer.canvas.cropSelection == ImagePixelRect(x: 0, y: 0, width: 240, height: 120),
+       "Editor starts with original pixel bounds")
+expect(!viewer.nextButton.isEnabled && !viewer.slideshowButton.isEnabled,
+       "Editing disables file navigation and slideshow")
+viewer.canvas.onNavigate?(1)
+viewer.canvas.onToggleSlideshow?()
+expect(viewer.selectedURL == url && !viewer.isSlideshowRunning, "Canvas shortcuts obey the edit guard")
+let panel = viewer.editingPanel
+panel.ratioPicker.selectItem(at: 2)
+NSApp.sendAction(panel.ratioPicker.action!, to: panel.ratioPicker.target, from: panel.ratioPicker)
+expect(viewer.canvas.cropSelection?.width == 120 && viewer.canvas.cropSelection?.height == 120,
+       "Square ratio uses source pixels, not screen points")
+panel.rotateRightButton.performClick(nil)
+waitFor("Rotated edit preview is ready") { !viewer.editPreviewPending }
+expect(viewer.canvas.image?.width == 120 && viewer.canvas.image?.height == 240,
+       "Rotation previews the original image at full resolution")
+expect(panel.orientationPlan.quarterTurnsClockwise == 1 && viewer.canvas.cropSelection?.height == 120,
+       "Rotation retains the crop ratio and resets its bounds")
+panel.widthField.stringValue = "60"
+NSApp.sendAction(panel.widthField.action!, to: panel.widthField.target, from: panel.widthField)
+expect(panel.heightField.stringValue == "60", "Pixel resize maintains the selected crop aspect ratio")
+let editedPlan = try panel.makePlan(crop: viewer.canvas.cropSelection)
+expect(editedPlan.outputWidth == 60 && editedPlan.outputHeight == 60 && editedPlan.sourceWidth == 240,
+       "Export plan records output pixels and original source dimensions")
+panel.horizontalButton.performClick(nil)
+waitFor("Flipped preview resets dimensions even if the crop rectangle is unchanged") { !viewer.editPreviewPending }
+expect(panel.widthField.stringValue == "120" && panel.heightField.stringValue == "120",
+       "An unchanged crop still synchronizes reset pixel fields")
+panel.widthField.stringValue = "60"
+NSApp.sendAction(panel.widthField.action!, to: panel.widthField.target, from: panel.widthField)
+panel.heightField.stringValue = "not-a-size"
+viewer.convertButton.performClick(nil)
+expect(viewer.window?.attachedSheet == nil && viewer.statusLabel.stringValue.contains("整数"),
+       "Invalid dimensions cannot start an export")
+panel.heightField.stringValue = "60"
+viewer.convertButton.performClick(nil)
+waitFor("Edited output has a confirmation sheet") { viewer.window?.attachedSheet != nil }
+expect(textContent(viewer.window!.attachedSheet!.contentView!).contains("60 × 60"),
+       "Confirmation shows actual output pixel dimensions")
+dismissSheet(viewer)
+viewer.window?.setContentSize(NSSize(width: 880, height: 620))
+pump()
+expect(viewer.canvas.bounds.width > 300 && viewer.canvas.bounds.height > 140,
+       "Editor leaves usable canvas space at minimum window size")
+for control in [panel.rotateRightButton, panel.exitButton, panel.widthField, panel.heightField] as [NSView] {
+  expect(control.visibleRect.width >= control.bounds.width - 1 && control.visibleRect.height > 10,
+         "Editing controls remain visible at minimum window size")
+}
+viewer.window?.setFrame(frame, display: true)
 if let screenshotPath = ProcessInfo.processInfo.environment["IMAGE_VIEWER_SCREENSHOT"],
    let view = viewer.window?.contentView,
    let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
@@ -94,6 +148,42 @@ if let screenshotPath = ProcessInfo.processInfo.environment["IMAGE_VIEWER_SCREEN
   capture.arguments = ["-l", String(viewer.window!.windowNumber), "-o", screenshotPath + ".window.png"]
   try? capture.run()
   capture.waitUntilExit()
+}
+panel.exitButton.performClick(nil)
+expect(!viewer.isEditingImage && !viewer.canvas.cropEnabled && viewer.canvas.image?.width == 240,
+       "Exiting editing restores original pixels and normal navigation")
+waitFor("Preview activity releases its update lease") { UpdateWorkAdmission.shared.activeReasons.isEmpty }
+expect(!viewer.isActiveForUpdate, "Finished editing no longer delays updates")
+viewer.editButton.performClick(nil)
+NSApp.sendAction(panel.rotateRightButton.action!, to: panel.rotateRightButton.target, from: panel.rotateRightButton)
+expect(viewer.editPreviewPending, "Orientation preview runs asynchronously")
+viewer.open(urls: [url, root.appendingPathComponent("pages.tiff")])
+waitFor("Opening a new source invalidates an in-flight edit") {
+  viewer.canvas.image?.width == 240 && !viewer.isEditingImage && !viewer.editPreviewPending
+}
+pump(0.1)
+expect(viewer.canvas.image?.height == 120 && !viewer.canvas.cropEnabled,
+       "Stale orientation preview cannot overwrite a newly opened source")
+
+// Compare sequential UI operations against actual pixel transforms, not only checkbox state.
+let editPixels = Data([255, 0, 0, 255, 0, 255, 0, 255,
+                       0, 0, 255, 255, 255, 255, 0, 255,
+                       255, 0, 255, 255, 0, 255, 255, 255])
+let editSource = CGImage(width: 2, height: 3, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 8,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+                        provider: CGDataProvider(data: editPixels as CFData)!, decode: nil,
+                        shouldInterpolate: false, intent: .defaultIntent)!
+for clockwise in [true, false] {
+  let isolatedPanel = ImageEditingPanel(frame: .zero)
+  isolatedPanel.configure(source: editSource)
+  (clockwise ? isolatedPanel.horizontalButton : isolatedPanel.verticalButton).performClick(nil)
+  (clockwise ? isolatedPanel.rotateRightButton : isolatedPanel.rotateLeftButton).performClick(nil)
+  let actual = try ImageEditor.orientedImage(editSource, plan: isolatedPanel.orientationPlan)
+  let first = try ImageEditor.orientedImage(editSource, plan: ImageEditPlan(flipHorizontal: clockwise, flipVertical: !clockwise))
+  let expected = try ImageEditor.orientedImage(first, plan: ImageEditPlan(quarterTurnsClockwise: clockwise ? 1 : 3))
+  expect(actual.dataProvider!.data! as Data == expected.dataProvider!.data! as Data,
+         "Rotate after flip follows the user's operation order in actual pixels")
 }
 
 let explicit = [root.appendingPathComponent("pages.tiff"), url]
@@ -139,6 +229,21 @@ viewer.convertButton.performClick(nil)
 waitFor("Animated TIFF conversion requires confirmation") { viewer.window?.attachedSheet != nil }
 expect(textContent(viewer.window!.attachedSheet!.contentView!).contains("多页静态图片"), "Animation to TIFF explicitly loses playback timing")
 dismissSheet(viewer)
+
+viewer.editButton.performClick(nil)
+expect(viewer.isEditingImage && !viewer.isAnimating && !viewer.nextFrameButton.isEnabled,
+       "Editing a GIF pauses animation and frame navigation")
+viewer.canvas.onToggleAnimation?()
+expect(!viewer.isAnimating, "Space cannot restart animation during editing")
+viewer.windowDidMiniaturize(Notification(name: NSWindow.didMiniaturizeNotification))
+viewer.windowDidDeminiaturize(Notification(name: NSWindow.didDeminiaturizeNotification))
+expect(!viewer.isAnimating && viewer.isEditingImage, "Restoring a window does not restart an edited GIF")
+viewer.convertButton.performClick(nil)
+waitFor("Animation editing asks to preserve all frames") { viewer.window?.attachedSheet != nil }
+expect(textContent(viewer.window!.attachedSheet!.contentView!).contains("全部 3 帧"),
+       "Animation editing confirms that the same crop applies to every frame")
+dismissSheet(viewer)
+viewer.editButton.performClick(nil)
 
 let triple = root.appendingPathComponent("triple.gif")
 try Data([0]).write(to: triple)
