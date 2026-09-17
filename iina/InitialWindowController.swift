@@ -43,6 +43,7 @@ class InitialWindowController: NSWindowController {
   var loaded = false
   let primaryOpenButton = NSButton()
   let downloadCenterButton = NSButton()
+  let fileAccessButton = NSButton()
   private let observedPrefKeys: [Preference.Key] = [.themeMaterial]
   private var isObservingPreferences = false
 
@@ -193,7 +194,16 @@ class InitialWindowController: NSWindowController {
     let build = info.buildType == .release ? "" : " · \(info.buildType.description)"
     let versionLabel = welcomeLabel("ChengYing View  \(version)\(build)", size: 10, color: .tertiaryLabelColor)
 
-    [header, title, description, primaryOpenButton, downloadCenterButton, dragHint, features, privacy, versionLabel]
+    fileAccessButton.title = welcomeString("welcome.file_access")
+    fileAccessButton.identifier = NSUserInterfaceItemIdentifier("welcome.file_access")
+    fileAccessButton.isBordered = false
+    fileAccessButton.font = .systemFont(ofSize: 11)
+    fileAccessButton.contentTintColor = ChengYingStyle.accent
+    fileAccessButton.target = self
+    fileAccessButton.action = #selector(openFileAccessGuide)
+    fileAccessButton.translatesAutoresizingMaskIntoConstraints = false
+
+    [header, title, description, primaryOpenButton, downloadCenterButton, dragHint, features, fileAccessButton, privacy, versionLabel]
       .forEach(hero.addSubview)
     NSLayoutConstraint.activate([
       icon.widthAnchor.constraint(equalToConstant: 66),
@@ -224,7 +234,11 @@ class InitialWindowController: NSWindowController {
       features.leadingAnchor.constraint(greaterThanOrEqualTo: hero.leadingAnchor),
       features.trailingAnchor.constraint(lessThanOrEqualTo: hero.trailingAnchor),
       features.topAnchor.constraint(equalTo: dragHint.bottomAnchor, constant: 22),
-      features.bottomAnchor.constraint(lessThanOrEqualTo: privacy.topAnchor, constant: -24),
+      features.bottomAnchor.constraint(lessThanOrEqualTo: fileAccessButton.topAnchor, constant: -16),
+      fileAccessButton.centerXAnchor.constraint(equalTo: hero.centerXAnchor),
+      fileAccessButton.leadingAnchor.constraint(greaterThanOrEqualTo: hero.leadingAnchor),
+      fileAccessButton.trailingAnchor.constraint(lessThanOrEqualTo: hero.trailingAnchor),
+      fileAccessButton.bottomAnchor.constraint(equalTo: privacy.topAnchor, constant: -10),
       privacy.centerXAnchor.constraint(equalTo: hero.centerXAnchor),
       privacy.leadingAnchor.constraint(greaterThanOrEqualTo: hero.leadingAnchor),
       privacy.trailingAnchor.constraint(lessThanOrEqualTo: hero.trailingAnchor),
@@ -262,6 +276,10 @@ class InitialWindowController: NSWindowController {
 
   @objc private func openDownloadCenter() {
     NSApp.sendAction(NSSelectorFromString("menuShowDownloadCenter:"), to: NSApp.delegate, from: self)
+  }
+
+  @objc private func openFileAccessGuide() {
+    NSApp.sendAction(NSSelectorFromString("showFileAccessGuide:"), to: NSApp.delegate, from: self)
   }
 
   @objc func openLocalFile() { AppDelegate.shared.openFile(self) }

@@ -55,6 +55,8 @@ controller.primaryOpenButton.performClick(nil)
 check(AppDelegate.shared.openedFilePanels == 1, "The primary action opens the existing local file panel")
 controller.downloadCenterButton.performClick(nil)
 check(AppDelegate.shared.openedDownloadCenters == 1, "The download action still routes through the app delegate")
+controller.fileAccessButton.performClick(nil)
+check(AppDelegate.shared.openedFileAccessGuides == 1, "The optional file-access guide remains reachable after skipping onboarding")
 check((content as? InitialWindowContentView)?.player === player, "The drop view retains its existing player routing")
 
 func sendKey(_ code: UInt16) {
@@ -124,6 +126,8 @@ func checkLayout() {
     check(!button.hasAmbiguousLayout && frame.width >= 300, "Primary actions retain usable, unambiguous widths")
     check(abs(frame.midX - content.bounds.midX) < 1, "Single-column actions are centered without an empty library column")
   }
+  let accessFrame = controller.fileAccessButton.convert(controller.fileAccessButton.bounds, to: content)
+  check(content.bounds.contains(accessFrame), "The file-access link stays within the welcome window")
   let ambiguous = views.filter { $0.hasAmbiguousLayout }
   let ambiguousDescription = ambiguous.map { view in
     "\(type(of: view)) \(view.frame) \((view as? NSTextField)?.stringValue ?? "")"

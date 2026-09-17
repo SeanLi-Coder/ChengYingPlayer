@@ -1,5 +1,6 @@
 /* Native welcome window copy. */
 "welcome.window_title" = "澄影视界";
+"welcome.file_access" = "文件访问权限设置…";
 "welcome.brand" = "澄影视界";
 "welcome.eyebrow" = "本地影像工作台";
 "welcome.headline" = "每一帧，\n都是更大的视界。";

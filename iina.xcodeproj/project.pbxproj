@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D4F200010000000000000001 /* FileAccessGuideCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F200020000000000000001 /* FileAccessGuideCoordinator.swift */; };
+		D4F200010000000000000002 /* FileAccessGuideWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F200020000000000000002 /* FileAccessGuideWindowController.swift */; };
+		D4F200010000000000000003 /* FileAccess.strings in Resources */ = {isa = PBXBuildFile; fileRef = D4F200040000000000000001 /* FileAccess.strings */; };
 		D4F100010000000000000001 /* UpdatePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F100020000000000000001 /* UpdatePolicy.swift */; };
 		D4F100010000000000000002 /* AppUpdateWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F100020000000000000002 /* AppUpdateWindowController.swift */; };
 		D4F100010000000000000003 /* AppUpdateUserDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F100020000000000000003 /* AppUpdateUserDriver.swift */; };
@@ -428,6 +431,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D4F200020000000000000001 /* FileAccessGuideCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileAccessGuideCoordinator.swift; sourceTree = "<group>"; };
+		D4F200020000000000000002 /* FileAccessGuideWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileAccessGuideWindowController.swift; sourceTree = "<group>"; };
+		D4F200030000000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/FileAccess.strings; sourceTree = "<group>"; };
+		D4F200030000000000000002 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/FileAccess.strings"; sourceTree = "<group>"; };
 		D4F100020000000000000001 /* UpdatePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatePolicy.swift; sourceTree = "<group>"; };
 		D4F100020000000000000002 /* AppUpdateWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateWindowController.swift; sourceTree = "<group>"; };
 		D4F100020000000000000003 /* AppUpdateUserDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateUserDriver.swift; sourceTree = "<group>"; };
@@ -2166,6 +2173,7 @@
 				D4F100040000000000000001 /* Updates.strings */,
 				D4C800302F6A000100000001 /* SubtitleTools.strings */,
 				D4CB00302F6A000100000001 /* DownloadCenter.strings */,
+				D4F200040000000000000001 /* FileAccess.strings */,
 				D4CA00302F6A000100000001 /* PlaylistBrowser.strings */,
 				34F294BF2C0B68B300F14962 /* Contribution.rtf */,
 				8483FAFF1EDFF325000F55D6 /* Credits.rtf */,
@@ -2209,6 +2217,8 @@
 				84996F921EC11CE6009A8A39 /* HistoryWindowController.xib */,
 				846352571EEEE11A0043F0CC /* ThumbnailPeekView.swift */,
 				849581EF1F02728700D3B359 /* InitialWindowController.swift */,
+				D4F200020000000000000001 /* FileAccessGuideCoordinator.swift */,
+				D4F200020000000000000002 /* FileAccessGuideWindowController.swift */,
 				849581F51F03D55A00D3B359 /* InitialWindowController.xib */,
 				84A09A0C1F2DF596000FF343 /* MiniPlayerWindowController.swift */,
 				8F49C370213EFB7E0076C4F9 /* MiniPlayerWindowController.xib */,
@@ -2851,6 +2861,7 @@
 				D4F100010000000000000007 /* Updates.strings in Resources */,
 				D4C800052F6A000100000005 /* SubtitleTools.strings in Resources */,
 				D4CB00042F6A000100000004 /* DownloadCenter.strings in Resources */,
+				D4F200010000000000000003 /* FileAccess.strings in Resources */,
 				D4CA00042F6A000100000004 /* PlaylistBrowser.strings in Resources */,
 				8400D5F61E1AB34D006785F5 /* PrefNetworkViewController.xib in Resources */,
 				8400D5D51E1AB317006785F5 /* FilterWindowController.xib in Resources */,
@@ -2930,6 +2941,8 @@
 			files = (
 				E35306FA214808AB008FE492 /* JavascriptAPIEvent.swift in Sources */,
 				849581F11F02728700D3B359 /* InitialWindowController.swift in Sources */,
+				D4F200010000000000000001 /* FileAccessGuideCoordinator.swift in Sources */,
+				D4F200010000000000000002 /* FileAccessGuideWindowController.swift in Sources */,
 				8461C52E1D45FFF6006E91FF /* PlaySliderCell.swift in Sources */,
 				84F5D4A21E4796F50060A838 /* KeyBindingTranslator.swift in Sources */,
 				E3DBD23E218EF4F100B3AFBF /* AboutWindowContributorAvatarItem.swift in Sources */,
@@ -3181,6 +3194,15 @@
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
+		D4F200040000000000000001 /* FileAccess.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				D4F200030000000000000001 /* en */,
+				D4F200030000000000000002 /* zh-Hans */,
+			);
+			name = FileAccess.strings;
+			sourceTree = "<group>";
+		};
 		D4F100040000000000000001 /* Updates.strings */ = {
 			isa = PBXVariantGroup;
 			children = (

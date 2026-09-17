@@ -101,6 +101,7 @@ jobs:
         run: |
           bash Tools/VisualStyleTests/run.sh
           bash Tools/WelcomeDesignTests/run.sh
+          bash Tools/FileAccessTests/run.sh
 
       - name: Test folder playlists and Finder tags
         run: |

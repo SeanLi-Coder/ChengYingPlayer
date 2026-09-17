@@ -66,6 +66,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   lazy var guideWindow: GuideWindowController = GuideWindowController()
   lazy var logWindow: LogWindowController = LogWindowController()
   lazy var downloadCenterWindow = DownloadCenterWindowController()
+  lazy var fileAccessGuide = FileAccessGuideCoordinator()
 
   lazy var preferenceWindowController: PreferenceWindowController = {
     let list: [NSViewController & PreferenceWindowEmbeddable] = [
@@ -89,6 +90,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func getReady() {
     menuController.bindMenuItems()
+    installFileAccessMenuItem()
     PlayerCore.loadKeyBindings()
     isReady = true
   }
@@ -234,10 +236,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Check for legacy pref entries and migrate them to their modern equivalents
     LegacyMigration.shared.migrateLegacyPreferences()
 
-    // guide window
-    if FirstRunManager.isFirstRun(for: .init("firstLaunchAfter\(version)")) {
-      guideWindow.show(pages: [.highlights])
-    }
+    // Optional file-access guidance is offered once after an interactive launch, not on every update.
 
     // Hide Window > "Enter Full Screen" menu item, because this is already present in the Video menu
     UserDefaults.standard.set(false, forKey: "NSFullScreenMenuItemEverywhere")
@@ -368,12 +367,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     AppDelegate.shared.menuController?.updatePluginMenu()
   }
 
+  private func installFileAccessMenuItem() {
+    guard let menu = NSApp.mainMenu?.items.first?.submenu,
+          !menu.items.contains(where: { $0.action == #selector(showFileAccessGuide(_:)) }) else { return }
+    let item = NSMenuItem(title: fileAccessString("menu.title"), action: #selector(showFileAccessGuide(_:)),
+                          keyEquivalent: "")
+    item.target = self
+    let settingsIndex = menu.items.firstIndex(where: { $0.action == #selector(showPreferences(_:)) })
+    menu.insertItem(item, at: settingsIndex.map { $0 + 1 } ?? min(2, menu.numberOfItems))
+  }
+
+  @IBAction func showFileAccessGuide(_ sender: Any?) {
+    fileAccessGuide.show()
+  }
+
   /** Show welcome window if `application(_:openFile:)` wasn't called, i.e. launched normally. */
   @objc
   func checkForShowingInitialWindow() {
+    guard !isTerminating else { return }
     if !openFileCalled {
       showWelcomeWindow()
     }
+    fileAccessGuide.scheduleLaunchOffer(isInteractive: !commandLineStatus.isCommandLine)
   }
 
   private func showWelcomeWindow() {
@@ -423,6 +438,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     guard updateCoordinator.shouldAllowTerminationForUpdate() else { return .terminateCancel }
     Logger.log("App should terminate")
     isTerminating = true
+    fileAccessGuide.cancelLaunchOffer()
     ImageViewerCoordinator.shared.cancelAndClose()
     SubtitleToolsService.shared.shutdown()
     DownloadCenterService.shared.shutdown()

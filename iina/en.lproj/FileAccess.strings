@@ -1,0 +1,14 @@
+"menu.title" = "File Access Permissions";
+"intro" = "Full Disk Access is optional. It can reduce separate permission prompts for protected folders, but also allows access to sensitive data belonging to other apps. Enable it only if you trust this app.";
+"step.1.title" = "1  Install in Applications first";
+"step.1.detail" = "Move ChengYing.app to Applications, then open that installed copy. Do not enable access for a copy running from a disk image.";
+"step.2.title" = "2  Enable access in macOS settings";
+"step.2.detail" = "Open System Settings → Privacy & Security → Full Disk Access. Click +, select ChengYing.app (ChengYing View) in Applications, then turn its switch on.";
+"step.3.title" = "3  Finish your work, then reopen the app";
+"step.3.detail" = "Finish any playback, exports, or unsaved tasks before quitting. Then quit and reopen the app yourself to apply the change.";
+"limitations" = "macOS protections and file permissions still apply. This build is ad-hoc signed; after an update, macOS may require you to confirm access again.";
+"footer" = "You can continue without granting access. Closing this guide stops reminders at startup; it does not grant or verify permission.";
+"button.settings" = "Open System Settings";
+"button.reveal" = "Show App in Finder";
+"button.continue" = "Continue Using the App";
+"settings.failed" = "Could not open System Settings automatically. Open System Settings → Privacy & Security → Full Disk Access manually.";
