@@ -324,10 +324,14 @@ class VideoView: NSView {
     } else if let screenColorSpace {
       let name = screenColorSpace.localizedName ?? "unnamed"
       logHDR("Using the ICC profile of the color space \(name)")
-      // Set MPV_RENDER_PARAM_ICC_PROFILE before enabling icc-profile-auto to true as mpv requires
-      // that parameter be set in the render context when icc-profile-auto is in use.
-      videoLayer.setRenderICCProfile(screenColorSpace)
+      // The pinned mpv renderer discards profiles while auto mode is disabled.
+      // Our source patch synchronizes renderer options when accepting the profile,
+      // so this ordering does not depend on a future frame refreshing the options.
       player.mpv.setFlag(MPVOption.GPURendererOptions.iccProfileAuto, true)
+      if !videoLayer.setRenderICCProfile(screenColorSpace) {
+        player.mpv.setFlag(MPVOption.GPURendererOptions.iccProfileAuto, false)
+        logHDR("Screen ICC profile could not be applied; automatic ICC correction is disabled", level: .warning)
+      }
     }
 
     let sdrColorSpace = screenColorSpace?.cgColorSpace ?? VideoView.SRGB

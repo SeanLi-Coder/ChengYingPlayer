@@ -399,28 +399,35 @@ class ViewLayer: CAOpenGLLayer {
   ///
   /// The IINA `Load ICC profile` setting is tied to the `--icc-profile-auto` option. This allows users to override IINA using
   /// the [--icc-profile](https://mpv.io/manual/stable/#options-icc-profile) option.
-  func setRenderICCProfile(_ profile: NSColorSpace) {
+  /// - Returns: Whether the render context accepted the profile.
+  func setRenderICCProfile(_ profile: NSColorSpace) -> Bool {
     // The OpenGL context must always be locked before locking the isUninited lock to avoid
     // deadlocks.
     videoView.player.mpv.lockAndSetOpenGLContext()
     defer { videoView.player.mpv.unlockOpenGLContext() }
-    videoView.$isUninited.withReadLock() { isUninited in
-      guard !isUninited else { return }
+    return videoView.$isUninited.withReadLock() { isUninited in
+      guard !isUninited else { return false }
 
-      guard let renderContext = videoView.player.mpv.mpvRenderContext else { return }
+      guard let renderContext = videoView.player.mpv.mpvRenderContext else { return false }
       guard var iccData = profile.iccProfileData else {
         let name = profile.localizedName ?? "unnamed"
         Logger.log("Color space \(name) does not contain ICC profile data", level: .warning)
-        return
+        return false
       }
-      iccData.withUnsafeMutableBytes { (ptr: UnsafeMutableRawBufferPointer) in
-        guard let baseAddress = ptr.baseAddress, ptr.count > 0 else { return }
+      return iccData.withUnsafeMutableBytes { (ptr: UnsafeMutableRawBufferPointer) in
+        guard let baseAddress = ptr.baseAddress, ptr.count > 0 else { return false }
 
         let u8Ptr = baseAddress.assumingMemoryBound(to: UInt8.self)
         var icc = mpv_byte_array(data: u8Ptr, size: ptr.count)
-        withUnsafeMutableBytes(of: &icc) { (ptr: UnsafeMutableRawBufferPointer) in
+        return withUnsafeMutableBytes(of: &icc) { (ptr: UnsafeMutableRawBufferPointer) in
           let params = mpv_render_param(type: MPV_RENDER_PARAM_ICC_PROFILE, data: ptr.baseAddress)
-          mpv_render_context_set_parameter(renderContext, params)
+          let result = mpv_render_context_set_parameter(renderContext, params)
+          guard result >= 0 else {
+            Logger.log("Unable to set the render ICC profile: \(String(cString: mpv_error_string(result)))",
+                       level: .warning)
+            return false
+          }
+          return true
         }
       }
     }

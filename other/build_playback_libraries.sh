@@ -13,6 +13,8 @@ DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
 source "$SCRIPT_DIR/third_party_sources.sh"
 # shellcheck source=other/playback_sources.sh
 source "$SCRIPT_DIR/playback_sources.sh"
+# shellcheck source=other/playback_patches.sh
+source "$SCRIPT_DIR/playback_patches.sh"
 # shellcheck source=other/build_subtitle_libraries.sh
 source "$SCRIPT_DIR/build_subtitle_libraries.sh"
 
@@ -20,7 +22,7 @@ if [[ "$(uname -s)" != Darwin || "$ARCHITECTURE" != arm64 || "$(uname -m)" != ar
   echo "The source-built playback release currently requires a native arm64 macOS host." >&2
   exit 2
 fi
-for command_name in clang clang++ cmake curl make meson ninja otool install_name_tool codesign pkg-config shasum tar autoreconf automake glibtoolize; do
+for command_name in clang clang++ cmake curl make meson ninja otool install_name_tool codesign pkg-config shasum tar patch autoreconf automake glibtoolize; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "Required playback build command is unavailable: $command_name" >&2
     exit 2
@@ -61,6 +63,8 @@ while IFS=$'\t' read -r name _; do
   archive="$(fetch_playback_source "$name" "$SOURCE_CACHE_DIR")"
   tar -xf "$archive" -C "$WORK_DIR"
 done < <(playback_source_records)
+
+apply_playback_patches "$WORK_DIR" "$RECORD_DIR"
 
 echo "Building isolated static subtitle libraries..."
 build_subtitle_libraries "$PREFIX"

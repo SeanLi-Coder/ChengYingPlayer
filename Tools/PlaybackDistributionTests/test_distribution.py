@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -30,6 +31,43 @@ class DistributionTests(unittest.TestCase):
         self.cache = self.dependencies / "sources"
         self.cache.mkdir()
         self.sources = {}
+        self.patch_records, original_hashes, _ = VERIFY.locked_patches()
+        self.original_patch_sources = {
+            name: f"Synthetic original source: {name}\n".encode()
+            for name in original_hashes
+        }
+        self.modified_patch_sources = {
+            name: f"Synthetic modified source: {name}\n".encode()
+            for name in original_hashes
+        }
+        self.patch_before = {
+            name: hashlib.sha256(data).hexdigest()
+            for name, data in self.original_patch_sources.items()
+        }
+        self.patch_after = {
+            name: hashlib.sha256(data).hexdigest()
+            for name, data in self.modified_patch_sources.items()
+        }
+        for name, data in self.modified_patch_sources.items():
+            destination = self.record / "patched-sources" / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
+        self.record.joinpath("patches").mkdir()
+        for value in self.patch_records.values():
+            filename = value[2]
+            self.record.joinpath("patches", filename).write_bytes(
+                ROOT.joinpath("other/patches", filename).read_bytes()
+            )
+        self.record.joinpath("patches.tsv").write_text(
+            "".join("\t".join(value) + "\n" for value in self.patch_records.values())
+        )
+        for label, hashes in (
+            ("before", self.patch_before),
+            ("after", self.patch_after),
+        ):
+            self.record.joinpath(f"patch-{label}-sha256.txt").write_text(
+                "".join(f"{digest}  {name}\n" for name, digest in hashes.items())
+            )
         # These tiny local archives are deliberately synthetic source-lock boundaries.
         # Production always obtains the real pinned records from repository-owned scripts.
         for (
@@ -58,6 +96,12 @@ class DistributionTests(unittest.TestCase):
                     destination = self.record / "licenses" / root / name
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     destination.write_bytes(contents)
+                for name, contents in self.original_patch_sources.items():
+                    if name.split("/")[0] != root:
+                        continue
+                    entry = tarfile.TarInfo(name)
+                    entry.size = len(contents)
+                    output.addfile(entry, io.BytesIO(contents))
             self.sources[component] = (
                 component,
                 version,
@@ -182,7 +226,84 @@ class DistributionTests(unittest.TestCase):
             sources=self.sources,
             source_cache=self.cache,
             runner=runner or self.native_boundary,
+            patch_spec=(self.patch_records, self.patch_before, self.patch_after),
         )
+
+    def test_missing_patch_manifest_is_rejected(self):
+        self.record.joinpath("patches.tsv").unlink()
+        with self.assertRaisesRegex(ValueError, "Missing or linked build-record"):
+            self.verify()
+
+    def test_reordered_patches_are_rejected(self):
+        path = self.record / "patches.tsv"
+        path.write_text("\n".join(reversed(path.read_text().splitlines())) + "\n")
+        with self.assertRaisesRegex(ValueError, "application order"):
+            self.verify()
+
+    def test_modified_patch_is_rejected(self):
+        next(self.record.joinpath("patches").glob("*.patch")).write_text(
+            "Tampered patch\n"
+        )
+        with self.assertRaisesRegex(
+            ValueError, "patch files are missing, extra, or modified"
+        ):
+            self.verify()
+
+    def test_missing_patch_is_rejected(self):
+        next(self.record.joinpath("patches").glob("*.patch")).unlink()
+        with self.assertRaisesRegex(
+            ValueError, "patch files are missing, extra, or modified"
+        ):
+            self.verify()
+
+    def test_stale_patch_is_rejected(self):
+        self.record.joinpath("patches/obsolete.patch").write_text("Stale patch\n")
+        with self.assertRaisesRegex(
+            ValueError, "patch files are missing, extra, or modified"
+        ):
+            self.verify()
+
+    def test_linked_patch_is_rejected(self):
+        path = next(self.record.joinpath("patches").glob("*.patch"))
+        data = path.read_bytes()
+        path.unlink()
+        target = self.dependencies / "external.patch"
+        target.write_bytes(data)
+        path.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, "Linked patch entry"):
+            self.verify()
+
+    def test_modified_patched_source_is_rejected(self):
+        path = self.record / "patched-sources" / next(iter(self.patch_after))
+        path.write_text("Unpatched implementation\n")
+        with self.assertRaisesRegex(ValueError, "patched source files"):
+            self.verify()
+
+    def test_forged_patched_source_hash_is_rejected(self):
+        path = self.record / "patch-after-sha256.txt"
+        path.write_text(
+            path.read_text().replace(next(iter(self.patch_after.values())), "0" * 64)
+        )
+        with self.assertRaisesRegex(ValueError, "patched-source checksums"):
+            self.verify()
+
+    def test_original_patch_source_is_verified_against_archive(self):
+        name = next(iter(self.patch_before))
+        self.patch_before[name] = "0" * 64
+        self.record.joinpath("patch-before-sha256.txt").write_text(
+            "".join(f"{digest}  {name}\n" for name, digest in self.patch_before.items())
+        )
+        with self.assertRaisesRegex(ValueError, "patch original source checksums"):
+            self.verify()
+
+    def test_checked_in_patch_bytes_match_the_locks(self):
+        patches, before, after = VERIFY.locked_patches()
+        self.assertEqual(set(before), set(after))
+        self.assertEqual(len(patches), 2)
+        for value in patches.values():
+            self.assertEqual(
+                VERIFY.digest_file(ROOT / "other/patches" / value[2]), value[4]
+            )
 
     def test_valid_distribution_and_unrelated_old_libraries(self):
         self.dependencies.joinpath("lib/unused-old-library.dylib").write_bytes(

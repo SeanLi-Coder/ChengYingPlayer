@@ -1,0 +1,21 @@
+Subject: Synchronize renderer options before applying an ICC profile
+Origin: ChengYingPlayer maintainers
+Modified-Date: 2026-09-17
+Applied-to: mpv 0.38.0 after the upstream ICC ownership backport
+
+The public render API may follow a synchronous icc-profile-auto option change
+before another frame has refreshed the renderer's option cache. Refresh on the
+render thread before checking that option, using the same function already
+called at the beginning of frame rendering. This keeps disabled-auto behavior
+unchanged and avoids silently discarding a newly enabled display profile.
+
+--- a/video/out/gpu/video.c
++++ b/video/out/gpu/video.c
+@@ -607,6 +607,7 @@ bool gl_video_gamma_auto_enabled(struct gl_video *p)
+ //          takes over ownership.
+ void gl_video_set_icc_profile(struct gl_video *p, bstr icc_data)
+ {
++    gl_video_update_options(p);
+     if (gl_lcms_set_memory_profile(p->cms, icc_data))
+         reinit_from_options(p);
+ }

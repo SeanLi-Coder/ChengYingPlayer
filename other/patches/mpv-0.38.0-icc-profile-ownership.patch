@@ -1,0 +1,46 @@
+Backport: vo_libmpv: don't steal pointer provided by the API user
+Origin: https://github.com/mpv-player/mpv/commit/6f619d5ef43b070d728e43f0b2fe0571449de1a8
+Upstream-Date: 2024-08-06
+Applied-to: mpv 0.38.0
+Modified-by: ChengYingPlayer maintainers, 2026-09-17
+
+This is the complete upstream fix: copy borrowed ICC bytes at the public API
+boundary, remove the now-redundant internal macOS copy, and retain its API note.
+Only documentation hunk context is adapted to the 0.38.0 release tarball.
+The public libmpv ABI version remains unchanged by this backport.
+
+--- a/DOCS/client-api-changes.rst
++++ b/DOCS/client-api-changes.rst
+@@ -32,5 +32,9 @@ API changes
+ 
+ ::
++ --- mpv 0.39.0 ---
++ 2.4    - mpv_render_param with the MPV_RENDER_PARAM_ICC_PROFILE argument no
++          longer has incorrect assumptions about memory allocation and can be
++          correctly used.
+  --- mpv 0.38.0 ---
+  2.3    - partially revert the changes from API version 1.27, remove libmpv as
+           the default VO and move it to the bottom of the auto-probing order.
+--- a/osdep/mac/libmpv_helper.swift
++++ b/osdep/mac/libmpv_helper.swift
+@@ -146,8 +146,7 @@ class LibmpvHelper {
+             guard let baseAddress = ptr.baseAddress, ptr.count > 0 else { return }
+ 
+             let u8Ptr = baseAddress.assumingMemoryBound(to: UInt8.self)
+-            let iccBstr = bstrdup(nil, bstr(start: u8Ptr, len: ptr.count))
+-            var icc = mpv_byte_array(data: iccBstr.start, size: iccBstr.len)
++            var icc = mpv_byte_array(data: u8Ptr, size: ptr.count)
+             withUnsafeMutableBytes(of: &icc) { (ptr: UnsafeMutableRawBufferPointer) in
+                 let params = mpv_render_param(type: MPV_RENDER_PARAM_ICC_PROFILE, data: ptr.baseAddress)
+                 mpv_render_context_set_parameter(mpvRenderContext, params)
+--- a/video/out/gpu/libmpv_gpu.c
++++ b/video/out/gpu/libmpv_gpu.c
+@@ -107,7 +107,7 @@ static int set_parameter(struct render_backend *ctx, mpv_render_param param)
+     switch (param.type) {
+     case MPV_RENDER_PARAM_ICC_PROFILE: {
+         mpv_byte_array *data = param.data;
+-        gl_video_set_icc_profile(p->renderer, (bstr){data->data, data->size});
++        gl_video_set_icc_profile(p->renderer, bstrdup(NULL, (bstr){data->data, data->size}));
+         return 0;
+     }
+     case MPV_RENDER_PARAM_AMBIENT_LIGHT: {

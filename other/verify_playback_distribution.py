@@ -158,6 +158,104 @@ def checksum_records(path):
     return records
 
 
+def locked_patches():
+    root = PROJECT_ROOT / "other" / "patches"
+    patches = parse_sources(read_text(root / "playback-patches.tsv"))
+    for _name, _component, filename, _origin, expected in patches.values():
+        require(
+            digest_file(root / filename) == expected,
+            f"Checked-in playback patch checksum mismatch: {filename}",
+        )
+    return (
+        patches,
+        checksum_records(root / "playback-before-sha256.txt"),
+        checksum_records(root / "playback-after-sha256.txt"),
+    )
+
+
+def validate_patches(record, source_cache, sources, patch_spec=None):
+    patches, before, after = locked_patches() if patch_spec is None else patch_spec
+    recorded = parse_sources(read_text(record / "patches.tsv"))
+    require(
+        list(recorded.values()) == list(patches.values()),
+        "Playback patches or their application order differ from the current locks.",
+    )
+    require(
+        before
+        and set(before) == set(after)
+        and checksum_records(record / "patch-before-sha256.txt") == before
+        and checksum_records(record / "patch-after-sha256.txt") == after,
+        "Playback patched-source checksums differ from the current locks.",
+    )
+
+    def tree_hashes(root):
+        require(
+            root.is_dir() and not root.is_symlink(),
+            f"Missing or linked patch directory: {root}",
+        )
+        result = {}
+        for path in root.rglob("*"):
+            require(not path.is_symlink(), f"Linked patch entry: {path}")
+            if path.is_file():
+                result[str(path.relative_to(root))] = digest_file(path)
+        return result
+
+    require(
+        tree_hashes(record / "patches")
+        == {value[2]: value[4] for value in patches.values()},
+        "Playback patch files are missing, extra, or modified.",
+    )
+    require(
+        tree_hashes(record / "patched-sources") == after,
+        "Playback patched source files are missing, extra, or modified.",
+    )
+    # Verify the original side against the checksum-pinned source archives too.
+    # Neither patch text nor other build-record content is ever executed here.
+    roots = {PurePosixPath(name).parts[0] for name in before}
+    require(
+        roots == {value[1] for value in patches.values()},
+        "Playback patch component roots do not match their source file locks.",
+    )
+    for root in roots:
+        candidates = [
+            value for value in sources.values() if f"{value[0]}-{value[1]}" == root
+        ]
+        require(len(candidates) == 1, f"Unresolved patched source component: {root}")
+        component, _version, filename, _url, digest = candidates[0]
+        archive = source_cache / filename
+        require(
+            digest_file(archive) == digest,
+            f"Playback source archive checksum mismatch: {component}",
+        )
+        wanted = {
+            name: digest
+            for name, digest in before.items()
+            if PurePosixPath(name).parts[0] == root
+        }
+        found = {}
+        with tarfile.open(archive, mode="r:*") as contents:
+            for member in contents:
+                name = member.name.removeprefix("./")
+                if name not in wanted:
+                    continue
+                require(
+                    member.isfile()
+                    and name not in found
+                    and 0 < member.size <= 25 * 1024 * 1024,
+                    f"Invalid original patched-source entry: {name}",
+                )
+                stream = contents.extractfile(member)
+                require(
+                    stream is not None, f"Unreadable original patched source: {name}"
+                )
+                with stream:
+                    found[name] = hashlib.sha256(stream.read()).hexdigest()
+        require(
+            found == wanted,
+            f"Playback patch original source checksums do not match {component}.",
+        )
+
+
 def validate_configuration(record):
     toolchain = read_text(record / "toolchain.txt")
     require(
@@ -442,7 +540,12 @@ def validate_licenses(record, source_cache, sources):
 
 
 def verify_distribution(
-    dependencies, *, sources=None, source_cache=None, runner=native_command
+    dependencies,
+    *,
+    sources=None,
+    source_cache=None,
+    runner=native_command,
+    patch_spec=None,
 ):
     dependencies = dependencies.resolve(strict=True)
     record = dependencies / "playback-build-record"
@@ -459,12 +562,13 @@ def verify_distribution(
     cache = source_cache or Path(
         os.environ.get("SOURCE_CACHE_DIR", str(dependencies / "sources"))
     )
+    validate_patches(record, cache.resolve(strict=True), expected, patch_spec)
     validate_configuration(record)
     validate_headers(dependencies, record)
     validate_libraries(dependencies, record, runner)
     validate_licenses(record, cache.resolve(strict=True), expected)
     print(
-        f"Verified source-built playback distribution: {len(expected)} locked sources, 9 ARM64 dylibs, SDK, build options, and original licenses."
+        f"Verified source-built playback distribution: {len(expected)} locked sources, locked patches and modified sources, 9 ARM64 dylibs, SDK, build options, and original licenses."
     )
 
 

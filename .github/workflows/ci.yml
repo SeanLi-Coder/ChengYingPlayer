@@ -172,6 +172,9 @@ jobs:
           python other/verify_playback_distribution.py "$PWD/deps"
           bash Tools/RenderTestSupport/test_native_capability.sh
 
+      - name: Test real ICC profile memory ownership
+        run: bash Tools/ICCProfileTests/run.sh
+
       - name: Build bundled video tools
         run: |
           ./other/build_media_binaries.sh

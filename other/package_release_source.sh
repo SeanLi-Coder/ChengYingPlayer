@@ -74,6 +74,10 @@ install -m 644 "$PROJECT_ROOT/Tools/DownloaderHelper/runtime-artifacts.json" \
   printf '%s\n' "The download center preserves its upstream MIT source under Tools/DownloaderHelper/vendor/rednote/."
   printf '%s\n' "DownloadCenter-WHEEL-MANIFEST.json identifies pinned runtime wheels. Their verified sources and runtime source manifest are in third-party-sources/download-runtime/."
   printf '%s\n' "playback-build-record/ contains the exact source, configuration, toolchain and library checksums for this release build. The App inside the matching Apple-Silicon.dmg is the installable artifact."
+  printf '%s\n' "Playback patches in other/patches/ are applied automatically, in locked order, by other/build_playback_libraries.sh; playback-build-record/ preserves their exact bytes and original/modified source hashes."
+  # Expand PWD when the recipient follows these instructions, not during packaging.
+  # shellcheck disable=SC2016
+  printf '%s\n' 'To reuse the included playback source archives, run SOURCE_CACHE_DIR="$PWD/third-party-sources" bash other/build_playback_libraries.sh from this extracted package directory.'
   printf '%s\n' "See NOTICE.md and Legal/THIRD_PARTY_NOTICES.md before building or redistributing a binary."
 } > "$PACKAGE_DIR/RELEASE_SOURCE_README.txt"
 

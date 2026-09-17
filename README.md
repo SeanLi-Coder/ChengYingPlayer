@@ -212,6 +212,8 @@ open iina.xcodeproj
 
 `build_playback_libraries.sh` 从固定源码构建 libmpv、播放 FFmpeg 和 AV1 / 字幕 / 色彩管理依赖，保留 VideoToolbox 硬解、OpenGL、CoreAudio、ICC 与 HDR 所需能力。它与视频处理使用的 FFmpeg CLI 独立；不再从其他播放器的 DMG 提取动态库。原 `download_libs.sh` 仅保留作历史开发参考，不能用于发行构建。播放依赖目前仅支持原生 arm64 构建。
 
+播放库包含明确记录的 ICC 内存所有权修复与配置同步补丁，避免加载屏幕色彩配置时崩溃或配置未生效。`bash Tools/ICCProfileTests/run.sh` 使用真实 OpenGL / LCMS 检查借用内存、重复切换和 sRGB / Display P3 渲染像素；补丁、原始源码及修改前后校验值随对应 Release 源码包提供。
+
 媒体处理工具、WebP 编码器和三个 helper 也由固定输入构建。下载模块复用 Playwright 内置 Node 执行 yt-dlp 的 JavaScript 求解，不再额外打包 Deno；不改变原有下载质量、登录、代理和重试策略。AI 字幕在用户主动准备模型时建立独立运行环境。
 
 完整 App 通过验证后，用 `bash other/package_dmg.sh /绝对路径/ChengYing.app /已有输出目录/ChengYingPlayer-v<版本>-Apple-Silicon.dmg` 打包。脚本不会修改输入 App，不覆盖已有输出，并验证签名、arm64、内部动态依赖、只读挂载和拷贝完整性。正式 Developer ID 签名与公证需要自己的 Apple 开发者凭据；不得使用上游身份或在仓库中提交私钥。
