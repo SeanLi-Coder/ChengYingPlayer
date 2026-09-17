@@ -33,6 +33,26 @@ entitlements. Assertions require download, signature verification, the idle
 countdown and admission barrier, on-disk replacement, and a real version-2 process
 relaunch. The installed replacement is also code-signature verified.
 
+The fixture wraps the unchanged production user driver with a protocol-conforming
+observer. Every callback is forwarded to the real driver; state is read immediately
+after it returns and before invoking a potentially reentrant Sparkle reply. Journal
+events are never synthesized from expected state. This makes short download phases
+observable even if localhost delivery and extraction happen between timer ticks.
+Assertions also require that the production download window was actually visible.
+No artificial network delay or relaxed download/security assertion is used.
+
+Both real scenarios first run a deterministic, same-main-actor-turn regression:
+the real driver enters downloading, receives all advertised bytes and begins extraction
+without giving the run loop a chance to sample the intermediate phase. The callback
+observer must capture both transitions while the former 10 ms polling approach
+demonstrably misses downloading. Reentrant acknowledgements must be observed first
+and forwarded exactly once. Run only this bounded regression with:
+
+```sh
+SPARKLE_TEST_ROOT=/path/to/SourcePackages/artifacts/sparkle/Sparkle \
+  python3 -B Tools/AppUpdateIntegrationTests/run.py --scenario phase-observer
+```
+
 Only a newly generated, test-only CryptoKit key is used. The production signing
 secret is removed from the environment, and the login Keychain is never accessed.
 The fixture has its own random bundle identifier and preference domain; it does not

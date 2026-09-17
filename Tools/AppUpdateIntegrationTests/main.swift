@@ -19,10 +19,11 @@ final class FixtureActivity: UpdateActivityChecking {
 final class FixtureDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
   let activity = FixtureActivity()
   var driver: AppUpdateUserDriver!
+  var observedDriver: FixtureObservedUserDriver!
   var updater: SPUUpdater!
-  var phaseTimer: Timer?
   var previousPhase = ""
   var receivedAbort = false
+  var failureTerminationScheduled = false
   var journal: URL { URL(fileURLWithPath: Bundle.main.object(forInfoDictionaryKey: "FixtureJournal") as! String) }
 
   func record(_ event: String) {
@@ -36,6 +37,27 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate
     try! handle.close()
   }
 
+  func observeDriver() {
+    let phase = String(describing: driver.phase)
+    if previousPhase != phase {
+      previousPhase = phase
+      record("phase:\(phase)")
+      if phase == "downloading" {
+        record("download-visible:\(driver.windowController.window?.isVisible == true)")
+      } else if phase == "failed" {
+        record("failure:\(driver.presentation?.detail ?? "unknown")")
+      }
+    }
+    finishFailedUpdateIfReady()
+  }
+
+  private func finishFailedUpdateIfReady() {
+    guard driver?.phase == .failed, receivedAbort, !failureTerminationScheduled else { return }
+    failureTerminationScheduled = true
+    // Let the driver acknowledgement and structured Sparkle error unwind before exiting.
+    DispatchQueue.main.async { NSApp.terminate(nil) }
+  }
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as! String
     record("launched:\(version):\(ProcessInfo.processInfo.processIdentifier)")
@@ -47,24 +69,9 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate
     }
     activity.didAcquire = { [weak self] in self?.record("gate-acquired") }
     driver = AppUpdateUserDriver(activity: activity, location: { .supported })
-    updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: driver, delegate: self)
-    phaseTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] _ in
-      MainActor.assumeIsolated {
-        guard let self else { return }
-        let phase = String(describing: self.driver.phase)
-        if self.previousPhase != phase {
-          self.previousPhase = phase
-          self.record("phase:\(phase)")
-          if phase == "failed" {
-            self.record("failure:\(self.driver.presentation?.detail ?? "unknown")")
-          }
-        }
-        // Allow Sparkle to deliver its structured error after the driver presents failure.
-        if phase == "failed" && self.receivedAbort {
-          NSApp.terminate(nil)
-        }
-      }
-    }
+    observedDriver = FixtureObservedUserDriver(driver: driver)
+    observedDriver.didObserve = { [weak self] _ in self?.observeDriver() }
+    updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: observedDriver, delegate: self)
     do {
       try updater.start()
       updater.checkForUpdatesInBackground()
@@ -75,6 +82,7 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    if driver != nil { observeDriver() }
     if driver?.isInstalling == true {
       record("barrier:\(activity.installationBarrierIsSafe)")
       return activity.installationBarrierIsSafe ? .terminateNow : .terminateCancel
@@ -101,13 +109,19 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate
       cause = current.userInfo[NSUnderlyingErrorKey] as? NSError
     }
     record("failure:\(failure.domain):\(failure.code):\(failure.localizedDescription)")
+    finishFailedUpdateIfReady()
   }
 }
 
 MainActor.assumeIsolated {
   let app = NSApplication.shared
-  let delegate = FixtureDelegate()
-  app.delegate = delegate
-  app.setActivationPolicy(.accessory)
-  app.run()
+  if CommandLine.arguments.contains("--phase-observer-regression") {
+    app.setActivationPolicy(.prohibited)
+    runPhaseObserverRegression()
+  } else {
+    let delegate = FixtureDelegate()
+    app.delegate = delegate
+    app.setActivationPolicy(.accessory)
+    app.run()
+  }
 }

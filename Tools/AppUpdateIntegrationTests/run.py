@@ -32,9 +32,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--scenario",
-        choices=("upgrade", "tampered-dmg"),
+        choices=("upgrade", "tampered-dmg", "phase-observer"),
         default="upgrade",
-        help="Exercise real replacement, or rejection of a modified signed archive.",
+        help="Exercise replacement, archive rejection, or same-turn driver observation.",
     )
     scenario = parser.parse_args().scenario
     os.environ.pop("SPARKLE_ED25519_PRIVATE_KEY", None)
@@ -103,6 +103,8 @@ def main():
             "-Xlinker",
             "@executable_path/../Frameworks",
             *map(str, sources),
+            str(Path(__file__).with_name("ObservedUserDriver.swift")),
+            str(Path(__file__).with_name("ObserverRegression.swift")),
             str(Path(__file__).with_name("main.swift")),
             "-o",
             str(content / "MacOS/UpdateFixture"),
@@ -148,6 +150,11 @@ def main():
                 str(app),
             )
             run("codesign", "--verify", "--deep", "--strict", str(app))
+        run(str(content / "MacOS/UpdateFixture"), "--phase-observer-regression")
+        if scenario == "phase-observer":
+            server.shutdown()
+            server.server_close()
+            return
         original_files = {
             relative: hashlib.sha256((content / relative).read_bytes()).digest()
             for relative in ("Info.plist", "MacOS/UpdateFixture")
@@ -262,6 +269,7 @@ def main():
                 for required in (
                     "launched:1:",
                     "phase:downloading",
+                    "download-visible:true",
                     "download-completed",
                     "phase:waiting",
                     "barrier:true",
