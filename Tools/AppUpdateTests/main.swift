@@ -114,18 +114,65 @@ check(UpdateInstallationLocation.evaluate(path: "/Applications/ChengYing.app", i
 
 let suite = "org.chengying.tests.updates.\(UUID().uuidString)"
 let defaults = UserDefaults(suiteName: suite)!
+let unrelatedPreference = "ChengYingTestsPreferredSubtitleLanguage"
 defaults.set(false, forKey: AppUpdatePreferences.automaticChecksKey)
+defaults.set(true, forKey: "SUAutomaticallyUpdate")
+defaults.set("ja", forKey: unrelatedPreference)
 AppUpdatePreferences.migrate(defaults)
 check(defaults.bool(forKey: AppUpdatePreferences.automaticChecksKey), "Legacy disabled default migrates once")
+check(!defaults.bool(forKey: "SUAutomaticallyUpdate"), "Migration selects visible downloads over Sparkle silent downloads")
+for launch in 1...3 {
+  // Recreate the preferences object using the same domain, as a later version does.
+  let upgradedDefaults = UserDefaults(suiteName: suite)!
+  AppUpdatePreferences.migrate(upgradedDefaults)
+  check(upgradedDefaults.bool(forKey: AppUpdatePreferences.automaticChecksKey)
+        && upgradedDefaults.bool(forKey: AppUpdatePreferences.migrationKey),
+        "Later launch \(launch) preserves migrated automatic checks")
+  check(!upgradedDefaults.bool(forKey: "SUAutomaticallyUpdate"),
+        "Later launch \(launch) keeps the visible download policy")
+  check(upgradedDefaults.string(forKey: unrelatedPreference) == "ja",
+        "Later launch \(launch) preserves unrelated user preferences")
+}
 defaults.set(false, forKey: AppUpdatePreferences.automaticChecksKey)
+defaults.set("en", forKey: unrelatedPreference)
 AppUpdatePreferences.migrate(defaults)
 check(!defaults.bool(forKey: AppUpdatePreferences.automaticChecksKey), "Subsequent user opt-out is preserved")
+for launch in 1...3 {
+  let upgradedDefaults = UserDefaults(suiteName: suite)!
+  AppUpdatePreferences.migrate(upgradedDefaults)
+  check(!upgradedDefaults.bool(forKey: AppUpdatePreferences.automaticChecksKey)
+        && upgradedDefaults.bool(forKey: AppUpdatePreferences.migrationKey),
+        "Later launch \(launch) preserves explicit user opt-out")
+  check(!upgradedDefaults.bool(forKey: "SUAutomaticallyUpdate"),
+        "Opted-out launch \(launch) keeps the visible download policy")
+  check(upgradedDefaults.string(forKey: unrelatedPreference) == "en",
+        "Opted-out launch \(launch) preserves subsequent user preference changes")
+}
 defaults.removePersistentDomain(forName: suite)
-defaults.setVolatileDomain([AppUpdatePreferences.automaticChecksKey: false], forName: UserDefaults.argumentDomain)
+defaults.set(true, forKey: AppUpdatePreferences.automaticChecksKey)
+defaults.set(true, forKey: "SUAutomaticallyUpdate")
+defaults.set("ja", forKey: unrelatedPreference)
+// Preserve unrelated launch arguments, including the screenshot localization.
+let originalArguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+var disabledArguments = originalArguments
+disabledArguments[AppUpdatePreferences.automaticChecksKey] = false
+defaults.setVolatileDomain(disabledArguments, forName: UserDefaults.argumentDomain)
 AppUpdatePreferences.migrate(defaults)
 check(!defaults.bool(forKey: AppUpdatePreferences.automaticChecksKey) && !defaults.bool(forKey: AppUpdatePreferences.migrationKey),
       "Command-line disable is honored and does not consume the migration")
-defaults.removeVolatileDomain(forName: UserDefaults.argumentDomain)
+check(defaults.persistentDomain(forName: suite)?[AppUpdatePreferences.automaticChecksKey] as? Bool == true,
+      "Command-line disable takes precedence without overwriting the saved preference")
+check(defaults.bool(forKey: "SUAutomaticallyUpdate") && defaults.string(forKey: unrelatedPreference) == "ja",
+      "Command-line disable leaves pending migration and unrelated preferences untouched")
+defaults.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain)
+let subsequentDefaults = UserDefaults(suiteName: suite)!
+AppUpdatePreferences.migrate(subsequentDefaults)
+check(subsequentDefaults.bool(forKey: AppUpdatePreferences.automaticChecksKey)
+      && subsequentDefaults.bool(forKey: AppUpdatePreferences.migrationKey)
+      && !subsequentDefaults.bool(forKey: "SUAutomaticallyUpdate"),
+      "A later normal launch performs migration after the command-line override is removed")
+check(subsequentDefaults.string(forKey: unrelatedPreference) == "ja",
+      "Deferred migration preserves unrelated user preferences")
 defaults.removePersistentDomain(forName: suite)
 
 MainActor.assumeIsolated {

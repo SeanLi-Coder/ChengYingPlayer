@@ -42,6 +42,11 @@ jobs:
             Tools/DownloaderHelper/requirements-dev.txt
             Tools/DownloaderHelper/requirements-runtime.txt
 
+      - name: Test automatic-update release continuity and delivery policy
+        run: |
+          python3 -B Tools/SparkleUpdateTests/test_release_policy.py
+          python3 -B Tools/SparkleUpdateTests/test_release_delivery.py
+
       - name: Install test dependencies
         run: |
           brew install ffmpeg
@@ -484,6 +489,29 @@ jobs:
             --sparkle-root "$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle"
           echo "path=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_OUTPUT"
 
+      - name: Verify the update with the previous stable client's public key
+        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'SeanLi-Coder/ChengYingPlayer'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest_tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          gh api --method GET "repos/$GITHUB_REPOSITORY/contents/Configs/Deployment.xcconfig" \
+            -f "ref=$latest_tag" > "$RUNNER_TEMP/previous-release-config.json"
+          gh api --method GET "repos/$GITHUB_REPOSITORY/contents/iina/Info.plist" \
+            -f "ref=$latest_tag" > "$RUNNER_TEMP/previous-release-info.json"
+          gh api --method GET "repos/$GITHUB_REPOSITORY/contents/Configs/iina.xcconfig" \
+            -f "ref=$latest_tag" > "$RUNNER_TEMP/previous-project-config.json"
+          python3 -B other/validate_release_progress.py \
+            --previous-tag "$latest_tag" --tag "$GITHUB_REF_NAME" \
+            --previous-configuration "$RUNNER_TEMP/previous-release-config.json" \
+            --previous-info "$RUNNER_TEMP/previous-release-info.json" \
+            --info-plist iina/Info.plist \
+            --previous-project-configuration "$RUNNER_TEMP/previous-project-config.json" \
+            --project-configuration Configs/iina.xcconfig \
+            --built-info-plist "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app/Contents/Info.plist" \
+            --appcast "${{ steps.appcast.outputs.path }}"
+
       - name: Package release source
         if: startsWith(github.ref, 'refs/tags/')
         id: package
@@ -527,7 +555,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/') && github.repository == 'SeanLi-Coder/ChengYingPlayer'
     needs: [media-helper-tests, build-apple-silicon]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     concurrency:
       group: chengying-release-publication
       cancel-in-progress: false
@@ -578,9 +606,17 @@ jobs:
           latest_tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
           gh api --method GET "repos/$GITHUB_REPOSITORY/contents/Configs/Deployment.xcconfig" \
             -f "ref=$latest_tag" > "$RUNNER_TEMP/previous-release-config.json"
+          gh api --method GET "repos/$GITHUB_REPOSITORY/contents/iina/Info.plist" \
+            -f "ref=$latest_tag" > "$RUNNER_TEMP/previous-release-info.json"
+          gh api --method GET "repos/$GITHUB_REPOSITORY/contents/Configs/iina.xcconfig" \
+            -f "ref=$latest_tag" > "$RUNNER_TEMP/previous-project-config.json"
           python3 -B other/validate_release_progress.py \
             --previous-tag "$latest_tag" --tag "$GITHUB_REF_NAME" \
             --previous-configuration "$RUNNER_TEMP/previous-release-config.json" \
+            --previous-info "$RUNNER_TEMP/previous-release-info.json" \
+            --info-plist iina/Info.plist \
+            --previous-project-configuration "$RUNNER_TEMP/previous-project-config.json" \
+            --project-configuration Configs/iina.xcconfig \
             --appcast dist/appcast.xml
 
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -616,15 +652,17 @@ jobs:
                 exit 1
               fi
             done
-            gh release upload "$GITHUB_REF_NAME" "${release_assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$GITHUB_REF_NAME" "${release_assets[@]}" \
+            gh release create "$GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY" \
               --draft \
               --title "澄影视界 $GITHUB_REF_NAME · Apple Silicon" \
               --verify-tag \
               --notes "下载 Apple-Silicon.dmg，打开后将 ChengYing 拖到 Applications 即可安装，支持 M4 Max 等 Apple Silicon Mac。无需 Homebrew 或 Python。此版本使用 ad-hoc 签名，尚未经过 Apple 公证；首次打开可能需要在系统设置 → 隐私与安全性中选择‘仍要打开’，无需关闭 Gatekeeper。macOS 12+ 可使用本地播放/编辑，下载中心需要 macOS 13.5+ 及自行安装的 Google Chrome。Release-Source.tar.gz 是与此版本对应的应用源码、播放组件和依赖源码及构建记录，不是安装包。"
           fi
+
+          # Retry only missing assets; never overwrite an existing remote asset.
+          python3 -B other/release_delivery.py upload --tag "$GITHUB_REF_NAME" --directory dist
 
           # Draft releases are not available through the REST release-by-tag endpoint.
           # Resolve one exact tag across all pages, then verify that same release by ID.
@@ -646,8 +684,8 @@ jobs:
           if len(matches) != 1:
               raise SystemExit("Expected exactly one release for the requested tag.")
           release = matches[0]
-          if release.get("draft") is not True or type(release.get("id")) is not int or release["id"] <= 0:
-              raise SystemExit("Refusing to publish a non-draft release or an invalid release ID.")
+          if release.get("draft") is not True or release.get("prerelease") is not False or type(release.get("id")) is not int or release["id"] <= 0:
+              raise SystemExit("Refusing to publish a non-stable draft release or an invalid release ID.")
           print(release["id"])
           PY
           )"
@@ -661,7 +699,7 @@ jobs:
           release = json.loads(Path(sys.argv[1]).read_text())
           expected = {Path(path).name: Path(path) for path in sys.argv[4:]}
           assets = release["assets"]
-          if release.get("id") != int(sys.argv[2]) or release.get("tag_name") != sys.argv[3] or release.get("draft") is not True:
+          if release.get("id") != int(sys.argv[2]) or release.get("tag_name") != sys.argv[3] or release.get("draft") is not True or release.get("prerelease") is not False:
               raise SystemExit("The resolved release identity or draft state changed before verification.")
           if len(expected) != 6 or len(assets) != len(expected) or {asset["name"] for asset in assets} != set(expected):
               raise SystemExit("The draft release does not contain exactly the verified asset set.")
@@ -673,4 +711,6 @@ jobs:
                   raise SystemExit(f"Uploaded release asset failed integrity verification: {path.name}")
           print("All DMG, corresponding source, checksum, manifest and signed appcast assets are complete and verified.")
           PY
-          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest
+          python3 -B other/release_delivery.py verify-public \
+            --tag "$GITHUB_REF_NAME" --appcast dist/appcast.xml --archive "${dmgs[0]}"

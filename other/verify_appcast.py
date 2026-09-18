@@ -45,6 +45,27 @@ def version_tuple(value):
     return parts + (0,) * (3 - len(parts))
 
 
+def validate_update_settings(info):
+    require(isinstance(info, dict), "Invalid application update configuration.")
+    require(info.get("SUFeedURL") == FEED_URL, "Unexpected update feed URL.")
+    public_key = decode_public_key(info.get("SUPublicEDKey"))
+    required = {
+        "SUEnableAutomaticChecks": True,
+        "SUAllowsAutomaticUpdates": True,
+        "SUAutomaticallyUpdate": False,
+        "SURequireSignedFeed": True,
+        "SUVerifyUpdateBeforeExtraction": True,
+    }
+    for key, expected in required.items():
+        require(info.get(key) is expected, f"Unexpected update setting: {key}.")
+    expiration = info.get("SUSignedFeedFailureExpirationInterval")
+    require(
+        type(expiration) is int and expiration == 0,
+        "Feed verification must fail closed.",
+    )
+    return public_key
+
+
 def validate_info(info, tag):
     require(re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag), "Invalid release tag.")
     require(info.get("CFBundleIdentifier") == BUNDLE_ID, "Unexpected app identity.")
@@ -54,18 +75,7 @@ def validate_info(info, tag):
         isinstance(build, str) and re.fullmatch(r"[1-9][0-9]*", build),
         "Invalid build number.",
     )
-    require(info.get("SUFeedURL") == FEED_URL, "Unexpected update feed URL.")
-    key = decode_public_key(info.get("SUPublicEDKey"))
-    require(info.get("SURequireSignedFeed") is True, "Signed feeds must be required.")
-    require(
-        info.get("SUVerifyUpdateBeforeExtraction") is True,
-        "Archives must be verified before extraction.",
-    )
-    expiration = info.get("SUSignedFeedFailureExpirationInterval")
-    require(
-        type(expiration) is int and expiration == 0,
-        "Feed verification must fail closed.",
-    )
+    key = validate_update_settings(info)
     require(
         version_tuple(info.get("LSMinimumSystemVersion")) == (12, 0, 0),
         "Unexpected minimum macOS version.",
@@ -174,6 +184,21 @@ def compile_verifier(destination):
     subprocess.run(["xcrun", "swiftc", str(source), "-o", str(destination)], check=True)
 
 
+def verify_feed_signature(data, public_key, verifier=None):
+    """Verify feed bytes against an already trusted public key on macOS."""
+    decode_public_key(public_key)
+    content, signature = signed_content(data)
+    with tempfile.TemporaryDirectory(prefix="chengying-feed-signature-") as directory:
+        temporary = Path(directory)
+        if verifier is None:
+            verifier = temporary / "verify-ed25519"
+            compile_verifier(verifier)
+        body = temporary / "signed-feed.xml"
+        body.write_bytes(content)
+        subprocess.run([str(verifier), public_key, signature, str(body)], check=True)
+    return content
+
+
 def verify(appcast, archive, info, tag, verifier=None):
     for path in (appcast, archive):
         require(
@@ -181,17 +206,12 @@ def verify(appcast, archive, info, tag, verifier=None):
             "Release input must be a regular file.",
         )
     public_key = validate_info(info, tag)
-    content, feed_signature = signed_content(appcast.read_bytes())
     with tempfile.TemporaryDirectory(prefix="chengying-feed-verify-") as directory:
         temporary = Path(directory)
         if verifier is None:
             verifier = temporary / "verify-ed25519"
             compile_verifier(verifier)
-        body = temporary / "signed-feed.xml"
-        body.write_bytes(content)
-        subprocess.run(
-            [str(verifier), public_key, feed_signature, str(body)], check=True
-        )
+        content = verify_feed_signature(appcast.read_bytes(), public_key, verifier)
         archive_signature = validate_feed(content, archive, info, tag)
         subprocess.run(
             [str(verifier), public_key, archive_signature, str(archive)], check=True

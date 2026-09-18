@@ -54,6 +54,9 @@ class SignedUpdates(unittest.TestCase):
             "LSMinimumSystemVersion": "12.0",
             "SUFeedURL": policy.FEED_URL,
             "SUPublicEDKey": cls.public,
+            "SUEnableAutomaticChecks": True,
+            "SUAllowsAutomaticUpdates": True,
+            "SUAutomaticallyUpdate": False,
             "SURequireSignedFeed": True,
             "SUVerifyUpdateBeforeExtraction": True,
             "SUSignedFeedFailureExpirationInterval": 0,
@@ -178,6 +181,9 @@ class SignedUpdates(unittest.TestCase):
             "CFBundleVersion": "100-beta",
             "SUFeedURL": "https://iina.io/appcast.xml",
             "SUPublicEDKey": "invalid",
+            "SUEnableAutomaticChecks": False,
+            "SUAllowsAutomaticUpdates": False,
+            "SUAutomaticallyUpdate": True,
             "SURequireSignedFeed": False,
             "SUVerifyUpdateBeforeExtraction": False,
             "SUSignedFeedFailureExpirationInterval": 1728000,
@@ -286,7 +292,27 @@ class SignedUpdates(unittest.TestCase):
                 b"CURRENT_PROJECT_VERSION = 99\nMARKETING_VERSION = 99.0.0\n"
             ).decode(),
         }
-        progress.validate_progress("v99.0.0", self.tag, configuration, self.original)
+        project_configuration = f"PRODUCT_BUNDLE_IDENTIFIER = {policy.BUNDLE_ID}\n"
+        continuity = {
+            "previous_info": {
+                "type": "file",
+                "path": "iina/Info.plist",
+                "encoding": "base64",
+                "content": base64.b64encode(plistlib.dumps(self.info)).decode(),
+            },
+            "info": self.info,
+            "previous_project_configuration": {
+                "type": "file",
+                "path": "Configs/iina.xcconfig",
+                "encoding": "base64",
+                "content": base64.b64encode(project_configuration.encode()).decode(),
+            },
+            "project_configuration": project_configuration,
+        }
+        progress.validate_progress(
+            "v99.0.0", self.tag, configuration, self.original,
+            **continuity, built_info=self.info,
+        )
         for previous, current in (
             (self.tag, self.tag),
             ("v100.0.0", self.tag),
@@ -294,7 +320,7 @@ class SignedUpdates(unittest.TestCase):
         ):
             with self.subTest(previous=previous), self.assertRaises(ValueError):
                 progress.validate_progress(
-                    previous, current, configuration, self.original
+                    previous, current, configuration, self.original, **continuity
                 )
         for build in ("100", "101", "invalid"):
             changed = dict(
@@ -304,7 +330,16 @@ class SignedUpdates(unittest.TestCase):
                 ).decode(),
             )
             with self.subTest(build=build), self.assertRaises(ValueError):
-                progress.validate_progress("v99.0.0", self.tag, changed, self.original)
+                progress.validate_progress(
+                    "v99.0.0", self.tag, changed, self.original, **continuity
+                )
+
+    def test_new_feed_must_verify_with_the_previously_installed_public_key(self):
+        policy.verify_feed_signature(self.original, self.public, self.verifier)
+        with self.assertRaises(subprocess.CalledProcessError):
+            policy.verify_feed_signature(
+                self.original, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", self.verifier
+            )
 
     def test_signing_failure_does_not_echo_private_input_or_tool_output(self):
         failure = subprocess.CompletedProcess(

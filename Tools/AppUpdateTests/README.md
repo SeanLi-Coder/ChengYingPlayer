@@ -18,6 +18,14 @@ read-only installation locations, content-length changes/overflow, hidden versus
 cancelled windows, already-installing updates, busy countdown reset, asynchronous
 barrier races, safe retry after termination veto, and quiet background failures.
 
+Preference regressions recreate `UserDefaults` with the same random test domain
+for three simulated later-version launches. They verify migrated automatic checks,
+an explicit user opt-out, visible downloads (`SUAutomaticallyUpdate = false`),
+and unrelated user preferences all persist. Command-line disable remains an
+argument-domain override: it does not overwrite stored settings or consume the
+migration, which runs on a later normal launch. These tests simulate preference
+reuse; they do not claim to perform sequential application replacements.
+
 Native AppKit screenshots cover light download progress, dark task waiting, and
 the restart countdown. Actual view bounds and Auto Layout diagnostics are checked.
 These tests never contact a release feed, replace an app, or terminate playback.
