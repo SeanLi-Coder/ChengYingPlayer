@@ -18,6 +18,7 @@ final class SubtitleToolsService {
   private var statusRequestID: String?
   private var existingSiblingNames = Set<String>()
   private var lastModelRefresh = Date.distantPast
+  private var attemptedAutomaticVerification = false
   private let dataDirectory: () throws -> URL
 
   var subtitleModels: [SubtitleToolsModel] { models.filter { $0.id != "summarizer" } }
@@ -58,6 +59,19 @@ final class SubtitleToolsService {
   }
 
   @discardableResult
+  func verifyModels() throws -> String {
+    try requireAvailable()
+    return try launch(operation: .verify, inputURL: nil, language: nil, burnSubtitles: nil)
+  }
+
+  @discardableResult
+  func deleteModel(id: String) throws -> String {
+    try requireAvailable()
+    guard SubtitleToolsModel.allModels.contains(where: { $0.id == id }) else { throw SubtitleToolsError.invalidInput }
+    return try launch(operation: .deleteModel, inputURL: nil, language: nil, burnSubtitles: nil, modelID: id)
+  }
+
+  @discardableResult
   func summarize(source: String) throws -> String {
     try requireAvailable()
     guard hardware.canGenerate else { throw SummaryToolsError.insufficientMemory }
@@ -82,7 +96,8 @@ final class SubtitleToolsService {
 
   func cancelCurrent() {
     precondition(Thread.isMainThread)
-    guard var current = task, current.isActive, current.phase != .cancelling else { return }
+    guard var current = task, current.isActive, current.phase != .cancelling,
+          current.operation != .deleteModel else { return }
     current.phase = .cancelling
     current.etaSeconds = nil
     task = current
@@ -112,19 +127,21 @@ final class SubtitleToolsService {
   }
 
   private func launch(operation: SubtitleToolsOperation, inputURL: URL?, language: String?, burnSubtitles: Bool?,
-                      sourceURL: URL? = nil, purpose: String? = nil) throws -> String {
+                      sourceURL: URL? = nil, purpose: String? = nil, modelID: String? = nil) throws -> String {
     let id = UUID().uuidString
     task = SubtitleToolsTask(id: id, operation: operation, inputURL: inputURL)
     task?.burnSubtitles = burnSubtitles == true
     task?.sourceURL = sourceURL
     task?.purpose = purpose
+    // Explicit work and automatic verification both consume this helper lifetime's scan.
+    attemptedAutomaticVerification = true
     statusError = nil
     notify()
     do {
       try transport.send(SubtitleToolsRequest(
-        id: id, command: operation == .prepare ? "prepare" : operation == .summary ? "summarize" : "start",
+        id: id, command: operation.command,
         inputPath: inputURL?.path, language: language, burnSubtitles: burnSubtitles,
-        sourceURL: sourceURL?.absoluteString, purpose: purpose
+        sourceURL: sourceURL?.absoluteString, purpose: purpose, modelID: modelID
       ))
     } catch {
       handleFailure(error)
@@ -135,7 +152,14 @@ final class SubtitleToolsService {
 
   private func handle(_ event: SubtitleToolsEvent) {
     precondition(Thread.isMainThread)
-    if event.type == .ready { notify(); return }
+    if event.type == .ready {
+      // A restarted helper has a fresh in-memory verification cache.
+      attemptedAutomaticVerification = task?.isActive == true
+      runtimeReady = false
+      models = models.map { model in var value = model; value.ready = false; return value }
+      notify()
+      return
+    }
     let matchesStatus = event.id != nil && event.id == statusRequestID
     if event.type == .status, !matchesStatus { return }
     let matchesTask = task.map { current in
@@ -151,6 +175,8 @@ final class SubtitleToolsService {
           result.totalBytes = max(0, update.totalBytes)
           result.downloadedBytes = max(0, update.downloadedBytes)
           result.ready = update.ready
+          result.storedBytes = update.storedBytes.map { max(0, $0) }
+          result.needsRepair = update.needsRepair
           return result
         }
       }
@@ -159,6 +185,11 @@ final class SubtitleToolsService {
       statusRequestID = nil
       statusError = event.error
       notify()
+      if statusError == nil, !attemptedAutomaticVerification, task?.isActive != true,
+         models.contains(where: { $0.downloadedBytes > 0 && !$0.ready }) {
+        // Hash local files only. This must never resume or start a network download.
+        do { try verifyModels() } catch { statusError = error.localizedDescription; notify() }
+      }
       return
     }
     if event.type == .failed, matchesStatus {
@@ -169,14 +200,14 @@ final class SubtitleToolsService {
     }
     guard var current = task, current.isActive, event.id == current.id else { return }
     if let operation = event.operation, operation != current.operation { return }
-    if (current.operation == .summary || current.purpose == "summary"),
+    if (current.operation == .summary || current.operation == .verify || current.operation == .deleteModel || current.purpose == "summary"),
        let stage = event.stage, stage != current.stage {
       current.downloadedBytes = 0
       current.totalBytes = 0
     }
     current.stage = event.stage ?? current.stage
     current.message = event.message ?? current.message
-    if current.operation == .summary || current.purpose == "summary" {
+    if current.operation == .summary || current.operation == .verify || current.operation == .deleteModel || current.purpose == "summary" {
       // Missing progress means unknown, including when the next stage has no denominator.
       current.progress = event.progress.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil }
     } else if let progress = event.progress, progress.isFinite { current.progress = min(1, max(0, progress)) }
@@ -240,8 +271,13 @@ final class SubtitleToolsService {
     }
     if !current.isActive { current.etaSeconds = nil }
     task = current
+    let managesModels = [.prepare, .verify, .deleteModel].contains(current.operation)
+    if managesModels && !current.isActive {
+      // A pre-completion status snapshot must not overwrite the terminal model state.
+      statusRequestID = nil
+    }
     notify()
-    if current.operation == .prepare,
+    if managesModels,
        !current.isActive || Date().timeIntervalSince(lastModelRefresh) >= 1 {
       lastModelRefresh = Date()
       refreshStatus()

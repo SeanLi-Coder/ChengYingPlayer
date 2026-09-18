@@ -23,7 +23,17 @@
 - Keep automatic downloads visible and defer replacement while playback, editing,
   exports, downloads or other protected work remains active. Preserve media, model
   files, user preferences and download history across updates.
-- Do not publish a release unless the user's active request authorizes publication.
+- The user has given standing authorization to automatically publish future player
+  changes after implementation and verification. Continue through versioning,
+  commit/tag/push, stable release publication and public update delivery checks
+  without asking for a separate release confirmation on every change.
+- This authorization applies only to this player repository and its existing
+  release workflow. Preserve any later user request to defer publication. Do not
+  bypass failed checks, publish incomplete builds, access secrets outside the
+  established signing workflow, or expand publication to unrelated projects.
+- If release verification fails or required access is unavailable, keep the
+  incomplete release unpublished, report the blocker accurately, and continue
+  safe fixes or retries within the requested scope.
 
 ## Communication
 

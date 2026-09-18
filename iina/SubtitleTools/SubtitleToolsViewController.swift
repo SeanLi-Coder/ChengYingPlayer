@@ -18,6 +18,7 @@ final class SubtitleToolsViewController: NSViewController {
   private static let languages = ["auto", "zh", "yue", "en", "ja", "ko"]
   private weak var player: PlayerCore?
   private let service: SubtitleToolsService
+  private let confirmModelDeletion: SubtitleToolsModelDeletion.Confirmation
   private var observers = [NSObjectProtocol]()
   private var ownedTaskID: String?
   private var ownedMediaGeneration: UInt64?
@@ -29,6 +30,8 @@ final class SubtitleToolsViewController: NSViewController {
   private let burnCheckbox = NSButton(checkboxWithTitle: subtitleToolsString("generate.burn"), target: nil, action: nil)
   private let generateButton = NSButton(title: subtitleToolsString("generate.run"), target: nil, action: nil)
   private let prepareButton = NSButton(title: subtitleToolsString("models.download"), target: nil, action: nil)
+  private let verifyButton = NSButton(title: subtitleToolsString("models.verify_local"), target: nil, action: nil)
+  private let runtimeLabel = NSTextField(labelWithString: "")
   private let cancelButton = NSButton(title: subtitleToolsString("task.cancel"), target: nil, action: nil)
   private let revealButton = NSButton(title: subtitleToolsString("task.reveal"), target: nil, action: nil)
   private let statusLabel = NSTextField(labelWithString: "")
@@ -38,13 +41,16 @@ final class SubtitleToolsViewController: NSViewController {
   private var modelsGroup: NSStackView!
   private var modelLabels = [String: NSTextField]()
   private var modelProgress = [String: NSProgressIndicator]()
+  private var modelDeleteButtons = [String: NSButton]()
   private weak var scrollView: NSScrollView?
   private weak var documentView: NSView?
   private weak var contentStack: NSStackView?
 
-  init(player: PlayerCore, service: SubtitleToolsService = .shared) {
+  init(player: PlayerCore, service: SubtitleToolsService = .shared,
+       confirmModelDeletion: @escaping SubtitleToolsModelDeletion.Confirmation = SubtitleToolsModelDeletion.confirm) {
     self.player = player
     self.service = service
+    self.confirmModelDeletion = confirmModelDeletion
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -115,7 +121,8 @@ final class SubtitleToolsViewController: NSViewController {
     generationGroup.spacing = 14
     stack.addArrangedSubview(generationGroup)
 
-    var modelViews: [NSView] = [label(subtitleToolsString("models.fixed"), secondary: true)]
+    styleDescription(runtimeLabel)
+    var modelViews: [NSView] = [label(subtitleToolsString("models.fixed"), secondary: true), runtimeLabel]
     for model in SubtitleToolsModel.fixedModels {
       let role = sectionLabel(subtitleToolsString("models.role.\(model.id)"))
       role.textColor = ChengYingStyle.accent
@@ -132,13 +139,24 @@ final class SubtitleToolsViewController: NSViewController {
       bar.maxValue = 1
       modelLabels[model.id] = details
       modelProgress[model.id] = bar
-      modelViews.append(ChengYingStyle.card(vertical([role, name, details, bar])))
+      let remove = NSButton(title: subtitleToolsString("models.delete"), target: self, action: #selector(deleteModel(_:)))
+      remove.identifier = NSUserInterfaceItemIdentifier("subtitle.delete.\(model.id)")
+      remove.setAccessibilityLabel(String(format: subtitleToolsString("models.delete_accessibility"), model.name))
+      ChengYingStyle.secondaryButton(remove)
+      remove.image = ChengYingStyle.symbol("trash")
+      remove.imagePosition = .imageLeading
+      modelDeleteButtons[model.id] = remove
+      modelViews.append(ChengYingStyle.card(vertical([role, name, details, bar, remove])))
     }
     configure(prepareButton, action: #selector(prepare(_:)))
     ChengYingStyle.primaryButton(prepareButton)
     prepareButton.image = ChengYingStyle.symbol("arrow.down.circle")
     prepareButton.imagePosition = .imageLeading
     modelViews.append(prepareButton)
+    configure(verifyButton, action: #selector(verifyModels(_:)))
+    ChengYingStyle.secondaryButton(verifyButton)
+    modelViews.append(verifyButton)
+    modelViews.append(label(subtitleToolsString("models.verify_hint"), secondary: true))
     modelViews.append(label(subtitleToolsString("models.resume_hint"), secondary: true))
     let qwenLicense = NSButton(title: "Qwen · Apache 2.0", target: self, action: #selector(openQwenLicense(_:)))
     let hyLicense = NSButton(title: "HY-MT2 · Tencent Hy Community License", target: self, action: #selector(openHYLicense(_:)))
@@ -256,6 +274,20 @@ final class SubtitleToolsViewController: NSViewController {
 
   @objc private func cancel(_ sender: NSButton) { service.cancelCurrent() }
 
+  @objc private func verifyModels(_ sender: NSButton) {
+    do { try service.verifyModels() } catch { showError(error.localizedDescription) }
+  }
+
+  @objc private func deleteModel(_ sender: NSButton) {
+    guard service.task?.isActive != true,
+          let id = modelDeleteButtons.first(where: { $0.value === sender })?.key,
+          let model = service.models.first(where: { $0.id == id }), model.localBytes > 0 else { return }
+    confirmModelDeletion(model, view.window) { [weak self] confirmed in
+      guard confirmed, let self else { return }
+      do { try self.service.deleteModel(id: model.id) } catch { self.showError(error.localizedDescription) }
+    }
+  }
+
   @objc private func reveal(_ sender: NSButton) {
     guard let task = service.task else { return }
     let urls = [task.assURL, task.srtURL, task.videoURL].compactMap { $0 }
@@ -308,18 +340,22 @@ final class SubtitleToolsViewController: NSViewController {
     languagePopup.isEnabled = !active
     burnCheckbox.isEnabled = !active
     prepareButton.isEnabled = service.hardware.supportsRuntime && !active
+    verifyButton.isEnabled = service.hardware.supportsRuntime && !active && service.models.contains { $0.localBytes > 0 }
     let partial = service.subtitleModels.contains { $0.downloadedBytes > 0 && !$0.ready }
     let completeBytes = service.subtitleModels.allSatisfy { $0.totalBytes > 0 && $0.downloadedBytes >= $0.totalBytes }
-    prepareButton.title = subtitleToolsString(service.isReady || completeBytes ? "models.verify" : partial ? "models.resume" : "models.download")
-    cancelButton.isHidden = !active
-    cancelButton.isEnabled = task?.phase != .cancelling
+    prepareButton.title = subtitleToolsString(service.isReady || completeBytes ? "models.repair" : partial ? "models.resume" : "models.download")
+    runtimeLabel.stringValue = subtitleToolsString(service.runtimeReady ? "models.runtime_ready" : "models.runtime_pending")
+    runtimeLabel.textColor = service.runtimeReady ? .secondaryLabelColor : .systemOrange
+    cancelButton.isHidden = !active || task?.operation == .deleteModel
+    cancelButton.isEnabled = task?.phase != .cancelling && task?.operation != .deleteModel
     cancelButton.title = subtitleToolsString(task?.operation == .prepare ? "models.pause" : "task.cancel")
     revealButton.isHidden = task?.assURL == nil && task?.srtURL == nil && task?.videoURL == nil
     for model in service.models {
       let total = model.totalBytes > 0 ? bytes(model.totalBytes) : subtitleToolsString("models.unknown_size")
-      let state = subtitleToolsString(model.ready ? "models.ready" : "models.not_ready")
+      let state = subtitleToolsString(model.stateKey)
       modelLabels[model.id]?.stringValue = "\(bytes(model.downloadedBytes)) / \(total) · \(state)"
       modelProgress[model.id]?.doubleValue = model.ready ? 1 : model.totalBytes > 0 ? min(1, Double(model.downloadedBytes) / Double(model.totalBytes)) : 0
+      modelDeleteButtons[model.id]?.isEnabled = service.hardware.supportsRuntime && !active && model.localBytes > 0
     }
     progress.isIndeterminate = active && task?.progress == nil
     if progress.isIndeterminate { progress.startAnimation(nil) } else { progress.stopAnimation(nil) }
@@ -332,19 +368,27 @@ final class SubtitleToolsViewController: NSViewController {
       case .starting: phaseKey = "status.starting"
       case .running: phaseKey = "status.running"
       case .cancelling: phaseKey = "status.cancelling"
-      case .completed: phaseKey = task.warnings.isEmpty ? "status.completed" : "status.partial"
+      case .completed:
+        phaseKey = task.operation == .deleteModel ? "status.deleted"
+          : task.operation == .verify ? "status.verified" : task.warnings.isEmpty ? "status.completed" : "status.partial"
       case .failed: phaseKey = "status.failed"
       case .cancelled: phaseKey = task.operation == .prepare ? "status.paused" : "status.cancelled"
       }
       var parts = [subtitleToolsString(phaseKey)]
       if let input = task.inputURL { parts.append(input.lastPathComponent) }
-      if let stage = task.stage { parts.append(stageTitle(stage)) }
+      if let stage = task.stage, stage != "complete" || (task.operation != .deleteModel && task.operation != .verify) {
+        parts.append(stageTitle(stage))
+      }
       if let error = task.error { parts.append(error) }
       parts.append(contentsOf: task.warnings)
       if task.phase == .completed, !task.warnings.isEmpty { statusLabel.textColor = .systemOrange }
       statusLabel.stringValue = parts.joined(separator: "\n")
       var timing = [String]()
-      if task.totalBytes > 0 { timing.append("\(bytes(task.downloadedBytes)) / \(bytes(task.totalBytes))") }
+      if task.totalBytes > 0 && (task.operation != .verify || task.isActive) {
+        let counter = "\(bytes(task.downloadedBytes)) / \(bytes(task.totalBytes))"
+        timing.append(task.etaScope == "current_file_verification"
+                      ? String(format: subtitleToolsString("task.current_file"), counter) : counter)
+      }
       if let rate = task.bytesPerSecond, rate > 0 { timing.append("\(bytes(Int64(min(rate, Double(Int64.max) / 2))))/s") }
       if let seconds = task.etaSeconds {
         let key = task.etaScope == "remaining_download" ? "task.eta.download"

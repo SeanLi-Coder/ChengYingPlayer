@@ -18,6 +18,10 @@
 "models.ready" = "Verified";
 "models.pending" = "Not ready";
 "models.license" = "Model license · Apache 2.0";
+"models.repair" = "Check downloads / repair runtime";
+"models.verify_local" = "Verify local models only";
+"models.delete" = "Delete model…";
+"models.select" = "Choose a model to delete; speech models are shared with AI subtitles";
 "stage.captions" = "Reading existing captions";
 "copy" = "Copy summary";
 "export" = "Export Markdown…";
@@ -35,12 +39,15 @@
 "status.running" = "Processing";
 "status.cancelling" = "Stopping safely…";
 "status.completed" = "Completed";
+"status.deleted" = "Model deleted; generated subtitles, videos and summaries are unchanged.";
+"status.verified" = "Local verification finished; model files and runtime have separate readiness states above.";
 "status.failed" = "Failed";
 "status.cancelled" = "Stopped; partial downloads are retained.";
 "counts.tokens" = "%d tokens generated";
 "counts.chunks" = "Segment %d / %d";
 "counts.elapsed" = "Elapsed %.0f s";
 "counts.eta" = "Current stage remaining %.0f s";
+"counts.eta.verify" = "Current file verification remaining %.0f s";
 "counts.progress" = "Current stage %.1f%%";
 "stage.reading_source" = "Reading available captions and source metadata";
 "stage.downloading_audio" = "Downloading audio";

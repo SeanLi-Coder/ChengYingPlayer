@@ -242,9 +242,7 @@ class Runtime:
             return False
 
     def ensure(self, cancel: threading.Event, progress: Callable[[dict], None]) -> None:
-        if self.ready():
-            return
-        if self._migrate_marker(cancel, progress):
+        if self.verify_existing(cancel, progress):
             return
         parent = safe_path(self.root, "runtime/.parent-check", parents=True).parent
         staging = Path(tempfile.mkdtemp(prefix=".installing-", dir=parent))
@@ -299,6 +297,11 @@ class Runtime:
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
+
+    def verify_existing(self, cancel: threading.Event, progress: Callable[[dict], None]) -> bool:
+        """Recognize or migrate an installed runtime without downloads or installation."""
+        check_cancelled(cancel)
+        return self.ready() or self._migrate_marker(cancel, progress)
 
     def _migrate_marker(self, cancel: threading.Event, progress: Callable[[dict], None]) -> bool:
         """Retain an existing validated runtime only after verifying its lock inputs."""

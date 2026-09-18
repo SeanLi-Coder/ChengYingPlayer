@@ -129,6 +129,7 @@ class ArtifactStore:
         self.allow_local_http = allow_local_http
         self.reserve_bytes = reserve_bytes
         self._verified: dict[str, tuple] = {}
+        self._invalid: dict[str, tuple] = {}
         self._lock = threading.RLock()
         context = ssl.create_default_context(cafile=certificate_file())
         self._opener = urllib.request.build_opener(_SafeRedirect(self._validate_url), urllib.request.HTTPSHandler(context=context))
@@ -165,6 +166,61 @@ class ArtifactStore:
                 pass
         return 0
 
+    def needs_repair(self, artifact: Artifact) -> bool:
+        with self._lock:
+            try:
+                return self._invalid.get(artifact.path) == (artifact.sha256, self._signature(self.path(artifact)))
+            except FileNotFoundError:
+                return False
+
+    def stored(self, artifact: Artifact) -> int:
+        """Count managed files, including interrupted and invalid copies."""
+        total = 0
+        for suffix in ("", ".part", ".invalid"):
+            try:
+                total += self._signature(safe_path(self.root, artifact.path + suffix))[2]
+            except FileNotFoundError:
+                pass
+        return total
+
+    def remove(self, artifacts: list[Artifact], progress: Callable[[int, int], None]) -> int:
+        """Remove only manifest-owned regular files without following directory links."""
+        candidates = []
+        for artifact in artifacts:
+            for suffix in ("", ".part", ".invalid"):
+                relative = artifact.path + suffix
+                try:
+                    signature = self._signature(safe_path(self.root, relative))
+                except FileNotFoundError:
+                    continue
+                candidates.append((relative, signature))
+        # Preflight every target before deleting anything; never recursively remove a directory.
+        removed = 0
+        for index, (relative, signature) in enumerate(candidates):
+            flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            descriptor = os.open(self.root.anchor, flags)
+            try:
+                components = (*self.root.parts[1:], *relative_path(relative).parts[:-1])
+                for component in components:
+                    child = os.open(component, flags, dir_fd=descriptor)
+                    os.close(descriptor)
+                    descriptor = child
+                name = relative_path(relative).name
+                info = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+                current = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                if not stat.S_ISREG(info.st_mode) or current != signature:
+                    raise AssetError("A model file changed before removal; refresh its status and retry.")
+                os.unlink(name, dir_fd=descriptor)
+                removed += info.st_size
+            finally:
+                os.close(descriptor)
+            progress(index + 1, len(candidates))
+        with self._lock:
+            for artifact in artifacts:
+                self._verified.pop(artifact.path, None)
+                self._invalid.pop(artifact.path, None)
+        return removed
+
     def verify(self, artifact: Artifact, cancel: threading.Event, progress: Progress | None = None, *, partial: bool = False) -> bool:
         path = self.path(artifact, partial=partial)
         check_cancelled(cancel)
@@ -175,6 +231,9 @@ class ArtifactStore:
         except FileNotFoundError:
             return False
         if signature[2] != artifact.size:
+            if not partial:
+                with self._lock:
+                    self._invalid[artifact.path] = (artifact.sha256, signature)
             return False
         digest = hashlib.sha256()
         started = time.monotonic()
@@ -191,9 +250,13 @@ class ArtifactStore:
         if self._signature(path) != signature:
             raise AssetError("An asset changed during verification.")
         valid = digest.hexdigest() == artifact.sha256
-        if valid and not partial:
+        if not partial:
             with self._lock:
-                self._verified[artifact.path] = (artifact.sha256, signature)
+                if valid:
+                    self._verified[artifact.path] = (artifact.sha256, signature)
+                    self._invalid.pop(artifact.path, None)
+                else:
+                    self._invalid[artifact.path] = (artifact.sha256, signature)
         return valid
 
     def ensure(self, artifact: Artifact, cancel: threading.Event, progress: Progress | None = None) -> Path:
@@ -224,6 +287,7 @@ class ArtifactStore:
                 os.replace(partial, destination)
                 with self._lock:
                     self._verified[artifact.path] = (artifact.sha256, self._signature(destination))
+                    self._invalid.pop(artifact.path, None)
                 return destination
             ensure_space(self.root, artifact.size - offset, self.reserve_bytes)
             request = urllib.request.Request(artifact.url, headers={"User-Agent": "ChengYing-SubtitleTools/1", "Accept-Encoding": "identity"})

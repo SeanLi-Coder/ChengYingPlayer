@@ -1,4 +1,4 @@
-import Foundation
+import Cocoa
 
 func subtitleToolsString(_ key: String) -> String {
   NSLocalizedString(key, tableName: "SubtitleTools", bundle: .main, comment: "Native subtitle tools")
@@ -8,6 +8,18 @@ enum SubtitleToolsOperation: String, Codable {
   case prepare
   case subtitles
   case summary
+  case verify
+  case deleteModel = "delete_model"
+
+  var command: String {
+    switch self {
+    case .prepare: return "prepare"
+    case .subtitles: return "start"
+    case .summary: return "summarize"
+    case .verify: return "verify"
+    case .deleteModel: return "delete_model"
+    }
+  }
 }
 
 struct SubtitleToolsRequest: Encodable {
@@ -19,6 +31,7 @@ struct SubtitleToolsRequest: Encodable {
   var targetID: String? = nil
   var sourceURL: String? = nil
   var purpose: String? = nil
+  var modelID: String? = nil
 
   enum CodingKeys: String, CodingKey {
     case id, command, language, purpose
@@ -26,6 +39,7 @@ struct SubtitleToolsRequest: Encodable {
     case inputPath = "input_path"
     case burnSubtitles = "burn_subtitles"
     case targetID = "target_id"
+    case modelID = "model_id"
   }
 }
 
@@ -35,11 +49,25 @@ struct SubtitleToolsModel: Decodable, Equatable {
   var totalBytes: Int64
   var downloadedBytes: Int64
   var ready: Bool
+  var storedBytes: Int64? = nil
+  var needsRepair: Bool? = nil
+
+  var localBytes: Int64 { max(0, storedBytes ?? downloadedBytes) }
+  var stateKey: String {
+    if ready { return "models.ready" }
+    if needsRepair == true { return "models.invalid" }
+    if totalBytes > 0 && downloadedBytes >= totalBytes { return "models.unverified" }
+    if downloadedBytes > 0 { return "models.partial" }
+    if localBytes > 0 { return "models.residue" }
+    return "models.not_downloaded"
+  }
 
   enum CodingKeys: String, CodingKey {
     case id, name, ready
     case totalBytes = "total_bytes"
     case downloadedBytes = "downloaded_bytes"
+    case storedBytes = "stored_bytes"
+    case needsRepair = "needs_repair"
   }
 
   static let fixedModels = [
@@ -51,6 +79,36 @@ struct SubtitleToolsModel: Decodable, Equatable {
                                              totalBytes: 0, downloadedBytes: 0, ready: false)
   static var allModels: [SubtitleToolsModel] { fixedModels + [summarizer] }
   static var summaryModels: [SubtitleToolsModel] { fixedModels.filter { $0.id != "translator" } + [summarizer] }
+}
+
+enum SubtitleToolsModelDeletion {
+  typealias Confirmation = (SubtitleToolsModel, NSWindow?, @escaping (Bool) -> Void) -> Void
+
+  static func alert(for model: SubtitleToolsModel) -> NSAlert {
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = String(format: subtitleToolsString("models.delete_title"), model.name)
+    var details = [subtitleToolsString("models.delete_body")]
+    if model.id == "asr" || model.id == "aligner" {
+      details.append(subtitleToolsString("models.delete_shared"))
+    }
+    details.append(String(format: subtitleToolsString("models.delete_size"),
+                          ByteCountFormatter.string(fromByteCount: model.localBytes, countStyle: .file)))
+    alert.informativeText = details.joined(separator: "\n\n")
+    let cancel = alert.addButton(withTitle: subtitleToolsString("task.cancel"))
+    cancel.keyEquivalent = "\r"
+    let remove = alert.addButton(withTitle: subtitleToolsString("models.delete"))
+    remove.keyEquivalent = ""
+    if #available(macOS 11.0, *) { remove.hasDestructiveAction = true }
+    return alert
+  }
+
+  static func confirm(_ model: SubtitleToolsModel, _ window: NSWindow?, completion: @escaping (Bool) -> Void) {
+    let alert = alert(for: model)
+    let finish: (NSApplication.ModalResponse) -> Void = { completion($0 == .alertSecondButtonReturn) }
+    if let window { alert.beginSheetModal(for: window, completionHandler: finish) }
+    else { finish(alert.runModal()) }
+  }
 }
 
 struct SubtitleToolsOutputs: Decodable {

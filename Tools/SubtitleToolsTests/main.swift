@@ -28,12 +28,16 @@ try Data("Source fixture".utf8).write(to: source)
 let originalBytes = try Data(contentsOf: source)
 let transport = SubtitleTransportDouble()
 let service = SubtitleToolsService(transport: transport, hardware: supported)
+var deletionRequest: SubtitleToolsModel?
+var deletionConfirmation: ((Bool) -> Void)?
 let updateBarrier = UUID()
 check(UpdateWorkAdmission.shared.acquire(updateBarrier), "Subtitle update fixture acquires native admission")
 service.refreshStatus()
-for operation in ["prepare", "subtitles"] {
+for operation in ["prepare", "subtitles", "verify", "delete_model"] {
   do {
     if operation == "prepare" { _ = try service.prepareModels() }
+    else if operation == "verify" { _ = try service.verifyModels() }
+    else if operation == "delete_model" { _ = try service.deleteModel(id: "asr") }
     else { _ = try service.start(inputURL: source, language: "auto", burnSubtitles: false) }
     fatalError("FAIL: Update barrier accepted subtitle work")
   } catch SubtitleToolsError.busy {
@@ -43,7 +47,10 @@ for operation in ["prepare", "subtitles"] {
 UpdateWorkAdmission.shared.release(updateBarrier)
 let player = PlayerCore()
 player.info.currentURL = source
-let controller = SubtitleToolsViewController(player: player, service: service)
+let controller = SubtitleToolsViewController(player: player, service: service, confirmModelDeletion: { model, _, completion in
+  deletionRequest = model
+  deletionConfirmation = completion
+})
 let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
 panel.contentViewController = controller
 controller.view.frame = NSRect(x: 0, y: 0, width: 340, height: 700)
@@ -51,6 +58,7 @@ controller.view.layoutSubtreeIfNeeded()
 controller.viewDidLayout()
 let generate = property("generateButton", of: controller, as: NSButton.self)
 let prepare = property("prepareButton", of: controller, as: NSButton.self)
+let verify = property("verifyButton", of: controller, as: NSButton.self)
 let cancel = property("cancelButton", of: controller, as: NSButton.self)
 let burn = property("burnCheckbox", of: controller, as: NSButton.self)
 let languages = property("languagePopup", of: controller, as: NSPopUpButton.self)
@@ -71,11 +79,20 @@ let partial = SubtitleToolsModel.fixedModels.map { model -> SubtitleToolsModel i
 }
 transport.emitStatus(runtimeReady: false, models: partial)
 check(prepare.title == subtitleToolsString("models.resume"), "A partial download offers resume")
+let automaticVerifyID = service.task!.id
+check(service.task?.operation == .verify && transport.requests.last?.command == "verify" && !prepare.isEnabled,
+      "The first local model status automatically starts only local verification and disables competing work")
 var completeUnverified = partial
 for index in completeUnverified.indices { completeUnverified[index].downloadedBytes = 100 }
+transport.emit(SubtitleToolsEvent(type: .completed, id: automaticVerifyID, operation: .verify, stage: "complete",
+                                  runtimeReady: false, models: completeUnverified))
+transport.emitStatus(runtimeReady: false, models: completeUnverified)
 service.refreshStatus()
 transport.emitStatus(runtimeReady: false, models: completeUnverified)
-check(prepare.title == subtitleToolsString("models.verify") && !generate.isEnabled, "Complete but unverified bytes offer verification instead of claiming readiness")
+check(prepare.title == subtitleToolsString("models.repair") && verify.isEnabled && !generate.isEnabled,
+      "Complete files expose independent local verification and runtime repair without claiming readiness")
+check(transport.requests.filter { $0.command == "verify" }.count == 1,
+      "Repeated status responses do not start another automatic verification")
 service.refreshStatus()
 transport.ready()
 check(service.isReady && generate.isEnabled, "Verified models and runtime enable generation")
@@ -103,6 +120,7 @@ check(!generate.isHiddenOrHasHiddenAncestor && prepare.isHiddenOrHasHiddenAncest
       "The generation page hides the complete model-manager hierarchy")
 tabs.selectedSegment = 1; action(tabs)
 let modelLabels = property("modelLabels", of: controller, as: [String: NSTextField].self)
+let deleteButtons = property("modelDeleteButtons", of: controller, as: [String: NSButton].self)
 checkPanelWidth(modelLabels.sorted(by: { $0.key < $1.key }).map { ($0.key, $0.value as NSView) } + [("Model preparation", prepare)])
 check(generate.isHiddenOrHasHiddenAncestor && !prepare.isHiddenOrHasHiddenAncestor,
       "The model page hides the complete generation-card hierarchy")
@@ -115,7 +133,19 @@ for model in SubtitleToolsModel.fixedModels {
   check(modelPageLabels.contains { $0.stringValue == subtitleToolsString("models.role.\(model.id)") },
         "The model card identifies its pipeline role: \(model.id)")
 }
-check(transport.requests.allSatisfy { $0.command == "status" }, "Opening either tab never starts an unsolicited model download")
+check(transport.requests.allSatisfy { $0.command == "status" || $0.command == "verify" }, "Opening either tab never starts an unsolicited model download")
+check(deleteButtons.count == 3 && deleteButtons.values.allSatisfy(\.isEnabled), "Every subtitle model has an independently available deletion action")
+let deletionAlert = SubtitleToolsModelDeletion.alert(for: service.models.first { $0.id == "asr" }!)
+check(deletionAlert.buttons.first?.title == subtitleToolsString("task.cancel") && deletionAlert.buttons.first?.keyEquivalent == "\r"
+        && deletionAlert.buttons.last?.keyEquivalent == "", "Deletion confirmation defaults to Cancel, never destructive Enter")
+check(deletionAlert.informativeText.contains(subtitleToolsString("models.delete_shared"))
+        && deletionAlert.informativeText.contains(subtitleToolsString("models.delete_body")),
+      "The confirmation explains shared speech-model impact, permanent residue deletion and preserved outputs")
+action(deleteButtons["asr"]!)
+check(deletionRequest?.id == "asr" && service.task?.operation != .deleteModel,
+      "The real model-card action first requests confirmation for exactly that model")
+deletionConfirmation?(false)
+check(!transport.requests.contains { $0.command == "delete_model" }, "Cancelling the deletion sheet never sends a deletion request")
 if let artifactPath = ProcessInfo.processInfo.environment["SUBTITLE_TEST_ARTIFACT_DIR"],
    let document = (controller.view as? NSScrollView)?.documentView {
   let artifactDirectory = URL(fileURLWithPath: artifactPath, isDirectory: true)
@@ -151,8 +181,13 @@ let firstID = service.task!.id
 check(transport.requests.last?.command == "start" && transport.requests.last?.inputPath == source.path, "The actual generation action sends the current local file")
 check(transport.requests.last?.language == "auto" && transport.requests.last?.burnSubtitles == false, "The IPC request keeps external subtitles as the default")
 check(!generate.isEnabled && !prepare.isEnabled && !cancel.isHidden, "A running task disables competing generation and model preparation")
+check(!verify.isEnabled && deleteButtons.values.allSatisfy { !$0.isEnabled }, "A running inference also disables local verification and all model deletions")
 do { try service.prepareModels(); fatalError("Busy preparation should fail") }
 catch SubtitleToolsError.busy { check(true, "The shared service rejects duplicate tasks across windows") }
+do { try service.deleteModel(id: "asr"); fatalError("Busy deletion should fail") }
+catch SubtitleToolsError.busy { check(true, "The service rejects model deletion while inference is active") }
+do { try service.verifyModels(); fatalError("Busy verification should fail") }
+catch SubtitleToolsError.busy { check(true, "The service rejects verification while inference is active") }
 transport.emit(SubtitleToolsEvent(type: .progress, id: "unrelated", operation: .subtitles, progress: 0.9))
 check(service.task?.progress == nil, "Unrelated task progress is ignored")
 transport.emit(SubtitleToolsEvent(type: .progress, id: firstID, operation: .subtitles, stage: "asr", progress: 0.25, etaSeconds: 10))
@@ -304,6 +339,97 @@ check(!recoveryService.isReady, "A stale status response cannot restore readines
 recoveryService.refreshStatus()
 recoveryTransport.ready()
 check(recoveryService.isReady && recoveryService.statusError == nil, "A fresh status request can re-establish verified readiness after recovery")
+
+let lifecycleTransport = SubtitleTransportDouble()
+let lifecycleService = SubtitleToolsService(transport: lifecycleTransport, hardware: supported)
+lifecycleService.refreshStatus()
+lifecycleTransport.emitStatus(runtimeReady: false, models: completeUnverified)
+let firstScan = lifecycleService.task!.id
+check(lifecycleService.task?.operation == .verify, "A new process with complete files starts local verification without downloading")
+lifecycleService.cancelCurrent()
+lifecycleTransport.emit(SubtitleToolsEvent(type: .cancelled, id: firstScan, operation: .verify))
+lifecycleTransport.emitStatus(runtimeReady: false, models: completeUnverified)
+lifecycleService.refreshStatus()
+lifecycleTransport.emitStatus(runtimeReady: false, models: completeUnverified)
+check(lifecycleService.task?.phase == .cancelled && lifecycleTransport.requests.filter { $0.command == "verify" }.count == 1,
+      "Cancelling automatic verification does not loop on the following status or panel refresh")
+lifecycleTransport.emit(SubtitleToolsEvent(type: .ready, protocolVersion: 1))
+lifecycleService.refreshStatus()
+lifecycleTransport.emitStatus(runtimeReady: false, models: completeUnverified)
+let secondScan = lifecycleService.task!.id
+check(secondScan != firstScan && lifecycleTransport.requests.filter { $0.command == "verify" }.count == 2,
+      "A fresh helper ready event permits exactly one new local scan after a restart")
+lifecycleTransport.emit(SubtitleToolsEvent(type: .failed, id: secondScan, operation: .verify, error: "Fixture hash mismatch"))
+lifecycleTransport.emitStatus(runtimeReady: false, models: completeUnverified)
+let explicitScan = try lifecycleService.verifyModels()
+check(lifecycleTransport.requests.last?.command == "verify" && explicitScan != secondScan,
+      "An explicit local verification can be repeated after a failed or cancelled scan")
+lifecycleTransport.emit(SubtitleToolsEvent(type: .completed, id: explicitScan, operation: .verify,
+                                         runtimeReady: true, models: completeUnverified))
+lifecycleTransport.emitStatus(runtimeReady: true, models: completeUnverified)
+check(lifecycleTransport.requests.allSatisfy { ["status", "verify", "cancel"].contains($0.command) },
+      "Automatic and explicit local checks never send prepare, download, start or summarize commands")
+
+let managementTransport = SubtitleTransportDouble()
+let managementService = SubtitleToolsService(transport: managementTransport, hardware: supported)
+var allVerified = SubtitleToolsModel.allModels
+for index in allVerified.indices {
+  allVerified[index].totalBytes = 100
+  allVerified[index].downloadedBytes = 100
+  allVerified[index].storedBytes = 125
+  allVerified[index].ready = true
+}
+managementService.refreshStatus()
+managementTransport.emitStatus(runtimeReady: true, models: allVerified)
+do { try managementService.deleteModel(id: "../../foreign"); fatalError("Unknown model should fail") }
+catch SubtitleToolsError.invalidInput { check(managementService.task == nil, "Deletion accepts only the fixed model allowlist") }
+let deleteID = try managementService.deleteModel(id: "asr")
+let deletionJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(managementTransport.requests.last!)) as! [String: Any]
+check(deletionJSON["command"] as? String == "delete_model" && deletionJSON["model_id"] as? String == "asr"
+        && deletionJSON["input_path"] == nil, "Deletion encodes model_id, not a caller-controlled model path")
+let requestsBeforeCancel = managementTransport.requests.count
+managementService.cancelCurrent()
+check(managementService.task?.phase == .starting && managementTransport.requests.count == requestsBeforeCancel,
+      "Model deletion cannot be cancelled halfway through")
+for operation in ["delete", "verify", "prepare"] {
+  do {
+    if operation == "delete" { _ = try managementService.deleteModel(id: "summarizer") }
+    else if operation == "verify" { _ = try managementService.verifyModels() }
+    else { _ = try managementService.prepareModels() }
+    fatalError("Concurrent model work should fail")
+  } catch SubtitleToolsError.busy { check(true, "Active deletion blocks competing \(operation) work") }
+}
+managementTransport.emit(SubtitleToolsEvent(type: .progress, id: deleteID, operation: .deleteModel,
+                                          stage: "delete_model", progress: 0.5))
+let oldStatus = managementTransport.requests.last(where: { $0.command == "status" })!.id
+var deletedModels = allVerified
+deletedModels[0].downloadedBytes = 0
+deletedModels[0].storedBytes = 0
+deletedModels[0].ready = false
+managementTransport.emit(SubtitleToolsEvent(type: .completed, id: deleteID, operation: .deleteModel,
+                                          stage: "complete", runtimeReady: true, models: deletedModels))
+let finalStatus = managementTransport.requests.last(where: { $0.command == "status" })!.id
+check(finalStatus != oldStatus, "A model lifecycle terminal event replaces any in-flight pre-completion status request")
+managementTransport.emit(SubtitleToolsEvent(type: .status, id: oldStatus, runtimeReady: true, models: allVerified))
+check(!managementService.isReady && managementService.summaryReady && managementService.models[0].localBytes == 0,
+      "A stale status cannot resurrect deleted model readiness while independent summary weights remain available")
+managementTransport.emitStatus(runtimeReady: true, models: deletedModels)
+check(managementService.models[1].ready && managementService.models[2].ready && managementService.runtimeReady,
+      "Removing one model retains other verified models and runtime readiness")
+let expectedStages = ["models.not_downloaded", "models.residue", "models.partial", "models.unverified", "models.invalid", "models.ready"]
+var stateProbe = SubtitleToolsModel.fixedModels[0]
+stateProbe.totalBytes = 100
+var actualStages = [stateProbe.stateKey]
+stateProbe.storedBytes = 10; actualStages.append(stateProbe.stateKey)
+stateProbe.downloadedBytes = 20; actualStages.append(stateProbe.stateKey)
+stateProbe.downloadedBytes = 100; actualStages.append(stateProbe.stateKey)
+stateProbe.needsRepair = true; actualStages.append(stateProbe.stateKey)
+stateProbe.ready = true; actualStages.append(stateProbe.stateKey)
+check(actualStages == expectedStages, "Model states distinguish missing, leftovers, partial, complete, invalid and verified files")
+let decodedModel = try JSONDecoder().decode(SubtitleToolsModel.self, from: Data("{\"id\":\"asr\",\"name\":\"Fixture\",\"total_bytes\":100,\"downloaded_bytes\":0,\"ready\":false,\"stored_bytes\":12,\"needs_repair\":true}".utf8))
+check(decodedModel.localBytes == 12 && decodedModel.needsRepair == true, "Protocol decoding preserves removable leftovers and verified corruption")
+let legacyModel = try JSONDecoder().decode(SubtitleToolsModel.self, from: Data("{\"id\":\"asr\",\"name\":\"Fixture\",\"total_bytes\":100,\"downloaded_bytes\":10,\"ready\":false}".utf8))
+check(legacyModel.localBytes == 10 && legacyModel.needsRepair == nil, "Older helper fixtures without optional lifecycle fields remain decodable")
 service.shutdown()
 check(transport.shutdownCount == 1, "Application shutdown delegates to the helper transport")
 print("SUCCESS: \(checks) subtitle checks passed")

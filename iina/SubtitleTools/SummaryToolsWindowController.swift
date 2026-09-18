@@ -13,6 +13,9 @@ final class SummaryToolsWindowController: NSWindowController {
   let cancelButton = NSButton()
   let downloadCenterButton = NSButton()
   let prepareButton = NSButton()
+  let verifyButton = NSButton()
+  let deleteModelButton = NSButton()
+  let modelPopup = NSPopUpButton(frame: .zero, pullsDown: false)
   let copyButton = NSButton()
   let exportButton = NSButton()
   let licenseButton = NSButton()
@@ -26,6 +29,7 @@ final class SummaryToolsWindowController: NSWindowController {
   private let copyText: (String) -> Void
   private let openModelLicense: () -> Void
   private let chooseExport: ((NSWindow, @escaping (URL?) -> Void) -> Void)?
+  private let confirmModelDeletion: SubtitleToolsModelDeletion.Confirmation
   private var observer: NSObjectProtocol?
   private var displayedResultID: String?
   private var observedSummaryID: String?
@@ -36,6 +40,7 @@ final class SummaryToolsWindowController: NSWindowController {
          NSPasteboard.general.clearContents()
          NSPasteboard.general.setString(text, forType: .string)
        }, chooseExport: ((NSWindow, @escaping (URL?) -> Void) -> Void)? = nil,
+       confirmModelDeletion: @escaping SubtitleToolsModelDeletion.Confirmation = SubtitleToolsModelDeletion.confirm,
        openModelLicense: @escaping () -> Void = {
          NSWorkspace.shared.open(URL(string: "https://www.apache.org/licenses/LICENSE-2.0")!)
        }) {
@@ -44,6 +49,7 @@ final class SummaryToolsWindowController: NSWindowController {
     self.copyText = copyText
     self.chooseExport = chooseExport
     self.openModelLicense = openModelLicense
+    self.confirmModelDeletion = confirmModelDeletion
     let window = SummaryToolsWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 780),
                                     styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                     backing: .buffered, defer: false)
@@ -133,6 +139,8 @@ final class SummaryToolsWindowController: NSWindowController {
     button(downloadCenterButton, "download_center", #selector(showDownloadCenter))
     downloadCenterButton.toolTip = summaryToolsString("download_center.hint")
     button(prepareButton, "models.download", #selector(prepareModels))
+    button(verifyButton, "models.verify_local", #selector(verifyModels))
+    button(deleteModelButton, "models.delete", #selector(deleteModel))
     button(copyButton, "copy", #selector(copyResult))
     button(exportButton, "export", #selector(exportResult))
     button(licenseButton, "models.license", #selector(showLicense))
@@ -146,9 +154,24 @@ final class SummaryToolsWindowController: NSWindowController {
     modelLabel.translatesAutoresizingMaskIntoConstraints = false
     modelLabel.setContentCompressionResistancePriority(.required, for: .vertical)
     let modelContents = NSView()
-    let modelActions = row([prepareButton, licenseButton])
+    let modelActions = row([prepareButton, verifyButton, licenseButton])
+    let deletionActions = NSView()
+    deletionActions.translatesAutoresizingMaskIntoConstraints = false
+    modelPopup.identifier = NSUserInterfaceItemIdentifier("summary.model_selection")
+    modelPopup.setAccessibilityLabel(summaryToolsString("models.select"))
+    modelPopup.target = self
+    modelPopup.action = #selector(modelSelectionChanged)
+    modelPopup.translatesAutoresizingMaskIntoConstraints = false
+    for model in SubtitleToolsModel.allModels {
+      modelPopup.addItem(withTitle: model.name)
+      modelPopup.lastItem?.representedObject = model.id
+    }
+    modelPopup.selectItem(at: SubtitleToolsModel.allModels.count - 1)
+    deletionActions.addSubview(modelPopup)
+    deletionActions.addSubview(deleteModelButton)
     modelContents.addSubview(modelLabel)
     modelContents.addSubview(modelActions)
+    modelContents.addSubview(deletionActions)
     NSLayoutConstraint.activate([
       modelLabel.leadingAnchor.constraint(equalTo: modelContents.leadingAnchor),
       modelLabel.trailingAnchor.constraint(equalTo: modelContents.trailingAnchor),
@@ -156,7 +179,18 @@ final class SummaryToolsWindowController: NSWindowController {
       modelActions.leadingAnchor.constraint(equalTo: modelContents.leadingAnchor),
       modelActions.trailingAnchor.constraint(equalTo: modelContents.trailingAnchor),
       modelActions.topAnchor.constraint(equalTo: modelLabel.bottomAnchor, constant: 8),
-      modelActions.bottomAnchor.constraint(equalTo: modelContents.bottomAnchor)
+      deletionActions.leadingAnchor.constraint(equalTo: modelContents.leadingAnchor),
+      deletionActions.trailingAnchor.constraint(equalTo: modelContents.trailingAnchor),
+      deletionActions.topAnchor.constraint(equalTo: modelActions.bottomAnchor, constant: 8),
+      deletionActions.bottomAnchor.constraint(equalTo: modelContents.bottomAnchor),
+      modelPopup.leadingAnchor.constraint(equalTo: deletionActions.leadingAnchor),
+      modelPopup.centerYAnchor.constraint(equalTo: deletionActions.centerYAnchor),
+      modelPopup.trailingAnchor.constraint(equalTo: deleteModelButton.leadingAnchor, constant: -10),
+      deleteModelButton.trailingAnchor.constraint(equalTo: deletionActions.trailingAnchor),
+      deleteModelButton.topAnchor.constraint(equalTo: deletionActions.topAnchor),
+      deleteModelButton.bottomAnchor.constraint(equalTo: deletionActions.bottomAnchor),
+      deleteModelButton.widthAnchor.constraint(equalToConstant: 140),
+      deletionActions.heightAnchor.constraint(equalToConstant: 34)
     ])
     let models = ChengYingStyle.card(modelContents)
     statusLabel.identifier = NSUserInterfaceItemIdentifier("summary.status")
@@ -218,7 +252,8 @@ final class SummaryToolsWindowController: NSWindowController {
   }
 
   private var summaryTask: SubtitleToolsTask? {
-    guard let task = service.task, task.operation == .summary || task.purpose == "summary" else { return nil }
+    guard let task = service.task,
+          task.operation == .summary || task.operation == .verify || task.operation == .deleteModel || task.purpose == "summary" else { return nil }
     return task
   }
 
@@ -232,15 +267,21 @@ final class SummaryToolsWindowController: NSWindowController {
     sourceField.isEnabled = !busy
     startButton.isEnabled = service.hardware.canGenerate && service.summaryReady && !busy
     prepareButton.isEnabled = service.hardware.supportsRuntime && !busy
-    cancelButton.isEnabled = task?.isActive == true && task?.phase != .cancelling
+    verifyButton.isEnabled = service.hardware.supportsRuntime && !busy && service.models.contains { $0.localBytes > 0 }
+    modelPopup.isEnabled = !busy
+    deleteModelButton.isEnabled = service.hardware.supportsRuntime && !busy && (selectedModel?.localBytes ?? 0) > 0
+    cancelButton.isEnabled = task?.isActive == true && task?.phase != .cancelling && task?.operation != .deleteModel
     let models = service.summaryModels
     let complete = models.allSatisfy { $0.totalBytes > 0 && $0.downloadedBytes >= $0.totalBytes }
     let partial = models.contains { $0.downloadedBytes > 0 && !$0.ready }
-    prepareButton.title = summaryToolsString(complete ? "models.verify" : partial ? "models.resume" : "models.download")
-    modelLabel.stringValue = models.map { model in
+    prepareButton.title = summaryToolsString(complete ? "models.repair" : partial ? "models.resume" : "models.download")
+    var modelDetails = models.map { model in
       let total = model.totalBytes > 0 ? bytes(model.totalBytes) : summaryToolsString("models.unknown")
-      return "\(model.name) · \(bytes(model.downloadedBytes)) / \(total) · \(summaryToolsString(model.ready ? "models.ready" : "models.pending"))"
-    }.joined(separator: "\n")
+      return "\(model.name) · \(bytes(model.downloadedBytes)) / \(total) · \(subtitleToolsString(model.stateKey))"
+    }
+    modelDetails.append(subtitleToolsString(service.runtimeReady ? "models.runtime_ready" : "models.runtime_pending"))
+    modelLabel.stringValue = modelDetails.joined(separator: "\n")
+    verifyButton.toolTip = subtitleToolsString("models.verify_hint")
     if let task, task.operation == .summary, observedSummaryID != task.id {
       observedSummaryID = task.id
       resultText = ""
@@ -270,12 +311,12 @@ final class SummaryToolsWindowController: NSWindowController {
       case .starting: phase = "status.starting"
       case .running: phase = "status.running"
       case .cancelling: phase = "status.cancelling"
-      case .completed: phase = "status.completed"
+      case .completed: phase = task.operation == .deleteModel ? "status.deleted" : task.operation == .verify ? "status.verified" : "status.completed"
       case .failed: phase = "status.failed"
       case .cancelled: phase = "status.cancelled"
       }
       var parts = [summaryToolsString(phase)]
-      if let stage = task.stage {
+      if let stage = task.stage, stage != "complete" || (task.operation != .deleteModel && task.operation != .verify) {
         let localized = summaryToolsString("stage.\(stage)")
         let fallback = subtitleToolsString("stage.\(stage)")
         parts.append(localized != "stage.\(stage)" ? localized
@@ -290,14 +331,21 @@ final class SummaryToolsWindowController: NSWindowController {
     statusLabel.toolTip = statusLabel.stringValue
     var counts = [String]()
     if let task {
-      if task.totalBytes > 0 { counts.append("\(bytes(task.downloadedBytes)) / \(bytes(task.totalBytes))") }
+      if task.totalBytes > 0 && (task.operation != .verify || task.isActive) {
+        let counter = "\(bytes(task.downloadedBytes)) / \(bytes(task.totalBytes))"
+        counts.append(task.etaScope == "current_file_verification"
+                      ? String(format: subtitleToolsString("task.current_file"), counter) : counter)
+      }
       if let speed = task.bytesPerSecond, speed > 0 { counts.append("\(bytes(Int64(min(speed, Double(Int64.max / 2)))))/s") }
       if let tokens = task.tokensGenerated { counts.append(String(format: summaryToolsString("counts.tokens"), tokens)) }
       if let index = task.chunkIndex, let total = task.chunkCount {
         counts.append(String(format: summaryToolsString("counts.chunks"), index, total))
       }
       if let elapsed = task.elapsedSeconds { counts.append(String(format: summaryToolsString("counts.elapsed"), elapsed)) }
-      if let eta = task.etaSeconds { counts.append(String(format: summaryToolsString("counts.eta"), eta)) }
+      if let eta = task.etaSeconds {
+        counts.append(String(format: summaryToolsString(task.etaScope == "current_file_verification"
+                                                        ? "counts.eta.verify" : "counts.eta"), eta))
+      }
       if let fraction = task.progress, task.isActive { counts.append(String(format: summaryToolsString("counts.progress"), fraction * 100)) }
     }
     countLabel.stringValue = counts.joined(separator: " · ")
@@ -313,6 +361,27 @@ final class SummaryToolsWindowController: NSWindowController {
   @objc private func prepareModels() {
     do { _ = try service.prepareSummaryModels() }
     catch { statusLabel.stringValue = error.localizedDescription; statusLabel.textColor = .systemRed }
+  }
+
+  private var selectedModel: SubtitleToolsModel? {
+    guard let id = modelPopup.selectedItem?.representedObject as? String else { return nil }
+    return service.models.first { $0.id == id }
+  }
+
+  @objc private func modelSelectionChanged() { render() }
+
+  @objc private func verifyModels() {
+    do { try service.verifyModels() }
+    catch { statusLabel.stringValue = error.localizedDescription; statusLabel.textColor = .systemRed }
+  }
+
+  @objc private func deleteModel() {
+    guard service.task?.isActive != true, let model = selectedModel, model.localBytes > 0 else { return }
+    confirmModelDeletion(model, window) { [weak self] confirmed in
+      guard confirmed, let self else { return }
+      do { try self.service.deleteModel(id: model.id) }
+      catch { self.statusLabel.stringValue = error.localizedDescription; self.statusLabel.textColor = .systemRed }
+    }
   }
 
   @objc private func cancelTask() {

@@ -55,3 +55,10 @@
 "stage.summary_mapping" = "分段总结转录内容";
 "stage.summary_reducing" = "合并最终总结";
 "stage.summary_saving" = "保存总结与转录文本";
+"models.repair" = "检查下载 / 修复运行环境";
+"models.verify_local" = "仅校验本地模型";
+"models.delete" = "删除选中模型…";
+"models.select" = "选择要删除的模型；语音模型与 AI 字幕共用";
+"status.deleted" = "模型已删除，生成的字幕、视频和总结保持不变。";
+"status.verified" = "本地校验完成；上方分别显示模型文件及运行环境的就绪情况。";
+"counts.eta.verify" = "当前文件校验预计剩余 %.0f 秒";

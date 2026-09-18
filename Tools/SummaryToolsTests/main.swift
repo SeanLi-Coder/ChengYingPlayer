@@ -46,14 +46,22 @@ transport.ready()
 check(service.isReady && !service.summaryReady, "Existing subtitle readiness does not require the new summary model")
 service.refreshStatus()
 var summaryOnly = SubtitleToolsModel.allModels
-for index in summaryOnly.indices { summaryOnly[index].ready = summaryOnly[index].id == "summarizer" }
+for index in summaryOnly.indices {
+  summaryOnly[index].ready = summaryOnly[index].id == "summarizer"
+  summaryOnly[index].totalBytes = 100
+  summaryOnly[index].downloadedBytes = summaryOnly[index].ready ? 100 : 0
+  summaryOnly[index].storedBytes = summaryOnly[index].ready ? 120 : 0
+}
 transport.emitStatus(runtimeReady: true, models: summaryOnly)
 check(service.summaryReady && !service.isReady, "Caption-only summaries need no verified speech or translation weights")
 
 var copied = "", downloadCenters = 0, licenses = 0
 var exportCompletion: ((URL?) -> Void)?
+var deletionPrompt: SubtitleToolsModel?
+var deletionCompletion: ((Bool) -> Void)?
 let controller = SummaryToolsWindowController(service: service, openDownloadCenter: { downloadCenters += 1 },
   copyText: { copied = $0 }, chooseExport: { _, completion in exportCompletion = completion },
+  confirmModelDeletion: { model, _, completion in deletionPrompt = model; deletionCompletion = completion },
   openModelLicense: { licenses += 1 })
 let window = controller.window!
 let background = FixtureWindowBackground(frame: window.contentView!.bounds)
@@ -67,6 +75,13 @@ controller.licenseButton.performClick(nil)
 check(downloadCenters == 1 && licenses == 1, "Website configuration and license actions use their injected boundaries")
 check(!controller.resultView.isEditable && !controller.resultView.isRichText && !controller.resultView.isAutomaticLinkDetectionEnabled,
       "The result is selectable, non-executing plain Markdown, not a web view")
+check(controller.modelPopup.numberOfItems == 4 && controller.modelPopup.selectedItem?.representedObject as? String == "summarizer"
+        && controller.deleteModelButton.isEnabled && controller.verifyButton.isEnabled,
+      "The summary model manager exposes the summarizer and all shared models with local verification and deletion")
+controller.deleteModelButton.performClick(nil)
+check(deletionPrompt?.id == "summarizer" && service.task == nil, "Summary model deletion first opens a model-specific confirmation")
+deletionCompletion?(false)
+check(!transport.requests.contains { $0.command == "delete_model" }, "Cancelling summary model deletion has no helper side effect")
 
 func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
 func snapshot(_ state: String) throws {
@@ -109,12 +124,33 @@ func snapshot(_ state: String) throws {
 try snapshot("idle")
 window.setContentSize(window.contentMinSize)
 try snapshot("minimum")
+service.refreshStatus()
+transport.emitStatus(runtimeReady: false, models: summaryOnly)
+check(controller.modelLabel.stringValue.contains(subtitleToolsString("models.runtime_pending")) && !controller.startButton.isEnabled,
+      "Verified model files remain distinct from a missing or incompatible runtime")
+try snapshot("runtime-pending")
+service.refreshStatus()
+transport.emitStatus(runtimeReady: true, models: summaryOnly)
 
 let barrier = UUID()
 check(UpdateWorkAdmission.shared.acquire(barrier), "The update barrier starts idle")
 rejects("The update barrier rejects summary preparation") { _ = try service.prepareSummaryModels() }
 rejects("The update barrier rejects generation before creating a task") { _ = try service.summarize(source: url) }
 UpdateWorkAdmission.shared.release(barrier)
+controller.verifyButton.performClick(nil)
+let verifyID = service.task!.id
+check(service.task?.operation == .verify && transport.requests.last?.command == "verify",
+      "The summary window's local verification action never invokes model preparation or download")
+transport.emit(SubtitleToolsEvent(type: .progress, id: verifyID, operation: .verify, stage: "verify", progress: 0.4,
+                                  downloadedBytes: 40, totalBytes: 100, etaSeconds: 15, etaScope: "current_file_verification"))
+check(controller.countLabel.stringValue.contains(String(format: summaryToolsString("counts.eta.verify"), 15.0))
+        && !controller.verifyButton.isEnabled && !controller.deleteModelButton.isEnabled,
+      "Verification reports a current-file ETA and blocks model deletion across the shared service")
+try snapshot("local-verification")
+controller.cancelButton.performClick(nil)
+transport.emit(SubtitleToolsEvent(type: .cancelled, id: verifyID, operation: .verify,
+                                  runtimeReady: true, models: summaryOnly))
+transport.emitStatus(runtimeReady: true, models: summaryOnly)
 let prepareID = try service.prepareSummaryModels()
 let prepareRequest = transport.requests.last!
 check(prepareRequest.command == "prepare" && prepareRequest.purpose == "summary", "Preparation requests only the summary-specific model set")
@@ -210,6 +246,42 @@ controller.exportButton.performClick(nil); exportCompletion?(nil)
 check(UpdateWorkAdmission.shared.activeReasons.isEmpty, "Cancelling the export chooser also releases its lease")
 try snapshot("completed")
 check(SummaryToolsLifecycle.mayTerminate(task: service.task) { fatalError("Idle tasks must not prompt") }, "Completed tasks do not create a redundant quit prompt")
+controller.deleteModelButton.performClick(nil)
+deletionCompletion?(true)
+let deleteID = service.task!.id
+check(service.task?.operation == .deleteModel && transport.requests.last?.modelID == "summarizer",
+      "Confirmed summary deletion sends exactly the selected allowlisted model id")
+check(!controller.cancelButton.isEnabled && !controller.prepareButton.isEnabled && !controller.modelPopup.isEnabled,
+      "Deleting a model disables cancellation, downloads and model selection until its terminal response")
+let cancellationCount = transport.requests.filter { $0.command == "cancel" }.count
+controller.cancelButton.performClick(nil)
+check(transport.requests.filter { $0.command == "cancel" }.count == cancellationCount,
+      "The summary Cancel control cannot interrupt a model deletion")
+transport.emit(SubtitleToolsEvent(type: .progress, id: deleteID, operation: .deleteModel, stage: "delete_model", progress: 0.5))
+try snapshot("deleting-model")
+var summaryDeleted = summaryOnly
+let summaryIndex = summaryDeleted.firstIndex { $0.id == "summarizer" }!
+summaryDeleted[summaryIndex].ready = false
+summaryDeleted[summaryIndex].downloadedBytes = 0
+summaryDeleted[summaryIndex].storedBytes = 0
+transport.emit(SubtitleToolsEvent(type: .completed, id: deleteID, operation: .deleteModel, stage: "complete",
+                                  runtimeReady: true, models: summaryDeleted))
+transport.emitStatus(runtimeReady: true, models: summaryDeleted)
+check(!service.summaryReady && !controller.startButton.isEnabled && !controller.deleteModelButton.isEnabled
+        && controller.resultText == markdown && controller.copyButton.isEnabled,
+      "Deleting summary weights disables new inference without deleting or hiding an already generated report")
+try snapshot("model-deleted")
+summaryDeleted[0].storedBytes = 12
+service.refreshStatus()
+transport.emitStatus(runtimeReady: true, models: summaryDeleted)
+controller.modelPopup.selectItem(at: 0)
+_ = controller.modelPopup.sendAction(controller.modelPopup.action!, to: controller.modelPopup.target)
+check(controller.deleteModelButton.isEnabled, "The summary manager can clean invalid-file leftovers even when downloaded bytes are zero")
+controller.deleteModelButton.performClick(nil)
+check(deletionPrompt?.id == "asr", "The summary manager exposes deletion for the shared speech-recognition model")
+deletionCompletion?(false)
+service.refreshStatus()
+transport.emitStatus(runtimeReady: true, models: summaryOnly)
 let errorID = try service.summarize(source: url)
 transport.emit(SubtitleToolsEvent(type: .failed, id: errorID, operation: .summary,
                                   error: String(repeating: "Fixture source unavailable; check website login and network. ", count: 18)))

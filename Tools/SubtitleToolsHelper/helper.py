@@ -98,6 +98,8 @@ class Supervisor:
         models = [
             {"id": model["id"], "name": model["name"], "total_bytes": sum(item.size for item in artifacts),
              "downloaded_bytes": sum(self.store.downloaded(item) for item in artifacts),
+             "stored_bytes": sum(self.store.stored(item) for item in artifacts),
+             "needs_repair": any(self.store.needs_repair(item) for item in artifacts),
              "ready": all(self.store.ready(item) for item in artifacts)}
             for model, artifacts in self.models
         ]
@@ -124,6 +126,9 @@ class Supervisor:
                 if self._active_id is None or request.get("target_id") != self._active_id:
                     self.emit({"type": "failed", "id": identifier, "error": "The target operation is not active."})
                     return
+                if self._active_operation == "delete_model":
+                    self.emit({"type": "failed", "id": identifier, "error": "Model removal cannot be cancelled once confirmed."})
+                    return
                 self._cancel.set()
             self.emit({"type": "accepted", "id": identifier, "message": "Cancellation requested."})
             return
@@ -131,7 +136,7 @@ class Supervisor:
             self.close()
             self.emit({"type": "completed", "id": identifier, "message": "Subtitle tools stopped."})
             return
-        if command not in {"prepare", "start", "summarize"}:
+        if command not in {"prepare", "start", "summarize", "verify", "delete_model"}:
             self.emit({"type": "failed", "id": identifier, "error": "Unknown command."})
             return
         with self._lock:
@@ -139,14 +144,14 @@ class Supervisor:
                 self.emit({"type": "failed", "id": identifier, "error": "Another subtitle operation is already running."})
                 return
             self._active_id = identifier
-            self._active_operation = {"prepare": "prepare", "start": "subtitles", "summarize": "summary"}[command]
+            self._active_operation = {"start": "subtitles", "summarize": "summary"}.get(command, command)
             self._cancel = threading.Event()
             self.emit({"type": "accepted", "id": identifier, "operation": self._active_operation})
             self._thread = threading.Thread(target=self._run, args=(identifier, command, dict(request)), daemon=True)
             self._thread.start()
 
     def _run(self, identifier: str, command: str, request: dict) -> None:
-        operation = {"prepare": "prepare", "start": "subtitles", "summarize": "summary"}[command]
+        operation = {"start": "subtitles", "summarize": "summary"}.get(command, command)
         last_emit = 0.0
         terminal_event: dict | None = None
         selected = self.artifacts
@@ -185,19 +190,44 @@ class Supervisor:
 
         try:
             with operation_lock(self.store.root):
-                if command == "prepare":
+                if command == "verify":
+                    emit({"type": "progress", "stage": "verify", "message": "Checking existing local models; no files will be downloaded."})
+                    for _, artifacts in self.models:
+                        for artifact in artifacts:
+                            self.store.verify(artifact, self._cancel, download_progress)
+                    self.runtime.verify_existing(self._cancel, lambda event: emit({"type": "progress", **event}))
+                    check_cancelled(self._cancel)
+                    emit({**self.status(), "type": "completed", "stage": "complete", "progress": 1.0,
+                          "message": "Local verification finished. Missing or invalid files were not downloaded."})
+                elif command == "delete_model":
+                    model_id = request.get("model_id")
+                    if not isinstance(model_id, str):
+                        raise AssetError("Select a bundled model to remove.")
+                    selected_model = next((artifacts for model, artifacts in self.models if model["id"] == model_id), None)
+                    if selected_model is None:
+                        raise AssetError("Unknown model identifier.")
+                    removed = self.store.remove(selected_model, lambda done, total: emit({
+                        "type": "progress", "stage": "delete_model", "progress": done / max(1, total),
+                        "message": "Removing the selected model and its partial downloads."}))
+                    emit({**self.status(), "type": "completed", "stage": "complete", "progress": 1.0,
+                          "model_id": model_id, "removed_bytes": removed,
+                          "message": "The selected model was removed. Other models, runtime and generated files were preserved."})
+                elif command == "prepare":
                     purpose = request.get("purpose", "subtitles")
                     if purpose not in {"subtitles", "summary"}:
                         raise AssetError("Unsupported model preparation purpose.")
                     identifiers = {"asr", "aligner", "summarizer" if purpose == "summary" else "translator"}
                     if not identifiers.issubset({model["id"] for model, _ in self.models}):
                         raise AssetError("The requested model pipeline is not bundled.")
-                    selected = [Artifact.from_dict(self.manifest["runtime"]["archive"])]
-                    selected += [Artifact.from_dict(item) for item in self.manifest["runtime"]["wheels"]]
+                    runtime_ready = self.runtime.verify_existing(self._cancel, lambda event: emit({"type": "progress", **event}))
+                    selected = []
+                    if not runtime_ready:
+                        selected = [Artifact.from_dict(self.manifest["runtime"]["archive"])]
+                        selected += [Artifact.from_dict(item) for item in self.manifest["runtime"]["wheels"]]
                     selected += [item for model, artifacts in self.models if model["id"] in identifiers for item in artifacts]
                     total_bytes = sum(item.size for item in selected)
                     remaining = sum(item.size - self.store.downloaded(item) for item in selected)
-                    install_space = 0 if self.runtime.ready() else sum(item["size"] for item in self.manifest["runtime"]["wheels"]) * 3 + self.manifest["runtime"]["archive"]["size"] * 4
+                    install_space = 0 if runtime_ready else sum(item["size"] for item in self.manifest["runtime"]["wheels"]) * 3 + self.manifest["runtime"]["archive"]["size"] * 4
                     ensure_space(self.store.root, remaining + install_space)
                     for artifact in selected:
                         self.store.ensure(artifact, self._cancel, download_progress)
@@ -216,6 +246,13 @@ class Supervisor:
             with self._lock:
                 self._active_id = None
                 self._active_operation = None
+                if terminal_event is not None and command in {"verify", "delete_model"}:
+                    try:
+                        terminal_event.update(self.status())
+                    except (AssetError, OSError):
+                        # Preserve the original failure if a managed path is unsafe.
+                        pass
+                    terminal_event["operation"] = operation
             if terminal_event is not None:
                 terminal_event["active_id"] = None
                 self.emit(terminal_event)
