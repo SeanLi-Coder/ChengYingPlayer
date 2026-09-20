@@ -31,6 +31,7 @@ final class MPVController {
   var values: [String: Any] = ["time": 10.0, "pause": false, "speed": 1.0, "a": 0.0, "b": 0.0, "count": "0", "rotation": 0]
   var hooks: [MPVHookValue] = []
   var reads = 0
+  var intWrites: [String: [Int]] = [:]
   func getFlag(_ key: String) -> Bool { reads += 1; return values[key] as? Bool ?? false }
   func getDouble(_ key: String) -> Double { reads += 1; return values[key] as? Double ?? Double(values[key] as? String ?? "") ?? 0 }
   func getString(_ key: String) -> String? {
@@ -42,7 +43,10 @@ final class MPVController {
   func getInt(_ key: String) -> Int { reads += 1; return values[key] as? Int ?? 0 }
   func setString(_ key: String, _ value: String) { values[key] = value }
   func setDouble(_ key: String, _ value: Double) { values[key] = value }
-  func setInt(_ key: String, _ value: Int) { values[key] = value }
+  func setInt(_ key: String, _ value: Int) {
+    intWrites[key, default: []].append(value)
+    values[key] = value
+  }
   func addHook(_ name: String, hook: MPVHookValue) { hooks.append(hook) }
 }
 final class PlayerCore: NSObject {
@@ -99,6 +103,12 @@ final class VideoToolsTaskManager: VideoToolsRotationTaskManaging {
     } else if phase == .failed {
       snapshot?.error = "Test export failure"
     }
+    notifyTaskChange()
+  }
+  func reportProgress(_ progress: Double) {
+    guard snapshot?.isActive == true else { return }
+    snapshot?.phase = .running
+    snapshot?.progress = progress
     notifyTaskChange()
   }
   func notifyTaskChange() {

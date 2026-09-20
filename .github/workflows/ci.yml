@@ -58,8 +58,9 @@ jobs:
       - name: Test media helper
         working-directory: Tools/VideoToolsHelper
         run: |
-          python -m ruff check helper.py media.py conversion.py tests ../VideoToolsTests/app_conversion_smoke.py
+          python -m ruff check helper.py media.py conversion.py tests ../VideoToolsTests/app_conversion_smoke.py ../VideoToolsTests/app_rotation_smoke.py ../VideoToolsTests/test_rotation_smoke.py ../PlaybackRotationTests
           python -m pytest -q
+          python -B ../VideoToolsTests/test_rotation_smoke.py
 
       - name: Preflight native media information UI and image metadata
         run: |
@@ -201,6 +202,9 @@ jobs:
           "$RUNNER_TEMP/build-python/bin/python" -m pip install --require-hashes --only-binary=:all: --requirement Tools/DownloaderHelper/requirements-build.txt
           echo "$RUNNER_TEMP/build-python/bin" >> "$GITHUB_PATH"
 
+      - name: Test rotation teardown with original and patched playback source
+        run: bash Tools/PlaybackRotationTests/run_source.sh
+
       - name: Build playback libraries from pinned source
         run: |
           python3 -B Tools/PlaybackBuildTests/test_sources.py
@@ -208,6 +212,10 @@ jobs:
           bash Tools/PlaybackBuildTests/run.sh
           python other/verify_playback_distribution.py "$PWD/deps"
           bash Tools/RenderTestSupport/test_native_capability.sh
+
+      - name: Test real rotation at EOF, stop, and file replacement
+        timeout-minutes: 5
+        run: bash Tools/PlaybackRotationTests/run.sh
 
       - name: Test real ICC profile memory ownership
         run: bash Tools/ICCProfileTests/run.sh
@@ -464,6 +472,13 @@ jobs:
         run: >-
           python Tools/VideoToolsTests/app_conversion_smoke.py
           --app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
+
+      - name: Test real application rapid rotation preview
+        timeout-minutes: 5
+        run: >-
+          python -B Tools/VideoToolsTests/app_rotation_smoke.py
+          --app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
+          --mode ipc --hwdec no --rounds 12
 
       - name: Package and verify Apple Silicon DMG
         id: dmg

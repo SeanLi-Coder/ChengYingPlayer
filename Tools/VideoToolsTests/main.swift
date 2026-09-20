@@ -328,12 +328,25 @@ check(status.stringValue == localized("videotools.status.cancelled"), "Debounce 
 RunLoop.main.run(until: Date().addingTimeInterval(0.35))
 check(taskManager.requests.isEmpty, "Cancelling the pending UI request prevents an export")
 
+let writesBeforeRotationExport = player.mpv.intWrites["rotation", default: []].count
 controller.requestPermanentRotation(clockwiseQuarterTurns: 1)
 check(player.mpv.getInt("rotation") == 90 && rotationStatus.stringValue.contains(localized("videotools.rotation.direction.right")), "Public right shortcut starts at the reset orientation and displays its direction")
 pumpTasks { taskManager.requests.count == 1 }
 check(taskManager.request?.operation == .rotate && taskManager.request?.degrees == 90 && taskManager.request?.inputPath == rotationSource.path, "The UI exports its first angle from the original file")
+for progress in [0.0, 1.0, 25.0, 50.0] {
+  taskManager.reportProgress(progress)
+}
+check(player.mpv.intWrites["rotation", default: []].count == writesBeforeRotationExport + 1,
+      "Starting and progress notifications do not rewrite the current display rotation")
+check(property("progressIndicator", as: NSProgressIndicator.self).doubleValue == 50,
+      "Rotation progress still updates the actual native panel")
+let writesBeforeRapidRotation = player.mpv.intWrites["rotation", default: []].count
 controller.requestPermanentRotation(clockwiseQuarterTurns: 1)
 check(player.mpv.getInt("rotation") == 180 && rotationStatus.stringValue.contains(localized("videotools.rotation.shortcut_queued")), "An in-flight shortcut updates preview and reports the queued cumulative target")
+controller.requestPermanentRotation(clockwiseQuarterTurns: -1)
+controller.requestPermanentRotation(clockwiseQuarterTurns: 1)
+check(Array(player.mpv.intWrites["rotation", default: []].dropFirst(writesBeforeRapidRotation)) == [180, 90, 180],
+      "Rapid right-left-right shortcuts apply every distinct cumulative angle immediately")
 action(run)
 check(taskManager.requests.count == 1 && status.stringValue == localized("videotools.error.busy"), "Manual run cannot take over a pending cumulative rotation")
 let firstRotationOutput = URL(fileURLWithPath: "/tmp/chengying-rotation-first.mkv")
@@ -342,6 +355,8 @@ pumpTasks { taskManager.requests.count == 2 }
 check(taskManager.request?.degrees == 180 && taskManager.request?.inputPath == rotationSource.path, "The queued UI angle is rendered from the original, not the previous output")
 let secondRotationOutput = URL(fileURLWithPath: "/tmp/chengying-rotation-second.mkv")
 taskManager.finishTask(.completed, outputURL: secondRotationOutput)
+check(player.mpv.intWrites["rotation", default: []].count == writesBeforeRapidRotation + 3,
+      "Completion and queued export startup do not rewrite the unchanged display rotation")
 check(player.mpv.getInt("rotation") == 180 && !reveal.isHidden && cancel.isHidden, "Completed rotation remains visible and offers its output without a cancel action")
 check(rotationStatus.stringValue.contains(localized("videotools.rotation.shortcut_saved")), "Successful rotation status explains where the output was saved")
 controller.setPlaybackControlsVisible(false)
@@ -385,6 +400,27 @@ controller.refreshCurrentMedia(force: true)
 controller.requestPermanentRotation(clockwiseQuarterTurns: -1)
 check(player.mpv.getInt("rotation") == 270, "Reloading the same path begins a fresh cumulative rotation generation")
 action(cancel)
+
+// Validate the production bridge independently of the panel's normalized inputs.
+let rotationProbe = PlayerCore()
+for degrees in [90, 180, 270, 360, 0] {
+  rotationProbe.videoToolsPreviewRotation(degrees)
+}
+check(rotationProbe.mpv.intWrites["rotation"] == [90, 180, 270, 0],
+      "Every supported quarter turn is applied and equivalent full turns are not repeated")
+for degrees in [Int.min, -90, -1, 45, 361, 450, Int.max] {
+  rotationProbe.videoToolsPreviewRotation(degrees)
+}
+check(rotationProbe.mpv.intWrites["rotation"] == [90, 180, 270, 0],
+      "Unsupported preview angles cannot reach the player rotation property")
+rotationProbe.mpv.values["rotation"] = 270
+rotationProbe.videoToolsPreviewRotation(0)
+check(rotationProbe.mpv.intWrites["rotation"] == [90, 180, 270, 0, 0],
+      "Preview compares the actual player angle after another entry point changes it")
+rotationProbe.info.state = .idle
+rotationProbe.videoToolsPreviewRotation(90)
+check(rotationProbe.mpv.intWrites["rotation"] == [90, 180, 270, 0, 0],
+      "Unloaded media cannot receive preview rotation writes")
 
 // Conversion is a whole-file operation, even when a keyboard loop remains active.
 let conversionFormat = property("conversionFormatPopup", as: NSPopUpButton.self)

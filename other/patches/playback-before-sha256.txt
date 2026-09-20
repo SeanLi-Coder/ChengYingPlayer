@@ -1,4 +1,6 @@
 8913f6dd3227a7b0ea4bcdcef14978d905d39cd359bc458caf55d5f185e54a88  mpv-0.38.0/DOCS/client-api-changes.rst
 f66656fa7a7ae3efc75284e39f68951c2b2b01fed28743e4f309a85163a4a779  mpv-0.38.0/osdep/mac/libmpv_helper.swift
+1628ca4d517496b55068e71ebc987d38e99bf045ea6f3edd893cc62c48e2323c  mpv-0.38.0/player/command.c
+f0675797b75398cf9e988b2d8e0f150bba1e4d842fd75f18a9b1108181f206ed  mpv-0.38.0/player/playloop.c
 e9873395b5c09068b3df0727de65748297ed3a495aa6958419fe519fa8460526  mpv-0.38.0/video/out/gpu/libmpv_gpu.c
 e64b3c6a974e66358543d5d9f1e0f357d16a5341aca29f8a9de5c111c5501aa0  mpv-0.38.0/video/out/gpu/video.c

@@ -184,8 +184,11 @@ extension PlayerCore {
   }
 
   func videoToolsPreviewRotation(_ degrees: Int) {
-    guard info.state.loaded else { return }
-    mpv.setInt(MPVOption.Video.videoRotate, degrees == 360 ? 0 : degrees)
+    guard info.state.loaded, [0, 90, 180, 270, 360].contains(degrees) else { return }
+    let rotation = degrees == 360 ? 0 : degrees
+    // Export progress republishes the same angle; only actual changes need a write.
+    guard mpv.getInt(MPVOption.Video.videoRotate) != rotation else { return }
+    mpv.setInt(MPVOption.Video.videoRotate, rotation)
   }
 
   /// Restore only state changed by preview before mpv unloads the current file.

@@ -196,6 +196,8 @@
 - 旋转快捷键会即时预览并自动导出：同一视频左转两次为 180°，四次恢复原方向；导出期间继续按键会排队生成最新累计角度。
 - 每次都从原视频生成新文件，不把已导出的文件反复压制。取消操作会撤销尚未完成的旋转请求；切换或关闭视频会取消该视频未完成的快捷键旋转任务，已保存的文件不会删除。
 
+v0.2.32 修复旋转预览遇到播放结束时的播放引擎收尾断言，避免因此导致整个 App 退出；同时避免导出进度刷新反复设置相同的预览角度，连续左右旋转仍即时累计。回归检查覆盖真实播放库的播放结束、停止和换片，并保留原版失败、修复版通过的源码对照；这不代表已覆盖所有素材或所有崩溃类型。
+
 为避免静默损坏画质或元数据，工具遇到当前无法安全保留的动态 HDR、异常像素格式或隔行旋转素材时会明确停止并提示，而不会悄悄降级输出。
 
 永久旋转需要重新编码画面；H.264 / HEVC 使用高质量编码，不代表逐像素无损，音频使用原码流复制。透视、剪切或非标准缩放矩阵仍会明确拒绝，不能把所有未知变换直接当作正常旋转。
@@ -296,6 +298,8 @@ open iina.xcodeproj
 `build_playback_libraries.sh` 从固定源码构建 libmpv、播放 FFmpeg 和 AV1 / 字幕 / 色彩管理依赖，保留 VideoToolbox 硬解、OpenGL、CoreAudio、ICC 与 HDR 所需能力。它与视频处理使用的 FFmpeg CLI 独立；不再从其他播放器的 DMG 提取动态库。原 `download_libs.sh` 仅保留作历史开发参考，不能用于发行构建。播放依赖目前仅支持原生 arm64 构建。
 
 播放库包含明确记录的 ICC 内存所有权修复与配置同步补丁，避免加载屏幕色彩配置时崩溃或配置未生效。`bash Tools/ICCProfileTests/run.sh` 使用真实 OpenGL / LCMS 检查借用内存、重复切换和 sRGB / Display P3 渲染像素；补丁、原始源码及修改前后校验值随对应 Release 源码包提供。
+
+播放库另回移了 [mpv 官方 EOF seek 状态修复](https://github.com/mpv-player/mpv/commit/d59f4fd3ec141693da4f7f6677aa729e1bb92f4d)，保留引擎断言，不以禁用检查规避崩溃。`bash Tools/PlaybackRotationTests/run_source.sh` 对锁定的原始与补丁后源码执行回归，`bash Tools/PlaybackRotationTests/run.sh` 使用实际编译的 libmpv 验证卸载时还原旋转角度、EOF、停止与换片。完整 App 快速旋转检查及其键盘权限限制见 [旋转测试说明](Tools/VideoToolsTests/README.md)。
 
 媒体处理工具、WebP 编码器和三个 helper 也由固定输入构建。下载模块复用 Playwright 内置 Node 执行 yt-dlp 的 JavaScript 求解，不再额外打包 Deno；不改变原有下载质量、登录、代理和重试策略。AI 字幕在用户主动准备模型时建立独立运行环境。
 

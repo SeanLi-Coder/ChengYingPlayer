@@ -1,2 +1,3 @@
 mpv-icc-ownership	mpv-0.38.0	mpv-0.38.0-icc-profile-ownership.patch	https://github.com/mpv-player/mpv/commit/6f619d5ef43b070d728e43f0b2fe0571449de1a8	f2a565494049a475fc99328ed0c0698abaafd9160e3405cffc6ccec653a2bdc6
 mpv-icc-option-refresh	mpv-0.38.0	mpv-0.38.0-icc-option-refresh.patch	https://github.com/SeanLi-Coder/ChengYingPlayer/blob/main/other/patches/mpv-0.38.0-icc-option-refresh.patch	83e40c7f2a0568d40d4f262aefeb31e117a65ff89b563144a6bc7bc8176379e6
+mpv-unload-seek-state	mpv-0.38.0	mpv-0.38.0-unload-seek-state.patch	https://github.com/mpv-player/mpv/commit/d59f4fd3ec141693da4f7f6677aa729e1bb92f4d	fc516330af817a9fae0d24f89daa02d283adc47e031760013fa1f5433248c3fb

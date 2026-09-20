@@ -299,7 +299,14 @@ class DistributionTests(unittest.TestCase):
     def test_checked_in_patch_bytes_match_the_locks(self):
         patches, before, after = VERIFY.locked_patches()
         self.assertEqual(set(before), set(after))
-        self.assertEqual(len(patches), 2)
+        self.assertEqual(
+            [(name, value[2]) for name, value in patches.items()],
+            [
+                ("mpv-icc-ownership", "mpv-0.38.0-icc-profile-ownership.patch"),
+                ("mpv-icc-option-refresh", "mpv-0.38.0-icc-option-refresh.patch"),
+                ("mpv-unload-seek-state", "mpv-0.38.0-unload-seek-state.patch"),
+            ],
+        )
         for value in patches.values():
             self.assertEqual(
                 VERIFY.digest_file(ROOT / "other/patches" / value[2]), value[4]
