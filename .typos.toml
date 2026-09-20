@@ -11,6 +11,8 @@ ignore-hidden = false
 
 [default]
 extend-ignore-re = [
+    # Exact ISO BMFF/MOV track-box byte identifier; it is not the word "track".
+    '\bb"trak"',
     # Exact upstream FFmpeg makefile extension and Rust crate identifiers.
     '(?:config|\*)\.mak\b',
     # Exact x265 content-light-level metadata parameter.
