@@ -5,6 +5,10 @@ test_dir="$(mktemp -d "${TMPDIR:-/tmp}/chengying-player-chrome-integration.XXXXX
 trap 'rm -rf "$test_dir"' EXIT
 snapshot_dir="${PLAYER_CHROME_INTEGRATION_SNAPSHOT_DIR:-$test_dir/snapshots}"
 mkdir -p "$snapshot_dir"
+for language in en zh-Hans; do
+  mkdir -p "$test_dir/$language.lproj"
+  cp "$project_root/iina/$language.lproj/PlaylistBrowser.strings" "$test_dir/$language.lproj/"
+done
 python3 "$project_root/Tools/PlayerChromeIntegrationTests/extract.py" "$project_root" "$test_dir/Extracted.swift"
 xcrun swiftc -target arm64-apple-macos12 -o "$test_dir/ChromeIntegrationTests" \
   "$test_dir/Extracted.swift" \
@@ -14,10 +18,14 @@ xcrun swiftc -target arm64-apple-macos12 -o "$test_dir/ChromeIntegrationTests" \
   "$project_root/iina/MediaInfo/MediaInfoModels.swift" \
   "$project_root/iina/PlaylistFileMetadata.swift" \
   "$project_root/iina/PlaylistPresentation.swift" \
+  "$project_root/iina/MediaFolderBrowserView.swift" \
+  "$project_root/iina/ImageViewer/ImageFileSupport.swift" \
+  "$project_root/iina/Updates/UpdateWorkAdmission.swift" \
   "$project_root/Tools/PlayerChromeTests/Fixture.swift" \
   "$project_root/Tools/PlayerChromeIntegrationTests/main.swift"
 "$test_dir/ChromeIntegrationTests" "$project_root/iina/Base.lproj/MainWindowController.xib" \
-  "$project_root/iina/Base.lproj/PlaylistViewController.xib" "$snapshot_dir" 2>&1 | tee "$test_dir/runtime.log"
+  "$project_root/iina/Base.lproj/PlaylistViewController.xib" "$snapshot_dir" "$test_dir/media-fixture" \
+  -AppleLanguages '(en)' 2>&1 | tee "$test_dir/runtime.log"
 if /usr/bin/grep -nE 'Unable to simultaneously satisfy constraints|Will attempt to recover by breaking constraint' "$test_dir/runtime.log"; then
   echo "FAIL: The native layout reported conflicting constraints."
   exit 1

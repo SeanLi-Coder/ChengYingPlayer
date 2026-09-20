@@ -35,8 +35,15 @@ image = block(toolbar, "func image()")
 toolbar = toolbar.replace(image, 'func image() -> NSImage { NSImage(systemSymbolName: "circle", accessibilityDescription: nil)! }')
 prefix = (root / "Tools/PlayerChromeIntegrationTests/Controller.swift").read_text()
 playlist_source = (root / "iina/PlaylistViewController.swift").read_text()
-playlist = block(playlist_source, "private func installSortControls(")
-playlist = playlist.replace("private func ", "func ", 1)
+playlist_methods = [block(playlist_source, marker) for marker in (
+    "private func installSortControls(", "private func installFolderBrowser(",
+    "private func syncFolderBrowser(", "@objc private func changeBrowserMode(",
+    "private func updateBrowserMode(", "private func updateTagFilterControls(",
+)]
+playlist = "\n".join(method.replace("private func ", "func ", 1) for method in playlist_methods)
+folder_properties = playlist_source[playlist_source.index("  private let folderBrowser ="):
+                                   playlist_source.index("  private let sortControls =")]
+prefix = prefix.replace("// PRODUCTION_FOLDER_BROWSER_PROPERTIES", folder_properties.replace("private ", ""))
 prefix = prefix.replace("// PRODUCTION_PLAYLIST_COMPACT_PROPERTY", block(playlist_source, "var useCompactTabHeight ="))
 prefix = prefix.replace("// PRODUCTION_PLAYLIST_SHIFT_PROPERTY", block(playlist_source, "var downShift:"))
 row_height = re.search(r"(?m)^    playlistTableView\.rowHeight = .+$", playlist_source).group(0)
@@ -49,4 +56,4 @@ generated = (
     + "extension PlaylistLayoutController {\n" + playlist + "\n}\n"
 )
 output.write_text(generated)
-print("Extracted and retained all four current production layout methods and the real toolbar sizing policy.")
+print("Extracted current player, folder browser, and playback queue layouts with their real mode-switching methods.")

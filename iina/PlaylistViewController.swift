@@ -41,6 +41,13 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   private var activationObserver: NSObjectProtocol?
   private var lifecycleObservers: [NSObjectProtocol] = []
   private var playlistReloadWork: DispatchWorkItem?
+  private let folderBrowser = MediaFolderBrowserView(extensions: Set(Utility.playableFileExt).union(ImageFileSupport.extensions))
+  private let browserModeControl = NSSegmentedControl(labels: [playlistBrowserString("browser.files"),
+                                                              playlistBrowserString("browser.queue")],
+                                                     trackingMode: .selectOne, target: nil, action: nil)
+  private var queuePresentationViews: [NSView] = []
+  private var prefersFolderBrowser = true
+  private var browserPlaybackURL: URL?
   private let sortControls = PlaylistSortControls()
   private let tagFilterControls = PlaylistTagFilterControls()
   private let filterEmptyLabel = NSTextField(wrappingLabelWithString: playlistBrowserString("filter.empty"))
@@ -139,6 +146,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     removeBtn.toolTip = NSLocalizedString("mini_player.remove", comment: "remove")
     sortBtn.toolTip = NSLocalizedString("mini_player.sort", comment: "sort")
     installSortControls()
+    installFolderBrowser()
     playlistTableView.rowHeight = 44
 
     hideTotalLength()
@@ -168,10 +176,18 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
                                                                object: nil, queue: .main) { [weak self] _ in
       guard let self, self.view.window != nil, !self.view.isHiddenOrHasHiddenAncestor else { return }
       self.refreshFileMetadata(force: true)
+      if !self.folderBrowser.isHidden { self.folderBrowser.refresh() }
     }
+    lifecycleObservers.append(NotificationCenter.default.addObserver(forName: .iinaFileLoaded, object: player,
+                                                                     queue: .main) { [weak self] _ in
+      self?.syncFolderBrowser()
+    })
     for name in [Notification.Name.iinaPlayerStopped, .iinaPlayerShutdown] {
       lifecycleObservers.append(NotificationCenter.default.addObserver(forName: name, object: player, queue: .main) { [weak self] _ in
         self?.cancelMetadataRefresh()
+        self?.folderBrowser.cancelPendingLoads()
+        self?.browserPlaybackURL = nil
+        self?.updateBrowserMode()
       })
     }
 
@@ -230,6 +246,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
       refreshFileMetadata(force: replacedList)
       rebuildDisplayedPlaylist()
       updateSortControls()
+      syncFolderBrowser()
     }
     if chapters {
       chapterTableView.reloadData()
@@ -271,6 +288,79 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     sortControls.onSortChange = { [weak self] key, ascending in self?.requestSort(key: key, ascending: ascending) }
     sortControls.onRefresh = { [weak self] in self?.refreshFileMetadata(force: true) }
     tagFilterControls.onFilterChange = { [weak self] filter in self?.requestTagFilter(filter) }
+  }
+
+  // MARK: - Folder browsing independent of the playback queue
+
+  private func installFolderBrowser() {
+    guard let container = playlistTableView.enclosingScrollView?.superview else { return }
+    queuePresentationViews = container.subviews
+    NSLayoutConstraint.deactivate(container.constraints.filter {
+      ($0.firstItem as? NSView) === sortControls && $0.firstAttribute == .top &&
+        ($0.secondItem as? NSView) === container && $0.secondAttribute == .top
+    })
+    browserModeControl.translatesAutoresizingMaskIntoConstraints = false
+    browserModeControl.controlSize = .small
+    browserModeControl.target = self
+    browserModeControl.action = #selector(changeBrowserMode(_:))
+    browserModeControl.setAccessibilityLabel(playlistBrowserString("browser.mode"))
+    folderBrowser.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(browserModeControl)
+    container.addSubview(folderBrowser)
+    NSLayoutConstraint.activate([
+      browserModeControl.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+      browserModeControl.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+      browserModeControl.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 8),
+      browserModeControl.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
+      browserModeControl.heightAnchor.constraint(equalToConstant: 24),
+      sortControls.topAnchor.constraint(equalTo: browserModeControl.bottomAnchor, constant: 6),
+      folderBrowser.topAnchor.constraint(equalTo: browserModeControl.bottomAnchor, constant: 6),
+      folderBrowser.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+      folderBrowser.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+      folderBrowser.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+    ])
+    folderBrowser.canNavigate = { [weak self] in
+      self?.player?.info.state.active == true && !UpdateWorkAdmission.shared.isBlocked
+    }
+    folderBrowser.onOpenFile = { [weak self] url in
+      guard let self, let player = self.player, player.info.state.active,
+            !UpdateWorkAdmission.shared.isBlocked else { return }
+      if ImageFileSupport.isImageURL(url) {
+        ImageViewerCoordinator.shared.openImages(in: [url])
+      } else {
+        player.openURL(url)
+      }
+    }
+    updateBrowserMode()
+  }
+
+  private func syncFolderBrowser() {
+    let current = player.info.currentURL.flatMap { $0.isFileURL ? $0.standardizedFileURL : nil }
+    if current != browserPlaybackURL {
+      browserPlaybackURL = current
+      if let current {
+        folderBrowser.showDirectory(current.deletingLastPathComponent(), selectedURL: current)
+      } else {
+        folderBrowser.cancelPendingLoads()
+      }
+    }
+    updateBrowserMode()
+  }
+
+  @objc private func changeBrowserMode(_ sender: NSSegmentedControl) {
+    prefersFolderBrowser = sender.selectedSegment == 0
+    updateBrowserMode()
+    if !folderBrowser.isHidden { folderBrowser.refresh() }
+  }
+
+  private func updateBrowserMode() {
+    let available = browserPlaybackURL != nil
+    let browsing = available && prefersFolderBrowser
+    browserModeControl.setEnabled(available, forSegment: 0)
+    browserModeControl.selectedSegment = browsing ? 0 : 1
+    queuePresentationViews.forEach { $0.isHidden = browsing }
+    folderBrowser.isHidden = !browsing
+    updateTagFilterControls()
   }
 
   // MARK: - Visible playlist identity mapping
@@ -326,7 +416,8 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   private func updateTagFilterControls() {
     tagFilterControls.update(filter: tagFilter, matchingCount: displayedPlaylist.count,
                              totalCount: player.info.playlist.count, busy: metadataLoading)
-    filterEmptyLabel.isHidden = tagFilter == .all || !displayedPlaylist.isEmpty || metadataLoading
+    filterEmptyLabel.isHidden = (browserPlaybackURL != nil && prefersFolderBrowser) ||
+      tagFilter == .all || !displayedPlaylist.isEmpty || metadataLoading
   }
 
   // MARK: - Playlist metadata and sorting
@@ -635,9 +726,9 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     if currentTab == .playlist {
       switch menuItem.tag {
       case MenuItemTagCut, MenuItemTagCopy, MenuItemTagDelete:
-        return playlistTableView.selectedRow != -1
+        return !playlistTableView.isHiddenOrHasHiddenAncestor && playlistTableView.selectedRow != -1
       case MenuItemTagPaste:
-        return NSPasteboard.general.types?.contains(.nsFilenames) ?? false
+        return !playlistTableView.isHiddenOrHasHiddenAncestor && (NSPasteboard.general.types?.contains(.nsFilenames) ?? false)
       default:
         break
       }
@@ -646,16 +737,19 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   }
 
   @objc func copy(_ sender: NSMenuItem) {
+    guard !playlistTableView.isHiddenOrHasHiddenAncestor else { return }
     copyToPasteboard(playlistTableView, writeRowsWith: playlistTableView.selectedRowIndexes, to: .general)
   }
 
   @objc func cut(_ sender: NSMenuItem) {
+    guard !playlistTableView.isHiddenOrHasHiddenAncestor else { return }
     if copyToPasteboard(playlistTableView, writeRowsWith: playlistTableView.selectedRowIndexes, to: .general) {
       delete(sender)
     }
   }
 
   @objc func paste(_ sender: NSMenuItem) {
+    guard !playlistTableView.isHiddenOrHasHiddenAncestor else { return }
     let dest = playlistTableView.selectedRowIndexes.first ?? 0
     pasteFromPasteboard(row: dest, from: .general)
   }
@@ -666,6 +760,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   }
 
   private func removeSelectedPlaylistItems() {
+    guard !playlistTableView.isHiddenOrHasHiddenAncestor else { return }
     player.playlistMutationLock.lock()
     defer { player.playlistMutationLock.unlock() }
     guard player.info.state.active, let playlist = player.playlistSnapshot(),

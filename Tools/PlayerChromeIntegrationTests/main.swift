@@ -38,8 +38,31 @@ NSLayoutConstraint.activate([
   playlist.view.topAnchor.constraint(equalTo: controller.sideBarView.topAnchor),
   playlist.view.bottomAnchor.constraint(equalTo: controller.sideBarView.bottomAnchor),
 ])
+let mediaFixture = URL(fileURLWithPath: CommandLine.arguments[4], isDirectory: true).standardizedFileURL
+try FileManager.default.createDirectory(at: mediaFixture, withIntermediateDirectories: true)
+try FileManager.default.createDirectory(at: mediaFixture.appendingPathComponent("Season 2", isDirectory: true),
+                                       withIntermediateDirectories: true)
+for index in 1...6 {
+  try Data([UInt8(index)]).write(to: mediaFixture.appendingPathComponent("Sample Video \(index).mp4"))
+}
+playlist.player.info.currentURL = mediaFixture.appendingPathComponent("Sample Video 1.mp4")
+playlist.syncFolderBrowser()
+let loadDeadline = Date().addingTimeInterval(5)
+while playlist.folderBrowser.isLoading && Date() < loadDeadline {
+  _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+}
+check(!playlist.folderBrowser.isLoading && playlist.folderBrowser.visibleEntries.count == 7,
+      "The integrated production folder browser loads only the generated temporary media fixture")
+func selectBrowserMode(_ segment: Int) {
+  playlist.browserModeControl.selectedSegment = segment
+  check(NSApp.sendAction(playlist.browserModeControl.action!, to: playlist.browserModeControl.target,
+                        from: playlist.browserModeControl),
+        "The real sidebar mode control dispatches its production action")
+  content.layoutSubtreeIfNeeded()
+}
 
-for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), NSSize(width: 640, height: 400), NSSize(width: 1920, height: 1080)] {
+for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), NSSize(width: 320, height: 380),
+             NSSize(width: 640, height: 400), NSSize(width: 1920, height: 1080)] {
   controller.setupOnScreenController(withPosition: .floating)
   window.setContentSize(size)
   for fullscreen in [false, true] {
@@ -78,7 +101,7 @@ for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), N
               "\(label): rebuilt icons remain inside a nonzero toolbar instead of clipping outside an empty stack")
         check(buttons.count == 4 && buttons.suffix(2).map(\.tag) == [Preference.ToolBarButton.settings.rawValue, Preference.ToolBarButton.playlist.rawValue],
               "\(label): toolbar has one information entry and settings/file-list at the right")
-        check(controller.sideBarView.frame.height <= 400.6 && controller.sideBarView.frame.height >= 179.4,
+        check(controller.sideBarView.frame.height <= 400.6 && controller.sideBarView.frame.height >= 239.4,
               "\(label): sidebar height stays within its intended bounds")
         check(controller.sideBarView.frame.minY >= footer.frame.maxY + 5.4,
               "\(label): sidebar cannot extend into the footer or below the video")
@@ -86,16 +109,30 @@ for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), N
               "\(label): sidebar stays below the corner toolbar")
         check(!controller.sideBarView.hasAmbiguousLayout && !footer.hasAmbiguousLayout && !corner.hasAmbiguousLayout,
               "\(label): the integrated edge layout has no ambiguous containers")
-        check(window.contentMinSize == NSSize(width: 320, height: 320) && content.bounds.width >= 320 && content.bounds.height >= 320,
+        check(window.contentMinSize == NSSize(width: 320, height: 380) && content.bounds.width >= 320 && content.bounds.height >= 380,
               "\(label): switching to edge mode expands undersized windows to the production content minimum")
-        check(content.bounds.width <= max(320, size.width) + 0.6 && content.bounds.height <= max(320, size.height) + 0.6,
+        check(content.bounds.width <= max(320, size.width) + 0.6 && content.bounds.height <= max(380, size.height) + 0.6,
               "\(label): preferred sidebar height never expands the requested video window beyond its minimum")
+        selectBrowserMode(1)
         let visibleHeight = playlist.playlistTableView.enclosingScrollView!.contentView.bounds.height
         print("PLAYLIST \(label): sidebar=\(controller.sideBarView.frame.height) header=\(playlist.tabHeightConstraint.constant) listViewport=\(visibleHeight) row=\(playlist.playlistTableView.rowHeight)")
         check(playlist.useCompactTabHeight && near(playlist.tabHeightConstraint.constant, 32),
               "\(label): edge mode uses the actual compact playlist header")
-        check(visibleHeight >= playlist.playlistTableView.rowHeight,
-              "\(label): playlist headers, sorting, color filtering, and footer leave at least one full row")
+        check(!playlist.playlistTableView.isHiddenOrHasHiddenAncestor && playlist.folderBrowser.isHidden &&
+              visibleHeight >= 44 && near(playlist.playlistTableView.rowHeight, 44),
+              "\(label): the real queue layout including its mode switch leaves at least one full 44-point row")
+        if !fullscreen {
+          try snapshot(content, name: "player-chrome-integrated-\(Int(size.width))-\(Int(size.height))-queue")
+        }
+        selectBrowserMode(0)
+        let folderVisibleHeight = playlist.folderBrowser.tableView.enclosingScrollView!.contentView.bounds.height
+        print("FOLDER \(label): sidebar=\(controller.sideBarView.frame.height) folderViewport=\(folderVisibleHeight) row=\(playlist.folderBrowser.tableView.rowHeight)")
+        check(!playlist.folderBrowser.isHiddenOrHasHiddenAncestor && playlist.playlistTableView.isHiddenOrHasHiddenAncestor &&
+              folderVisibleHeight >= 58 && near(playlist.folderBrowser.tableView.rowHeight, 58),
+              "\(label): the actual folder header, sort, filter, and mode switch leave at least one full 58-point row")
+        check(!playlist.browserModeControl.hasAmbiguousLayout && !playlist.folderBrowser.hasAmbiguousLayout &&
+              !playlist.folderBrowser.tableView.enclosingScrollView!.hasAmbiguousLayout,
+              "\(label): the extracted folder integration has no ambiguous mode or browser containers")
         if !fullscreen {
           try snapshot(content, name: "player-chrome-integrated-\(Int(size.width))-\(Int(size.height))")
         }
@@ -104,6 +141,10 @@ for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), N
               "\(label): legacy modes remove both edge containers")
         check(controller.originalSidebarVerticalConstraints.allSatisfy(\.isActive),
               "\(label): legacy full-height sidebar constraints are restored")
+        let legacyFolderHeight = playlist.folderBrowser.tableView.enclosingScrollView!.contentView.bounds.height
+        print("LEGACY FOLDER \(label): content=\(content.bounds.height) folderViewport=\(legacyFolderHeight)")
+        check(legacyFolderHeight >= playlist.folderBrowser.tableView.rowHeight,
+              "\(label): returning from edge mode to a legacy layout keeps at least one visible folder row")
       }
     }
   }

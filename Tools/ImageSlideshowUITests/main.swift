@@ -105,7 +105,12 @@ viewer.window?.makeKeyAndOrderFront(nil)
 NSApp.activate(ignoringOtherApps: true)
 waitFor("Single image discovers all sibling images") { loaded(viewer, first) && viewer.files.count == 3 && viewer.slideshowButton.isEnabled }
 expect(viewer.files.map(\.name) == ["2.png", "10.png", "30.png"], "Folder initially uses natural filename order")
-expect(viewer.tableView.numberOfRows == 3 && visible(viewer.tableView), "Folder image list is visible without opening another panel")
+expect(viewer.folderBrowser.tableView.numberOfRows == 3 && visible(viewer.folderBrowser.tableView),
+       "Shared folder image browser is visible without opening another panel")
+viewer.sidebarPicker.selectedSegment = 1
+send(viewer.sidebarPicker)
+pump()
+expect(visible(viewer.tableView), "The current image sequence remains available in its list tab")
 expect(viewer.tableView.selectedRow == 0 && viewer.selectedURL == first, "Directory enumeration keeps the opened image selected")
 expect(viewer.folderLabel.stringValue.contains("folder"), "Folder heading identifies the current folder")
 expect(viewer.slideshowInterval == 5, "Slideshow defaults to five seconds")

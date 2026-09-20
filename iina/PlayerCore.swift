@@ -92,10 +92,11 @@ class PlayerCore: NSObject {
       Utility.showAlert("local_media_only", style: .informational)
       return nil
     }
-    let plan = ImageOpenPlan.make(Utility.resolveURLs(urls), playbackExtensions: Set(Utility.playableFileExt))
+    let resolvedURLs = Utility.resolveURLs(urls)
+    let plan = ImageOpenPlan.make(resolvedURLs, playbackExtensions: Set(Utility.playableFileExt))
     // Choose the existing video target before the image window changes NSApp.mainWindow.
-    defer { ImageViewerCoordinator.shared.openImages(in: plan.imageURLs) }
-    guard !plan.mediaURLs.isEmpty else { return plan.imageCount }
+    defer { ImageViewerCoordinator.shared.openImages(in: resolvedURLs) }
+    guard !plan.mediaURLs.isEmpty else { return plan.combinedCount(with: 0) }
     return plan.combinedCount(with: openMediaURLs(plan.mediaURLs))
   }
 
@@ -426,7 +427,7 @@ class PlayerCore: NSObject {
       return nil
     }
     let plan = ImageViewerCoordinator.shared.openImages(in: Utility.resolveURLs(urls))
-    guard !plan.mediaURLs.isEmpty else { return plan.imageCount }
+    guard !plan.mediaURLs.isEmpty else { return plan.combinedCount(with: 0) }
     return plan.combinedCount(with: openMediaURLs(plan.mediaURLs, shouldAutoLoad: autoLoad))
   }
 

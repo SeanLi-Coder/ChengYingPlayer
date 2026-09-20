@@ -48,6 +48,7 @@ func prepare(filtered: Bool = true, selected: IndexSet = [0]) {
     return (item.filename, PlaylistFileMetadata(url: URL(fileURLWithPath: item.filename), tags: tags))
   })
   table.selectedIndexes = []
+  table.isHidden = false
   controller.requestTagFilter(filtered ? .color(6) : .all)
   table.selectedIndexes = selected
   table.clickedIndex = selected.first ?? -1
@@ -140,6 +141,26 @@ controller.delete(menu)
 controller.performDoubleAction(sender: table)
 check(player.removedIDs.isEmpty && player.playedIDs.isEmpty,
       "Stopping playback invalidates queued removal and double-click actions")
+
+prepare(selected: [0, 1])
+table.isHidden = true
+controller.delete(menu)
+controller.removeBtnAction(NSButton())
+check(player.removedIDs.isEmpty && player.livePlaylist.map(\.entryID) == all.map(\.entryID),
+      "Hidden playback rows cannot be removed by stale menu or button actions")
+table.isHidden = false
+let hiddenQueueContainer = NSView()
+hiddenQueueContainer.addSubview(table)
+hiddenQueueContainer.isHidden = true
+controller.delete(menu)
+controller.removeBtnAction(NSButton())
+check(player.removedIDs.isEmpty && player.livePlaylist.map(\.entryID) == all.map(\.entryID),
+      "Folder mode hiding the queue ancestor also blocks deletion of its retained selection")
+hiddenQueueContainer.isHidden = false
+controller.removeBtnAction(NSButton())
+check(Set(player.removedIDs) == [2, 4],
+      "Restoring queue visibility restores deletion with the original visible-row identity mapping")
+table.removeFromSuperview()
 
 prepare(selected: [0, 1])
 controller.copyToPasteboard(table, writeRowsWith: [0, 1], to: pasteboard)

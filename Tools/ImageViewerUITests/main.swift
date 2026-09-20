@@ -329,4 +329,159 @@ viewer.cancelAndClose()
 pump()
 expect(viewer.window?.attachedSheet == nil, "Close also dismisses pending conversion confirmation")
 
+let container = root.appendingPathComponent("Container", isDirectory: true)
+let child = container.appendingPathComponent("Pictures.gif", isDirectory: true)
+let emptyChild = child.appendingPathComponent("Empty", isDirectory: true)
+try FileManager.default.createDirectory(at: emptyChild, withIntermediateDirectories: true)
+let childImage = child.appendingPathComponent("1.png")
+let childAnimation = child.appendingPathComponent("2.gif")
+let childVideo = child.appendingPathComponent("3.mp4")
+for childFile in [childImage, childAnimation, childVideo] { try Data([0]).write(to: childFile) }
+let startsBeforeBrowsing = ImageDocument.starts.count
+let browserViewer = ImageViewerWindowController(urls: [], directoryURL: container, defaults: defaults)
+func captureBrowser(_ name: String) throws {
+  guard let path = ProcessInfo.processInfo.environment["IMAGE_VIEWER_BROWSER_SCREENSHOT_DIR"],
+        let window = browserViewer.window, let content = window.contentView else { return }
+  window.setContentSize(NSSize(width: 880, height: 620))
+  window.makeKeyAndOrderFront(nil)
+  content.wantsLayer = true
+  content.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+  pump(0.1)
+  guard let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
+  content.cacheDisplay(in: content.bounds, to: bitmap)
+  guard let opaque = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: bitmap.pixelsWide,
+    pixelsHigh: bitmap.pixelsHigh, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+    isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+    let context = NSGraphicsContext(bitmapImageRep: opaque) else { return }
+  NSGraphicsContext.saveGraphicsState()
+  NSGraphicsContext.current = context
+  let pixelBounds = NSRect(x: 0, y: 0, width: bitmap.pixelsWide, height: bitmap.pixelsHigh)
+  NSColor.windowBackgroundColor.setFill()
+  pixelBounds.fill()
+  bitmap.draw(in: pixelBounds)
+  NSGraphicsContext.restoreGraphicsState()
+  if let data = opaque.representation(using: .png, properties: [:]) {
+    let output = URL(fileURLWithPath: path, isDirectory: true).appendingPathComponent(name + ".png")
+    try data.write(to: output)
+    print("Image browser screenshot: \(output.path)")
+  }
+  let capture = Process()
+  capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+  let output = URL(fileURLWithPath: path, isDirectory: true).appendingPathComponent(name + ".window.png")
+  capture.arguments = ["-l", String(window.windowNumber), "-o", output.path]
+  try capture.run()
+  capture.waitUntilExit()
+}
+browserViewer.showWindow(nil)
+browserViewer.window?.makeKeyAndOrderFront(nil)
+waitFor("A folder containing only subfolders opens the native browser") {
+  !browserViewer.folderBrowser.isLoading && browserViewer.folderBrowser.visibleEntries.count == 1
+}
+expect(browserViewer.canvas.image == nil && browserViewer.selectedURL == nil &&
+       !browserViewer.folderBrowser.isHidden && !browserViewer.slideshowButton.isEnabled,
+       "An empty browser starts without a fake image or slideshow")
+expect(browserViewer.folderBrowser.tableView.visibleRect.height > 100,
+       "An empty image canvas still gives the folder browser a usable layout")
+func activateBrowserEntry(_ url: URL) {
+  guard let row = browserViewer.folderBrowser.visibleEntries.firstIndex(where: {
+    $0.url.standardizedFileURL.resolvingSymlinksInPath() == url.standardizedFileURL.resolvingSymlinksInPath()
+  }) else { expect(false, "Requested browser entry exists"); return }
+  browserViewer.folderBrowser.tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+  browserViewer.folderBrowser.openSelectedEntry()
+}
+activateBrowserEntry(child)
+waitFor("Double-clicking a directory enters its direct children") {
+  !browserViewer.folderBrowser.isLoading && browserViewer.folderBrowser.visibleEntries.count == 4
+}
+expect(ImageDocument.starts.count == startsBeforeBrowsing && browserViewer.canvas.image == nil,
+       "Even a directory named GIF never reaches the image decoder")
+activateBrowserEntry(childImage)
+waitFor("Double-clicking a nested image opens it") {
+  browserViewer.selectedURL?.lastPathComponent == childImage.lastPathComponent && browserViewer.canvas.image != nil
+}
+expect(browserViewer.files.map(\.name) == ["1.png", "2.gif"],
+       "Nested image navigation excludes folders and video files")
+try captureBrowser("image-folder-minimum")
+activateBrowserEntry(childVideo)
+expect(PlayerCore.urls.first?.lastPathComponent == childVideo.lastPathComponent &&
+       browserViewer.selectedURL?.lastPathComponent == childImage.lastPathComponent,
+       "Nested videos use common media routing while retaining the current image")
+browserViewer.editButton.performClick(nil)
+browserViewer.folderBrowser.goToParent()
+activateBrowserEntry(childAnimation)
+expect(browserViewer.isEditingImage && browserViewer.selectedURL?.lastPathComponent == childImage.lastPathComponent &&
+       browserViewer.folderBrowser.directoryURL?.lastPathComponent == child.lastPathComponent,
+       "Folder and file activation respect an active image editing session")
+browserViewer.editButton.performClick(nil)
+let updateOwner = UUID()
+expect(UpdateWorkAdmission.shared.acquire(updateOwner), "Idle image browser can enter the update barrier")
+browserViewer.folderBrowser.goToParent()
+activateBrowserEntry(childAnimation)
+expect(browserViewer.selectedURL?.lastPathComponent == childImage.lastPathComponent &&
+       browserViewer.folderBrowser.directoryURL?.lastPathComponent == child.lastPathComponent,
+       "Folder and file activation respect the update admission barrier")
+UpdateWorkAdmission.shared.release(updateOwner)
+activateBrowserEntry(childAnimation)
+waitFor("Nested animation begins playing") { browserViewer.isAnimating }
+let sequenceBeforeBrowsing = browserViewer.files.map(\.url)
+activateBrowserEntry(emptyChild)
+waitFor("An empty nested folder remains browsable") { !browserViewer.folderBrowser.isLoading }
+expect(browserViewer.isAnimating && browserViewer.files.map(\.url) == sequenceBeforeBrowsing &&
+       browserViewer.selectedURL?.lastPathComponent == childAnimation.lastPathComponent,
+       "Browsing an empty child folder preserves animation and the image sequence")
+browserViewer.folderBrowser.goToParent()
+waitFor("Parent navigation restores the containing folder") {
+  !browserViewer.folderBrowser.isLoading && browserViewer.folderBrowser.visibleEntries.count == 4
+}
+browserViewer.folderBrowser.tagFilterControls.filterPopup.selectItem(at: 2)
+NSApp.sendAction(browserViewer.folderBrowser.tagFilterControls.filterPopup.action!,
+                 to: browserViewer.folderBrowser.tagFilterControls.filterPopup.target,
+                 from: browserViewer.folderBrowser.tagFilterControls.filterPopup)
+expect(browserViewer.files.map(\.url) == sequenceBeforeBrowsing && browserViewer.isAnimating,
+       "Finder tag filtering never replaces the active image sequence or stops animation")
+browserViewer.open(urls: [childAnimation, childImage])
+waitFor("Explicit nested selection retains its requested order") {
+  browserViewer.files.map(\.name) == ["2.gif", "1.png"] && browserViewer.canvas.image != nil
+}
+expect(browserViewer.sidebarPicker.selectedSegment == 1 && !browserViewer.tableView.isHiddenOrHasHiddenAncestor,
+       "Explicit image selection opens its own ordered list")
+try captureBrowser("image-selection-minimum")
+browserViewer.sidebarPicker.selectedSegment = 0
+NSApp.sendAction(browserViewer.sidebarPicker.action!, to: browserViewer.sidebarPicker.target, from: browserViewer.sidebarPicker)
+browserViewer.folderBrowser.showDirectory(container, force: true)
+waitFor("Explicit selection can explore other folders") { !browserViewer.folderBrowser.isLoading }
+expect(browserViewer.files.map(\.name) == ["2.gif", "1.png"] && browserViewer.isAnimating,
+       "Switching to folder browsing preserves explicit image order and animation")
+waitFor("Explicit image sequence is ready for slideshow") { browserViewer.slideshowButton.isEnabled }
+browserViewer.setSlideshowInterval(120)
+NSApp.sendAction(browserViewer.slideshowButton.action!, to: browserViewer.slideshowButton.target,
+                 from: browserViewer.slideshowButton)
+browserViewer.folderBrowser.showDirectory(emptyChild, force: true)
+waitFor("A running slideshow can browse an unrelated empty folder") { !browserViewer.folderBrowser.isLoading }
+expect(browserViewer.isSlideshowRunning && browserViewer.isAnimating && browserViewer.files.map(\.name) == ["2.gif", "1.png"],
+       "Folder navigation preserves both slideshow and animation timers")
+browserViewer.open(urls: [childImage])
+waitFor("An image folder is ready before a failed refresh") {
+  browserViewer.files.count == 2 && browserViewer.slideshowButton.isEnabled && browserViewer.canvas.image != nil
+}
+let detachedChild = container.appendingPathComponent("Detached", isDirectory: true)
+try FileManager.default.moveItem(at: child, to: detachedChild)
+browserViewer.folderBrowser.refresh()
+waitFor("An unavailable folder reports its load failure") {
+  !browserViewer.folderBrowser.isLoading && browserViewer.folderBrowser.loadError != nil
+}
+expect(browserViewer.files.count == 2 && browserViewer.slideshowButton.isEnabled && browserViewer.canvas.image != nil,
+       "A failed browser refresh preserves the image sequence without a stuck loading state")
+try FileManager.default.moveItem(at: detachedChild, to: child)
+browserViewer.cancelAndClose()
+expect(!browserViewer.folderBrowser.isLoading && browserViewer.canvas.image == nil,
+       "Closing the image viewer cancels browser loads as well as image work")
+browserViewer.open(urls: [], directoryURL: container)
+browserViewer.showWindow(nil)
+waitFor("A closed image window can reopen directly into a folder") { !browserViewer.folderBrowser.isLoading }
+expect(browserViewer.selectedURL == nil && browserViewer.files.isEmpty && browserViewer.canvas.image == nil &&
+       browserViewer.window?.representedURL == nil,
+       "Reopening an empty folder does not reuse a stale image selection or title")
+browserViewer.cancelAndClose()
+
 print("Image viewer UI checks passed: \(checks)")

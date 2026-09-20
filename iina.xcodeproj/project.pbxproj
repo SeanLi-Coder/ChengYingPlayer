@@ -47,6 +47,7 @@
 		D4E100010000000000000002 /* PlayerChromePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E100020000000000000002 /* PlayerChromePolicy.swift */; };
 		D4CA00012F6A000100000001 /* PlaylistFileMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00112F6A000100000001 /* PlaylistFileMetadata.swift */; };
 		D4CA00022F6A000100000002 /* PlaylistPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00122F6A000100000002 /* PlaylistPresentation.swift */; };
+		D4CA00052F6A000100000005 /* MediaFolderBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00152F6A000100000005 /* MediaFolderBrowserView.swift */; };
 		D4CA00032F6A000100000003 /* PlaylistPlaybackPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00132F6A000100000003 /* PlaylistPlaybackPolicy.swift */; };
 		D4CA00042F6A000100000004 /* PlaylistBrowser.strings in Resources */ = {isa = PBXBuildFile; fileRef = D4CA00302F6A000100000001 /* PlaylistBrowser.strings */; };
 		D4C800012F6A000100000001 /* SubtitleToolsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C800102F6A000100000001 /* SubtitleToolsModels.swift */; };
@@ -484,9 +485,11 @@
 		D4E100020000000000000002 /* PlayerChromePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerChromePolicy.swift; sourceTree = "<group>"; };
 		D4CA00112F6A000100000001 /* PlaylistFileMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistFileMetadata.swift; sourceTree = "<group>"; };
 		D4CA00122F6A000100000002 /* PlaylistPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPresentation.swift; sourceTree = "<group>"; };
+		D4CA00152F6A000100000005 /* MediaFolderBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaFolderBrowserView.swift; sourceTree = "<group>"; };
 		D4CA00132F6A000100000003 /* PlaylistPlaybackPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPlaybackPolicy.swift; sourceTree = "<group>"; };
 		D4CA00312F6A000100000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/PlaylistBrowser.strings; sourceTree = "<group>"; };
 		D4CA00322F6A000100000002 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/PlaylistBrowser.strings"; sourceTree = "<group>"; };
+		D4CA00332F6A000100000003 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/PlaylistBrowser.strings"; sourceTree = "<group>"; };
 		D4C800102F6A000100000001 /* SubtitleToolsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsModels.swift; sourceTree = "<group>"; };
 		D4C800112F6A000100000002 /* SubtitleToolsHelperClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsHelperClient.swift; sourceTree = "<group>"; };
 		D4C800122F6A000100000003 /* SubtitleToolsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleToolsService.swift; sourceTree = "<group>"; };
@@ -2275,6 +2278,7 @@
 				D4E100020000000000000002 /* PlayerChromePolicy.swift */,
 				D4CA00112F6A000100000001 /* PlaylistFileMetadata.swift */,
 				D4CA00122F6A000100000002 /* PlaylistPresentation.swift */,
+				D4CA00152F6A000100000005 /* MediaFolderBrowserView.swift */,
 				D4CA00132F6A000100000003 /* PlaylistPlaybackPolicy.swift */,
 				84A886E21E24F2D3008755BB /* Sub */,
 				8497A4831D2FF573005F504F /* iina-Bridging-Header.h */,
@@ -3054,6 +3058,7 @@
 				D4D100010000000000000006 /* ImageMediaInfoReader.swift in Sources */,
 				D4CA00012F6A000100000001 /* PlaylistFileMetadata.swift in Sources */,
 				D4CA00022F6A000100000002 /* PlaylistPresentation.swift in Sources */,
+				D4CA00052F6A000100000005 /* MediaFolderBrowserView.swift in Sources */,
 				D4CA00032F6A000100000003 /* PlaylistPlaybackPolicy.swift in Sources */,
 				D4C700022F6A000100000002 /* VideoToolsHelperClient.swift in Sources */,
 				D4C700032F6A000100000003 /* VideoToolsTaskManager.swift in Sources */,
@@ -3271,6 +3276,7 @@
 			children = (
 				D4CA00312F6A000100000001 /* en */,
 				D4CA00322F6A000100000002 /* zh-Hans */,
+				D4CA00332F6A000100000003 /* zh-Hant */,
 			);
 			name = PlaylistBrowser.strings;
 			sourceTree = "<group>";

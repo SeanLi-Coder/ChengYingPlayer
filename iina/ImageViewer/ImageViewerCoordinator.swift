@@ -4,11 +4,14 @@ import Cocoa
 struct ImageOpenPlan {
   let imageURLs: [URL]
   let mediaURLs: [URL]
+  let browserDirectoryURL: URL?
   var imageCount: Int { imageURLs.count }
+  var hasImageViewerInput: Bool { !imageURLs.isEmpty || browserDirectoryURL != nil }
 
   static func make(_ urls: [URL], playbackExtensions: Set<String>) -> ImageOpenPlan {
     var images: [URL] = []
     var media: [URL] = []
+    var browserDirectory: URL?
     var seen = Set<URL>()
     func appendImage(_ url: URL) {
       let identity = url.standardizedFileURL.resolvingSymlinksInPath()
@@ -26,8 +29,11 @@ struct ImageOpenPlan {
         if isDisc { media.append(url); continue }
         let files = PlaylistPlaybackPolicy.regularFiles(in: url)
         let imageFiles = files.filter(ImageFileSupport.isImageURL)
+        let hasPlaybackFiles = files.contains { playbackExtensions.contains($0.pathExtension.lowercased()) }
         imageFiles.forEach(appendImage)
-        if imageFiles.isEmpty || files.contains(where: { playbackExtensions.contains($0.pathExtension.lowercased()) }) {
+        // Keep a single folder as a browsable location, including containers with only subfolders.
+        if urls.count == 1 && (!imageFiles.isEmpty || !hasPlaybackFiles) { browserDirectory = url }
+        if hasPlaybackFiles || (imageFiles.isEmpty && browserDirectory == nil) {
           media.append(url)
         }
       } else if ImageFileSupport.isImageURL(url) {
@@ -36,12 +42,12 @@ struct ImageOpenPlan {
         media.append(url)
       }
     }
-    return ImageOpenPlan(imageURLs: images, mediaURLs: media)
+    return ImageOpenPlan(imageURLs: images, mediaURLs: media, browserDirectoryURL: browserDirectory)
   }
 
   /// Image success must not be mistaken for an empty playlist by callers.
   func combinedCount(with mediaCount: Int?) -> Int? {
-    imageCount == 0 ? mediaCount : imageCount + (mediaCount ?? 0)
+    hasImageViewerInput ? max(1, imageCount) + (mediaCount ?? 0) : mediaCount
   }
 }
 
@@ -78,13 +84,13 @@ final class ImageViewerCoordinator {
   func openImages(in urls: [URL]) -> ImageOpenPlan {
     precondition(Thread.isMainThread, "Image windows must be opened on the main thread")
     let plan = ImageOpenPlan.make(urls, playbackExtensions: Set(Utility.playableFileExt))
-    guard !UpdateWorkAdmission.shared.isBlocked, !isShuttingDown, !plan.imageURLs.isEmpty else { return plan }
+    guard !UpdateWorkAdmission.shared.isBlocked, !isShuttingDown, plan.hasImageViewerInput else { return plan }
     isOpening = true
     defer { isOpening = false }
     if let controller {
-      controller.open(urls: plan.imageURLs)
+      controller.open(urls: plan.imageURLs, directoryURL: plan.browserDirectoryURL)
     } else {
-      controller = ImageViewerWindowController(urls: plan.imageURLs)
+      controller = ImageViewerWindowController(urls: plan.imageURLs, directoryURL: plan.browserDirectoryURL)
     }
     controller?.showWindow(nil)
     controller?.window?.makeKeyAndOrderFront(nil)

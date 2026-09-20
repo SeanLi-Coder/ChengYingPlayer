@@ -1,4 +1,8 @@
-import Foundation
+import Cocoa
+
+enum Utility {
+  static let playableFileExt = ["mp4", "mkv", "mp3", "flac"]
+}
 
 enum Preference {
   enum Key { case recordRecentFiles }

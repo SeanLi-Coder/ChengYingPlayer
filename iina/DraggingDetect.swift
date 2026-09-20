@@ -128,8 +128,8 @@ extension PlayerCore {
 
       if hasPlayableFiles(in: paths)
           || hasSubtitleFile(in: paths)
-          || !ImageOpenPlan.make(paths.map { URL(fileURLWithPath: $0) },
-                                playbackExtensions: Set(Utility.playableFileExt)).imageURLs.isEmpty {
+          || ImageOpenPlan.make(paths.map { URL(fileURLWithPath: $0) },
+                               playbackExtensions: Set(Utility.playableFileExt)).hasImageViewerInput {
         return .copy
       }
     } else if types.contains(.nsURL) {

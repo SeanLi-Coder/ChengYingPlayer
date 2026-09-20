@@ -27,8 +27,12 @@ func setPlaylist(_ controller: PlaylistControllerUnderTest, _ playlist: [MPVPlay
   controller.player.backendPlaylist = playlist
   controller.player.getPlaylist()
 }
+func normalizedURLs(_ urls: [URL]) -> [URL] {
+  urls.map { $0.standardizedFileURL.resolvingSymlinksInPath() }
+}
 
-let directory = FileManager.default.temporaryDirectory.appendingPathComponent("chengying-playlist-operations-\(UUID().uuidString)")
+let directory = FileManager.default.temporaryDirectory
+  .appendingPathComponent("chengying-playlist-operations-\(UUID().uuidString)").resolvingSymlinksInPath()
 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 defer { try? FileManager.default.removeItem(at: directory) }
 let large = directory.appendingPathComponent("Episode 10.mp4")
@@ -37,6 +41,12 @@ let replacement = directory.appendingPathComponent("Replacement.mp4")
 try Data(repeating: 1, count: 1024).write(to: large)
 try Data(repeating: 2, count: 16).write(to: small)
 try Data(repeating: 3, count: 32).write(to: replacement)
+let nestedDirectory = directory.appendingPathComponent("Season 2", isDirectory: true)
+try FileManager.default.createDirectory(at: nestedDirectory, withIntermediateDirectories: true)
+let nestedVideo = nestedDirectory.appendingPathComponent("Episode 1.mp4")
+let imageFixture = nestedDirectory.appendingPathComponent("Cover.png")
+try Data([1, 2, 3]).write(to: nestedVideo)
+try Data([4, 5, 6]).write(to: imageFixture)
 
 let controller = PlaylistControllerUnderTest()
 let playback = PlayerCore()
@@ -166,6 +176,30 @@ check(abs(controller.sortControls.frame.maxY - controller.view.bounds.maxY) < 0.
       abs(scrollView.frame.maxY - controller.tagFilterControls.frame.minY) < 0.5,
       "The actual sort and filter toolbars reserve separate rows without overlapping the playlist")
 
+controller.installFolderBrowser()
+controller.view.layoutSubtreeIfNeeded()
+check(controller.folderBrowser.isHidden && !scrollView.isHidden &&
+      controller.browserModeControl.selectedSegment == 1 && !controller.browserModeControl.isEnabled(forSegment: 0),
+      "A player without a local file keeps the playback queue available and disables folder browsing")
+check(controller.browserModeControl.label(forSegment: 0) == playlistBrowserString("browser.files") &&
+      controller.browserModeControl.label(forSegment: 1) == playlistBrowserString("browser.queue"),
+      "The installed mode switch uses the actual localized browser and playback queue labels")
+check(controller.browserModeControl.frame.maxY <= controller.view.bounds.maxY &&
+      controller.sortControls.frame.maxY <= controller.browserModeControl.frame.minY &&
+      controller.folderBrowser.frame.maxY <= controller.browserModeControl.frame.minY,
+      "Both the real queue toolbar and folder browser fit below the separate mode switch")
+playback.info.currentURL = large
+controller.syncFolderBrowser()
+check(!controller.folderBrowser.isHidden && scrollView.isHidden && controller.sortControls.isHidden &&
+      controller.tagFilterControls.isHidden && controller.browserModeControl.selectedSegment == 0,
+      "The first local playback file defaults to the folder browser without overlapping the queue controls")
+controller.browserModeControl.selectedSegment = 1
+NSApp.sendAction(controller.browserModeControl.action!, to: controller.browserModeControl.target,
+                 from: controller.browserModeControl)
+check(controller.folderBrowser.isHidden && !scrollView.isHidden && !controller.sortControls.isHidden &&
+      !controller.tagFilterControls.isHidden && !controller.prefersFolderBrowser,
+      "The installed native mode callback restores the existing sortable playback queue")
+
 func writeTags(_ names: [String], to url: URL) throws {
   let data = try PropertyListSerialization.data(fromPropertyList: names, format: .binary, options: 0)
   let result = data.withUnsafeBytes { bytes in
@@ -227,6 +261,98 @@ check(controller.displayedPlaylist.map(\.filename) == [replacement.path],
 controller.cancelMetadataRefresh()
 check(controller.displayedPlaylist.isEmpty && controller.filterEmptyLabel.isHidden,
       "Stopping metadata work clears stale filtered rows")
+
+setPlaylist(controller, original)
+playback.info.currentURL = large
+controller.syncFolderBrowser()
+check(controller.folderBrowser.isHidden && controller.browserModeControl.selectedSegment == 1,
+      "A playback refresh preserves the user's explicit playback queue mode")
+controller.browserModeControl.selectedSegment = 0
+NSApp.sendAction(controller.browserModeControl.action!, to: controller.browserModeControl.target,
+                 from: controller.browserModeControl)
+check(!controller.folderBrowser.isHidden && controller.prefersFolderBrowser && controller.filterEmptyLabel.isHidden,
+      "Returning to folder browsing removes any playback filter empty-state overlay")
+let folderQueueIDs = playback.backendPlaylist.map(\.entryID)
+let folderReorderCount = playback.reorderCount
+let browser = controller.folderBrowser
+drain(until: { !browser.isLoading }, message: "The installed browser finishes reading the current playback folder")
+func activateBrowserEntry(_ url: URL) {
+  guard let row = browser.visibleEntries.firstIndex(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) else {
+    fatalError("Expected fixture entry is missing from the production folder browser: \(url.lastPathComponent)")
+  }
+  browser.tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+  NSApp.sendAction(browser.tableView.doubleAction!, to: browser.tableView.target, from: browser.tableView)
+}
+activateBrowserEntry(nestedDirectory)
+drain(until: { !browser.isLoading }, message: "The real browser row action opens the selected direct child folder")
+check(browser.directoryURL == nestedDirectory.standardizedFileURL && playback.openedURLs.isEmpty &&
+      ImageViewerCoordinator.shared.openedURLGroups.isEmpty,
+      "Entering a child folder browses its files without opening media or replacing playback")
+controller.reloadData(playlist: true, chapters: false)
+NotificationCenter.default.post(name: .iinaFileLoaded, object: playback)
+check(browser.directoryURL == nestedDirectory.standardizedFileURL,
+      "Queue reloads and repeated file-loaded notifications preserve the user's manually browsed folder")
+activateBrowserEntry(imageFixture)
+check(ImageViewerCoordinator.shared.openedURLGroups.map(normalizedURLs) == [normalizedURLs([imageFixture])] &&
+      playback.openedURLs.isEmpty,
+      "Opening an image through the installed folder callback reaches only the image viewer boundary")
+activateBrowserEntry(nestedVideo)
+check(normalizedURLs(playback.openedURLs) == normalizedURLs([nestedVideo]) &&
+      ImageViewerCoordinator.shared.openedURLGroups.map(normalizedURLs) == [normalizedURLs([imageFixture])],
+      "Opening a video through the installed folder callback reaches the existing playback window")
+check(playback.backendPlaylist.map(\.entryID) == folderQueueIDs && playback.reorderCount == folderReorderCount,
+      "Folder mode changes and media routing do not sort or mutate the current playback queue")
+playback.info.currentURL = small
+NotificationCenter.default.post(name: .iinaFileLoaded, object: playback)
+drain(until: { !browser.isLoading }, message: "A changed playback URL follows its containing folder")
+check(browser.directoryURL == directory.standardizedFileURL && browser.tableView.selectedRow >= 0 &&
+      browser.visibleEntries[browser.tableView.selectedRow].url.standardizedFileURL == small.standardizedFileURL,
+      "A changed playback file resets the browser to its containing folder and selects that exact file")
+let updateOwner = UUID()
+check(UpdateWorkAdmission.shared.acquire(updateOwner), "The integration fixture can reserve an idle update admission lock")
+check(controller.folderBrowser.canNavigate?() == false,
+      "Folder navigation honors the real update admission lock")
+controller.folderBrowser.onOpenFile?(large)
+controller.folderBrowser.onOpenFile?(imageFixture)
+check(normalizedURLs(playback.openedURLs) == normalizedURLs([nestedVideo]) &&
+      ImageViewerCoordinator.shared.openedURLGroups.map(normalizedURLs) == [normalizedURLs([imageFixture])],
+      "An admitted update blocks both image and video opening through already installed callbacks")
+UpdateWorkAdmission.shared.release(updateOwner)
+check(controller.folderBrowser.canNavigate?() == true, "Releasing update admission restores folder navigation")
+playback.info.state.active = false
+check(controller.folderBrowser.canNavigate?() == false, "Stopped playback cannot navigate its obsolete folder browser")
+controller.folderBrowser.onOpenFile?(large)
+controller.folderBrowser.onOpenFile?(imageFixture)
+check(normalizedURLs(playback.openedURLs) == normalizedURLs([nestedVideo]) &&
+      ImageViewerCoordinator.shared.openedURLGroups.map(normalizedURLs) == [normalizedURLs([imageFixture])],
+      "Stopped playback cannot open new media from stale folder callbacks")
+playback.info.state.active = true
+playback.info.currentURL = URL(string: "https://example.invalid/media.mp4")!
+NotificationCenter.default.post(name: .iinaFileLoaded, object: playback)
+check(controller.browserPlaybackURL == nil && controller.folderBrowser.isHidden && !scrollView.isHidden &&
+      controller.browserModeControl.selectedSegment == 1 && !controller.browserModeControl.isEnabled(forSegment: 0),
+      "The real file-loaded notification falls back to the queue for network media")
+playback.info.currentURL = small
+NotificationCenter.default.post(name: .iinaFileLoaded, object: playback)
+check(controller.browserPlaybackURL == small.standardizedFileURL && !controller.folderBrowser.isHidden &&
+      controller.browserModeControl.selectedSegment == 0 && controller.browserModeControl.isEnabled(forSegment: 0),
+      "Returning to local playback restores the user's prior folder mode preference")
+browser.showDirectory(nestedDirectory, force: true)
+check(browser.isLoading, "An explicit folder refresh starts cancellable background work")
+playback.info.state.active = false
+NotificationCenter.default.post(name: .iinaPlayerStopped, object: playback)
+check(!browser.isLoading, "The production stop notification cancels in-flight folder loading immediately")
+_ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.1))
+check(browser.visibleEntries.isEmpty && !browser.isLoading,
+      "A cancelled folder completion cannot repopulate rows after playback stops")
+playback.info.state.active = true
+NotificationCenter.default.post(name: .iinaFileLoaded, object: playback)
+drain(until: { !browser.isLoading }, message: "Reopening the same playback file can finish a fresh folder load")
+check(browser.directoryURL == directory.standardizedFileURL && !browser.visibleEntries.isEmpty,
+      "Reopening the same URL after stop restores browsing instead of retaining a cancelled empty snapshot")
+browser.showDirectory(nestedDirectory, force: true)
+NotificationCenter.default.post(name: .iinaPlayerShutdown, object: playback)
+check(!browser.isLoading, "The production shutdown notification also cancels pending folder work")
 
 var disposableController: PlaylistControllerUnderTest? = PlaylistControllerUnderTest()
 disposableController!.player = playback

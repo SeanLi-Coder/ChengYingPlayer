@@ -21,21 +21,26 @@ class PlayerWindowController: NSWindowController {}
 final class ImageViewerWindowController: NSWindowController {
   static var instances: [ImageViewerWindowController] = []
   var inputs: [[URL]] = []
+  var directories: [URL?] = []
   var isBusy = false
   var isSlideshowRunning = false
   var isActiveForUpdate: Bool { isBusy || isSlideshowRunning }
   var cancelCount = 0
 
-  init(urls: [URL]) {
+  init(urls: [URL], directoryURL: URL? = nil) {
     let window = NSWindow(contentRect: NSRect(x: -3000, y: -3000, width: 300, height: 200),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
     super.init(window: window)
     inputs.append(urls)
+    directories.append(directoryURL)
     Self.instances.append(self)
   }
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-  func open(urls: [URL]) { inputs.append(urls) }
+  func open(urls: [URL], directoryURL: URL? = nil) {
+    inputs.append(urls)
+    directories.append(directoryURL)
+  }
   func cancelAndClose() { cancelCount += 1; isBusy = false; close() }
 }

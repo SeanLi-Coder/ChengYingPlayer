@@ -1,5 +1,25 @@
 import Cocoa
 
+// Only playback and media opening are boundary doubles; all layout is extracted
+// from production methods and the shared native folder browser.
+final class ProbeChromePlaybackState { var active = true }
+final class ProbeChromePlaybackInfo {
+  let state = ProbeChromePlaybackState()
+  var currentURL: URL?
+  var playlist: [Int] = []
+}
+final class PlayerCore {
+  let info = ProbeChromePlaybackInfo()
+  func openURL(_ url: URL) {}
+}
+final class ImageViewerCoordinator {
+  static let shared = ImageViewerCoordinator()
+  func openImages(in urls: [URL]) {}
+}
+extension Utility {
+  static let playableFileExt = ["mp4", "mkv", "mp3"]
+}
+
 enum Preference {
   enum OSCPosition { case floating, top, bottom }
   enum Key { case controlBarPositionHorizontal, controlBarPositionVertical, controlBarToolbarButtons }
@@ -150,9 +170,14 @@ final class LayoutController: NSWindowController {
 }
 
 final class PlaylistLayoutController: NSViewController, NSTableViewDataSource {
+  let player: PlayerCore! = PlayerCore()
+  // PRODUCTION_FOLDER_BROWSER_PROPERTIES
   let sortControls = PlaylistSortControls()
   let tagFilterControls = PlaylistTagFilterControls()
   let filterEmptyLabel = NSTextField(wrappingLabelWithString: playlistBrowserString("filter.empty"))
+  var tagFilter: PlaylistTagFilter = .all
+  var displayedPlaylist: [Int] = []
+  var metadataLoading = false
   var playlistTableView: NSTableView!
   var tabHeightConstraint: NSLayoutConstraint!
   var buttonTopConstraint: NSLayoutConstraint!
@@ -167,6 +192,7 @@ final class PlaylistLayoutController: NSViewController, NSTableViewDataSource {
     tabHeightConstraint = try fixture.constraint(forOutlet: "tabHeightConstraint")
     buttonTopConstraint = try fixture.constraint(forOutlet: "buttonTopConstraint")
     installSortControls()
+    installFolderBrowser()
     applyProductionTableMetrics()
     playlistTableView.reloadData()
   }

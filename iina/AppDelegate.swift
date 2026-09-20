@@ -915,7 +915,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         imagePlan = nil
       }
       defer {
-        if let imagePlan { ImageViewerCoordinator.shared.openImages(in: imagePlan.imageURLs) }
+        if imagePlan?.hasImageViewerInput == true, let localURL {
+          ImageViewerCoordinator.shared.openImages(in: Utility.resolveURLs([localURL]))
+        }
       }
       // Image requests must not enqueue images or change a background video's presentation.
       if imagePlan?.mediaURLs.isEmpty == true { return }

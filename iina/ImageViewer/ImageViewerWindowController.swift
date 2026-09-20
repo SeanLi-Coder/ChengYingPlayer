@@ -16,6 +16,11 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
 
   let canvas = ImageCanvasView(frame: .zero)
   let tableView = NSTableView()
+  let folderBrowser = MediaFolderBrowserView(extensions: Set(ImageFileSupport.extensions).union(Utility.playableFileExt))
+  let sidebarPicker = NSSegmentedControl(labels: ["文件夹", "图片列表"], trackingMode: .selectOne, target: nil, action: nil)
+  private var imageListView: NSView?
+  private var browserFiles: [PlaylistFileMetadata] = []
+  private var browserLoadedDirectory: URL?
   let statusLabel = NSTextField(labelWithString: "打开图片，开始浏览")
   let frameLabel = NSTextField(labelWithString: "")
   let zoomLabel = NSTextField(labelWithString: "适应窗口")
@@ -97,7 +102,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private var cachedOrder: [Int] = []
   private let maximumFrameBytes = 64 * 1024 * 1024
 
-  init(urls: [URL], defaults: UserDefaults = .standard) {
+  init(urls: [URL], directoryURL: URL? = nil, defaults: UserDefaults = .standard) {
     self.defaults = defaults
     super.init(window: nil)
     if let saved = defaults.object(forKey: Self.intervalPreference) as? NSNumber {
@@ -105,7 +110,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     }
     loadWindow()
     loadFormats()
-    open(urls: urls)
+    open(urls: urls, directoryURL: directoryURL)
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -170,8 +175,18 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     scroll.documentView = tableView
     scroll.hasVerticalScroller = true
     scroll.borderType = .noBorder
-    let sidebar = stack([folderLabel, sidebarHeading, scroll], vertical: true, spacing: 8)
+    let imageList = stack([folderLabel, sidebarHeading, scroll], vertical: true, spacing: 8)
+    imageListView = imageList
+    sidebarPicker.target = self
+    sidebarPicker.action = #selector(sidebarChanged)
+    sidebarPicker.selectedSegment = 0
+    sidebarPicker.setAccessibilityLabel("切换文件夹浏览和图片播放列表")
+    sidebarPicker.toolTip = "浏览文件夹不会中断当前图片；双击图片后切换到该文件夹的图片序列。"
+    let sidebar = stack([sidebarPicker, folderBrowser, imageList], vertical: true, spacing: 8)
     sidebar.widthAnchor.constraint(equalToConstant: 248).isActive = true
+    sidebarPicker.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
+    folderBrowser.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
+    imageList.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
     folderLabel.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
     sidebarHeading.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
     scroll.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
@@ -183,6 +198,14 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     sidebar.heightAnchor.constraint(equalTo: body.heightAnchor).isActive = true
     sidebar.setHuggingPriority(.defaultLow, for: .vertical)
     scroll.setContentHuggingPriority(.defaultLow, for: .vertical)
+    folderBrowser.setContentHuggingPriority(.defaultLow, for: .vertical)
+    imageList.setHuggingPriority(.defaultLow, for: .vertical)
+    folderBrowser.onDirectoryLoaded = { [weak self] directory, _ in
+      self?.folderDidLoad(directory)
+    }
+    folderBrowser.onOpenFile = { [weak self] url in self?.openBrowserFile(url) }
+    folderBrowser.canNavigate = { [weak self] in self?.canBrowse == true }
+    updateSidebarVisibility()
     let navigation = stack([previousButton, nextButton, spacer(), previousFrameButton,
                             frameLabel, nextFrameButton, animationButton])
     [previousButton, nextButton, previousFrameButton, nextFrameButton, animationButton,
@@ -312,14 +335,42 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     return result
   }
 
-  func open(urls: [URL]) {
-    guard !UpdateWorkAdmission.shared.isBlocked else { return }
+  func open(urls: [URL], directoryURL requestedDirectory: URL? = nil) {
+    guard !UpdateWorkAdmission.shared.isBlocked, !isBusy else { return }
+    let accepted = urls.filter {
+      $0.isFileURL && ImageFileSupport.isImageURL($0) &&
+        (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != true
+    }
+    guard let first = accepted.first else {
+      guard let requestedDirectory, !isEditingImage, !isBusy, window?.attachedSheet == nil else { return }
+      if closed {
+        selectedURL = nil
+        files = []
+        details = nil
+        isListing = false
+        tableView.reloadData()
+        titleLabel.stringValue = "图片"
+        infoLabel.stringValue = ""
+        window?.representedURL = nil
+        window?.title = "澄影视界 · 图片"
+      }
+      closed = false
+      sidebarPicker.selectedSegment = 0
+      updateSidebarVisibility()
+      if selectedURL == nil {
+        directoryURL = requestedDirectory
+        statusLabel.stringValue = "双击文件夹继续浏览，或双击图片、视频和音频打开。"
+      }
+      folderBrowser.showDirectory(requestedDirectory, selectedURL: selectedURL, force: true)
+      updateControls()
+      return
+    }
     closed = false
     stopSlideshow()
     wasAnimatingBeforeMiniaturize = false
-    let accepted = urls.filter { $0.isFileURL && ImageFileSupport.isImageURL($0) }
-    guard let first = accepted.first else { return }
-    directoryURL = accepted.count == 1 ? first.deletingLastPathComponent() : nil
+    directoryURL = requestedDirectory ?? (accepted.count == 1 ? first.deletingLastPathComponent() : nil)
+    sidebarPicker.selectedSegment = directoryURL == nil ? 1 : 0
+    updateSidebarVisibility()
     sortRequested = false
     ascending = true
     directionButton.title = "↑"
@@ -329,21 +380,18 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     listToken = ImageCancellationToken()
     let token = listToken
     let generation = listGeneration
-    isListing = true
+    isListing = directoryURL == nil
     files = accepted.map { PlaylistFileMetadata(url: $0) }
     tableView.reloadData()
     load(first)
+    browserFiles = []
+    browserLoadedDirectory = nil
+    folderBrowser.showDirectory(directoryURL ?? first.deletingLastPathComponent(), selectedURL: first, force: true)
+    // The shared browser owns folder enumeration; explicit selections keep their own ordered list.
+    if directoryURL != nil { return }
     listQueue.async { [weak self] in
       guard !token.isCancelled else { return }
-      let candidates: [URL]
-      if accepted.count == 1 {
-        candidates = ((try? FileManager.default.contentsOfDirectory(
-          at: first.deletingLastPathComponent(), includingPropertiesForKeys: [.isRegularFileKey],
-          options: [.skipsHiddenFiles])) ?? []).filter {
-            !token.isCancelled && ImageFileSupport.isImageURL($0) &&
-              ((try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true)
-          }
-      } else { candidates = accepted }
+      let candidates = accepted
       guard !token.isCancelled else { return }
       let firstIdentity = first.standardizedFileURL.resolvingSymlinksInPath()
       var seen = Set<URL>()
@@ -358,9 +406,6 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       }
       guard !token.isCancelled else { return }
       if !seen.contains(firstIdentity) { metadata.append(PlaylistFileMetadata.read(from: first)) }
-      if accepted.count == 1 {
-        metadata = PlaylistFileMetadata.sortedIndices(for: metadata).map { metadata[$0] }
-      }
       DispatchQueue.main.async { [weak self] in
         guard let self, !self.closed, self.listGeneration == generation else { return }
         self.isListing = false
@@ -371,6 +416,65 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
         self.updateControls()
       }
     }
+  }
+
+  private var canBrowse: Bool {
+    !closed && !isEditingImage && !isBusy && !UpdateWorkAdmission.shared.isBlocked && window?.attachedSheet == nil
+  }
+
+  private func sameLocation(_ lhs: URL?, _ rhs: URL?) -> Bool {
+    lhs?.standardizedFileURL.resolvingSymlinksInPath() == rhs?.standardizedFileURL.resolvingSymlinksInPath()
+  }
+
+  @objc private func sidebarChanged() { updateSidebarVisibility() }
+
+  private func updateSidebarVisibility() {
+    let showsFolder = sidebarPicker.selectedSegment == 0
+    folderBrowser.isHidden = !showsFolder
+    imageListView?.isHidden = showsFolder
+  }
+
+  private func folderDidLoad(_ directory: URL) {
+    guard !closed else { return }
+    browserLoadedDirectory = directory
+    browserFiles = folderBrowser.mediaFiles.filter { ImageFileSupport.isImageURL($0.url) }
+    // Exploring another folder must not replace an active slideshow or explicit selection.
+    guard sameLocation(directory, directoryURL) else { return }
+    files = browserFiles.map { file in
+      guard let selectedURL, sameLocation(file.url, selectedURL) else { return file }
+      return PlaylistFileMetadata(url: selectedURL, name: file.name, fileSize: file.fileSize,
+                                  modificationDate: file.modificationDate, creationDate: file.creationDate,
+                                  tags: file.tags)
+    }
+    if let selectedURL, !files.contains(where: { sameLocation($0.url, selectedURL) }) {
+      files.append(PlaylistFileMetadata(url: selectedURL))
+    }
+    isListing = false
+    if sortRequested { applySort(); return }
+    tableView.reloadData()
+    selectCurrentRow()
+    if files.count < 2 { stopSlideshow() }
+    updateControls()
+  }
+
+  private func openBrowserFile(_ url: URL) {
+    guard canBrowse, (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { return }
+    guard ImageFileSupport.isImageURL(url) else {
+      _ = PlayerCore.openURLs([url])
+      return
+    }
+    guard let directory = folderBrowser.directoryURL, sameLocation(directory, browserLoadedDirectory),
+          browserFiles.contains(where: { sameLocation($0.url, url) }) else { return }
+    stopSlideshow()
+    listToken.cancel()
+    listGeneration = UUID()
+    isListing = false
+    directoryURL = directory
+    files = browserFiles
+    sortRequested = false
+    tableView.reloadData()
+    load(url)
+    window?.makeFirstResponder(canvas)
   }
 
   private func load(_ url: URL) {
@@ -632,8 +736,8 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private func updateControls() {
     let index = files.firstIndex { $0.url == selectedURL }
     browsingControls.forEach { $0.isHidden = isEditingImage }
-    previousButton.isEnabled = !isEditingImage && (index.map { $0 > 0 } ?? false)
-    nextButton.isEnabled = !isEditingImage && (index.map { $0 + 1 < files.count } ?? false)
+    previousButton.isEnabled = !isEditingImage && !isBusy && (index.map { $0 > 0 } ?? false)
+    nextButton.isEnabled = !isEditingImage && !isBusy && (index.map { $0 + 1 < files.count } ?? false)
     previousFrameButton.isEnabled = !isEditingImage && details != nil && frameIndex > 0 && !framePending
     nextFrameButton.isEnabled = !isEditingImage && details.map { frameIndex + 1 < $0.frameCount } == true && !framePending
     animationButton.isEnabled = !isEditingImage && details?.isAnimated == true
@@ -773,7 +877,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   private func navigate(_ offset: Int) {
-    guard !isEditingImage, let index = files.firstIndex(where: { $0.url == selectedURL }), files.indices.contains(index + offset) else { return }
+    guard canBrowse, let index = files.firstIndex(where: { $0.url == selectedURL }), files.indices.contains(index + offset) else { return }
     load(files[index + offset].url)
   }
   @objc private func previousImage() { navigate(-1) }
@@ -804,6 +908,13 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
   @objc private func refreshList() {
     guard !closed else { return }
+    if canBrowse {
+      if directoryURL != nil, sameLocation(folderBrowser.directoryURL, directoryURL) {
+        folderBrowser.refresh()
+        return
+      }
+      folderBrowser.refresh()
+    }
     listToken.cancel()
     listToken = ImageCancellationToken()
     listGeneration = UUID()
@@ -857,17 +968,18 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     }
   }
   private func selectCurrentRow() {
+    folderBrowser.selectFile(selectedURL)
     selectingRow = true
     defer { selectingRow = false }
     if let index = files.firstIndex(where: { $0.url == selectedURL }) {
       tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
       tableView.scrollRowToVisible(index)
-    }
+    } else { tableView.deselectAll(nil) }
   }
   func numberOfRows(in tableView: NSTableView) -> Int { files.count }
   func tableViewSelectionDidChange(_ notification: Notification) {
     guard !selectingRow, files.indices.contains(tableView.selectedRow) else { return }
-    guard !isEditingImage else { selectCurrentRow(); return }
+    guard canBrowse else { selectCurrentRow(); return }
     let url = files[tableView.selectedRow].url
     if url != selectedURL { load(url) }
   }
@@ -1040,6 +1152,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     conversionGeneration = UUID()
     sourceToken.cancel()
     listToken.cancel()
+    folderBrowser.cancelPendingLoads()
     frameToken.cancel()
     if let sheet = window?.attachedSheet {
       window?.endSheet(sheet, returnCode: .alertSecondButtonReturn)

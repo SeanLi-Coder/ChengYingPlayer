@@ -34,12 +34,21 @@ check(plan([video, audio, subtitle]).mediaURLs == [video, audio, subtitle], "Rou
 check(plan([remote]).imageURLs.isEmpty && plan([remote]).mediaURLs == [remote], "Remote image URLs remain subject to the local-media gate")
 check(plan([root]).imageURLs == [first, second], "Folder image discovery is shallow, visible, and naturally sorted")
 check(plan([root]).mediaURLs == [root], "Mixed folders retain the original video folder-autoload semantics")
+check(plan([root]).browserDirectoryURL == root, "A single mixed folder retains its browser location")
+check(plan([first, second]).browserDirectoryURL == nil, "Explicit image selections never become folder selections")
 check(!plan([root]).imageURLs.contains(hidden), "Hidden folder entries are not automatically opened")
 check(plan([first, root, second]).imageURLs == [first, second], "Explicit files and folder discovery share stable image deduplication")
 let alias = root.appendingPathComponent("Alias.png")
 try fm.createSymbolicLink(at: alias, withDestinationURL: first)
 check(plan([first, alias]).imageURLs == [first], "Symlink aliases do not create duplicate image entries")
 check(plan([nested]).mediaURLs.isEmpty && plan([nested]).imageCount == 1, "Image-only folders never start an empty video player")
+let container = root.appendingPathComponent("Container", isDirectory: true)
+try fm.createDirectory(at: container.appendingPathComponent("Subfolder", isDirectory: true), withIntermediateDirectories: true)
+let containerPlan = plan([container])
+check(containerPlan.imageURLs.isEmpty && containerPlan.mediaURLs.isEmpty && containerPlan.browserDirectoryURL == container,
+      "A folder containing only subfolders opens a browser without an empty media player")
+check(containerPlan.hasImageViewerInput && containerPlan.combinedCount(with: 0) == 1,
+      "A successful folder browser opening is counted even before an image is selected")
 let album = root.appendingPathComponent("Album", isDirectory: true)
 try fm.createDirectory(at: album, withIntermediateDirectories: true)
 let cover = try file("cover.jpg", in: album)
@@ -108,6 +117,12 @@ videoController.close()
 check(PlayerCore.playerCores[0].initialWindow.closeCount == 1, "Welcome is closed only after the image replacement is visible")
 _ = coordinator.openImages(in: [second])
 check(ImageViewerWindowController.instances.count == 1 && viewer.inputs == [[first], [second]], "Subsequent opening reuses the retained viewer")
+_ = coordinator.openImages(in: [container])
+check(viewer.inputs.last?.isEmpty == true && viewer.directories.last! == container,
+      "The actual coordinator forwards an empty folder browser input to the existing window")
+_ = coordinator.openImages(in: [nested])
+check(viewer.directories.last! == nested && viewer.inputs.last == plan([nested]).imageURLs,
+      "The actual coordinator preserves the image folder context rather than treating it as explicit selection")
 viewer.isBusy = true
 check(coordinator.isBusy, "Image conversion keeps the app alive when its windows close")
 viewer.isBusy = false

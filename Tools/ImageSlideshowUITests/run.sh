@@ -9,6 +9,9 @@ xcrun swiftc -o "$test_dir/ImageSlideshowUITests" \
   "$project_root/iina/Updates/UpdateWorkAdmission.swift" \
   "$project_root/iina/MediaInfo/MediaInfoModels.swift" \
   "$project_root/iina/PlaylistFileMetadata.swift" \
+  "$project_root/iina/ChengYingStyle.swift" \
+  "$project_root/iina/PlaylistPresentation.swift" \
+  "$project_root/iina/MediaFolderBrowserView.swift" \
   "$project_root/iina/ImageViewer/ImageSlideshowPolicy.swift" \
   "$project_root/iina/ImageViewer/ImageEditing.swift" \
   "$project_root/iina/ImageViewer/ImageCropGeometry.swift" \
