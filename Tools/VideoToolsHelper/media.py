@@ -220,25 +220,46 @@ def _parse_display_matrix(value: object) -> tuple[int, ...] | None:
         _, separator, matrix_values = line.partition(":")
         if not separator:
             continue
-        row = [int(item) for item in re.findall(r"-?\d+", matrix_values)]
-        if len(row) == 3:
-            rows.extend(row)
+        values = matrix_values.split()
+        if len(values) != 3 or any(not re.fullmatch(r"-?\d+", item) for item in values):
+            return None
+        rows.extend(int(item) for item in values)
     return tuple(rows) if len(rows) == 9 else None
 
 
-def _is_standard_rotation_matrix(matrix: tuple[int, ...], rotation: int) -> bool:
+def _display_transform_filters(matrix: tuple[int, ...]) -> tuple[str, ...]:
+    """Normalize a lossless orthogonal display transform to the frame's bounds.
+
+    MOV/MP4 matrices use row vectors and 16.16 fixed-point affine components.
+    Translation positions the transformed track on the movie canvas; it does not
+    change any pixels when that track is exported to its own tightly bounded frame.
+    Phone cameras commonly include this origin adjustment, even for pure rotations.
+    Reject scale, shear and perspective instead of silently approximating them.
+    """
+    if len(matrix) != 9 or any(not -(2**31) <= value < 2**31 for value in matrix):
+        raise MediaError("Invalid video display matrix")
+    if matrix[2] != 0 or matrix[5] != 0 or matrix[8] != 1_073_741_824:
+        raise MediaError("Unsupported perspective video display matrix")
     unit = 65_536
-    canonical = {
-        0: (unit, 0, 0, 0, unit, 0, 0, 0, 1_073_741_824),
-        90: (0, -unit, 0, unit, 0, 0, 0, 0, 1_073_741_824),
-        180: (-unit, 0, 0, 0, -unit, 0, 0, 0, 1_073_741_824),
-        270: (0, unit, 0, -unit, 0, 0, 0, 0, 1_073_741_824),
-    }[rotation]
-    tolerances = (512, 512, 8, 512, 512, 8, 8, 8, 16_384)
-    return all(
-        abs(actual - expected) <= tolerance
-        for actual, expected, tolerance in zip(matrix, canonical, tolerances, strict=True)
-    )
+    transforms = {
+        (1, 0, 0, 1): (),
+        (0, -1, 1, 0): ("transpose=cclock",),
+        (-1, 0, 0, -1): ("hflip", "vflip"),
+        (0, 1, -1, 0): ("transpose=clock",),
+        (-1, 0, 0, 1): ("hflip",),
+        (1, 0, 0, -1): ("vflip",),
+        (0, 1, 1, 0): ("transpose=clock", "hflip"),
+        (0, -1, -1, 0): ("transpose=clock", "vflip"),
+    }
+    linear = (matrix[0], matrix[1], matrix[3], matrix[4])
+    for expected, filters in transforms.items():
+        # A few fixed-point rounding units are not a meaningful scale or shear.
+        if all(
+            abs(actual - component * unit) <= 8
+            for actual, component in zip(linear, expected, strict=True)
+        ):
+            return filters
+    raise MediaError("Unsupported scaled, sheared, or non-right-angle video display matrix")
 
 
 def _normalize_hdr_side_data_value(value: object) -> str:
@@ -476,20 +497,26 @@ def probe_video(
         ),
         0,
     )
-    display_matrix = next(
+    display_matrix_text = next(
         (
-            _parse_display_matrix(item.get("displaymatrix"))
+            item.get("displaymatrix")
             for item in side_data
-            if isinstance(item, dict) and item.get("displaymatrix")
+            if isinstance(item, dict) and "displaymatrix" in item
         ),
         None,
     )
+    display_matrix = _parse_display_matrix(display_matrix_text)
+    has_display_matrix = display_matrix_text is not None or any(
+        isinstance(item, dict) and item.get("side_data_type") == "Display Matrix"
+        for item in side_data
+    )
+    if has_display_matrix and display_matrix is None:
+        raise MediaError("Invalid video display matrix")
     try:
         rotation_value_float = float(rotation_value) % 360
         rotation = round(rotation_value_float) % 360
-    except (TypeError, ValueError, OverflowError):
-        rotation_value_float = 0.0
-        rotation = 0
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MediaError("Invalid video rotation angle") from exc
     rotation_error = min(
         abs(rotation_value_float - rotation),
         abs(rotation_value_float - rotation - 360),
@@ -497,9 +524,17 @@ def probe_video(
     )
     if rotation_error > 0.1 or rotation not in {0, 90, 180, 270}:
         raise MediaError("Unsupported video rotation angle")
-    if display_matrix is not None and not _is_standard_rotation_matrix(display_matrix, rotation):
-        raise MediaError("Unsupported mirrored or transformed video")
-    swaps_dimensions = rotation in {90, 270}
+    display_filters = (
+        _display_transform_filters(display_matrix)
+        if display_matrix is not None
+        else {
+            0: (),
+            90: ("transpose=cclock",),
+            180: ("hflip", "vflip"),
+            270: ("transpose=clock",),
+        }[rotation]
+    )
+    swaps_dimensions = any(item.startswith("transpose=") for item in display_filters)
     width = encoded_height if swaps_dimensions else encoded_width
     height = encoded_width if swaps_dimensions else encoded_height
     encoded_sample_aspect_ratio = _parse_aspect_ratio(video_stream.get("sample_aspect_ratio"))
@@ -600,6 +635,8 @@ def probe_video(
         "sample_aspect_ratio": _aspect_ratio_text(sample_aspect_ratio),
         "rotation": rotation,
         "display_matrix": display_matrix,
+        "display_transform_filters": display_filters,
+        "display_swaps_dimensions": swaps_dimensions,
         "fps": rate,
         "max_fps": maximum_rate,
         "average_frame_rate": str(video_stream.get("avg_frame_rate") or ""),
@@ -653,6 +690,7 @@ def probe_video(
         "size": int(media_format.get("size") or resolved.stat().st_size),
         "bit_rate": int(media_format.get("bit_rate") or 0),
         "has_audio": isinstance(audio_stream, dict),
+        "has_data_streams": any(stream.get("codec_type") == "data" for stream in streams),
     }
 
 
@@ -1610,6 +1648,10 @@ class ExportManager:
                     raise MediaError("Output verification detected a pixel format change")
                 if result_metadata["rotation"] != job.source.metadata["rotation"]:
                     raise MediaError("Output verification detected a rotation change")
+                if result_metadata["display_transform_filters"] != job.source.metadata.get(
+                    "display_transform_filters", ()
+                ):
+                    raise MediaError("Output verification detected a display orientation change")
             elif result_metadata["rotation"] != 0:
                 raise MediaError("Output verification detected an unexpected rotation")
             if video_family in {"h264", "hevc"} and (
@@ -1804,6 +1846,10 @@ class RotationManager(ExportManager):
         family = cls._rotation_family(source, degrees)
         if family == "ffv1":
             return ".mkv"
+        if source.metadata.get("has_data_streams"):
+            # iPhone files can use an .mp4 extension while retaining MOV-only
+            # mebx tracks. Keep those tracks in MOV, not an incompatible MP4.
+            return ".mov"
         source_suffix = source.path.suffix.lower()
         if source_suffix not in {".mp4", ".m4v", ".mov"}:
             return ".mkv"
@@ -1830,9 +1876,13 @@ class RotationManager(ExportManager):
             270: "transpose=cclock",
             360: "null",
         }[validated]
-        if validated in {90, 270} and self._has_asymmetric_chroma(source):
-            return f"format={self._lossless_rotation_pixel_format(source)},{rotation_filter}"
-        return rotation_filter
+        filters = list(source.metadata.get("display_transform_filters") or ())
+        if self._rotation_needs_chroma_promotion(source, validated):
+            # Promote before *either* quarter turn, including the source matrix.
+            # Letting FFmpeg autorotate 4:2:2 first can discard chroma samples.
+            filters.insert(0, f"format={self._lossless_rotation_pixel_format(source)}")
+        filters.extend([rotation_filter, "sidedata=mode=delete:type=DISPLAYMATRIX"])
+        return ",".join(filters)
 
     def _rotation_encoding_options(self, source: VideoSource, degrees: int) -> list[str]:
         options = self._video_encoding_options_for_source(
@@ -1840,13 +1890,19 @@ class RotationManager(ExportManager):
             allow_copy=False,
             family_override=self._rotation_family(source, degrees),
         )
-        if validate_rotation_degrees(degrees) in {90, 270} and self._has_asymmetric_chroma(
-            source
-        ):
+        if self._rotation_needs_chroma_promotion(source, degrees):
             options[options.index("-pix_fmt") + 1] = self._lossless_rotation_pixel_format(
                 source
             )
         return options
+
+    @classmethod
+    def _rotation_needs_chroma_promotion(cls, source: VideoSource, degrees: int | None) -> bool:
+        return cls._has_asymmetric_chroma(source) and (
+            degrees is None
+            or validate_rotation_degrees(degrees) in {90, 270}
+            or bool(source.metadata.get("display_swaps_dimensions"))
+        )
 
     @staticmethod
     def _has_asymmetric_chroma(source: VideoSource) -> bool:
@@ -1898,9 +1954,7 @@ class RotationManager(ExportManager):
 
     @classmethod
     def _rotation_family(cls, source: VideoSource, degrees: int | None = None) -> str:
-        if cls._has_asymmetric_chroma(source) and (
-            degrees is None or validate_rotation_degrees(degrees) in {90, 270}
-        ):
+        if cls._rotation_needs_chroma_promotion(source, degrees):
             return "ffv1"
         codec = str(source.metadata.get("video_codec") or "").lower()
         if codec == "ffv1":
@@ -2029,6 +2083,10 @@ class RotationManager(ExportManager):
         validated_degrees = validate_rotation_degrees(degrees)
         if not source.path.is_file():
             raise MediaError("The original video was moved or deleted")
+        if self.output_suffix(source, validated_degrees) == ".mkv" and source.metadata.get(
+            "has_data_streams"
+        ):
+            raise MediaError("Ancillary data tracks cannot be preserved in lossless MKV output")
         if source.metadata.get("is_hdr") and not source.metadata.get(
             "hdr_metadata_inspected",
             False,
@@ -2126,6 +2184,9 @@ class RotationManager(ExportManager):
             "error",
             "-nostdin",
             "-y",
+            "-noautorotate",
+            f"-display_rotation:{job.source.metadata['video_stream_index']}",
+            "0",
             "-i",
             str(job.source.path),
             "-map",
@@ -2154,6 +2215,8 @@ class RotationManager(ExportManager):
                 "rotate=0",
                 "-fps_mode:v:0",
                 "passthrough",
+                "-enc_time_base:v:0",
+                "demux",
             ]
         )
         if temporary_path.suffix.lower() in {".mp4", ".m4v", ".mov"}:
@@ -2212,9 +2275,10 @@ class RotationManager(ExportManager):
             _positive_int(job.source.metadata.get("pixel_log2_chroma_w")),
             _positive_int(job.source.metadata.get("pixel_log2_chroma_h")),
         )
-        expected_chroma_limits = (
-            source_chroma[::-1] if job.degrees in {90, 270} else source_chroma
+        swaps_chroma_axes = bool(job.source.metadata.get("display_swaps_dimensions")) != (
+            job.degrees in {90, 270}
         )
+        expected_chroma_limits = source_chroma[::-1] if swaps_chroma_axes else source_chroma
         for key, maximum in zip(
             ("pixel_log2_chroma_w", "pixel_log2_chroma_h"),
             expected_chroma_limits,

@@ -2975,6 +2975,7 @@ class MainWindowController: PlayerWindowController {
     let screenSize = screenRect.size
 
     let (width, height) = player.videoSizeForDisplay
+    guard width > 0, height > 0 else { return }
 
     // set aspect ratio
     let originalVideoSize = NSSize(width: width, height: height)
@@ -3012,8 +3013,9 @@ class MainWindowController: PlayerWindowController {
       // get videoSize on screen
       var videoSize = originalVideoSize
       if Preference.bool(for: .usePhysicalResolution) {
-        videoSize = window.convertFromBacking(
-          NSMakeRect(window.frame.origin.x, window.frame.origin.y, CGFloat(width), CGFloat(height))).size
+        // The destination display can differ from the window's previous display.
+        // Only an explicit physical-pixel preference divides video pixels by Retina scale.
+        videoSize = videoSize.multiply(1 / screen.backingScaleFactor)
         if videoSize != originalVideoSize {
           log("""
             Adjusted size from \(originalVideoSize) to \(videoSize) based on physical \
@@ -3037,11 +3039,11 @@ class MainWindowController: PlayerWindowController {
           }
         }
       }
-      // check screen size
-      videoSize = videoSize.satisfyMaxSizeWithSameAspectRatio(screenSize)
       // guard min size
       // must be slightly larger than the min size, or it will crash when the min size is auto saved as window frame size.
       videoSize = videoSize.satisfyMinSizeWithSameAspectRatio(minSize)
+      // Screen bounds take precedence for extreme aspect ratios and small displays.
+      videoSize = videoSize.satisfyMaxSizeWithSameAspectRatio(screenSize)
       if shouldApplyInitialWindowSize {
         // check if have geometry set (initial window position/size)
         if let wfg = windowFrameFromGeometry(newSize: videoSize, screen: screen) {
@@ -3071,16 +3073,16 @@ class MainWindowController: PlayerWindowController {
 
     shouldApplyInitialWindowSize = false
 
+    let rectBefore = rect
+    rect = rect.constrain(in: screenRect)
+    if rectBefore != rect {
+      log("Constrained window frame to be in screen: \(rect)")
+    }
+
     if fsState.isFullscreen {
       log("In full screen mode, setting prior window frame")
       fsState.priorWindowedFrame = rect
     } else {
-      let rectBefore = rect
-      rect = rect.constrain(in: screenRect)
-      if rectBefore != rect {
-        log("Constrained window frame to be in screen: \(rect)")
-      }
-
       log("Setting window frame to: \(rect)")
       if player.disableWindowAnimation || Preference.bool(for: .disableAnimations) || !window.isVisible {
         window.setFrame(rect, display: true, animate: false)
@@ -3113,29 +3115,27 @@ class MainWindowController: PlayerWindowController {
   }
 
   func setWindowScale(_ scale: Double) {
-    guard let window = window, fsState == .windowed else { return }
-    let screenFrame = (window.screen ?? NSScreen.main!).visibleFrame
+    guard let window = window, fsState == .windowed,
+          let screen = window.screen ?? NSScreen.main,
+          scale.isFinite, scale > 0 else { return }
+    let screenFrame = screen.visibleFrame
     let (videoWidth, videoHeight) = player.videoSizeForDisplay
-    let newFrame: NSRect
+    guard videoWidth > 0, videoHeight > 0 else { return }
     // calculate 1x size
     let useRetinaSize = Preference.bool(for: .usePhysicalResolution)
-    let logicalFrame = NSRect(x: window.frame.origin.x,
-                             y: window.frame.origin.y,
-                             width: CGFloat(videoWidth),
-                             height: CGFloat(videoHeight))
-    var finalSize = (useRetinaSize ? window.convertFromBacking(logicalFrame) : logicalFrame).size
+    var finalSize = NSSize(width: videoWidth, height: videoHeight)
+    if useRetinaSize {
+      finalSize = finalSize.multiply(1 / screen.backingScaleFactor)
+    }
     // calculate scaled size
     let scalef = CGFloat(scale)
     finalSize.width *= scalef
     finalSize.height *= scalef
-    // set size
-    if finalSize.width > screenFrame.size.width || finalSize.height > screenFrame.size.height {
-      // if final size is bigger than screen
-      newFrame = window.frame.centeredResize(to: window.frame.size.shrink(toSize: screenFrame.size)).constrain(in: screenFrame)
-    } else {
-      // otherwise, resize the window normally
-      newFrame = window.frame.centeredResize(to: finalSize.satisfyMinSizeWithSameAspectRatio(minSize)).constrain(in: screenFrame)
-    }
+    guard finalSize.width.isFinite, finalSize.height.isFinite else { return }
+    // Bound the requested video size, not the previous window's unrelated size/aspect.
+    finalSize = finalSize.satisfyMinSizeWithSameAspectRatio(minSize)
+      .satisfyMaxSizeWithSameAspectRatio(screenFrame.size)
+    let newFrame = window.frame.centeredResize(to: finalSize).constrain(in: screenFrame)
     window.setFrame(newFrame, display: true, animate: true)
   }
 

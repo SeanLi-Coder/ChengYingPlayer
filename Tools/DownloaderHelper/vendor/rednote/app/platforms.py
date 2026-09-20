@@ -54,6 +54,16 @@ def identify_url(value: str) -> UrlInfo:
     query = parse_qs(parsed.query)
     query_with_blanks = parse_qs(parsed.query, keep_blank_values=True)
 
+    if host in {"kuaishou.com", "www.kuaishou.com", "v.kuaishou.com", "m.gifshow.com"}:
+        from .errors import DiscoveryError
+        from .kuaishou import source_identity
+
+        try:
+            kind, _ = source_identity(url)
+        except DiscoveryError as exc:
+            raise UnsupportedUrlError(str(exc)) from exc
+        return UrlInfo(url=url, platform=Platform.KUAISHOU, kind=SourceKind(kind))
+
     if _is_domain(host, "xhslink.com"):
         return UrlInfo(
             url=url, platform=Platform.XIAOHONGSHU, kind=SourceKind.SHORT_LINK
@@ -129,5 +139,5 @@ def identify_url(value: str) -> UrlInfo:
         return UrlInfo(url=url, platform=Platform.YOUTUBE, kind=kind)
 
     raise UnsupportedUrlError(
-        "Only Xiaohongshu, Douyin, Bilibili, and YouTube URLs are supported"
+        "Only Xiaohongshu, Douyin, Kuaishou, Bilibili, and YouTube URLs are supported"
     )

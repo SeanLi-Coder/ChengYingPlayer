@@ -168,7 +168,7 @@ def copy_manifested_source(destination: Path) -> None:
     """Copy only verified tracked files, never user state or runtime caches."""
     manifest = json.loads((HELPER_ROOT / "upstream-manifest.json").read_text(encoding="utf-8"))
     vendor = HELPER_ROOT / "vendor" / "rednote"
-    for entry in manifest["files"]:
+    for entry in [*manifest["files"], *manifest["integration_files"]]:
         relative = entry["path"]
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -48,6 +48,7 @@ class UpstreamRunnerTests(unittest.TestCase):
             self.assertFalse((destination / "downloads").exists())
             self.assertFalse((destination / ".venv").exists())
             self.assertFalse((destination / ".git").exists())
+            self.assertTrue((destination / "app" / "kuaishou.py").is_file())
 
     def test_offline_bootstrap_blocks_external_tcp_udp_and_dns(self):
         bootstrap = RUNNER.OFFLINE_TEST_BOOTSTRAP.split("\nimport pytest\n", 1)[0]

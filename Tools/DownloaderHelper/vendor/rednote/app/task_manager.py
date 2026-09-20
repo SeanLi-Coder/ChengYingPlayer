@@ -711,8 +711,8 @@ class DownloadManager:
                 targets = None
                 rediscover = True
             elif (
-                job.platform == Platform.DOUYIN
-                and job.source_kind == SourceKind.PROFILE
+                (job.platform == Platform.DOUYIN and job.source_kind == SourceKind.PROFILE
+                 or job.platform == Platform.KUAISHOU)
                 and self._should_rediscover_on_retry(job)
             ):
                 targets = None
@@ -1030,6 +1030,18 @@ class DownloadManager:
                     job.output_dir = str(Path(job.output_root) / author_folder)
                     Path(job.output_dir).mkdir(parents=True, exist_ok=True)
                     previous_items = job.items
+                    if job.platform == Platform.KUAISHOU and result.items:
+                        source_kinds = {item.metadata.get("kuaishou_source_kind") for item in result.items}
+                        source_ids = {item.metadata.get("kuaishou_source_id") for item in result.items}
+                        if len(source_kinds) != 1 or len(source_ids) != 1:
+                            raise DiscoveryError("Kuaishou discovery returned inconsistent source identities")
+                        resolved_kind = SourceKind(next(iter(source_kinds)))
+                        resolved_id = next(iter(source_ids))
+                        if (job.resolved_source_id and (job.resolved_source_id != resolved_id
+                                or job.resolved_source_kind != resolved_kind)):
+                            raise DiscoveryError("Kuaishou share link target changed; retry with a new task")
+                        job.resolved_source_kind = resolved_kind
+                        job.resolved_source_id = resolved_id
                     if job.platform == Platform.XIAOHONGSHU:
                         for xhs_item in [*previous_items, *result.items]:
                             self._normalize_xiaohongshu_item_identity(xhs_item)
@@ -3101,6 +3113,9 @@ class DownloadManager:
 
     @staticmethod
     def _should_rediscover_on_retry(job: DownloadJob) -> bool:
+        if job.platform == Platform.KUAISHOU:
+            return (not job.items or not job.discovery_complete
+                    or job.status in {JobStatus.NEEDS_AUTH, JobStatus.INTERRUPTED})
         if DownloadManager._has_xiaohongshu_binding_rediscovery_pending(job):
             return True
         if DownloadManager._has_xiaohongshu_profile_media_revalidation_pending(job):
@@ -3132,7 +3147,7 @@ class DownloadManager:
             )
         return (
             job.source_kind == SourceKind.PROFILE
-            and job.platform in {Platform.XIAOHONGSHU, Platform.DOUYIN}
+            and job.platform in {Platform.XIAOHONGSHU, Platform.DOUYIN, Platform.KUAISHOU}
             and (
                 job.status in {JobStatus.NEEDS_AUTH, JobStatus.INTERRUPTED}
                 or any(item.status == ItemStatus.NEEDS_AUTH for item in job.items)

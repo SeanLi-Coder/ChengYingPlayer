@@ -68,6 +68,7 @@ jobs:
       - name: Test native playback controls
         run: |
           ./Tools/VideoToolsTests/run.sh
+          bash Tools/VideoWindowSizingTests/run.sh
           bash Tools/VideoViewportTests/run.sh
 
       - name: Test edge player controls and visibility lifecycle

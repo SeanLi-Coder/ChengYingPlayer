@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "upstream_name": "rednote_downloader",
   "upstream_commit": "e532e4fcd74bce4dfe730e49b8f1b49adceff62e",
   "upstream_version": "1.2.23",
@@ -8,7 +8,13 @@
     ".github/"
   ],
   "allowed_patches": {
-    "app/main.py": "Optional CHENGYING_DOWNLOAD_DATA_DIR and CHENGYING_DOWNLOAD_DEFAULT_DIR writable-path environment hooks; defaults are unchanged.",
+    "app/main.py": "Optional user-owned writable-path environment hooks; redact Kuaishou share query values from public responses.",
+    "app/models.py": "Add the Kuaishou platform enum without changing existing values.",
+    "app/platforms.py": "Recognize strictly validated Kuaishou video, profile and share URLs.",
+    "app/downloader.py": "Connect original Kuaishou discovery to the existing verified media transfer, proxy, progress and cancellation paths.",
+    "app/task_manager.py": "Bind resolved Kuaishou share identities and preserve incomplete-profile retry semantics.",
+    "app/static/app.js": "Add Kuaishou labels, localized progress and error guidance; recognize resolved share profile jobs.",
+    "app/static/index.html": "Advertise Kuaishou single-video, share and author-profile inputs with login and permission guidance.",
     "tests/test_stop.py": "Isolate the no-server test from real localhost services and cover a disappearing legacy listener; production stop.py is unchanged."
   },
   "files": [
@@ -55,7 +61,7 @@
     {
       "path": "app/downloader.py",
       "upstream_sha256": "0401b8290cd9cda5b71a61a6d8086a3d59e7ad6f36d395bac9ec988f3e182573",
-      "vendored_sha256": "0401b8290cd9cda5b71a61a6d8086a3d59e7ad6f36d395bac9ec988f3e182573"
+      "vendored_sha256": "bd3399b1496de866fa27f44122a369e0a52b43e1c9aa6faaea15f8fe600aa9f4"
     },
     {
       "path": "app/errors.py",
@@ -75,17 +81,17 @@
     {
       "path": "app/main.py",
       "upstream_sha256": "6710e6e7940d66c16f9e70814e44f868c4905d9b038317d5c47ba0f663f5af5e",
-      "vendored_sha256": "3f7aa9fcd700c88e69ffa6ee6f649a30f5cf98fe8cec1f1989920c92f30bc0a7"
+      "vendored_sha256": "845f1e9225c48ed47f343fae86efe4f7a47fe06e47fad13d9fd4173e41a41dca"
     },
     {
       "path": "app/models.py",
       "upstream_sha256": "57f289db1d85bfb67de360cb7e2fbf1d7351b8c9541d83293efb6dfcc407e0ad",
-      "vendored_sha256": "57f289db1d85bfb67de360cb7e2fbf1d7351b8c9541d83293efb6dfcc407e0ad"
+      "vendored_sha256": "25f23ba16b212df89a14f08aa15c1c99d89515f338c42e0f22195c7657177200"
     },
     {
       "path": "app/platforms.py",
       "upstream_sha256": "38ac7b64f1804abc24adbc9b8b8233250de6144cdc9ff041db82bf1d77085433",
-      "vendored_sha256": "38ac7b64f1804abc24adbc9b8b8233250de6144cdc9ff041db82bf1d77085433"
+      "vendored_sha256": "7f19de0360d690cbbf126070cad8b282f11b5be85a7fe50e8bbaaa120caff652"
     },
     {
       "path": "app/process_guard.py",
@@ -100,7 +106,7 @@
     {
       "path": "app/static/app.js",
       "upstream_sha256": "c88f22bce27cd49ad5f289155f2d0a6ee6bfe2f7aab0fee54a22307dd5bbcbb8",
-      "vendored_sha256": "c88f22bce27cd49ad5f289155f2d0a6ee6bfe2f7aab0fee54a22307dd5bbcbb8"
+      "vendored_sha256": "58ead2096c8bbd7a07350f440c95feefade875044ffce18269e35a2a2d8dc332"
     },
     {
       "path": "app/static/favicon.svg",
@@ -110,7 +116,7 @@
     {
       "path": "app/static/index.html",
       "upstream_sha256": "70a385836d05dacad77876c7c8f7e59c4ab565348f740c61395552da2d7c1141",
-      "vendored_sha256": "70a385836d05dacad77876c7c8f7e59c4ab565348f740c61395552da2d7c1141"
+      "vendored_sha256": "9e6feeb09683554e817d4c31fa637eee0a0ca35e2c0bd71a04ae9e3e4cd74bf2"
     },
     {
       "path": "app/static/styles.css",
@@ -125,7 +131,7 @@
     {
       "path": "app/task_manager.py",
       "upstream_sha256": "2264717a9ed202fc1db757d54140dea575c14799ec49bef48815fb679a862236",
-      "vendored_sha256": "2264717a9ed202fc1db757d54140dea575c14799ec49bef48815fb679a862236"
+      "vendored_sha256": "08b860fc063262f2ee2b379394786d0953e84e6a862e5f6b9915631173c7f5e5"
     },
     {
       "path": "app/xiaohongshu.py",
@@ -338,9 +344,9 @@
       "vendored_sha256": "e9575cbc1174d8fa441866de8eec3400efcb846da8d650627d9cf4420ac02a5b"
     },
     {
-    "path": "tests/test_stop.py",
-    "upstream_sha256": "60ff42850b481e6639cb7d8ff174455df2c005be15c4e332492b1334e5aa3afd",
-    "vendored_sha256": "d01a26826d926ee36cdc75a3f4a234d24c3e5d893e54408bd0411c1dd5937778"
+      "path": "tests/test_stop.py",
+      "upstream_sha256": "60ff42850b481e6639cb7d8ff174455df2c005be15c4e332492b1334e5aa3afd",
+      "vendored_sha256": "d01a26826d926ee36cdc75a3f4a234d24c3e5d893e54408bd0411c1dd5937778"
     },
     {
       "path": "tests/test_storage.py",
@@ -356,6 +362,13 @@
       "path": "tests/test_xiaohongshu.py",
       "upstream_sha256": "fd004d7924242f6fbffa5db6a8b18380630b3d06d84d40c4c937c042d6186ebb",
       "vendored_sha256": "fd004d7924242f6fbffa5db6a8b18380630b3d06d84d40c4c937c042d6186ebb"
+    }
+  ],
+  "integration_files": [
+    {
+      "path": "app/kuaishou.py",
+      "license": "GPL-3.0-or-later",
+      "sha256": "cdaab939251417e3fa80f542149f67f852f226e83ca0c960937fed4fe8b96902"
     }
   ]
 }

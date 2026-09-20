@@ -489,6 +489,10 @@ class ConversionManager(RotationManager):
         ):
             if source.get(key) != result.get(key):
                 raise MediaError(f"Output verification detected changed {key}")
+        if source.get("display_transform_filters", ()) != result.get(
+            "display_transform_filters", ()
+        ):
+            raise MediaError("Output verification detected a display orientation change")
         expected_codec = source["video_codec"] if job.mode == "copy" else job.mode
         if result["video_codec"] != expected_codec:
             raise MediaError("Output verification detected an unexpected video codec")

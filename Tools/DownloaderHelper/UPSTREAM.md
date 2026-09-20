@@ -14,15 +14,18 @@ workflow files are excluded: nested upstream CI is not part of the application.
 No original configuration, cookies, browser profiles, job history, downloads,
 virtual environment, Git history, or other untracked source files are included.
 
-`upstream-manifest.json` records both upstream and integrated SHA256 hashes for
-every imported file. `verify_vendor.py` checks the complete inventory without
+`upstream-manifest.json` schema 2 records both upstream and integrated SHA256 hashes
+for every imported file. The original 69 upstream hashes are unchanged. Original
+ChengYing additions are listed separately under `integration_files`, with their
+own SHA256 and license, never with fabricated upstream provenance.
+`verify_vendor.py` checks the complete inventory without
 importing the engine or touching user data. Unlisted files, missing files,
 symlinked sources, and unapproved modifications fail verification. Python bytecode
 and pytest caches are ignored; they are not source or redistribution assets.
 
-## Deliberate patch
+## Deliberate patches
 
-Only `app/main.py` differs in production code. Two optional environment variables move
+Two optional environment variables in `app/main.py` move
 writable files out of the signed, read-only application bundle:
 
 - `CHENGYING_DOWNLOAD_DATA_DIR`: configuration and persisted task state.
@@ -35,6 +38,24 @@ behavior remain unchanged. Without these variables, the original `data/` and
 `downloads/` defaults are preserved. A user's saved download-directory preference
 continues to take precedence over the initial default.
 
+The additive Kuaishou integration also patches `app/models.py`, `app/platforms.py`,
+`app/downloader.py`, and `app/task_manager.py` to connect the new platform to the
+existing queue, verified asset transfer, retry/cancel and state machinery.
+`app/main.py` additionally redacts Kuaishou share-query values from public responses.
+`app/static/app.js` and `app/static/index.html` add platform labels, localized
+progress/errors and input guidance; original platform behavior is retained.
+Each intentional change is explicitly allowlisted and hashed in the manifest.
+
+`app/kuaishou.py` is an original ChengYing extension, licensed GPL-3.0-or-later,
+not part of the MIT upstream snapshot. It observes the site's normal Chrome
+page responses and author-feed pagination. It does not copy third-party signing
+code, replay private signed APIs, bypass challenges, or strip watermarks. Source
+identity, author ownership, cursor continuity, trusted HTTPS hosts and redirect
+targets are checked before accepting media. Incomplete profile enumeration is
+reported as incomplete; recommendations are not substituted for requested media.
+The adapter uses the existing native proxy hooks and does not persist temporary
+media URLs. Its independent regression tests live in the helper's `tests/` folder.
+
 The adapter must not use `run.py`'s project lock in the application bundle. Its
 legacy `--runtime-dir` option only moves runtime records, not configuration,
 task state, downloads, or the project lock. The native host owns process lifetime,
@@ -44,8 +65,8 @@ its private runtime directory, authenticated loopback transport, and shutdown.
 
 ### Native proxy integration
 
-The native adapter adds `proxy_config.py` and `proxy_transport.py` without changing
-the imported downloader source or its manifest. Private `proxy.json` settings use
+The native adapter adds `proxy_config.py` and `proxy_transport.py` outside the
+imported downloader source. Private `proxy.json` settings use
 atomic writes and owner-only permissions, separate from upstream `config.json`
 and task records. Authenticated `/api/native/proxy` endpoints expose only redacted
 status. Saving a changed route takes the manager's submission lock and refuses
@@ -125,7 +146,7 @@ The pristine upstream offline baseline on 2026-09-17 was **1379 passed, 1 failed
 an unmocked health request to the machine's occupied localhost port 8766. That
 test now mocks the absent server instead of consulting unrelated user processes.
 A separate test covers a legacy listener disappearing before inspection. These
-are the only test-source changes; production `stop.py` and its strict refusal to
+are the only upstream test-source changes; production `stop.py` and its strict refusal to
 signal unverified processes are unchanged. The native adapter must use its
 authenticated owned process lifecycle, not legacy listener discovery or global
 process termination.

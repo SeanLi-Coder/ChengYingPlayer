@@ -12,7 +12,12 @@ from pathlib import Path, PurePosixPath
 HELPER_ROOT = Path(__file__).resolve().parent
 UPSTREAM_COMMIT = "e532e4fcd74bce4dfe730e49b8f1b49adceff62e"
 UPSTREAM_VERSION = "1.2.23"
-PATCHED_FILES = {"app/main.py", "tests/test_stop.py"}
+PATCHED_FILES = {
+    "app/main.py", "app/models.py", "app/platforms.py", "app/downloader.py",
+    "app/task_manager.py", "app/static/app.js", "app/static/index.html",
+    "tests/test_stop.py",
+}
+INTEGRATION_FILES = {"app/kuaishou.py"}
 IGNORED_CACHE_DIRECTORIES = {"__pycache__", ".pytest_cache"}
 
 
@@ -29,7 +34,7 @@ def verify_vendor(
         return ["The upstream manifest is missing or invalid."]
     if not isinstance(manifest, dict):
         return ["The upstream manifest must be an object."]
-    if manifest.get("schema_version") != 1:
+    if manifest.get("schema_version") != 2:
         errors.append("Unsupported manifest schema.")
     if manifest.get("upstream_commit") != UPSTREAM_COMMIT:
         errors.append("Unexpected upstream commit.")
@@ -45,9 +50,14 @@ def verify_vendor(
     entries = manifest.get("files")
     if not isinstance(entries, list) or not entries:
         return errors + ["The manifest must contain upstream files."]
+    integrations = manifest.get("integration_files")
+    if not isinstance(integrations, list):
+        return errors + ["The manifest must contain original integration files."]
     expected_paths: set[str] = set()
     actual_patches: set[str] = set()
-    for entry in entries:
+    actual_integrations: set[str] = set()
+    records = [(entry, False) for entry in entries] + [(entry, True) for entry in integrations]
+    for entry, is_integration in records:
         if not isinstance(entry, dict):
             errors.append("Invalid manifest file entry.")
             continue
@@ -65,8 +75,20 @@ def verify_vendor(
         if relative in expected_paths:
             errors.append(f"Duplicate manifest entry: {relative}")
         expected_paths.add(relative)
-        original_hash = entry.get("upstream_sha256")
-        vendored_hash = entry.get("vendored_sha256")
+        if is_integration:
+            actual_integrations.add(relative)
+            if relative not in INTEGRATION_FILES:
+                errors.append(f"Unauthorized original integration file: {relative}")
+            if entry.get("license") != "GPL-3.0-or-later":
+                errors.append(f"The original integration license must be preserved: {relative}")
+            if "upstream_sha256" in entry or "vendored_sha256" in entry:
+                errors.append(f"Original integration cannot claim upstream provenance: {relative}")
+            original_hash = vendored_hash = entry.get("sha256")
+        else:
+            original_hash = entry.get("upstream_sha256")
+            vendored_hash = entry.get("vendored_sha256")
+            if relative in INTEGRATION_FILES:
+                errors.append(f"Original integration must not be listed as upstream: {relative}")
         if not all(
             isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
             for value in (original_hash, vendored_hash)
@@ -94,6 +116,8 @@ def verify_vendor(
             errors.append(f"Vendored file hash mismatch: {relative}")
     if actual_patches != PATCHED_FILES:
         errors.append("The expected integration patches are missing or changed.")
+    if actual_integrations != INTEGRATION_FILES:
+        errors.append("The expected original integration files are missing or changed.")
     actual_paths = {
         path.relative_to(vendor_root).as_posix()
         for path in vendor_root.rglob("*")

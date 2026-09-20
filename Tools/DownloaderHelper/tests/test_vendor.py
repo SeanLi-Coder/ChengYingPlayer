@@ -34,8 +34,41 @@ class VendorIntegrityTests(unittest.TestCase):
                 for entry in manifest["files"]
                 if entry["upstream_sha256"] != entry["vendored_sha256"]
             },
-            {"app/main.py", "tests/test_stop.py"},
+            VERIFIER.PATCHED_FILES,
         )
+        self.assertEqual(manifest["schema_version"], 2)
+        self.assertEqual(
+            {entry["path"] for entry in manifest["integration_files"]},
+            {"app/kuaishou.py"},
+        )
+        self.assertNotIn("app/kuaishou.py", {entry["path"] for entry in manifest["files"]})
+
+    def test_original_adapter_has_independent_integrity_and_license_checks(self):
+        with tempfile.TemporaryDirectory(prefix="chengying-integration-integrity-") as name:
+            root = Path(name) / "vendor"
+            shutil.copytree(VENDOR_ROOT, root)
+            (root / "app" / "kuaishou.py").write_text("# Modified.\n", encoding="utf-8")
+            self.assertIn("Vendored file hash mismatch: app/kuaishou.py", VERIFIER.verify_vendor(root))
+            manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+            integration = manifest["integration_files"][0]
+            integration["license"] = "MIT"
+            integration["upstream_sha256"] = integration["sha256"]
+            modified = Path(name) / "manifest.json"
+            modified.write_text(json.dumps(manifest), encoding="utf-8")
+            errors = VERIFIER.verify_vendor(VENDOR_ROOT, modified)
+            self.assertIn("The original integration license must be preserved: app/kuaishou.py", errors)
+            self.assertIn("Original integration cannot claim upstream provenance: app/kuaishou.py", errors)
+
+    def test_unsafe_or_unlisted_integration_paths_are_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="chengying-integration-path-") as name:
+            for path in ("../outside.py", "/outside.py", "app/unapproved.py"):
+                with self.subTest(path=path):
+                    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+                    manifest["integration_files"][0]["path"] = path
+                    modified = Path(name) / "manifest.json"
+                    modified.write_text(json.dumps(manifest), encoding="utf-8")
+                    errors = VERIFIER.verify_vendor(VENDOR_ROOT, modified)
+                    self.assertTrue(any("Unsafe" in error or "Unauthorized" in error for error in errors))
 
     def test_modified_missing_and_unlisted_files_are_rejected(self):
         with tempfile.TemporaryDirectory(prefix="chengying-vendor-integrity-") as name:

@@ -17,6 +17,7 @@ def utc_now() -> datetime:
 class Platform(str, Enum):
     XIAOHONGSHU = "xiaohongshu"
     DOUYIN = "douyin"
+    KUAISHOU = "kuaishou"
     BILIBILI = "bilibili"
     YOUTUBE = "youtube"
 

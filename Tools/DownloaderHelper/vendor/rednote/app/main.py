@@ -179,6 +179,12 @@ def _http_error(exc: Exception) -> HTTPException:
 
 
 def _redact_public_url(value: str) -> str:
+    try:
+        parsed = urlsplit(value)
+        if parsed.hostname in {"kuaishou.com", "www.kuaishou.com", "v.kuaishou.com", "m.gifshow.com"}:
+            return urlunsplit(parsed._replace(query="", fragment=""))
+    except (TypeError, ValueError):
+        pass
     if "xsec_token" not in value.lower():
         return value
     try:

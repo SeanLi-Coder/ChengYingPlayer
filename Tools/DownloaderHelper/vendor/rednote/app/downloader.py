@@ -57,6 +57,9 @@ from .errors import (
     is_explicit_rate_limit_message,
 )
 from .models import DownloadItem, MediaType, Platform, SourceKind, TransferProgress
+from .kuaishou import discover as discover_kuaishou
+from .kuaishou import is_media_url as is_kuaishou_media_url
+from .kuaishou import source_identity as kuaishou_source_identity
 from .platforms import identify_url
 from .xiaohongshu import RemoteAsset, discover_profile as discover_xhs_profile
 from .xiaohongshu import (
@@ -707,6 +710,8 @@ class MediaDownloader:
         should_cancel = should_cancel or (lambda: False)
         if should_cancel():
             raise DownloadCancelledError("Task cancelled")
+        if platform == Platform.KUAISHOU:
+            return self._discover_kuaishou(url, should_cancel)
         xiaohongshu_browser_cookies = False
         if platform == Platform.XIAOHONGSHU:
             xiaohongshu_browser_cookies = self._xiaohongshu_browser_cookies_enabled()
@@ -950,6 +955,31 @@ class MediaDownloader:
             )
 
         return self._discover_with_ytdlp(url, platform, kind, should_cancel)
+
+    def _discover_kuaishou(self, url: str, should_cancel: CancelCallback) -> DiscoveryResult:
+        if self.config.cookie_browser not in {None, "chrome"}:
+            raise TemporaryAccessError("Kuaishou supports Chrome Cookie or explicit anonymous access only")
+        result = discover_kuaishou(
+            url, cookie_profile=self.config.cookie_profile,
+            use_browser_cookies=self.config.cookie_browser == "chrome",
+            should_cancel=should_cancel, status_callback=self._report_discovery,
+        )
+        items = [DownloadItem(
+            id=_item_key(Platform.KUAISHOU, video.media_id, video.url, index),
+            media_id=video.media_id, source_url=video.url, title=video.title,
+            author=video.author, upload_date=video.upload_date, playlist_index=index,
+            extractor_key="Kuaishou", media_type=MediaType.VIDEO,
+            metadata={
+                "kuaishou_author_id": video.author_id,
+                "kuaishou_source_kind": result.source_kind,
+                "kuaishou_source_id": result.source_id,
+                "kuaishou_refresh_url": url if result.source_kind == "item" else video.url,
+            },
+        ) for index, video in enumerate(result.videos, start=1)]
+        return DiscoveryResult(
+            author=result.videos[0].author if result.videos else "Kuaishou Author",
+            items=items, warning=result.warning, discovery_complete=result.complete,
+        )
 
     def _discover_douyin_item(
         self,
@@ -1299,6 +1329,10 @@ class MediaDownloader:
         should_cancel = should_cancel or (lambda: False)
         output_path = Path(output_dir).expanduser().resolve()
         output_path.mkdir(parents=True, exist_ok=True)
+        if platform == Platform.KUAISHOU:
+            return self._download_kuaishou_item(
+                item, output_path, callback=callback, should_cancel=should_cancel,
+            )
         if platform == Platform.XIAOHONGSHU:
             return self._download_xhs_item(
                 item,
@@ -5339,6 +5373,56 @@ class MediaDownloader:
             return MediaType.VIDEO
         return MediaType.IMAGE
 
+    def _download_kuaishou_item(
+        self, item: DownloadItem, output_dir: Path, *,
+        callback: EventCallback | None, should_cancel: CancelCallback,
+    ) -> DownloadOutcome:
+        if should_cancel():
+            raise DownloadCancelledError("Task cancelled")
+        source_kind, source_id = kuaishou_source_identity(item.source_url)
+        if source_kind != "item" or source_id != item.media_id:
+            raise MediaDownloadError("Kuaishou item identity changed; download was blocked")
+        refresh_url = item.metadata.get("kuaishou_refresh_url") or item.source_url
+        refresh_kind, refresh_id = kuaishou_source_identity(refresh_url)
+        if refresh_kind not in {"item", "short_link"} or (
+            refresh_kind == "item" and refresh_id != item.media_id
+        ):
+            raise MediaDownloadError("Kuaishou refresh URL identity changed; download was blocked")
+        if callback:
+            callback(EngineEvent(event="probing", message="Refreshing Kuaishou video links before download"))
+        result = discover_kuaishou(
+            refresh_url, cookie_profile=self.config.cookie_profile,
+            use_browser_cookies=self.config.cookie_browser == "chrome",
+            should_cancel=should_cancel,
+            status_callback=(lambda message: callback(EngineEvent(event="probing", message=message))) if callback else None,
+        )
+        if len(result.videos) != 1 or result.videos[0].media_id != item.media_id:
+            raise MediaDownloadError("Kuaishou returned a different video; download was blocked")
+        video = result.videos[0]
+        if not item.metadata.get("kuaishou_author_id") or video.author_id != item.metadata["kuaishou_author_id"]:
+            raise MediaDownloadError("Kuaishou author identity changed; download was blocked")
+        if not video.assets:
+            raise MediaDownloadError("Kuaishou video has no trusted media stream; no cover image was substituted")
+        if callback:
+            callback(EngineEvent(event="metadata", title=video.title, author=video.author,
+                                 upload_date=video.upload_date, media_type=MediaType.VIDEO))
+        # CDN requests do not need account cookies. Keep the native YoutubeDL
+        # proxy transport, checked redirects, atomic writes and FFprobe gates.
+        with YoutubeDL(self._base_options(False)) as ydl:
+            path, chosen = self._download_first_available_asset(
+                ydl, video.assets, output_dir, video.upload_date, video.title,
+                video.media_id, video.url, platform=Platform.KUAISHOU,
+                media_type=MediaType.VIDEO, callback=callback,
+                should_cancel=should_cancel, verify_declared_dimensions=True,
+            )
+        resolution = f"{chosen.width}x{chosen.height}" if chosen.width and chosen.height else None
+        if callback:
+            callback(EngineEvent(event="asset_completed", output_paths=[str(path)]))
+        return DownloadOutcome(output_paths=[str(path)], title=video.title,
+                               author=video.author, upload_date=video.upload_date,
+                               media_type=MediaType.VIDEO, selected_format=chosen.format_id,
+                               resolution=resolution)
+
     def _download_xhs_item(
         self,
         item: DownloadItem,
@@ -5723,6 +5807,7 @@ class MediaDownloader:
         douyin_refresh_errors: list[DouyinMediaRefreshRequiredError] = []
         is_xiaohongshu_source = platform == Platform.XIAOHONGSHU
         is_douyin_source = platform == Platform.DOUYIN
+        is_kuaishou_source = platform == Platform.KUAISHOU
         transfer_budget = _douyin_transfer_budget
         for asset in assets:
             allow_verified_douyin_redirect = bool(
@@ -5809,6 +5894,8 @@ class MediaDownloader:
                         raise MediaDownloadError(
                             "Untrusted Xiaohongshu media URL was blocked"
                         )
+                    if is_kuaishou_source and not is_kuaishou_media_url(candidate):
+                        raise MediaDownloadError("Untrusted Kuaishou media URL was blocked")
                     candidate_redirect_reason = (
                         self._douyin_media_redirect_rejection_reason(
                             candidate,
@@ -5841,6 +5928,8 @@ class MediaDownloader:
                         referer = "https://www.xiaohongshu.com/"
                     elif is_douyin_source:
                         referer = DOUYIN_MEDIA_HEADERS["Referer"]
+                    elif is_kuaishou_source:
+                        referer = "https://www.kuaishou.com/"
                     request_headers = {
                         "Referer": referer,
                         "Accept": "*/*",
@@ -5884,21 +5973,24 @@ class MediaDownloader:
                                 f"Redirect port: {exc.redirect_port or 'unavailable'}; "
                                 f"reason: {exc.redirect_reason or 'unrecognized-host'}"
                             ) from exc
-                    elif is_xiaohongshu_source:
+                    elif is_xiaohongshu_source or is_kuaishou_source:
                         try:
                             response = _open_xiaohongshu_response(
                                 ydl,
                                 media_request,
-                                is_trusted_url=is_trusted_xiaohongshu_asset_url,
+                                is_trusted_url=(is_kuaishou_media_url if is_kuaishou_source
+                                                else is_trusted_xiaohongshu_asset_url),
                             )
                         except _XiaohongshuRedirectRejected as exc:
                             raise MediaDownloadError(
-                                "Xiaohongshu media redirect was blocked before "
+                                ("Kuaishou" if is_kuaishou_source else "Xiaohongshu") + " media redirect was blocked before "
                                 "requesting an untrusted target"
                             ) from exc
                     else:
                         response = ydl.urlopen(media_request)
                     final_url = str(getattr(response, "url", None) or candidate)
+                    if is_kuaishou_source and not is_kuaishou_media_url(final_url):
+                        raise MediaDownloadError("Kuaishou media request redirected to an untrusted URL")
                     if is_xiaohongshu_source and not (
                         is_trusted_xiaohongshu_asset_url(final_url)
                     ):

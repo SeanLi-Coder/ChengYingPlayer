@@ -106,6 +106,7 @@ def run_smoke(command, ffmpeg, ffprobe):
                 )
                 status, body, headers = request(url, token=token)
                 assert status == 200 and b"/native/desktop.js" in body
+                assert "快手".encode() in body
                 assert token.encode() not in body
                 assert "frame-ancestors 'none'" in headers["content-security-policy"]
                 status, body, _ = request(url + "api/health", token=token)
@@ -113,7 +114,8 @@ def run_smoke(command, ffmpeg, ffprobe):
                 assert status == 200 and health["status"] == "ok"
                 assert health["build_id"] == health["source_build_id"]
                 assert health["restart_required"] is False
-                assert request(url + "static/app.js", token=token)[0] == 200
+                script_status, script_body, _ = request(url + "static/app.js", token=token)
+                assert script_status == 200 and b"kuaishouMessage" in script_body
                 assert request(url + "native/desktop.js", token=token)[0] == 200
                 assert request(url + "api/jobs", token=token)[1] == b"[]"
                 config = json.loads(request(url + "api/config", token=token)[1])

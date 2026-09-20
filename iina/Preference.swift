@@ -677,7 +677,7 @@ struct Preference {
     case onlyWhenOpen
     case never
 
-    static var defaultValue = ResizeWindowTiming.onlyWhenOpen
+    static var defaultValue = ResizeWindowTiming.always
 
     init?(key: Key) {
       self.init(rawValue: Preference.integer(for: key))
@@ -886,9 +886,11 @@ struct Preference {
     .autoRepeat: false,
     .defaultRepeatMode: DefaultRepeatMode.playlist.rawValue,
 
-    .usePhysicalResolution: true,
+    // Use the video's display dimensions in window points by default. Registering
+    // defaults preserves an explicit physical-pixel preference from an older build.
+    .usePhysicalResolution: false,
     .initialWindowSizePosition: "",
-    .resizeWindowTiming: ResizeWindowTiming.onlyWhenOpen.rawValue,
+    .resizeWindowTiming: ResizeWindowTiming.always.rawValue,
     .resizeWindowOption: ResizeWindowOption.videoSize10.rawValue,
     .showRemainingTime: true,
     .scaleRemainingTime: false,

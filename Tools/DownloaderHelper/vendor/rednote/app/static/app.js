@@ -697,6 +697,7 @@
     if (combined.includes("bilibili") || combined.includes("b23.tv") || combined.includes("b站")) return "bilibili";
     if (combined.includes("youtube") || combined.includes("youtu.be")) return "youtube";
     if (combined.includes("douyin") || combined.includes("抖音")) return "douyin";
+    if (combined.includes("kuaishou") || combined.includes("gifshow.com") || combined.includes("快手")) return "kuaishou";
     return "unknown";
   }
 
@@ -705,6 +706,7 @@
     const metadata = {
       bilibili: { glyph: "B", label: "B站" },
       douyin: { glyph: "抖", label: "抖音" },
+      kuaishou: { glyph: "快", label: "快手" },
       unknown: { glyph: "链", label: "正在识别平台" },
       xiaohongshu: { glyph: "红", label: "小红书" },
       youtube: { glyph: "YT", label: "YouTube" }
@@ -713,11 +715,12 @@
   }
 
   function isProfileJob(job) {
-    const kind = String(firstDefined(job?.source_kind, job?.sourceKind, job?.kind, "")).toLowerCase();
+    const kind = String(firstDefined(job?.resolved_source_kind, job?.source_kind, job?.sourceKind, job?.kind, "")).toLowerCase();
     if (["profile", "channel", "user"].includes(kind)) return true;
     if (["item", "video", "note"].includes(kind)) return false;
     const url = String(firstDefined(job?.source_url, job?.url, job?.profile_url, ""));
-    return /\/user\/[^/?#]+(?:[/?#]|$)/i.test(url);
+    return /\/user\/[^/?#]+(?:[/?#]|$)/i.test(url)
+      || (getPlatform(job) === "kuaishou" && /\/profile\/[^/?#]+(?:[/?#]|$)/i.test(url));
   }
 
   function isXiaohongshuVerificationItem(job) {
@@ -1030,8 +1033,53 @@
     return `抖音解析已停止：${detail}。程序没有接受该响应或下载替代内容。${advice}不需要打开 Chrome 验证。诊断码：${code}。`;
   }
 
+  function kuaishouMessage(text) {
+    if (!text.includes("Kuaishou")) return null;
+    const progress = text.match(/^Kuaishou: verified (\d+) videos across (\d+) pages$/);
+    if (progress) return `正在读取快手主页，已验证 ${progress[1]} 个视频（${progress[2]} 页）`;
+    const messages = [
+      ["Only Xiaohongshu, Douyin, Kuaishou, Bilibili, and YouTube URLs are supported", "目前支持小红书、抖音、快手、B站和 YouTube，请粘贴这些平台的视频或主页链接。"],
+      ["Opening Kuaishou in Chrome", "正在通过 Chrome 读取快手原页面并核对视频信息"],
+      ["Refreshing Kuaishou video links", "正在从快手原视频页刷新下载地址并再次核对身份"],
+      ["Kuaishou profile discovery is incomplete", "快手主页尚未读取完整。已发现并验证的视频会继续下载；网站未确认列表结束，请稍后继续任务以重新读取主页。不能把当前数量视为全部作品。"],
+      ["Kuaishou requires security verification", "快手要求安全验证。请打开 Chrome 完成验证，然后返回继续任务；程序不会绕过验证码。"],
+      ["Kuaishou requires login", "快手要求登录。请在 Chrome 登录快手，开启 Chrome Cookie 后重试。"],
+      ["Kuaishou Chrome cookies could not be read", "无法读取快手的 Chrome Cookie。请完全退出 Chrome 后重试，或明确关闭 Chrome Cookie 使用未登录模式；不会静默切换账号或匿名访问。"],
+      ["Kuaishou rate limited", "快手暂时限制了请求频率，请稍后重试；已经完成的文件会保留。"],
+      ["Kuaishou video is deleted, private, or unavailable", "快手视频已删除、设为私密或当前不可见。请先在 Chrome 中确认你有权访问该视频。"],
+      ["Kuaishou rejected the page request", "快手拒绝了本次请求，请稍后重试；程序不会绕过网站的访问限制。"],
+      ["Kuaishou page could not be opened", "无法打开快手页面，请检查下载中心的代理与网络连接后重试。"],
+      ["Kuaishou was blocked by the local DNS or web filter", "本机的 DNS 或网页过滤器拦截了快手。请检查已配置的代理或网络访问策略；这不是快手验证码，不需要反复打开 Chrome 验证。"],
+      ["Kuaishou browser request timed out", "读取快手页面超时，请检查下载中心的代理与网络连接后重试。"],
+      ["Kuaishou browser TLS certificate verification failed", "快手连接的 HTTPS 证书校验失败，请检查代理证书或网络访问策略；程序不会关闭证书验证。"],
+      ["Kuaishou browser request failed", "快手页面请求失败，请检查下载中心的代理和网络；已开启代理时不会自动改为直连。"],
+      ["Kuaishou browser redirect limit exceeded", "快手页面发生过多跳转，已停止访问；请复制新的官方视频或主页链接重试。"],
+      ["Kuaishou cross-origin browser submission redirect was blocked", "快手请求试图跨站转发提交内容，已安全拦截；请核对官方原始链接后重试。"],
+      ["Kuaishou returned no verified video data", "未取得可验证的快手视频信息。请在 Chrome 确认原链接可正常播放，复制新的分享链接后重试；不会下载推荐视频作为替代。"],
+      ["Kuaishou profile response changed", "快手主页返回格式发生变化，未加入无法验证的作品。请确认原主页可访问后重试，仍失败时请反馈链接与软件版本。"],
+      ["Kuaishou response exceeded the safe size limit", "快手响应超过安全大小限制，已停止解析。已经下载的文件不受影响。"],
+      ["Kuaishou share link target changed", "这个快手分享链接指向的作品或作者已变化。为避免混入其他内容，已停止旧任务，请用新链接创建任务。"],
+      ["Kuaishou supports Chrome Cookie", "快手支持 Chrome Cookie 或明确选择的未登录模式，请检查下载设置。"],
+      ["Kuaishou video has no trusted media stream", "快手未提供可信的视频流，不会用封面图冒充视频；请确认原页面可播放后重试。"],
+      ["Unsupported Kuaishou", "快手链接格式不支持，请粘贴单个视频、分享短链接或作者主页链接。"],
+      ["Kuaishou URL is not a trusted HTTPS page", "快手链接必须是受支持的官方 HTTPS 地址，不能包含账号密码或自定义端口。"]
+    ];
+    for (const [prefix, localized] of messages) {
+      if (text.startsWith(prefix)) return localized;
+    }
+    if (/Kuaishou.*(?:identity|identities|different video|different author|missing video|inconsistent source)/.test(text)) {
+      return "快手返回的视频或作者身份未通过校验，已停止处理，不会下载其他作品作为替代。请核对原链接后重试。";
+    }
+    if (/Kuaishou.*(?:untrusted|trusted pages)|Untrusted Kuaishou/.test(text)) {
+      return "快手页面或媒体跳转到不可信地址，已在请求前拦截。请核对原始链接，不要手动放行未知地址。";
+    }
+    return null;
+  }
+
   function localizeRuntimeMessage(value, job = null) {
     let text = asText(value);
+    const kuaishou = kuaishouMessage(text);
+    if (kuaishou) return kuaishou;
     const signingValidation = douyinSigningValidationMessage(text);
     if (signingValidation) return signingValidation;
     if (text.startsWith("Could not save settings. Check free disk space and write permissions for the project's data folder")) {
@@ -1685,6 +1733,8 @@
 
   function localizeDiscoveryActivity(value, job) {
     const message = asText(value).trim();
+    const kuaishou = kuaishouMessage(message);
+    if (kuaishou) return kuaishou;
     const platform = platformMeta(job).label;
     const target = isProfileJob(job) ? `${platform}主页` : `${platform}作品`;
     if (!message || message === "Starting media discovery") {

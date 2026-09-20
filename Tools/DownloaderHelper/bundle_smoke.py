@@ -51,6 +51,7 @@ def _check() -> dict[str, object]:
         "launcher.py",
         "LICENSE",
         "app/main.py",
+        "app/kuaishou.py",
         "app/static/index.html",
     ):
         if not (vendor_root / relative).is_file():
