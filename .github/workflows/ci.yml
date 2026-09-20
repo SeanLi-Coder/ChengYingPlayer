@@ -61,6 +61,7 @@ jobs:
           python -m ruff check helper.py media.py conversion.py tests ../VideoToolsTests/app_conversion_smoke.py ../VideoToolsTests/app_rotation_smoke.py ../VideoToolsTests/test_rotation_smoke.py ../PlaybackRotationTests
           python -m pytest -q
           python -B ../VideoToolsTests/test_rotation_smoke.py
+          python -B ../PlaybackRotationTests/test_pipeline.py
 
       - name: Preflight native media information UI and image metadata
         run: |
@@ -213,10 +214,6 @@ jobs:
           python other/verify_playback_distribution.py "$PWD/deps"
           bash Tools/RenderTestSupport/test_native_capability.sh
 
-      - name: Test real rotation at EOF, stop, and file replacement
-        timeout-minutes: 5
-        run: bash Tools/PlaybackRotationTests/run.sh
-
       - name: Test real ICC profile memory ownership
         run: bash Tools/ICCProfileTests/run.sh
 
@@ -227,6 +224,10 @@ jobs:
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/VideoToolsHelper/build_helper.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/SubtitleToolsHelper/build_helper.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/DownloaderHelper/build_helper.sh
+
+      - name: Test real rotation at EOF, stop, and file replacement
+        timeout-minutes: 5
+        run: bash Tools/PlaybackRotationTests/run.sh
 
       - name: Verify frozen helper signing after Xcode-style copying
         run: |
