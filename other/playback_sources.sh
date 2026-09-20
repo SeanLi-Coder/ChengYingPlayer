@@ -58,22 +58,53 @@ fetch_playback_source() (
   destination_dir="$2"
   while IFS=$'\t' read -r name version filename url expected; do
     [[ "$component" == "$name" ]] || continue
-    mkdir -p "$destination_dir"
+    case "$url" in
+      https://*) ;;
+      *) echo "Playback source URL must use HTTPS: $name." >&2; exit 2 ;;
+    esac
+    mkdir -p "$destination_dir" || exit "$?"
     destination="$destination_dir/$filename"
-    if [[ -f "$destination" ]] && [[ "$(shasum -a 256 "$destination" | awk '{print $1}')" == "$expected" ]]; then
-      printf '%s\n' "$destination"
-      exit 0
+    if [[ -f "$destination" ]]; then
+      actual="$(shasum -a 256 "$destination" | awk '{print $1}')" || exit "$?"
+      if [[ "$actual" == "$expected" ]]; then
+        printf '%s\n' "$destination"
+        exit 0
+      fi
     fi
-    partial="$destination.partial-$$"
+    partial="$(mktemp "$destination.partial.XXXXXX")" || exit "$?"
     trap 'rm -f "$partial"' EXIT
+    fallback=""
+    curl_options=(--fail --location --proto '=https' --proto-redir '=https')
+    if [[ "$name" == dav1d && "$version" == 1.5.3 && \
+          "$filename" == dav1d-1.5.3.tar.xz && \
+          "$url" == https://downloads.videolan.org/pub/videolan/dav1d/1.5.3/dav1d-1.5.3.tar.xz ]]; then
+      # This mirror was verified byte-for-byte against the pinned source digest.
+      fallback="https://sources.buildroot.net/dav1d/dav1d-1.5.3.tar.xz"
+      curl_options+=(--connect-timeout 15 --max-time 120 --retry 0)
+    else
+      curl_options+=(--retry 3 --retry-all-errors)
+    fi
     echo "Downloading $name $version source..." >&2
-    curl --fail --location --retry 3 --retry-all-errors "$url" --output "$partial"
-    actual="$(shasum -a 256 "$partial" | awk '{print $1}')"
+    if curl "${curl_options[@]}" "$url" --output "$partial"; then
+      :
+    else
+      download_status=$?
+      case "$download_status" in
+        6|7|28)
+          [[ -n "$fallback" ]] || exit "$download_status"
+          echo "Primary $name source is unreachable; trying the verified HTTPS mirror..." >&2
+          : > "$partial" || exit "$?"
+          curl "${curl_options[@]}" "$fallback" --output "$partial" || exit "$?"
+          ;;
+        *) exit "$download_status" ;;
+      esac
+    fi
+    actual="$(shasum -a 256 "$partial" | awk '{print $1}')" || exit "$?"
     if [[ "$actual" != "$expected" ]]; then
       echo "Playback source checksum mismatch: $name (expected $expected, got $actual)." >&2
       exit 1
     fi
-    mv "$partial" "$destination"
+    mv "$partial" "$destination" || exit "$?"
     printf '%s\n' "$destination"
     exit 0
   done < <(playback_source_records)

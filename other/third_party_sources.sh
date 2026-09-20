@@ -125,6 +125,11 @@ third_party_source_records() {
 fetch_verified_source() {
   local component="$1"
   local destination_dir="$2"
+  if [[ "$component" == dav1d ]]; then
+    # Source packaging must use the same pinned download and verification policy.
+    fetch_playback_source "$component" "$destination_dir"
+    return $?
+  fi
   local record_name=""
   local version=""
   local filename=""
