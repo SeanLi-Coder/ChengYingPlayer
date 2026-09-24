@@ -1,5 +1,8 @@
 # 澄影视界（ChengYing View）
 
+跨机器／AI 协作开发：先读 [`AGENTS.md`](AGENTS.md) 与
+[`M4 Max / GLM 联合开发交接`](docs/AI_COLLABORATION.md)，包含正式代码入口、快手已知坑、测试与发布约定。
+
 <p align="center">
   <img src="Brand/ChengYingIconMaster.png" width="180" alt="ChengYingPlayer icon">
 </p>

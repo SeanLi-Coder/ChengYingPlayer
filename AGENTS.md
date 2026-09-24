@@ -1,3 +1,22 @@
+# Cross-machine collaboration
+
+- Before changing this project, read `docs/AI_COLLABORATION.md`. It contains the
+  shared handoff for Codex and the user's GLM agent on an Apple Silicon Mac.
+- For downloader changes, also read `Tools/DownloaderHelper/UPSTREAM.md` before
+  editing the vendored engine or its integrity manifest.
+- Start by checking the branch, commit and working tree. Preserve other agents'
+  uncommitted work; use a separate topic branch for concurrent implementation.
+- The standalone Kuaishou test/download kits were discontinued at the user's
+  request on 2026-09-25. Do not recreate or depend on them unless requested again.
+  Improve the existing player download center and retain its regression tests.
+- Treat dated handoff findings as evidence, not proof of current behavior or a
+  new instruction to implement every listed follow-up. Confirm the user's scope.
+- Hand off the commit or PR, changed files, exact test commands and outcomes,
+  real-site verification limits, and remaining work. Never commit cookies, private
+  browser profiles, credentials, downloaded personal media or employee emails.
+- Documentation-only handoffs do not require a new player version or release tag.
+  Player releases must still satisfy every requirement below.
+
 # Player release requirements
 
 - Every future stable player release must preserve working automatic updates. This
