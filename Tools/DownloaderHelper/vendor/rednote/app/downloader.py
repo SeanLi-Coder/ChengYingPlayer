@@ -6118,6 +6118,7 @@ class MediaDownloader:
                         media_id,
                         extension,
                         asset_index,
+                        platform,
                     )
                     total_header = response.headers.get("Content-Length")
                     total = (
@@ -6703,12 +6704,25 @@ class MediaDownloader:
         media_id: str,
         extension: str,
         asset_index: int | None,
+        platform: Platform | None = None,
     ) -> Path:
         date_part = upload_date or "Unknown-Date"
         title_part = safe_component(
             title, fallback=media_id, limit=self.config.filename_limit
         )
         suffix = f"-{asset_index:03d}" if asset_index is not None else ""
+        if platform == Platform.KUAISHOU:
+            base = f"{date_part}-{title_part}{suffix}"
+            path = output_dir / f"{base}.{extension}"
+            if path.exists():
+                # Never replace an existing user file; use the stable media ID
+                # only when the human-readable name collides.
+                path = output_dir / f"{base} [{_safe_media_id(media_id)}].{extension}"
+                counter = 2
+                while path.exists():
+                    path = output_dir / f"{base} [{_safe_media_id(media_id)}-{counter}].{extension}"
+                    counter += 1
+            return path
         return output_dir / f"{date_part}-{title_part} [{media_id}]{suffix}.{extension}"
 
     @staticmethod

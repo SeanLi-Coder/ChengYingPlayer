@@ -840,6 +840,35 @@ def test_media_transfer_cancel_preserves_no_partial_file(monkeypatch, tmp_path):
     assert response.closed and not list(tmp_path.iterdir())
 
 
+def test_kuaishou_output_path_uses_date_title_and_collision_id(tmp_path):
+    downloader = engine.MediaDownloader(engine.DownloaderConfig(cookie_browser=None))
+    first = downloader._xhs_output_path(
+        tmp_path,
+        "2026-09-19",
+        "#平底鞋给不了高跟鞋的优雅 #家纺人聊睡眠",
+        "3xvideo1",
+        "mp4",
+        None,
+        Platform.KUAISHOU,
+    )
+    assert first.name == "2026-09-19-#平底鞋给不了高跟鞋的优雅 #家纺人聊睡眠.mp4"
+    first.write_bytes(b"existing")
+    second = downloader._xhs_output_path(
+        tmp_path,
+        "2026-09-19",
+        "#平底鞋给不了高跟鞋的优雅 #家纺人聊睡眠",
+        "3xvideo1",
+        "mp4",
+        None,
+        Platform.KUAISHOU,
+    )
+    assert second.name == "2026-09-19-#平底鞋给不了高跟鞋的优雅 #家纺人聊睡眠 [3xvideo1].mp4"
+
+
+def test_kuaishou_output_directory_is_separate(tmp_path):
+    assert Path(tmp_path, "Kuaishou", "Fixture Author") != Path(tmp_path, "Fixture Author")
+
+
 def test_incomplete_short_profile_retries_discovery():
     job = DownloadJob(
         id="fixture",

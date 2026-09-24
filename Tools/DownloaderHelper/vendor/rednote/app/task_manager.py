@@ -1027,7 +1027,12 @@ class DownloadManager:
                     author_folder = safe_component(
                         result.author, fallback=f"{job.platform.value}-author"
                     )
-                    job.output_dir = str(Path(job.output_root) / author_folder)
+                    output_base = (
+                        Path(job.output_root) / "Kuaishou"
+                        if job.platform == Platform.KUAISHOU
+                        else Path(job.output_root)
+                    )
+                    job.output_dir = str(output_base / author_folder)
                     Path(job.output_dir).mkdir(parents=True, exist_ok=True)
                     previous_items = job.items
                     if job.platform == Platform.KUAISHOU and result.items:
@@ -1145,9 +1150,14 @@ class DownloadManager:
                     job_snapshot.author,
                     fallback=f"{job_snapshot.platform.value}-author",
                 )
+                output_base = (
+                    Path(job_snapshot.output_root) / "Kuaishou"
+                    if job_snapshot.platform == Platform.KUAISHOU
+                    else Path(job_snapshot.output_root)
+                )
                 with self._lock:
                     job = self._require_job(job_id)
-                    job.output_dir = str(Path(job.output_root) / author_folder)
+                    job.output_dir = str(output_base / author_folder)
                     Path(job.output_dir).mkdir(parents=True, exist_ok=True)
                     self._commit_locked(job)
 

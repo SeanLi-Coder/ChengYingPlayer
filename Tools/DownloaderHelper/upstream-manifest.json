@@ -61,7 +61,7 @@
     {
       "path": "app/downloader.py",
       "upstream_sha256": "0401b8290cd9cda5b71a61a6d8086a3d59e7ad6f36d395bac9ec988f3e182573",
-      "vendored_sha256": "bd3399b1496de866fa27f44122a369e0a52b43e1c9aa6faaea15f8fe600aa9f4"
+      "vendored_sha256": "fad17fe94a55999d94085246b9bffc44ba8d0d88ee7886fb0580fc729295d657"
     },
     {
       "path": "app/errors.py",
@@ -131,7 +131,7 @@
     {
       "path": "app/task_manager.py",
       "upstream_sha256": "2264717a9ed202fc1db757d54140dea575c14799ec49bef48815fb679a862236",
-      "vendored_sha256": "08b860fc063262f2ee2b379394786d0953e84e6a862e5f6b9915631173c7f5e5"
+      "vendored_sha256": "bb3024901ac36f662d51d6fce19953e1f6befe6c30a24f72e333fe3ad04f8f49"
     },
     {
       "path": "app/xiaohongshu.py",
