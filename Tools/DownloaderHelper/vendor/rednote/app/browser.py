@@ -48,10 +48,37 @@ def chrome_user_data_directory(platform_name: str | None = None) -> Path | None:
     return root / "google-chrome"
 
 
+COOKIE_DIAGNOSTIC_CODES = frozenset(
+    {
+        "cookie_decryption_failed",
+        "cookie_permission_denied",
+        "cookie_database_locked",
+        "chrome_data_directory_missing",
+        "chrome_profile_invalid",
+        "chrome_profile_missing",
+        "cookie_database_missing",
+        "cookie_access_unknown",
+    }
+)
+
+
+def public_cookie_diagnostic_code(value: object) -> str:
+    """Accept only known safe codes; never echo an arbitrary exception suffix."""
+    code = str(value or "").strip().lower()
+    return code if code in COOKIE_DIAGNOSTIC_CODES else "cookie_access_unknown"
+
+
 def chrome_cookie_diagnostic(
     profile: str | None, error: BaseException | None = None
 ) -> str:
-    """Return a safe, actionable reason without exposing paths or cookie data."""
+    """Return a safe, actionable reason without exposing paths or cookie data.
+
+    The diagnostic probe itself must never escape: an ``OSError`` while checking
+    directories or databases falls back to ``cookie_access_unknown`` so the
+    caller's real business error category (``cookie_unavailable``) is preserved
+    instead of being reclassified as a site response change. Only ``OSError`` is
+    caught, so cancellation and interpreter-exit signals still propagate.
+    """
     messages: list[str] = []
     current: BaseException | None = error
     while current is not None and len(messages) < 4:
@@ -64,21 +91,24 @@ def chrome_cookie_diagnostic(
         return "cookie_permission_denied"
     if any(marker in text for marker in ("locked", "database is busy", "resource busy")):
         return "cookie_database_locked"
-    root = chrome_user_data_directory()
-    if root is None or not root.is_dir():
-        return "chrome_data_directory_missing"
-    selected = profile or "Default"
-    if not _CHROME_PROFILE_DIRECTORY_RE.fullmatch(selected):
-        return "chrome_profile_invalid"
-    profile_dir = root / selected
-    if not profile_dir.is_dir():
-        return "chrome_profile_missing"
-    databases = (
-        profile_dir / "Network/Cookies",
-        profile_dir / "Cookies",
-    )
-    if not any(path.is_file() for path in databases):
-        return "cookie_database_missing"
+    try:
+        root = chrome_user_data_directory()
+        if root is None or not root.is_dir():
+            return "chrome_data_directory_missing"
+        selected = profile or "Default"
+        if not _CHROME_PROFILE_DIRECTORY_RE.fullmatch(selected):
+            return "chrome_profile_invalid"
+        profile_dir = root / selected
+        if not profile_dir.is_dir():
+            return "chrome_profile_missing"
+        databases = (
+            profile_dir / "Network/Cookies",
+            profile_dir / "Cookies",
+        )
+        if not any(path.is_file() for path in databases):
+            return "cookie_database_missing"
+    except OSError:
+        return "cookie_access_unknown"
     return "cookie_access_unknown"
 
 

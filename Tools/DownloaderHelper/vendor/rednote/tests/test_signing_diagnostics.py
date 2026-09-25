@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import pytest
 
+import app.browser as browser
 import app.douyin_signing as signing
 from app.errors import (
     AuthenticationRequiredError,
@@ -319,4 +323,176 @@ def test_cookie_access_failure_includes_safe_diagnostic_code():
         signing._raise_signing_error(VIDEO_URL, cause)
     message = str(captured.value)
     assert "Diagnostic: cookie_permission_denied." in message
+    assert captured.value.issue_code == SiteIssueCode.COOKIE_UNAVAILABLE
+    assert captured.value.diagnostic_code == "cookie_permission_denied"
     assert "SECRET" not in message
+
+
+class _ExplodingPath(type(Path())):
+    """A path whose existence probes fail, to exercise the diagnostic's own I/O."""
+
+    def is_dir(self):
+        raise PermissionError("operation not permitted")
+
+    def is_file(self):
+        raise PermissionError("operation not permitted")
+
+
+@pytest.mark.parametrize(
+    ("cause_text", "expected"),
+    [
+        ("cookie could not be decrypted with the keychain key", "cookie_decryption_failed"),
+        ("operation not permitted while reading cookies", "cookie_permission_denied"),
+        ("access denied to the cookie store", "cookie_permission_denied"),
+        ("database is locked", "cookie_database_locked"),
+        ("sqlite resource busy", "cookie_database_locked"),
+    ],
+)
+def test_cookie_diagnostic_classifies_synthetic_local_failures(cause_text, expected):
+    """Only a fixed category is returned; the original text is never echoed."""
+    secret = "/Users/someone/Library/Application Support/Google/Chrome/Default"
+    assert browser.chrome_cookie_diagnostic(
+        "Default", PermissionError(f"{cause_text} ({secret})")
+    ) == expected
+
+
+def test_cookie_diagnostic_swallows_its_own_directory_probe_error():
+    """R6: an OSError while probing directories must not escape the helper."""
+    with tempfile.TemporaryDirectory(prefix="cookie-diagnostic-") as name:
+        original = browser.chrome_user_data_directory
+        try:
+            browser.chrome_user_data_directory = lambda *a, **k: _ExplodingPath(name)
+            assert browser.chrome_cookie_diagnostic(
+                "Default", RuntimeError("generic failure")
+            ) == "cookie_access_unknown"
+        finally:
+            browser.chrome_user_data_directory = original
+
+
+def test_cookie_diagnostic_swallows_its_own_database_probe_error(monkeypatch):
+    """R6: an OSError while probing the cookie database must not escape either."""
+    with tempfile.TemporaryDirectory(prefix="cookie-diagnostic-") as name:
+        root = Path(name)
+        (root / "Default").mkdir()
+        monkeypatch.setattr(browser, "chrome_user_data_directory", lambda *a, **k: root)
+        monkeypatch.setattr(
+            Path, "is_file", _ExplodingPath.is_file, raising=True
+        )
+        assert browser.chrome_cookie_diagnostic(
+            "Default", RuntimeError("generic failure")
+        ) == "cookie_access_unknown"
+
+
+@pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit])
+def test_cookie_diagnostic_does_not_swallow_control_signals(signal, monkeypatch):
+    """R6: only OSError is caught, so cancellation and interpreter exit propagate."""
+
+    def explode(self):
+        raise signal()
+
+    monkeypatch.setattr(Path, "is_dir", explode, raising=True)
+    with pytest.raises(signal):
+        browser.chrome_cookie_diagnostic("Default", RuntimeError("generic"))
+
+
+@pytest.mark.parametrize("profile", [None, "Default", "Profile 3", "Profile 12"])
+def test_cookie_diagnostic_reports_profile_and_database_states(profile, tmp_path, monkeypatch):
+    """R6: the filesystem categories stay reachable and never leak a path."""
+    monkeypatch.setattr(browser, "chrome_user_data_directory", lambda *a, **k: tmp_path)
+    selected = tmp_path / (profile or "Default")
+    assert browser.chrome_cookie_diagnostic(profile, RuntimeError("generic")) == (
+        "chrome_profile_missing"
+    )
+    selected.mkdir()
+    assert browser.chrome_cookie_diagnostic(profile, RuntimeError("generic")) == (
+        "cookie_database_missing"
+    )
+    (selected / "Network").mkdir()
+    (selected / "Network" / "Cookies").write_bytes(b"")
+    assert browser.chrome_cookie_diagnostic(profile, RuntimeError("generic")) == (
+        "cookie_access_unknown"
+    )
+
+
+def test_cookie_diagnostic_reports_missing_chrome_data_directory(tmp_path, monkeypatch):
+    """R6: an absent Chrome root is reported distinctly from an absent profile."""
+    missing = tmp_path / "no-chrome-here"
+    monkeypatch.setattr(
+        browser, "chrome_user_data_directory", lambda *a, **k: missing
+    )
+    assert browser.chrome_cookie_diagnostic("Default", None) == (
+        "chrome_data_directory_missing"
+    )
+    monkeypatch.setattr(browser, "chrome_user_data_directory", lambda *a, **k: None)
+    assert browser.chrome_cookie_diagnostic("Default", None) == (
+        "chrome_data_directory_missing"
+    )
+
+
+def test_cookie_diagnostic_reports_an_invalid_profile_name(tmp_path, monkeypatch):
+    """R6: a profile outside the allowed shape is rejected without leaking it."""
+    monkeypatch.setattr(browser, "chrome_user_data_directory", lambda *a, **k: tmp_path)
+    assert browser.chrome_cookie_diagnostic(
+        "../../etc", RuntimeError("generic")
+    ) == "chrome_profile_invalid"
+    assert browser.chrome_cookie_diagnostic(
+        "Default/Cookies", RuntimeError("generic")
+    ) == "chrome_profile_invalid"
+
+
+def test_cookie_diagnostic_never_returns_an_unlisted_code():
+    """R6: every returned value is inside the public whitelist."""
+    assert browser.chrome_cookie_diagnostic(None, None) in browser.COOKIE_DIAGNOSTIC_CODES
+    assert browser.public_cookie_diagnostic_code("") == "cookie_access_unknown"
+    assert browser.public_cookie_diagnostic_code(None) == "cookie_access_unknown"
+    assert browser.public_cookie_diagnostic_code(
+        "cookie_permission_denied"
+    ) == "cookie_permission_denied"
+    # An arbitrary exception suffix must not be echoed back as a category.
+    hostile = "/Users/someone/Default/Cookies permission denied secret=value"
+    assert browser.public_cookie_diagnostic_code(hostile) == "cookie_access_unknown"
+
+
+@pytest.mark.parametrize(
+    ("diagnostic", "expected"),
+    [
+        ("cookie_permission_denied", "cookie_permission_denied"),
+        ("cookie_database_locked", "cookie_database_locked"),
+        ("cookie_decryption_failed", "cookie_decryption_failed"),
+        ("chrome_profile_missing", "chrome_profile_missing"),
+        (None, "cookie_access_unknown"),
+        ("/Users/someone/secret permission denied", "cookie_access_unknown"),
+    ],
+)
+def test_signing_cookie_failure_carries_only_whitelisted_codes(diagnostic, expected):
+    """R5/R6: the signing chain resolves one safe category, structured and textual."""
+    suffix = f" (diagnostic: {diagnostic})" if diagnostic else ""
+    cause = signing._CookieAccessSigningFailure(
+        f"Chrome cookies could not be read{suffix}"
+    )
+    if diagnostic in browser.COOKIE_DIAGNOSTIC_CODES:
+        cause.cookie_diagnostic_code = diagnostic
+    with pytest.raises(TemporaryAccessError) as captured:
+        signing._raise_signing_error(VIDEO_URL, cause)
+    error = captured.value
+    assert error.issue_code == SiteIssueCode.COOKIE_UNAVAILABLE
+    assert error.diagnostic_code == expected
+    assert f"Diagnostic: {expected}." in str(error)
+    assert "/Users/someone" not in str(error)
+    assert error.__cause__ is cause
+
+
+def test_cookie_failure_is_not_relabelled_as_a_signing_integrity_failure():
+    """R6: a cookie read failure must not become site_response_changed."""
+    cause = signing._CookieAccessSigningFailure(
+        "Chrome cookies could not be read (diagnostic: cookie_database_locked)",
+        cookie_diagnostic_code="cookie_database_locked",
+    )
+    with pytest.raises(TemporaryAccessError) as captured:
+        signing._raise_signing_error(VIDEO_URL, cause)
+    error = captured.value
+    assert error.issue_code == SiteIssueCode.COOKIE_UNAVAILABLE
+    assert error.issue_code != SiteIssueCode.SITE_RESPONSE_CHANGED
+    assert "identity or integrity validation" not in str(error)
+    assert "verification page is not required" in str(error)
+    assert signing.public_signing_diagnostic_code(error) == "signing-validation-failed"

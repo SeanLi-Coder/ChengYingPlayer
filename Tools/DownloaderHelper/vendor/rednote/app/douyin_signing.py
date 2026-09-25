@@ -15,7 +15,12 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from yt_dlp.cookies import extract_cookies_from_browser
 
-from .browser import chrome_cookie_diagnostic, chrome_user_agent
+from .browser import (
+    COOKIE_DIAGNOSTIC_CODES,
+    chrome_cookie_diagnostic,
+    chrome_user_agent,
+    public_cookie_diagnostic_code,
+)
 from .errors import (
     AuthenticationRequiredError,
     DiscoveryError,
@@ -261,7 +266,15 @@ class _AuthenticationSigningFailure(_SigningFailure):
 
 
 class _CookieAccessSigningFailure(_SigningFailure):
-    pass
+    """A Chrome Cookie access failure, distinct from an integrity/signing failure.
+
+    Carries a whitelisted cookie diagnostic category so callers can preserve the
+    real local reason instead of relabeling it as a signing validation failure.
+    """
+
+    def __init__(self, message: str, *, cookie_diagnostic_code: str | None = None):
+        super().__init__(message)
+        self.cookie_diagnostic_code = cookie_diagnostic_code
 
 
 class _SigningNoProgressTimeout(_TransientSigningFailure):
@@ -647,9 +660,12 @@ def _load_chrome_cookie_jar(cookie_profile: str | None) -> CookieJar:
             "chrome", profile=cookie_profile, logger=_QuietCookieLogger()
         )
     except Exception as exc:
-        reason = chrome_cookie_diagnostic(cookie_profile, exc)
+        reason = public_cookie_diagnostic_code(
+            chrome_cookie_diagnostic(cookie_profile, exc)
+        )
         raise _CookieAccessSigningFailure(
-            f"Chrome cookies could not be read (diagnostic: {reason})"
+            f"Chrome cookies could not be read (diagnostic: {reason})",
+            cookie_diagnostic_code=reason,
         ) from exc
 
 
@@ -2035,9 +2051,12 @@ def _run_with_signing_page(
         except (DownloadCancelledError, _SigningFailure):
             raise
         except Exception as exc:
-            diagnostic = chrome_cookie_diagnostic(cookie_profile, exc)
+            diagnostic = public_cookie_diagnostic_code(
+                chrome_cookie_diagnostic(cookie_profile, exc)
+            )
             raise _CookieAccessSigningFailure(
-                f"Chrome cookies could not be read (diagnostic: {diagnostic})"
+                f"Chrome cookies could not be read (diagnostic: {diagnostic})",
+                cookie_diagnostic_code=diagnostic,
             ) from exc
         budget.remaining_seconds()
         browser_cookies = _cookie_jar_to_playwright(cookie_jar)
@@ -2218,6 +2237,30 @@ def _signing_diagnostic_code(cause: Exception) -> str:
     return "signing-validation-failed"
 
 
+_COOKIE_DIAGNOSTIC_IN_MESSAGE_RE = re.compile(
+    r"(?:diagnostic(?: code)?:\s*)([a-z0-9_]+)", re.I
+)
+
+
+def _cookie_diagnostic_of(cause: BaseException) -> str:
+    """Resolve one whitelisted Chrome Cookie reason from a cookie access failure.
+
+    Prefers the structured field set when the failure was created. Older or
+    hand-built failures may carry only the text marker, so that is parsed as a
+    strict fallback. Anything outside the whitelist resolves to the generic
+    ``cookie_access_unknown`` instead of being echoed back to the user.
+    """
+    structured = getattr(cause, "cookie_diagnostic_code", None)
+    if isinstance(structured, str) and structured.strip().lower() in COOKIE_DIAGNOSTIC_CODES:
+        return structured.strip().lower()
+    match = _COOKIE_DIAGNOSTIC_IN_MESSAGE_RE.search(str(cause) or "")
+    if match:
+        code = match.group(1).strip().lower()
+        if code in COOKIE_DIAGNOSTIC_CODES:
+            return code
+    return public_cookie_diagnostic_code(structured)
+
+
 def _raise_signing_error(
     verification_url: str,
     cause: Exception,
@@ -2270,14 +2313,19 @@ def _raise_signing_error(
             issue_code=code,
         ) from cause
     if isinstance(cause, _CookieAccessSigningFailure):
-        diagnostic = re.search(r"diagnostic: ([a-z0-9_]+)", str(cause))
-        suffix = f" Diagnostic: {diagnostic.group(1)}." if diagnostic else ""
+        # The wording above is asserted by upstream tests, so keep it intact and
+        # carry the specific local reason in a whitelisted structured field plus a
+        # fixed-code suffix. Prefer the structured field; fall back to a strict
+        # parse of the message that accepts only a known safe code, never an
+        # arbitrary exception suffix.
+        diagnostic = _cookie_diagnostic_of(cause)
         raise TemporaryAccessError(
             "Chrome cookies could not be read. Fully quit Chrome and retry, approve "
             "any system cookie-access prompt, or disable Chrome Cookie in settings "
             "to continue explicitly without login and create a new task. Opening a "
-            "verification page is not required." + suffix,
+            f"verification page is not required. Diagnostic: {diagnostic}.",
             issue_code=SiteIssueCode.COOKIE_UNAVAILABLE,
+            diagnostic_code=diagnostic,
         ) from cause
     if isinstance(cause, _AuthenticationSigningFailure):
         if cause.issue_code == SiteIssueCode.LOGIN_REQUIRED:

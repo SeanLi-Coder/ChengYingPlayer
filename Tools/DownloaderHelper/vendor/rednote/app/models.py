@@ -105,6 +105,9 @@ class DownloadItem(BaseModel):
     error: str | None = None
     auth_message: str | None = None
     issue_code: SiteIssueCode | None = None
+    # Whitelisted local diagnostic category, for example a Chrome Cookie reason.
+    # Only fixed safe codes are stored, never raw exception text.
+    diagnostic_code: str | None = None
     retryable: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)
@@ -136,6 +139,7 @@ class DownloadJob(BaseModel):
     auth_message: str | None = None
     issue_code: SiteIssueCode | None = None
     issue_message: str | None = None
+    diagnostic_code: str | None = None
     verification_url: str | None = None
     cookie_browser: str | None = "chrome"
     cookie_profile: str | None = None

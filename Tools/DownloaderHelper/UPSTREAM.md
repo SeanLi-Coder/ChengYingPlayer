@@ -46,6 +46,28 @@ existing queue, verified asset transfer, retry/cancel and state machinery.
 progress/errors and input guidance; original platform behavior is retained.
 Each intentional change is explicitly allowlisted and hashed in the manifest.
 
+Chrome Cookie failures are diagnosed by an additive patch to `app/browser.py`,
+which classifies a read failure into one fixed, safe category: decryption,
+permission, database lock, missing Chrome data directory, invalid or missing
+profile, missing cookie database, or unknown. The probe never returns a profile
+path, cookie value, token or raw exception text, and its own filesystem errors
+fall back to the fixed `cookie_access_unknown` category instead of escaping and
+masking the original `cookie_unavailable` business error. Cancellation and
+interpreter-exit signals are deliberately not caught.
+
+`app/douyin_signing.py` carries that category through the cookie-unavailable path
+as a whitelisted structured code, so a local cookie failure is never relabelled
+as a signing integrity failure or as a site response change. `app/models.py` adds
+an optional diagnostic category field to the job and item records,
+`app/task_manager.py` persists it with task state and recovers it for older
+records, and `app/static/app.js` localizes each category with its own guidance
+rather than collapsing every cookie failure into a single generic message. The
+upstream English wording of the cookie error is preserved because unmodified
+upstream tests assert it; only a fixed-code suffix and the structured field are
+added. `tests/test_signing_diagnostics.py` covers the classification, the
+helper's own error fallback, control-signal propagation and the chain end to end,
+using synthetic exceptions, fictional profiles and temporary directories.
+
 `app/kuaishou.py` is an original ChengYing extension, licensed GPL-3.0-or-later,
 not part of the MIT upstream snapshot. It observes the site's normal Chrome
 page responses and author-feed pagination. It does not copy third-party signing
@@ -55,6 +77,56 @@ targets are checked before accepting media. Incomplete profile enumeration is
 reported as incomplete; recommendations are not substituted for requested media.
 The adapter uses the existing native proxy hooks and does not persist temporary
 media URLs. Its independent regression tests live in the helper's `tests/` folder.
+
+### Kuaishou interruption, reporting and resume semantics
+
+A rate-limited or transiently failing author-feed page no longer discards the
+works already verified. Only `rate_limited`, `request_rejected`,
+`site_unavailable` and `network_error` are treated as recoverable, and only while
+a profile is actually being paginated. Login, verification, author/item identity
+and security failures stay fatal and are never degraded into a partial result,
+because doing so would hide a real access problem. `content_unavailable` is also
+excluded: it describes one work, not a pagination interruption.
+
+Recovery retries with a bounded backoff (3 attempts at 5s, 10s and 20s). Every
+wait counts against the existing 300 second browser budget and is checked against
+cancellation in 200ms slices, so cancellation stays immediate and one task can
+never wait indefinitely. A retry resumes from the same expected cursor, which
+preserves cursor continuity instead of restarting the walk or skipping pages.
+When retries are exhausted the verified works are still returned as an
+incomplete result carrying a fixed reason category. If nothing was verified at
+all, the real error is raised; an interruption is never reported as an empty
+profile, and a site-confirmed end (`pcursor == "no_more"`) is never implied.
+
+Works that cannot be queued are reported with a bounded detail list (20 entries)
+using fixed reason codes only: `no_verifiable_media`, `unsupported_media_type`,
+`queue_limit_reached`, `page_item_limit_reached`. The user-facing summary counts
+them and names up to ten affected works, stating explicitly when further entries
+were only counted. Items beyond the protected page limit are counted rather than
+silently dropped, but are not parsed, so an oversized page cannot cost unbounded
+work. No site text, caption, cookie or media URL is ever included.
+
+Completed assets are persisted per work under a single metadata key with a
+`media_kind` of `video` or `image`, committed as soon as each asset passes its
+checks and lands atomically. Records carry work identity, asset position and
+local file facts only, never a URL or token, so they survive retries and
+restarts. A saved asset is reused only after full re-verification: FFmpeg decode
+plus declared-dimension checks for images, the FFprobe quality gate for videos.
+A truncated, user-modified, moved or missing file is re-downloaded instead of
+being trusted, and an existing user file is never overwritten.
+
+Resume is delivered at four levels: in-session pagination continues from the
+interrupted cursor; a retried or restarted task skips works already completed
+and retries failed ones, keeping unmatched profile items queued while discovery
+is incomplete; an album resumes per image; a single video resumes per file.
+Two things are deliberately not implemented. Intra-file HTTP Range resume is not
+done because Kuaishou media URLs are signed and expire, so splicing bytes fetched
+under two different signatures could produce a corrupt file and would violate the
+rule that a resumed task must not splice different content versions; an
+interrupted file is cleaned up and re-downloaded whole instead. Pagination
+cursors are not persisted across restarts either, because a cursor is opaque,
+expiring site state and the site requires contiguous pagination from an empty
+cursor, so a stale cursor would break the continuity guarantee.
 
 The adapter must not use `run.py`'s project lock in the application bundle. Its
 legacy `--runtime-dir` option only moves runtime records, not configuration,
@@ -145,11 +217,17 @@ The pristine upstream offline baseline on 2026-09-17 was **1379 passed, 1 failed
 `tests/test_stop.py::test_no_record_and_no_legacy_listener_is_idempotent` came from
 an unmocked health request to the machine's occupied localhost port 8766. That
 test now mocks the absent server instead of consulting unrelated user processes.
-A separate test covers a legacy listener disappearing before inspection. These
-are the only upstream test-source changes; production `stop.py` and its strict refusal to
-signal unverified processes are unchanged. The native adapter must use its
-authenticated owned process lifecycle, not legacy listener discovery or global
-process termination.
+A separate test covers a legacy listener disappearing before inspection.
+Production `stop.py` and its strict refusal to signal unverified processes are
+unchanged. The native adapter must use its authenticated owned process lifecycle,
+not legacy listener discovery or global process termination.
+
+`tests/test_stop.py` and `tests/test_signing_diagnostics.py` are the two modified
+upstream test-source files; both changes are allowlisted and hashed in the
+manifest, and no other upstream test file is modified. The signing diagnostics
+file only gains additive tests for the Chrome Cookie diagnostic categories
+described above. Upstream hashes are preserved for both files, so the original
+sources remain verifiable.
 
 After the isolated-test correction, the complete vendored suite passed:
 **1381 passed in 65.23 seconds**. It ran from a temporary source copy with

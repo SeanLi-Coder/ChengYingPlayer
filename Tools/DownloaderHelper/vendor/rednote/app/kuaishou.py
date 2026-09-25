@@ -17,7 +17,11 @@ from urllib.parse import urljoin, urlsplit
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
-from .browser import chrome_user_agent
+from .browser import (
+    chrome_cookie_diagnostic,
+    chrome_user_agent,
+    public_cookie_diagnostic_code,
+)
 from .errors import (
     AuthenticationRequiredError,
     DiscoveryError,
@@ -36,6 +40,14 @@ MEDIA_DOMAINS = (
     "kwimgs.com",
 )
 BROWSER_DOMAINS = (*MEDIA_DOMAINS, "kuaishou.com", "gifshow.com", "gifshowstatic.com")
+# Kuaishou serves its page JavaScript and CSS from these static-asset hosts.
+# Blocking them stops the page script from ever running, so the site never issues
+# its author-feed request and discovery reports "no verified data" even though the
+# author has works. They are page subresources only: media downloads stay bound to
+# MEDIA_DOMAINS and navigation stays bound to PAGE_HOSTS, so neither the trusted
+# media allowlist nor the page identity check is widened by this entry.
+STATIC_ASSET_DOMAINS = ("wskwai.com", "wsbkwai.com")
+BROWSER_DOMAINS = (*BROWSER_DOMAINS, *STATIC_ASSET_DOMAINS)
 ID_PATTERN = r"[A-Za-z0-9_-]{1,80}"
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_PROFILE_PAGES = 500
@@ -45,6 +57,104 @@ PROFILE_INCOMPLETE = (
     "Kuaishou profile discovery is incomplete. Only verified videos were queued; "
     "retry the original profile to continue. The site did not confirm the end of the list."
 )
+PROFILE_INTERRUPTED = (
+    "Kuaishou stopped serving further profile pages, so discovery is incomplete. "
+    "Only verified videos were queued; the already saved files are kept. Wait a few "
+    "minutes, then retry the original profile to continue where it stopped."
+)
+# A recoverable interruption must not discard works that were already verified.
+# Login, verification, identity and security problems stay fatal: they are never
+# partial results, and reporting them as incomplete would hide a real problem.
+# CONTENT_UNAVAILABLE describes one work, not a pagination interruption, so it is
+# deliberately excluded; SITE_RESPONSE_CHANGED must stay loud as well.
+RECOVERABLE_PROFILE_ISSUES = frozenset(
+    {
+        SiteIssueCode.RATE_LIMITED,
+        SiteIssueCode.REQUEST_REJECTED,
+        SiteIssueCode.SITE_UNAVAILABLE,
+        SiteIssueCode.NETWORK_ERROR,
+    }
+)
+# Bounded backoff retries keep a rate-limited profile usable without turning one
+# task into an unbounded wait. Every wait counts against MAX_BROWSER_SECONDS.
+PROFILE_RETRY_ATTEMPTS = 3
+PROFILE_RETRY_BASE_SECONDS = 5.0
+PROFILE_RETRY_MAX_SECONDS = 20.0
+# A user must be able to see which works were skipped and why, but an unbounded
+# list would bloat task state, so details are capped and the rest is counted.
+MAX_PROFILE_PROBLEM_DETAILS = 20
+# Fixed reason codes only; never site text, captions or media URLs.
+PROFILE_PROBLEM_NO_MEDIA = "no_verifiable_media"
+PROFILE_PROBLEM_QUEUE_LIMIT = "queue_limit_reached"
+PROFILE_PROBLEM_UNSUPPORTED = "unsupported_media_type"
+PROFILE_PROBLEM_PAGE_LIMIT = "page_item_limit_reached"
+
+
+def is_recoverable_profile_interruption(
+    exc: BaseException, *, paginating: bool
+) -> bool:
+    """True when a profile pagination failure may be retried without losing work.
+
+    Only rate limiting, transient site and network failures qualify, and only
+    while an author feed is actually being paginated. Login, verification,
+    identity and security failures stay fatal: they are never partial results,
+    and silently degrading them to "incomplete" would hide a real access problem.
+    """
+    if not paginating:
+        return False
+    if isinstance(exc, (AuthenticationRequiredError, DiscoveryError)):
+        return False
+    return getattr(exc, "issue_code", None) in RECOVERABLE_PROFILE_ISSUES
+
+
+def _public_interruption_category(exc: BaseException | None) -> str:
+    """Return a fixed interruption category, never raw site or exception text."""
+    code = getattr(exc, "issue_code", None)
+    if isinstance(code, SiteIssueCode):
+        return code.value
+    if code is not None:
+        code_value = str(code)
+        if code_value in {member.value for member in SiteIssueCode}:
+            return code_value
+    return SiteIssueCode.UNKNOWN.value
+
+
+def _profile_problem_summary(collector: ProfileCollector) -> str | None:
+    """Summarize which works were skipped and why, using fixed reason codes only.
+
+    The full bounded detail list is carried separately in structured form; this
+    text is what a user reads in the task warning. It names the affected works and
+    their fixed reason code, and never contains site text, captions, cookies or
+    media URLs. It also never invents a total the site did not confirm.
+    """
+    if not collector.problem_count:
+        return None
+    by_reason: dict[str, int] = {}
+    for problem in collector.problems:
+        reason = str(problem.get("reason") or PROFILE_PROBLEM_NO_MEDIA)
+        by_reason[reason] = by_reason.get(reason, 0) + 1
+    hidden = collector.problem_count - len(collector.problems)
+    reasons = ", ".join(
+        f"{reason} x{count}" for reason, count in sorted(by_reason.items())
+    )
+    summary = (
+        f"{collector.problem_count} work(s) could not be verified and were not "
+        f"queued: {reasons}."
+    )
+    # Name the affected works so the user can see exactly which ones, bounded by
+    # the same cap that limits the structured detail list.
+    affected = [
+        f"#{problem.get('position')}:{problem.get('media_id')}"
+        for problem in collector.problems
+        if problem.get("media_id") and problem.get("position")
+    ]
+    if affected:
+        summary += f" Affected: {', '.join(affected[:10])}."
+        if len(affected) > 10:
+            summary += f" (+{len(affected) - 10} more listed in task details)"
+    if hidden > 0:
+        summary += f" A further {hidden} were only counted; details are capped."
+    return summary
 
 
 def fulfill_checked_route(
@@ -251,34 +361,164 @@ class Result:
     warning: str | None = None
 
 
-def _image_assets(photo: dict, duration: float | None) -> list[RemoteAsset]:
-    """Extract page-returned image variants without treating a cover as video."""
-    assets: list[RemoteAsset] = []
-    values: list[Any] = []
-    for name in ("photoUrl", "photoH265Url", "photoUrls", "coverUrl"):
-        value = photo.get(name)
-        if isinstance(value, list):
-            values.extend(value[:100])
-        elif value:
-            values.append(value)
-    for index, value in enumerate(values, 1):
-        entry = _object(value)
-        candidates = _urls(entry or value)
-        if not candidates:
+def _image_variants(group: list, duration: float | None) -> RemoteAsset | None:
+    """Pick the highest verifiable variant among quality variants of ONE image.
+
+    A variant without its own declared dimensions can never be claimed as the
+    highest quality, so it is skipped. Live responses show a sizeless ``photoUrls``
+    entry is a cover-image CDN backup of a VIDEO work, so a work-level size must
+    never be borrowed to turn such an entry into a downloadable image. Returns
+    ``None`` when no entry declares its own dimensions and a trusted URL.
+    """
+    best: tuple[list[str], int, int] | None = None
+    best_pixels = -1
+    for entry in group:
+        obj = _object(entry)
+        urls = _urls(entry)
+        if not urls:
             continue
-        width = _positive(entry.get("width") or entry.get("w"))
-        height = _positive(entry.get("height") or entry.get("h"))
-        assets.append(RemoteAsset(
-            candidates=candidates, index=index, width=width, height=height,
-            format_id=f"kuaishou-image-{index}", duration=duration,
-        ))
-    if not assets:
+        width = _positive(obj.get("width") or obj.get("w"))
+        height = _positive(obj.get("height") or obj.get("h"))
+        if not (width and height):
+            continue
+        pixels = width * height
+        if pixels > best_pixels:
+            best_pixels = pixels
+            best = (list(dict.fromkeys(urls)), width, height)
+    if best is None:
+        return None
+    urls, width, height = best
+    return RemoteAsset(
+        candidates=urls, index=1, width=width, height=height, duration=duration,
+    )
+
+
+def _has_sized_image_entry(photo: dict) -> bool:
+    """True when the page returned evidence that this work is an image or album.
+
+    The two fields are held to different standards because only one is backed by
+    live evidence:
+
+    - ``photoUrls`` (plural): on a real video work this holds cover-image CDN
+      backups shaped ``{cdn, url}`` with NO dimensions. A sizeless entry here
+      therefore proves nothing about the work being an image, and borrowing the
+      work-level width/height for it would download a cover as if it were the
+      work. Only an entry declaring its own dimensions counts.
+    - ``photoUrl`` (singular): a dict entry, or a list of dict entries, keeps its
+      established meaning as image evidence. This shape has not been observed
+      live, so it is not reinterpreted on a guess. Safety does not depend on the
+      label: an entry without declared dimensions still yields no asset, so the
+      work is reported unsupported rather than claimed as highest quality.
+    """
+    def sized(entry: Any) -> bool:
+        obj = _object(entry)
+        return bool(
+            _urls(entry)
+            and _positive(obj.get("width") or obj.get("w"))
+            and _positive(obj.get("height") or obj.get("h"))
+        )
+
+    def is_image_entry(entry: Any) -> bool:
+        return isinstance(entry, dict) and bool(_urls(entry))
+
+    album = photo.get("photoUrls")
+    if isinstance(album, list):
+        for entry in album[:100]:
+            if isinstance(entry, list):
+                if any(sized(item) for item in entry):
+                    return True
+            elif sized(entry):
+                return True
+    else:
+        if sized(album):
+            return True
+    single = photo.get("photoUrl")
+    if is_image_entry(single):
+        return True
+    if isinstance(single, list) and any(is_image_entry(entry) for entry in single):
+        return True
+    return False
+
+
+def _structured_image_groups(photo: dict) -> list[list]:
+    """Return one candidate group per DISTINCT image, in page-declared order.
+
+    Field cardinality, never a URL file name or size proximity, decides whether
+    two records are the same image or two images:
+
+    - ``photoUrls`` (plural list) is an ordered album of distinct images. An entry
+      that declares its own dimensions is one image; a nested list holds one
+      image's own quality variants.
+    - ``photoUrl`` (singular) is ONE image. A dict entry carries its dimensions;
+      a list of entries holds quality variants of that single image.
+
+    Only entries with a trusted media URL AND their own declared dimensions count
+    as images. A plain string ``photoUrl`` is the legacy video file of a video
+    post. Sizeless dict entries are video cover backups, so they are not images
+    and never become video candidates either. Mixing sized and sizeless entries
+    leaves the album's identity unresolvable, so the whole group is rejected
+    instead of guessed at.
+    """
+    def is_image_entry(entry: Any) -> bool:
+        return isinstance(entry, dict) and bool(_urls(entry))
+
+    def has_own_size(entry: Any) -> bool:
+        obj = _object(entry)
+        return bool(
+            _positive(obj.get("width") or obj.get("w"))
+            and _positive(obj.get("height") or obj.get("h"))
+        )
+
+    groups: list[list] = []
+    album = photo.get("photoUrls")
+    if isinstance(album, list) and album:
+        sized: list[list] = []
+        unsized: list[dict] = []
+        for entry in album[:100]:
+            if isinstance(entry, list):
+                if any(is_image_entry(item) for item in entry):
+                    sized.append(entry)
+            elif is_image_entry(entry):
+                (sized.append([entry]) if has_own_size(entry) else unsized.append(entry))
+        if sized and unsized:
+            # Cannot tell whether a sizeless entry is a further backup of a listed
+            # image or another image. Fail closed rather than guess identities.
+            return []
+        if sized:
+            return sized
+        # Only sizeless entries: a video work's cover backups, not an album.
         return []
-    sized = [a for a in assets if a.width and a.height]
-    if not sized:
+    single = photo.get("photoUrl")
+    if is_image_entry(single):
+        return [[single]]
+    if isinstance(single, list) and single:
+        if any(is_image_entry(entry) for entry in single):
+            return [single]
+    return []
+
+
+def _image_assets(photo: dict, duration: float | None) -> list[RemoteAsset]:
+    """Build one asset per album image, keeping every distinct image.
+
+    ``coverUrl`` is a thumbnail and is never a substitute for the work itself,
+    so it is not read here. Returns ``[]`` when any image of the album lacks
+    verifiable dimensions or trusted media: the album is then reported as
+    unsupported instead of silently dropping a member and still claiming that
+    the whole group completed.
+    """
+    groups = _structured_image_groups(photo)
+    if not groups:
         return []
-    highest = max((a.width or 0) * (a.height or 0) for a in sized)
-    return [a for a in assets if (a.width or 0) * (a.height or 0) == highest]
+    assets: list[RemoteAsset] = []
+    for index, group in enumerate(groups, 1):
+        asset = _image_variants(group, duration)
+        if asset is None:
+            return []
+        asset.index = index
+        asset.format_id = f"kuaishou-image-{index}"
+        assets.append(asset)
+    return assets
+
 
 def parse_video(
     value: dict, *, expected_id: str | None = None, owner_id: str | None = None
@@ -302,11 +542,10 @@ def parse_video(
     # that the real page returned for this exact, identity-bound video.
     duration_ms = _positive(photo.get("duration"))
     duration = duration_ms / 1000 if duration_ms else None
-    image_hint = any(
-        isinstance(photo.get(name), list)
-        and any(isinstance(entry, dict) for entry in photo.get(name, []))
-        for name in ("photoUrl", "photoUrls")
-    )
+    # Structured image evidence, not "we failed to parse a video stream", decides
+    # the media type. A cover thumbnail is never a substitute for the work.
+    is_image_work = _has_sized_image_entry(photo)
+    image_groups = _structured_image_groups(photo)
     assets: list[RemoteAsset] = []
     bitrate_ranks: dict[int, int] = {}
     for field_name in ("manifest", "manifestH265", "videoResource"):
@@ -363,17 +602,25 @@ def parse_video(
                         bitrate_ranks[id(assets[-1])] = (
                             _positive(rep.get("avgBitrate")) or 0
                         )
-    for name in ("photoUrl", "photoH265Url", "photoUrls"):
-        candidates = _urls(photo.get(name))
-        if candidates:
-            assets.append(
-                RemoteAsset(
-                    candidates=candidates,
-                    index=1,
-                    format_id="kuaishou-" + name,
-                    duration=duration,
+    if not is_image_work:
+        # Only the legacy plain-string photoUrl is a video file. Live evidence
+        # shows photoUrls holds cover-image CDN backups ({cdn, url}, no
+        # dimensions) and that photoH265Urls (plural) is the real cover field
+        # name, so neither may become a video candidate: doing so would download
+        # a cover thumbnail as if it were the work. A speculative field name that
+        # the site has never been observed to return is not read at all.
+        legacy_video = photo.get("photoUrl")
+        if isinstance(legacy_video, str):
+            candidates = _urls(legacy_video)
+            if candidates:
+                assets.append(
+                    RemoteAsset(
+                        candidates=candidates,
+                        index=1,
+                        format_id="kuaishou-photoUrl",
+                        duration=duration,
+                    )
                 )
-            )
     floor = max(assets, key=lambda a: (a.width or 0) * (a.height or 0), default=None)
     highest = (floor.width or 0) * (floor.height or 0) if floor else 0
     codec_best: dict[str | None, int] = {}
@@ -411,24 +658,32 @@ def parse_video(
                 .date()
                 .isoformat()
             )
-    if not assets or image_hint:
+    # A verified video stream always wins. The structured-image heuristic must
+    # not override an explicit media type, a real video rendition, or verified
+    # image structure; likewise "no video stream parsed" never implies "image".
+    if selected:
+        return Video(
+            media_id, author_id, str(author.get("name") or author_id),
+            str(photo.get("caption") or photo.get("originCaption") or "Untitled Kuaishou video"),
+            upload_date, selected, "video",
+        )
+    if is_image_work:
+        # Only sized, per-image evidence becomes an image work. A mixed album
+        # (some entries sized, some not) has no resolvable identities, so this
+        # returns no assets and the item is reported as an unsupported image work
+        # rather than being silently completed with a cover thumbnail.
         image_assets = _image_assets(photo, duration)
-        if image_hint:
-            return Video(
-                media_id, author_id, str(author.get("name") or author_id),
-                str(photo.get("caption") or photo.get("originCaption") or "Untitled Kuaishou image"),
-                upload_date, image_assets, "image",
-            )
-        if image_assets:
-            return Video(
-                media_id, author_id, str(author.get("name") or author_id),
-                str(photo.get("caption") or photo.get("originCaption") or "Untitled Kuaishou image"),
-                upload_date, image_assets, "image",
-            )
+        return Video(
+            media_id, author_id, str(author.get("name") or author_id),
+            str(photo.get("caption") or photo.get("originCaption") or "Untitled Kuaishou image"),
+            upload_date, image_assets, "image",
+        )
+    # No verified video stream and no sized image entry: unsupported. A cover
+    # image is never downloaded as a substitute for the missing work media.
     return Video(
         media_id, author_id, str(author.get("name") or author_id),
         str(photo.get("caption") or photo.get("originCaption") or "Untitled Kuaishou video"),
-        upload_date, selected, "video",
+        upload_date, [], "video",
     )
 
 
@@ -535,7 +790,21 @@ class ProfileCollector:
         self.seen_cursors: set[str] = set()
         self.complete = False
         self.terminal = False
-        self.unsupported = False
+        # Which works could not be queued, and why. Bounded so a large profile
+        # cannot inflate persisted task state; the overflow is only counted.
+        self.problems: list[dict[str, Any]] = []
+        self.problem_count = 0
+
+    @property
+    def unsupported(self) -> bool:
+        return bool(self.problem_count)
+
+    def _record_problem(self, position: int, media_id: str, reason: str) -> None:
+        self.problem_count += 1
+        if len(self.problems) < MAX_PROFILE_PROBLEM_DETAILS:
+            self.problems.append(
+                {"position": position, "media_id": media_id, "reason": reason}
+            )
 
     def accept(self, payload: dict, *, owner_id: str, cursor: str) -> bool:
         if owner_id != self.owner_id or cursor in self.seen_cursors or self.terminal:
@@ -549,15 +818,32 @@ class ProfileCollector:
                 "Kuaishou profile response changed; no unverified list was queued.",
                 issue_code=SiteIssueCode.SITE_RESPONSE_CHANGED,
             )
-        for feed in feeds[:MAX_PROFILE_ITEMS]:
+        for position, feed in enumerate(feeds, 1):
+            if position > MAX_PROFILE_ITEMS:
+                # Beyond the protected page limit. Count it instead of dropping it
+                # silently, but do not parse it: an unbounded page must not cost
+                # unbounded work. There is no verified identity to report here.
+                self._record_problem(
+                    position, "", PROFILE_PROBLEM_PAGE_LIMIT
+                )
+                continue
             video = parse_video(_object(feed), owner_id=self.owner_id)
             if not video.assets:
-                self.unsupported = True
+                # Never claim a work was queued when no verifiable media exists.
+                self._record_problem(
+                    position,
+                    video.media_id,
+                    PROFILE_PROBLEM_UNSUPPORTED
+                    if video.media_type == "image"
+                    else PROFILE_PROBLEM_NO_MEDIA,
+                )
                 continue
             if len(self.videos) < MAX_PROFILE_ITEMS:
                 self.videos.setdefault(video.media_id, video)
             elif video.media_id not in self.videos:
-                self.unsupported = True
+                self._record_problem(
+                    position, video.media_id, PROFILE_PROBLEM_QUEUE_LIMIT
+                )
         self.seen_cursors.add(cursor)
         next_cursor = payload.get("pcursor")
         if next_cursor == "no_more":
@@ -596,10 +882,18 @@ def _browser_cookies(profile: str | None) -> list[dict]:
             if cookie.expires and cookie.expires <= 253_402_300_799:
                 item["expires"] = cookie.expires
             result.append(item)
+    except (DownloadCancelledError, KeyboardInterrupt, SystemExit):
+        # Cancellation and interpreter-exit signals are never cookie failures.
+        raise
     except Exception as exc:
+        diagnostic = public_cookie_diagnostic_code(
+            chrome_cookie_diagnostic(profile, exc)
+        )
         raise TemporaryAccessError(
-            "Kuaishou Chrome cookies could not be read. Quit Chrome and retry, or disable Chrome Cookie explicitly.",
+            "Kuaishou Chrome cookies could not be read. Quit Chrome and retry, or "
+            f"disable Chrome Cookie explicitly. Diagnostic: {diagnostic}.",
             issue_code=SiteIssueCode.COOKIE_UNAVAILABLE,
+            diagnostic_code=diagnostic,
         ) from exc
     return result
 
@@ -633,6 +927,10 @@ def discover(
             page = context.new_page()
             page.set_default_timeout(5000)
             errors: list[Exception] = []
+            # A recoverable interruption (rate limit, transient site/network
+            # failure) stops pagination but must not discard already verified
+            # works, so it is tracked separately from fatal errors.
+            interruption: list[Exception] = []
             details: dict[str, Video] = {}
             collector = ProfileCollector(identity, url) if kind == "profile" else None
             navigation = {"url": url}
@@ -773,7 +1071,14 @@ def discover(
                     TemporaryAccessError,
                     DiscoveryError,
                 ) as exc:
-                    errors.append(exc)
+                    if is_profile and is_recoverable_profile_interruption(
+                        exc, paginating=bool(collector)
+                    ):
+                        # A rate-limited or transient page failure stops further
+                        # pagination but keeps the works already verified.
+                        interruption.append(exc)
+                    else:
+                        errors.append(exc)
                 except (PlaywrightError, TypeError, ValueError):
                     # Irrelevant telemetry and responses that close during teardown
                     # must not become false login/verification requirements.
@@ -795,11 +1100,44 @@ def discover(
                 ) from exc
             idle = 0
             previous_count = -1
+            retry_attempts = 0
+            interrupted_reason: Exception | None = None
             while time.monotonic() - started < MAX_BROWSER_SECONDS:
                 if should_cancel():
                     raise DownloadCancelledError("Task cancelled")
                 if errors:
                     raise errors[0]
+                if interruption:
+                    # The site stopped serving further pages. Retry from the same
+                    # expected cursor with a bounded backoff so already verified
+                    # works survive; never discard them on a transient failure.
+                    interrupted_reason = interruption[0]
+                    if retry_attempts >= PROFILE_RETRY_ATTEMPTS:
+                        break
+                    delay = min(
+                        PROFILE_RETRY_MAX_SECONDS,
+                        PROFILE_RETRY_BASE_SECONDS * (2 ** retry_attempts),
+                    )
+                    if MAX_BROWSER_SECONDS - (time.monotonic() - started) <= delay:
+                        break
+                    retry_attempts += 1
+                    if status_callback:
+                        status_callback(
+                            "Kuaishou rate limited the profile; waiting before "
+                            f"continuing ({retry_attempts}/{PROFILE_RETRY_ATTEMPTS})"
+                        )
+                    waited = 0.0
+                    while waited < delay:
+                        if should_cancel():
+                            raise DownloadCancelledError("Task cancelled")
+                        page.wait_for_timeout(200)
+                        waited += 0.2
+                    interruption.clear()
+                    # Resume pagination rather than restarting the walk; the
+                    # collector still expects the interrupted cursor next.
+                    idle = 0
+                    previous_count = len(collector.videos) if collector else -1
+                    continue
                 if any(
                     marker in page.title().lower()
                     for marker in ("domain blocked", "website filtered")
@@ -893,18 +1231,45 @@ def discover(
                     page.wait_for_timeout(200)
             if errors:
                 raise errors[0]
+            interrupted = bool(interruption) or interrupted_reason is not None
+            reason = interruption[0] if interruption else interrupted_reason
+            if interrupted and not (collector and collector.videos):
+                # Nothing was verified, so this is a real failure, not a partial
+                # result. Reporting it as an empty or incomplete profile would
+                # hide a rate limit or a transient site problem.
+                raise TemporaryAccessError(
+                    "Kuaishou stopped serving the author feed before any work could "
+                    "be verified, so nothing was queued. Wait a few minutes, then "
+                    "retry the original profile. Reason category: "
+                    f"{_public_interruption_category(reason)}.",
+                    issue_code=(
+                        getattr(reason, "issue_code", None)
+                        or SiteIssueCode.REQUEST_REJECTED
+                    ),
+                ) from reason
             if not (collector and collector.videos):
                 for notice in page.locator(
                     "[role='dialog'], [class*='captcha'], [class*='error-page'], [class*='empty-page']"
                 ).all_inner_texts()[:10]:
                     response_error({"message": notice[:4000]}, url)
             if collector and collector.videos:
+                warning = None
+                if not collector.complete:
+                    warning = PROFILE_INCOMPLETE
+                    if interrupted:
+                        warning = (
+                            f"{PROFILE_INTERRUPTED} Reason category: "
+                            f"{_public_interruption_category(reason)}."
+                        )
+                summary = _profile_problem_summary(collector)
+                if summary:
+                    warning = f"{warning} {summary}" if warning else summary
                 return Result(
                     list(collector.videos.values()),
                     "profile",
                     collector.owner_id,
                     collector.complete,
-                    None if collector.complete else PROFILE_INCOMPLETE,
+                    warning,
                 )
             if collector and collector.complete:
                 return Result([], "profile", collector.owner_id)

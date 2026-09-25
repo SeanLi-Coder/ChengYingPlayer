@@ -5,12 +5,20 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 HELPER_ROOT = Path(__file__).resolve().parents[1]
 STATIC_ROOT = HELPER_ROOT / "vendor" / "rednote" / "app" / "static"
+
+sys.path.insert(0, str(HELPER_ROOT))
+sys.path.insert(0, str(HELPER_ROOT / "vendor" / "rednote"))
+
+# Importing the adapter keeps these tests bound to the real backend wording, so a
+# change to the English warning text cannot silently drift away from the UI check.
+from app import kuaishou as ks
 
 
 def run_ui(expression: str) -> object:
@@ -23,7 +31,9 @@ def run_ui(expression: str) -> object:
     source = source.replace(
         marker,
         "  window.testAPI = {getPlatform, platformMeta, isProfileJob, "
-        "verificationTarget, localizeDiscoveryActivity, localizeRuntimeMessage};\n})();\n",
+        "verificationTarget, localizeDiscoveryActivity, localizeRuntimeMessage, "
+        "composeIssueMessage, issuePresentation, issueTitleForJob, "
+        "cookieDiagnosticCode, warningPresentation};\n})();\n",
     )
     result = subprocess.run(
         [node, "-e", "globalThis.window = {};\n"
@@ -102,3 +112,235 @@ def test_live_discovery_progress_reports_verified_items_not_an_invented_total():
         " {platform:'kuaishou', source_kind:'profile'})"
     )
     assert result == "正在读取快手主页，已验证 37 个视频（3 页）"
+
+
+COOKIE_DIAGNOSTIC_CASES = [
+    ("cookie_decryption_failed", "钥匙串"),
+    ("cookie_permission_denied", "完全磁盘访问权限"),
+    ("cookie_database_locked", "被占用或锁定"),
+    ("chrome_data_directory_missing", "Chrome 的用户数据目录"),
+    ("chrome_profile_invalid", "Profile 名称不符合"),
+    ("chrome_profile_missing", "Profile 目录已不存在"),
+    ("cookie_database_missing", "没有找到 Cookie 数据库"),
+    ("cookie_access_unknown", "不足以归类到具体原因"),
+]
+
+
+@pytest.mark.parametrize(("diagnostic", "expected"), COOKIE_DIAGNOSTIC_CASES)
+def test_each_cookie_diagnostic_gets_its_own_guidance(diagnostic, expected):
+    """R5: every whitelisted category has distinct advice, not one generic line."""
+    raw = (
+        "Kuaishou Chrome cookies could not be read. Quit Chrome and retry, or "
+        f"disable Chrome Cookie explicitly. Diagnostic: {diagnostic}."
+    )
+    result = run_ui(
+        f"window.testAPI.localizeRuntimeMessage({json.dumps(raw)}, {{platform:'kuaishou'}})"
+    )
+    assert expected in result
+    assert diagnostic in result
+    assert "Kuaishou" not in result
+
+
+@pytest.mark.parametrize(("diagnostic", "expected"), COOKIE_DIAGNOSTIC_CASES)
+def test_composed_cookie_issue_keeps_the_specific_category(diagnostic, expected):
+    """R5: the composed alert must not collapse back into generic quit-Chrome advice."""
+    job = {
+        "platform": "kuaishou",
+        "status": "failed",
+        "issue_code": "cookie_unavailable",
+        "diagnostic_code": diagnostic,
+        "issue_message": (
+            "Kuaishou Chrome cookies could not be read. Quit Chrome and retry, or "
+            f"disable Chrome Cookie explicitly. Diagnostic: {diagnostic}."
+        ),
+    }
+    message = run_ui(
+        "window.testAPI.composeIssueMessage('cookie_unavailable',"
+        f" {json.dumps(job['issue_message'])}, {json.dumps(job)},"
+        f" {json.dumps(diagnostic)})"
+    )
+    assert expected in message
+    assert "具体原因：" in message
+    assert diagnostic in message
+
+
+@pytest.mark.parametrize("diagnostic", [code for code, _ in COOKIE_DIAGNOSTIC_CASES])
+def test_job_title_names_the_specific_cookie_reason(diagnostic):
+    """R5: the alert title states the real reason instead of one fixed headline."""
+    job = {
+        "platform": "kuaishou",
+        "status": "failed",
+        "issue_code": "cookie_unavailable",
+        "diagnostic_code": diagnostic,
+        "error": "Kuaishou Chrome cookies could not be read.",
+    }
+    title = run_ui(f"window.testAPI.issueTitleForJob({json.dumps(job)})")
+    assert title.startswith("Chrome Cookie 读取失败：")
+    assert title != "Chrome Cookie 读取失败"
+
+
+def test_cookie_diagnostic_is_recovered_from_a_persisted_message():
+    """R5: an older task that stored only text still resolves its category."""
+    job = {
+        "platform": "kuaishou",
+        "status": "failed",
+        "issue_code": "cookie_unavailable",
+        "error": (
+            "Kuaishou Chrome cookies could not be read. Quit Chrome and retry, or "
+            "disable Chrome Cookie explicitly. Diagnostic: cookie_database_locked."
+        ),
+    }
+    assert run_ui(f"window.testAPI.cookieDiagnosticCode({json.dumps(job)})") is None
+    title = run_ui(f"window.testAPI.issueTitleForJob({json.dumps(job)})")
+    assert "被占用" in title
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        None,
+        "cookie_permission_denied; rm -rf /",
+        "/Users/someone/Library/Application Support/Google/Chrome/Default",
+        "sessionid=secret-value",
+        "signing-validation-failed",
+        "CONSTRUCTOR",
+        "__proto__",
+    ],
+)
+def test_unknown_or_hostile_diagnostic_values_are_never_displayed(value):
+    """R5: only a known safe code is accepted; anything else is dropped."""
+    job = {
+        "platform": "kuaishou",
+        "status": "failed",
+        "issue_code": "cookie_unavailable",
+        "diagnostic_code": value,
+        "error": f"Kuaishou Chrome cookies could not be read. Diagnostic: {value}.",
+    }
+    assert run_ui(f"window.testAPI.cookieDiagnosticCode({json.dumps(job)})") is None
+    message = run_ui(
+        "window.testAPI.composeIssueMessage('cookie_unavailable',"
+        f" {json.dumps(job['error'])}, {json.dumps(job)}, null)"
+    )
+    for secret in ("rm -rf", "sessionid", "Chrome/Default", "__proto__"):
+        assert secret not in message
+
+
+def test_disabled_cookie_task_still_gets_its_own_distinct_advice():
+    """R5: an explicit cookie-off task must not be shown a local-failure category."""
+    raw = "Chrome Cookie is disabled for this task; no browser cookies were read."
+    presentation = run_ui(
+        f"window.testAPI.issuePresentation('cookie_unavailable', {json.dumps(raw)}, null)"
+    )
+    assert presentation["diagnostic"] is None
+    assert "这个任务创建时关闭了 Chrome Cookie" in presentation["description"]
+
+
+def localize(text):
+    return run_ui(
+        f"window.testAPI.localizeRuntimeMessage({json.dumps(text)}, {{platform:'kuaishou'}})"
+    )
+
+
+def test_profile_retry_wait_is_localized_with_progress_and_no_loss():
+    """2c: the retry status tells the user work is kept and pagination resumes."""
+    result = localize(
+        "Kuaishou rate limited the profile; waiting before continuing (2/3)"
+    )
+    assert "第 2/3 次" in result
+    assert "已验证的作品不会丢失" in result
+    assert "不会从头重新读取" in result
+    assert "Kuaishou" not in result
+
+
+def test_profile_interruption_keeps_works_and_names_the_reason():
+    """2c: the interrupted warning states the fixed reason category in Chinese."""
+    result = localize(
+        f"{ks.PROFILE_INTERRUPTED} Reason category: rate_limited."
+    )
+    assert "本次读取不完整" in result
+    assert "已保存的文件都会保留" in result
+    assert "从中断的位置继续" in result
+    assert "网站限制了请求频率" in result
+    assert "rate_limited" in result
+    assert "Kuaishou" not in result
+
+
+@pytest.mark.parametrize(
+    "category", ["rate_limited", "request_rejected", "site_unavailable", "network_error"]
+)
+def test_every_recoverable_interruption_category_is_translated(category):
+    """2c: no recoverable category falls through to a raw untranslated code."""
+    result = localize(f"{ks.PROFILE_INTERRUPTED} Reason category: {category}.")
+    assert f"（{category}）" in result
+    assert "中断原因：" in result
+
+
+def test_unknown_interruption_category_is_still_shown_not_dropped():
+    """2c: an unrecognized category is displayed raw rather than silently lost."""
+    result = localize(f"{ks.PROFILE_INTERRUPTED} Reason category: some_new_code.")
+    assert "some_new_code" in result
+    assert "中断原因：" in result
+
+
+def test_skipped_works_summary_lists_affected_ids_and_reasons():
+    """2c: the user sees how many works were skipped, why, and which ones."""
+    result = localize(
+        f"{ks.PROFILE_INCOMPLETE} 3 work(s) could not be verified and were not "
+        "queued: no_verifiable_media x2, unsupported_media_type x1. "
+        "Affected: #2:3xcover1, #5:3xalbum1, #7:3xcover2."
+    )
+    assert "3 个作品无法验证" in result
+    assert "没有可验证的媒体" in result
+    assert "媒体类型暂不支持" in result
+    assert "#2:3xcover1" in result
+    assert "#7:3xcover2" in result
+
+
+def test_skipped_works_summary_reports_the_capped_overflow():
+    """2c: a capped detail list must say so instead of implying completeness."""
+    result = localize(
+        f"{ks.PROFILE_INCOMPLETE} 25 work(s) could not be verified and were not "
+        "queued: no_verifiable_media x25. Affected: #1:3xa, #2:3xb, #3:3xc, "
+        "#4:3xd, #5:3xe, #6:3xf, #7:3xg, #8:3xh, #9:3xi, #10:3xj. "
+        "(+10 more listed in task details) A further 5 were only counted; "
+        "details are capped."
+    )
+    assert "25 个作品无法验证" in result
+    assert "另有 10 个仅在任务详情中列出" in result
+    assert "另有 5 个仅计数" in result
+
+
+def test_affected_work_list_is_not_parsed_as_reasons():
+    """2c: the reason segment parser must not pick up affected-work identifiers."""
+    result = localize(
+        f"{ks.PROFILE_INCOMPLETE} 2 work(s) could not be verified and were not "
+        "queued: queue_limit_reached x2. Affected: #11:3xalpha1, #12:3xbeta2."
+    )
+    assert "已达到作品数量保护上限（queue_limit_reached） 2 个" in result
+    assert result.count("已达到作品数量保护上限") == 1
+    assert "#11:3xalpha1" in result
+
+
+def test_empty_profile_failure_is_not_shown_as_an_empty_profile():
+    """2c: an interruption with nothing verified must read as a failure to retry."""
+    result = localize(
+        "Kuaishou stopped serving the author feed before any work could be "
+        "verified, so nothing was queued. Wait a few minutes, then retry the "
+        "original profile. Reason category: request_rejected."
+    )
+    assert "没有加入任何下载项" in result
+    assert "不是主页为空" in result
+    assert "网站拒绝了请求" in result
+    assert "Kuaishou" not in result
+
+
+def test_problem_summary_never_leaks_site_text_through_localization():
+    """2c: captions, cookies and signed URLs must not appear in the UI text."""
+    hostile = (
+        f"{ks.PROFILE_INCOMPLETE} 1 work(s) could not be verified and were not "
+        "queued: no_verifiable_media x1. Affected: #1:3xvideo1."
+    )
+    result = localize(hostile)
+    for secret in ("sessionid", "cookie", "signature", "kwaicdn.com"):
+        assert secret not in result

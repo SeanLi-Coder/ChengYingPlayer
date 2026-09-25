@@ -68,6 +68,9 @@ playground.xcworkspace
 # Packages/
 .build/
 
+# Local coding-agent metadata (session plans and caches); never redistributed.
+.zcode/
+
 # CocoaPods
 #
 # We recommend against adding the Pods directory to your .gitignore. However

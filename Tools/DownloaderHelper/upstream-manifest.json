@@ -9,16 +9,16 @@
   ],
   "allowed_patches": {
     "app/main.py": "Optional user-owned writable-path environment hooks; redact Kuaishou share query values from public responses.",
-    "app/models.py": "Add the Kuaishou platform enum without changing existing values.",
+    "app/models.py": "Add the Kuaishou platform enum without changing existing values; add a whitelisted local diagnostic category field to the job and item records.",
     "app/platforms.py": "Recognize strictly validated Kuaishou video, profile and share URLs.",
-    "app/downloader.py": "Connect original Kuaishou discovery to the existing verified media transfer, proxy, progress and cancellation paths.",
-    "app/task_manager.py": "Bind resolved Kuaishou share identities and preserve incomplete-profile retry semantics.",
-    "app/static/app.js": "Add Kuaishou labels, localized progress and error guidance; recognize resolved share profile jobs.",
+    "app/downloader.py": "Connect original Kuaishou discovery to the existing verified media transfer, proxy, progress and cancellation paths; download one video from its single filtered candidate set; download each album image separately with a full decode check; persist unified per-asset completion records for both video and image work and reuse a verified file instead of re-downloading it; share one per-platform output directory calculation.",
+    "app/task_manager.py": "Bind resolved Kuaishou share identities and preserve incomplete-profile retry semantics; persist unified asset completion records so a retry or restart resumes; keep unmatched Kuaishou profile items queued while discovery is incomplete; reuse the shared output directory calculation; and carry the whitelisted Cookie diagnostic category into task state.",
+    "app/static/app.js": "Add Kuaishou labels, localized progress and error guidance; recognize resolved share profile jobs; localize each whitelisted Chrome Cookie diagnostic category with its own guidance; localize profile interruption, bounded retry status and the skipped-work reason summary instead of collapsing into one generic message.",
     "app/static/index.html": "Advertise Kuaishou single-video, share and author-profile inputs with login and permission guidance.",
     "tests/test_stop.py": "Isolate the no-server test from real localhost services and cover a disappearing legacy listener; production stop.py is unchanged.",
-    "app/browser.py": "Add safe Chrome Cookie access diagnostics without exposing profile paths or cookie values.",
-    "app/douyin_signing.py": "Include sanitized Chrome Cookie diagnostic categories in cookie-unavailable errors.",
-    "tests/test_signing_diagnostics.py": "Test sanitized Chrome Cookie diagnostic categories."
+    "app/browser.py": "Add safe Chrome Cookie access diagnostics without exposing profile paths or cookie values; the diagnostic probe falls back to a fixed category on its own filesystem errors instead of masking the original cookie failure.",
+    "app/douyin_signing.py": "Include sanitized Chrome Cookie diagnostic categories in cookie-unavailable errors, carried as a whitelisted structured code that is never relabelled as a signing integrity failure.",
+    "tests/test_signing_diagnostics.py": "Test sanitized Chrome Cookie diagnostic categories, the diagnostic helper's own filesystem-error fallback, control-signal propagation, and whitelisted structured codes through the signing chain."
   },
   "files": [
     {
@@ -44,7 +44,7 @@
     {
       "path": "app/browser.py",
       "upstream_sha256": "5bdd4a9b642ba056f2fcea29b592a352f4e8aeff53b781b39c28c3ec4a7a42fc",
-      "vendored_sha256": "a928fa023df08f0c952d92b27ef8df204667a7662f45b6eb67f9cf7b1ab1ab5b"
+      "vendored_sha256": "59ec9fad638a76e017c239e88704fa61d46fdb57d5ec0ecc8e2179f015f4eedc"
     },
     {
       "path": "app/build_info.py",
@@ -59,12 +59,12 @@
     {
       "path": "app/douyin_signing.py",
       "upstream_sha256": "ea11f7a2545a82dd20e3bb5db2b8e2a80856281aed23efd30d62c426767e4cb8",
-      "vendored_sha256": "66b55164effb4c1c17123f5fcfd3b190dadcd32251f0419061aae1e52ab823c5"
+      "vendored_sha256": "642d4c50b785e753fc98a42c96369e097d14ec92ff5288c3e1ed99a65ed0bc87"
     },
     {
       "path": "app/downloader.py",
       "upstream_sha256": "0401b8290cd9cda5b71a61a6d8086a3d59e7ad6f36d395bac9ec988f3e182573",
-      "vendored_sha256": "6dbe63f48b0104c3f35869c46572f037dde2160f54824faf769c42847360ab62"
+      "vendored_sha256": "60baa40f5580b98d4fdef50306b1d7be8a33a25af8c5499b7130a9fc4b8926fb"
     },
     {
       "path": "app/errors.py",
@@ -89,7 +89,7 @@
     {
       "path": "app/models.py",
       "upstream_sha256": "57f289db1d85bfb67de360cb7e2fbf1d7351b8c9541d83293efb6dfcc407e0ad",
-      "vendored_sha256": "25f23ba16b212df89a14f08aa15c1c99d89515f338c42e0f22195c7657177200"
+      "vendored_sha256": "42af1327680041ad19310042fb3b79ead424bafe3c36f4a65933363a461f4772"
     },
     {
       "path": "app/platforms.py",
@@ -109,7 +109,7 @@
     {
       "path": "app/static/app.js",
       "upstream_sha256": "c88f22bce27cd49ad5f289155f2d0a6ee6bfe2f7aab0fee54a22307dd5bbcbb8",
-      "vendored_sha256": "58ead2096c8bbd7a07350f440c95feefade875044ffce18269e35a2a2d8dc332"
+      "vendored_sha256": "0041eafad8b4ac829c678881a2dedfb3606b23eb4bae63ddb4e76b18c55a8b6e"
     },
     {
       "path": "app/static/favicon.svg",
@@ -134,7 +134,7 @@
     {
       "path": "app/task_manager.py",
       "upstream_sha256": "2264717a9ed202fc1db757d54140dea575c14799ec49bef48815fb679a862236",
-      "vendored_sha256": "bb3024901ac36f662d51d6fce19953e1f6befe6c30a24f72e333fe3ad04f8f49"
+      "vendored_sha256": "0f1bdeaf482a88ad192f026caabac389e48c80187a6814b620e9eedfcac7e506"
     },
     {
       "path": "app/xiaohongshu.py",
@@ -344,7 +344,7 @@
     {
       "path": "tests/test_signing_diagnostics.py",
       "upstream_sha256": "e9575cbc1174d8fa441866de8eec3400efcb846da8d650627d9cf4420ac02a5b",
-      "vendored_sha256": "b4ea7ee8d0320e37c5767baa89b340c1a359b379260fe04329bda8e97e56f389"
+      "vendored_sha256": "58d6bfdab763b3f578375cc7d13361ac4dd8397a25081c374c1ab009edef12b8"
     },
     {
       "path": "tests/test_stop.py",
@@ -371,7 +371,7 @@
     {
       "path": "app/kuaishou.py",
       "license": "GPL-3.0-or-later",
-      "sha256": "318877693fc1d7ae10f3c6fd61ddbed4c59e5421c985fe3e47503c4aa22ac8b4"
+      "sha256": "4a30e3caf3f74d1ae5f889a04eec7a98931941645ae587542b2438b88c05236f"
     }
   ]
 }

@@ -13,17 +13,19 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from .browser import (
+    COOKIE_DIAGNOSTIC_CODES,
     chrome_profile_has_cookies,
     select_chrome_profile_with_cookies,
 )
 from .downloader import (
     DOUYIN_ITEM_EXPANSION_MESSAGE,
+    KUAISHOU_SAVED_ASSETS_KEY,
     DiscoveryResult,
     DownloaderConfig,
     EngineEvent,
     MediaDownloader,
     XIAOHONGSHU_COOKIE_BROWSER_ERROR,
-    safe_component,
+    platform_output_directory,
     safe_external_error_message,
 )
 from .douyin import (
@@ -74,6 +76,90 @@ class ItemNotFoundError(KeyError):
 
 class ItemNotRetryableError(RuntimeError):
     pass
+
+
+_KUAISHOU_SAVED_ASSET_FIELDS = {
+    "media_id": str,
+    "index": int,
+    "media_kind": str,
+    "path": str,
+    "width": int,
+    "height": int,
+    "size": int,
+    "format_id": str,
+}
+_KUAISHOU_SAVED_ASSET_KINDS = frozenset({"video", "image"})
+
+
+def _public_kuaishou_saved_asset(record: object) -> dict[str, object] | None:
+    """Keep only whitelisted fields of one saved-asset completion record.
+
+    A record must never persist a media URL, token or other expiring value, and
+    must stay readable after a restart. Anything outside the whitelist is
+    dropped; a record without its work identity, asset position and a known media
+    kind is rejected.
+    """
+    if not isinstance(record, dict):
+        return None
+    cleaned: dict[str, object] = {}
+    for name, kind in _KUAISHOU_SAVED_ASSET_FIELDS.items():
+        value = record.get(name)
+        if value is None:
+            continue
+        if kind is int and isinstance(value, bool):
+            continue
+        if not isinstance(value, kind):
+            continue
+        cleaned[name] = value
+    if not isinstance(cleaned.get("media_id"), str) or not cleaned["media_id"]:
+        return None
+    if not isinstance(cleaned.get("index"), int) or cleaned["index"] <= 0:
+        return None
+    if not isinstance(cleaned.get("path"), str) or not cleaned["path"]:
+        return None
+    if cleaned.get("media_kind") not in _KUAISHOU_SAVED_ASSET_KINDS:
+        return None
+    return cleaned
+
+
+_DIAGNOSTIC_IN_MESSAGE_RE = re.compile(
+    r"(?:diagnostic(?: code)?:\s*)([a-z0-9_]+)", re.I
+)
+
+
+def _recover_cookie_diagnostic_code(message: str) -> str | None:
+    """Recover a whitelisted Chrome Cookie reason from an already persisted message.
+
+    Older tasks stored only the text, so this reads the fixed diagnostic marker
+    back out. Only a known safe code is returned; anything else yields ``None``
+    rather than echoing arbitrary exception text into the UI.
+    """
+    match = _DIAGNOSTIC_IN_MESSAGE_RE.search(message or "")
+    if not match:
+        return None
+    code = match.group(1).strip().lower()
+    return code if code in COOKIE_DIAGNOSTIC_CODES else None
+
+
+def _cookie_diagnostic_from_cause(cause: BaseException | None) -> str | None:
+    """Recover the Chrome Cookie category carried by a wrapped signing failure.
+
+    Douyin wraps cookie access failures in its own signing exception type. Without
+    this, the real local reason (keychain, permission, locked database, missing
+    profile) would be relabeled as a signing integrity failure and the user would
+    be told to complete a verification that is not actually required.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = cause
+    while current is not None and id(current) not in seen and len(seen) < 8:
+        seen.add(id(current))
+        code = getattr(current, "cookie_diagnostic_code", None)
+        if isinstance(code, str):
+            normalized = code.strip().lower()
+            if normalized in COOKIE_DIAGNOSTIC_CODES:
+                return normalized
+        current = current.__cause__ or current.__context__
+    return None
 
 
 Listener = Callable[[ManagerEvent, DownloadJob], None]
@@ -957,6 +1043,7 @@ class DownloadManager:
         job.auth_message = None
         job.issue_code = None
         job.issue_message = None
+        job.diagnostic_code = None
         job.verification_url = None
         job.finished_at = None
         job.updated_at = utc_now()
@@ -1024,15 +1111,11 @@ class DownloadManager:
                 with self._lock:
                     job = self._require_job(job_id)
                     job.author = result.author
-                    author_folder = safe_component(
-                        result.author, fallback=f"{job.platform.value}-author"
+                    job.output_dir = str(
+                        platform_output_directory(
+                            job.platform, job.output_root, result.author
+                        )
                     )
-                    output_base = (
-                        Path(job.output_root) / "Kuaishou"
-                        if job.platform == Platform.KUAISHOU
-                        else Path(job.output_root)
-                    )
-                    job.output_dir = str(output_base / author_folder)
                     Path(job.output_dir).mkdir(parents=True, exist_ok=True)
                     previous_items = job.items
                     if job.platform == Platform.KUAISHOU and result.items:
@@ -1096,6 +1179,15 @@ class DownloadManager:
                             and job.source_kind == SourceKind.PROFILE
                             and result.discovery_complete
                         ),
+                        # A rate-limited Kuaishou feed stops early, so items the
+                        # site did not return this pass were never proven gone.
+                        # Keep them queued so a retry resumes the profile instead
+                        # of discarding work it had already discovered.
+                        preserve_unmatched_items=(
+                            job.platform == Platform.KUAISHOU
+                            and job.source_kind == SourceKind.PROFILE
+                            and not result.discovery_complete
+                        ),
                     )
                     if (
                         job.platform == Platform.DOUYIN
@@ -1146,18 +1238,14 @@ class DownloadManager:
 
             job_snapshot = self.get_job(job_id)
             if not job_snapshot.output_dir:
-                author_folder = safe_component(
+                output_dir = platform_output_directory(
+                    job_snapshot.platform,
+                    job_snapshot.output_root,
                     job_snapshot.author,
-                    fallback=f"{job_snapshot.platform.value}-author",
-                )
-                output_base = (
-                    Path(job_snapshot.output_root) / "Kuaishou"
-                    if job_snapshot.platform == Platform.KUAISHOU
-                    else Path(job_snapshot.output_root)
                 )
                 with self._lock:
                     job = self._require_job(job_id)
-                    job.output_dir = str(output_base / author_folder)
+                    job.output_dir = str(output_dir)
                     Path(job.output_dir).mkdir(parents=True, exist_ok=True)
                     self._commit_locked(job)
 
@@ -1176,6 +1264,7 @@ class DownloadManager:
                     item.error = None
                     item.auth_message = None
                     item.issue_code = None
+                    item.diagnostic_code = None
                     item.updated_at = utc_now()
                     job.active_item_id = item.id
                     job.status = JobStatus.DOWNLOADING
@@ -1265,6 +1354,7 @@ class DownloadManager:
                         item.progress.percent = 100.0
                         item.error = None
                         item.issue_code = None
+                        item.diagnostic_code = None
                         item.updated_at = utc_now()
                         job.cookie_fallback_used |= outcome.cookie_fallback_used
                         job.active_item_id = None
@@ -1358,6 +1448,7 @@ class DownloadManager:
                         item.status = ItemStatus.CANCELLED
                         item.error = "Cancelled by user"
                         item.issue_code = None
+                        item.diagnostic_code = None
                         item.updated_at = utc_now()
                         job.active_item_id = None
                         job.refresh_counts()
@@ -1606,6 +1697,15 @@ class DownloadManager:
                         f"{safe_external_error_message(exc)}",
                         issue_code=issue_code,
                     ) from exc
+                cookie_diagnostic = _cookie_diagnostic_from_cause(exc)
+                if cookie_diagnostic:
+                    raise TemporaryAccessError(
+                        "Douyin could not read the Chrome Cookie bound to this "
+                        "task, so the item was not refreshed and no stored media "
+                        f"address was reused. Diagnostic: {cookie_diagnostic}.",
+                        issue_code=SiteIssueCode.COOKIE_UNAVAILABLE,
+                        diagnostic_code=cookie_diagnostic,
+                    ) from exc
                 diagnostic_code = public_signing_diagnostic_code(exc)
                 raise TemporaryAccessError(
                     "Douyin automatic item refresh did not pass identity or "
@@ -1687,6 +1787,15 @@ class DownloadManager:
                         "required local component is unavailable. Details: "
                         f"{safe_external_error_message(exc)}",
                         issue_code=issue_code,
+                    ) from exc
+                cookie_diagnostic = _cookie_diagnostic_from_cause(exc)
+                if cookie_diagnostic:
+                    raise TemporaryAccessError(
+                        "Douyin could not read the Chrome Cookie bound to this "
+                        "task, so the media was not refreshed and no stored media "
+                        f"address was reused. Diagnostic: {cookie_diagnostic}.",
+                        issue_code=SiteIssueCode.COOKIE_UNAVAILABLE,
+                        diagnostic_code=cookie_diagnostic,
                     ) from exc
                 diagnostic_code = public_signing_diagnostic_code(exc)
                 raise TemporaryAccessError(
@@ -1978,6 +2087,17 @@ class DownloadManager:
                     )
                 else:
                     item.output_paths = event.output_paths
+            asset_records = getattr(event, "asset_records", None)
+            if event.event == "asset_completed" and asset_records:
+                # Persist each verified asset immediately so a retry, a
+                # cancellation or a restart reuses it instead of re-downloading
+                # it under a new collision-avoidance name.
+                cleaned = [
+                    _public_kuaishou_saved_asset(record) for record in asset_records
+                ]
+                item.metadata[KUAISHOU_SAVED_ASSETS_KEY] = [
+                    record for record in cleaned if record is not None
+                ]
             if event.event == "postprocessing":
                 item.status = ItemStatus.POSTPROCESSING
             elif event.event == "downloading":
@@ -2097,6 +2217,7 @@ class DownloadManager:
                 else:
                     job.issue_code = None
                     job.issue_message = None
+                    job.diagnostic_code = None
             elif job.completed_items and job.failed_items:
                 job.status = JobStatus.PARTIAL
                 job.error = f"{job.failed_items} item(s) failed"
@@ -2124,6 +2245,7 @@ class DownloadManager:
         job.auth_message = None
         job.issue_code = None
         job.issue_message = None
+        job.diagnostic_code = None
         job.verification_url = None
         job.active_item_id = None
         job.cancel_requested = False
@@ -2139,6 +2261,7 @@ class DownloadManager:
                 item.error = "Cancelled by user"
                 item.auth_message = None
                 item.issue_code = None
+                item.diagnostic_code = None
                 item.updated_at = now
         job.refresh_counts()
 
@@ -2971,14 +3094,27 @@ class DownloadManager:
             cause or message,
             authentication_required=authentication_required,
         )
+        # Accept only a genuine Chrome Cookie category. Other platforms carry a
+        # diagnostic_code of their own (for example Douyin signing codes); those
+        # must not be coerced into a cookie reason, so an unknown value stays None
+        # instead of falling back to a generic cookie code.
+        raw_diagnostic = getattr(cause, "diagnostic_code", None)
+        diagnostic = (
+            str(raw_diagnostic).strip().lower()
+            if isinstance(raw_diagnostic, str)
+            and raw_diagnostic.strip().lower() in COOKIE_DIAGNOSTIC_CODES
+            else None
+        )
         if item is not None:
             item.issue_code = code
+            item.diagnostic_code = diagnostic
         if code != SiteIssueCode.UNKNOWN or job.issue_code in {
             None,
             SiteIssueCode.UNKNOWN,
         }:
             job.issue_code = code
             job.issue_message = message
+            job.diagnostic_code = diagnostic
 
     @classmethod
     def _backfill_job_issue_locked(cls, job: DownloadJob) -> bool:
@@ -2991,8 +3127,16 @@ class DownloadManager:
                 if item.issue_code is not None:
                     item.issue_code = None
                     changed = True
+                if item.diagnostic_code is not None:
+                    item.diagnostic_code = None
+                    changed = True
                 continue
             if item.issue_code is not None:
+                if not item.diagnostic_code:
+                    recovered = _recover_cookie_diagnostic_code(message)
+                    if recovered:
+                        item.diagnostic_code = recovered
+                        changed = True
                 if item.issue_code in NON_RETRYABLE_SITE_ISSUES and item.retryable:
                     item.retryable = False
                     changed = True
@@ -3004,6 +3148,11 @@ class DownloadManager:
             if item.issue_code != expected:
                 item.issue_code = expected
                 changed = True
+            if not item.diagnostic_code:
+                recovered = _recover_cookie_diagnostic_code(message)
+                if recovered:
+                    item.diagnostic_code = recovered
+                    changed = True
             if expected in NON_RETRYABLE_SITE_ISSUES and item.retryable:
                 item.retryable = False
                 changed = True
@@ -3014,6 +3163,9 @@ class DownloadManager:
                 changed = True
             if job.issue_message is not None:
                 job.issue_message = None
+                changed = True
+            if job.diagnostic_code is not None:
+                job.diagnostic_code = None
                 changed = True
             return changed
 
@@ -3197,6 +3349,7 @@ class DownloadManager:
         discovered: list[DownloadItem],
         *,
         retire_missing_douyin_profile_items: bool = False,
+        preserve_unmatched_items: bool = False,
     ) -> list[DownloadItem]:
         previous_by_media_id = {
             item.media_id: item for item in previous if item.media_id
@@ -3334,10 +3487,17 @@ class DownloadManager:
                 retained.updated_at = utc_now()
                 merged.append(retained)
                 continue
-            if retained.status != ItemStatus.COMPLETED and retained.retryable:
+            if (
+                not preserve_unmatched_items
+                and retained.status != ItemStatus.COMPLETED
+                and retained.retryable
+            ):
                 retained.status = ItemStatus.FAILED
                 retained.error = "Item was not found when the profile was refreshed"
                 retained.updated_at = utc_now()
+            # When discovery stopped early (for example a rate-limited author
+            # feed), an absent item was never proven to be gone. Keep its queued
+            # state so a retry resumes instead of discarding already known work.
             merged.append(retained)
 
         return merged
@@ -3416,6 +3576,7 @@ class DownloadManager:
         item.error = None
         item.auth_message = None
         item.issue_code = None
+        item.diagnostic_code = None
         item.progress = item.progress.model_copy(
             update={
                 "downloaded_bytes": 0,
