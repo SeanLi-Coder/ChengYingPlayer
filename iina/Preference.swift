@@ -915,7 +915,7 @@ struct Preference {
     .hardwareDecoder: HardwareDecoderOption.auto.rawValue,
     .forceDedicatedGPU: false,
     .loadIccProfile: true,
-    .enableHdrSupport: true,
+    .enableHdrSupport: false,
     .enableToneMapping: false,
     .toneMappingTargetPeak: 0,
     .toneMappingAlgorithm: "auto",
