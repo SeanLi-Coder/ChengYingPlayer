@@ -228,6 +228,10 @@ jobs:
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/SubtitleToolsHelper/build_helper.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/DownloaderHelper/build_helper.sh
 
+      - name: Test screenshot defaults, retained preferences, and real JPG exports
+        timeout-minutes: 5
+        run: bash Tools/ScreenshotPreferenceTests/run.sh
+
       - name: Test real rotation at EOF, stop, and file replacement
         timeout-minutes: 5
         run: bash Tools/PlaybackRotationTests/run.sh

@@ -30,6 +30,7 @@ class MediaError(RuntimeError):
 
 TIME_EPSILON_SECONDS = 0.002
 MAX_FRAME_EXTRACTION_SECONDS = 5.0
+SUPPORTED_FRAME_FORMATS = frozenset({"jpg", "png"})
 SUPPORTED_ROTATION_DEGREES = frozenset({90, 180, 270, 360})
 MAX_ESTIMATED_REMAINING_SECONDS = 30 * 24 * 60 * 60
 
@@ -2505,6 +2506,7 @@ class FrameExtractionJob:
     end: float
     output_path: Path
     frame_extension: str
+    frame_format: str = "jpg"
     status: str = "queued"
     progress: float = 0.0
     frame_count: int = 0
@@ -2529,6 +2531,7 @@ class FrameExtractionJob:
                 "status": self.status,
                 "progress": round(self.progress, 1),
                 "frame_count": self.frame_count,
+                "frame_format": self.frame_extension.removeprefix("."),
                 "output_name": self.output_path.name,
                 "output_path": str(self.output_path) if self.status == "completed" else None,
                 "error": self.error,
@@ -2555,8 +2558,6 @@ class FrameExtractionManager:
         self.ffprobe = ffprobe or executable_path("ffprobe")
         self.cancel_event = cancel_event
         self.encoders = set(encoders) if encoders is not None else self._read_encoders()
-        if "png" not in self.encoders:
-            raise MediaError("Required FFmpeg encoder is not available: png")
         self._jobs: dict[str, FrameExtractionJob] = {}
         self._lock = threading.RLock()
         self._publish_lock = threading.Lock()
@@ -2580,7 +2581,11 @@ class FrameExtractionManager:
         return encoders
 
     @staticmethod
-    def _image_profile(source: VideoSource) -> tuple[str, str, list[str]]:
+    def _image_profile(
+        source: VideoSource, frame_format: str = "jpg"
+    ) -> tuple[str, str, list[str]]:
+        if not isinstance(frame_format, str) or frame_format not in SUPPORTED_FRAME_FORMATS:
+            raise MediaError("frame_format must be jpg or png")
         metadata = source.metadata
         source_format = str(metadata.get("pix_fmt") or "").lower()
         source_depth = _positive_int(metadata.get("video_bit_depth")) or 8
@@ -2588,6 +2593,42 @@ class FrameExtractionManager:
         has_alpha = bool(metadata.get("has_alpha"))
         is_palette = bool(metadata.get("is_palette"))
         is_float = any(token in source_format for token in ("f16", "f32", "f64"))
+
+        if frame_format == "jpg":
+            if (
+                has_alpha
+                or is_palette
+                or is_float
+                or source_depth > 16
+                or metadata.get("is_hdr")
+                or metadata.get("is_dolby_vision")
+                or metadata.get("static_hdr_metadata")
+                or metadata.get("dynamic_hdr_metadata_types")
+            ):
+                raise MediaError(
+                    "JPG cannot safely preserve HDR, transparency, or floating-point video; "
+                    "select lossless PNG/EXR instead"
+                )
+            known_or_unspecified = {"", "unknown", "unspecified", "reserved"}
+            if (
+                str(metadata.get("color_primaries") or "").lower()
+                not in known_or_unspecified | {"bt709"}
+                or str(metadata.get("color_transfer") or "").lower()
+                not in known_or_unspecified | {"bt709", "smpte170m", "iec61966-2-1"}
+                or str(metadata.get("color_space") or "").lower()
+                not in known_or_unspecified | {
+                    "rgb", "gbr", "bt709", "fcc", "bt470bg", "smpte170m", "smpte240m",
+                }
+            ):
+                raise MediaError(
+                    "JPG export does not safely preserve this color profile; "
+                    "select lossless PNG/EXR instead"
+                )
+            return (
+                ".jpg",
+                "mjpeg",
+                ["-c:v", "mjpeg", "-q:v", "1", "-pix_fmt", "yuvj444p", "-color_range", "pc"],
+            )
 
         if is_float or source_depth > 16:
             if has_alpha:
@@ -2658,7 +2699,9 @@ class FrameExtractionManager:
         start: float,
         end: float,
         output_directory: Path,
+        frame_format: str = "jpg",
     ) -> FrameExtractionJob:
+        extension, encoder, _ = self._image_profile(source, frame_format)
         directory = output_directory.expanduser().resolve()
         self._check_output_directory(directory)
         if not source.path.is_file():
@@ -2669,7 +2712,6 @@ class FrameExtractionManager:
             duration=float(source.metadata["duration"]),
             fps=source.metadata.get("fps"),
         )
-        extension, encoder, _ = self._image_profile(source)
         if encoder not in self.encoders:
             raise MediaError(f"Required FFmpeg encoder is not available: {encoder}")
 
@@ -2706,6 +2748,7 @@ class FrameExtractionManager:
             end=end,
             output_path=destination,
             frame_extension=extension,
+            frame_format=frame_format,
         )
         with self._lock:
             self._jobs[job.id] = job
@@ -2757,12 +2800,31 @@ class FrameExtractionManager:
 
     def _command(self, job: FrameExtractionJob, temporary_directory: Path) -> list[str]:
         clip_duration = job.end - job.start
-        _, _, encoding_options = self._image_profile(job.source)
+        _, _, encoding_options = self._image_profile(job.source, job.frame_format)
         trim_filter = (
             "setpts=PTS-STARTPTS,"
             f"trim=start={job.start:.6f}:end={job.end:.6f},"
             "setpts=PTS-STARTPTS"
         )
+        if job.frame_format == "jpg":
+            metadata = job.source.metadata
+            matrix = str(metadata.get("color_space") or "").lower()
+            # JPEG viewers normally interpret YCbCr using a full-range BT.601 matrix.
+            # Preserve the source interpretation instead of relabeling BT.709 samples.
+            input_matrix = {
+                "bt709": "bt709",
+                "fcc": "fcc",
+                "bt470bg": "bt601",
+                "smpte170m": "bt601",
+                "smpte240m": "smpte240m",
+            }.get(matrix, "auto")
+            input_range = {"tv": "tv", "pc": "pc"}.get(
+                str(metadata.get("color_range") or ""), "auto"
+            )
+            trim_filter += (
+                f",scale=in_color_matrix={input_matrix}:out_color_matrix=bt601:"
+                f"in_range={input_range}:out_range=pc,format=yuvj444p"
+            )
         return [
             self.ffmpeg,
             "-hide_banner",
@@ -2821,7 +2883,8 @@ class FrameExtractionManager:
                     "-select_streams",
                     "v:0",
                     "-show_entries",
-                    "stream=width,height,pix_fmt",
+                    "stream=width,height,pix_fmt,codec_name,color_range,nb_read_frames",
+                    "-count_frames",
                     "-of",
                     "json",
                     str(path),
@@ -2836,7 +2899,7 @@ class FrameExtractionManager:
             stream = payload["streams"][0]
         except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
             raise MediaError("Could not verify an extracted frame") from exc
-        if completed.returncode != 0 or not isinstance(stream, dict):
+        if completed.returncode != 0 or completed.stderr.strip() or not isinstance(stream, dict):
             raise MediaError("Could not verify an extracted frame")
         return stream
 
@@ -2868,7 +2931,7 @@ class FrameExtractionManager:
                 if job.source.metadata.get("has_alpha") and color_type not in alpha_types:
                     raise MediaError("Output verification detected a missing frame alpha channel")
         else:
-            _, _, encoding_options = self._image_profile(job.source)
+            _, _, encoding_options = self._image_profile(job.source, job.frame_format)
             expected_pixel_format = encoding_options[encoding_options.index("-pix_fmt") + 1]
             for path in frames:
                 if job.cancel_event.is_set():
@@ -2882,6 +2945,19 @@ class FrameExtractionManager:
                     raise MediaError("Output verification detected an unexpected frame size")
                 if str(stream.get("pix_fmt") or "") != expected_pixel_format:
                     raise MediaError("Output verification detected a reduced frame pixel format")
+                if job.frame_format == "jpg":
+                    with path.open("rb") as handle:
+                        start = handle.read(2)
+                        handle.seek(-2, os.SEEK_END)
+                        end = handle.read(2)
+                    if (
+                        start != b"\xff\xd8"
+                        or end != b"\xff\xd9"
+                        or stream.get("codec_name") != "mjpeg"
+                        or stream.get("color_range") != "pc"
+                        or str(stream.get("nb_read_frames")) != "1"
+                    ):
+                        raise MediaError("Output verification detected a damaged JPG frame")
 
     @staticmethod
     def _remove_owned_directory(directory: Path | None) -> str | None:
@@ -2934,7 +3010,11 @@ class FrameExtractionManager:
                 if job.cancel_event.is_set():
                     raise InterruptedError
                 job.status = "running"
-                job.message = "Saving every frame at the original dimensions"
+                job.message = (
+                    "Saving high-quality lossy 8-bit JPG frames at the original dimensions"
+                    if job.frame_format == "jpg"
+                    else "Saving lossless frames at the original dimensions"
+                )
                 job.started_at = time.time()
 
             command = self._command(job, temporary_directory)
@@ -3019,6 +3099,7 @@ class FrameExtractionManager:
                 job.progress = 100.0
                 job.message = (
                     f"Frame extraction completed with {job.frame_count} original-size images"
+                    + (" (high-quality lossy 8-bit JPG)" if job.frame_format == "jpg" else "")
                 )
                 job.finished_at = time.time()
             published_directory = None

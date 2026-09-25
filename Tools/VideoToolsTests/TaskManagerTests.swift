@@ -103,9 +103,15 @@ struct TaskManagerTests {
           "Actionable conversion errors remain visible without an output")
 
     let clipID = try manager.start(operation: .clip, inputURL: source, start: 1, end: 2)
-    check(client.requests.last?.targetFormat == nil && client.requests.last?.conversionMode == nil,
+    check(client.requests.last?.targetFormat == nil && client.requests.last?.conversionMode == nil && client.requests.last?.frameFormat == nil,
           "Existing clip calls remain source compatible and omit conversion options")
     try client.emit(["id": clipID, "type": "cancelled", "operation": "clip"])
+    let jpgID = try manager.start(operation: .frames, inputURL: source, start: 1, end: 2)
+    check(client.requests.last?.frameFormat == "jpg", "Existing frame callers default to JPG through the real manager")
+    try client.emit(["id": jpgID, "type": "completed", "operation": "frames"])
+    let pngID = try manager.start(operation: .frames, inputURL: source, start: 1, end: 2, frameFormat: "png")
+    check(client.requests.last?.frameFormat == "png", "Explicit lossless frame format reaches the helper request")
+    try client.emit(["id": pngID, "type": "completed", "operation": "frames"])
     client.sendError = VideoToolsClientError.launchFailed("Test failure")
     do {
       try manager.start(operation: .convert, inputURL: source)

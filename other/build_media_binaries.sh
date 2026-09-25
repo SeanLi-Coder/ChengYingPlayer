@@ -236,7 +236,7 @@ for executable in "$OUTPUT_DIR/ffmpeg" "$OUTPUT_DIR/ffprobe"; do
 done
 
 ENCODERS="$("$OUTPUT_DIR/ffmpeg" -hide_banner -encoders 2>&1)"
-for encoder in libx264 libx265 prores_ks ffv1 alac png exr; do
+for encoder in libx264 libx265 prores_ks ffv1 alac mjpeg png exr; do
   if ! grep -q "[[:space:]]${encoder}[[:space:]]" <<<"$ENCODERS"; then
     echo "Required FFmpeg encoder is unavailable: $encoder" >&2
     exit 1
@@ -244,7 +244,7 @@ for encoder in libx264 libx265 prores_ks ffv1 alac png exr; do
 done
 
 FILTERS="$("$OUTPUT_DIR/ffmpeg" -hide_banner -filters 2>&1)"
-for filter_name in transpose trim setpts hflip vflip ass subtitles; do
+for filter_name in transpose trim setpts hflip vflip scale format ass subtitles; do
   if ! grep -q "[[:space:]]${filter_name}[[:space:]]" <<<"$FILTERS"; then
     echo "Required FFmpeg filter is unavailable: $filter_name" >&2
     exit 1

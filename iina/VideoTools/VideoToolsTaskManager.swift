@@ -29,6 +29,7 @@ final class VideoToolsTaskManager {
     degrees: Int? = nil,
     targetFormat: String? = nil,
     conversionMode: String? = nil,
+    frameFormat: String? = nil,
     outputDirectory: URL? = nil
   ) throws -> String {
     precondition(Thread.isMainThread)
@@ -46,6 +47,7 @@ final class VideoToolsTaskManager {
       degrees: degrees,
       targetFormat: targetFormat,
       conversionMode: conversionMode,
+      frameFormat: frameFormat,
       outputDirectory: outputDirectory
     )
     let initial = VideoToolsTaskSnapshot(

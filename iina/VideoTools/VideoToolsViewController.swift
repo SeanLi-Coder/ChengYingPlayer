@@ -11,6 +11,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private static let playbackSpeeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 8.0, 16.0]
   private static let conversionFormats = ["mp4", "mkv", "mov"]
   private static let conversionModes = ["copy", "h264", "hevc"]
+  private static let frameFormats = ["jpg", "png"]
 
   private weak var player: PlayerCore?
   private weak var mainWindow: MainWindowController?
@@ -78,6 +79,9 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     action: nil
   )
   private let frameHintLabel = NSTextField(labelWithString: "")
+  private let frameFormatPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+  private let frameFormatHintLabel = NSTextField(wrappingLabelWithString: "")
+  private var frameFormatGroup = NSStackView()
   private let rotationControl = NSSegmentedControl(
     labels: ["90°", "180°", "270°", "360°"],
     trackingMode: .selectOne,
@@ -233,6 +237,27 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     ], spacing: 10)
     timeGroup = makeVerticalGroup([ChengYingStyle.card(timeContent)], spacing: 0)
     stack.addArrangedSubview(timeGroup)
+
+    frameFormatPopup.addItems(withTitles: Self.frameFormats.map {
+      NSLocalizedString("videotools.frames.format.\($0)", comment: "Frame image format")
+    })
+    let savedFrameFormat = Preference.string(for: .frameExtractionFormat) ?? "jpg"
+    frameFormatPopup.selectItem(at: Self.frameFormats.firstIndex(of: savedFrameFormat) ?? 0)
+    frameFormatPopup.target = self
+    frameFormatPopup.action = #selector(frameFormatChanged(_:))
+    frameFormatPopup.controlSize = .large
+    frameFormatPopup.font = .systemFont(ofSize: 12, weight: .medium)
+    frameFormatPopup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    let frameFormatTitle = NSLocalizedString("videotools.frames.format", comment: "Frame image format")
+    frameFormatPopup.setAccessibilityLabel(frameFormatTitle)
+    frameFormatHintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+    frameFormatHintLabel.textColor = .secondaryLabelColor
+    frameFormatHintLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    frameFormatGroup = makeVerticalGroup([ChengYingStyle.card(makeVerticalGroup([
+      makeCaption(frameFormatTitle), frameFormatPopup, frameFormatHintLabel,
+    ], spacing: 10))], spacing: 0)
+    stack.addArrangedSubview(frameFormatGroup)
+    updateFrameFormatHint()
 
     frameHintLabel.stringValue = NSLocalizedString("videotools.frames_hint", comment: "Frame extraction limit")
     frameHintLabel.textColor = .secondaryLabelColor
@@ -725,6 +750,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
         degrees: operation == .rotate ? selectedRotation : nil,
         targetFormat: operation == .convert ? selectedConversionFormat : nil,
         conversionMode: operation == .convert ? selectedConversionMode : nil,
+        frameFormat: operation == .frames ? selectedFrameFormat : nil,
         outputDirectory: operation == .rotate ? nil : outputDirectoryURL
       )
       updateTaskUI()
@@ -910,6 +936,23 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     return Self.conversionModes.indices.contains(index) ? Self.conversionModes[index] : "copy"
   }
 
+  private var selectedFrameFormat: String {
+    let index = frameFormatPopup.indexOfSelectedItem
+    return Self.frameFormats.indices.contains(index) ? Self.frameFormats[index] : "jpg"
+  }
+
+  @objc private func frameFormatChanged(_ sender: NSPopUpButton) {
+    Preference.set(selectedFrameFormat, for: .frameExtractionFormat)
+    updateFrameFormatHint()
+  }
+
+  private func updateFrameFormatHint() {
+    frameFormatHintLabel.stringValue = NSLocalizedString(
+      "videotools.frames.hint.\(selectedFrameFormat)", comment: "Frame image quality and compatibility"
+    )
+    if isViewLoaded { view.needsLayout = true }
+  }
+
   private func updateConversionHint() {
     conversionHintLabel.stringValue = NSLocalizedString(
       "videotools.conversion.hint.\(selectedConversionMode)", comment: "Conversion quality and compatibility"
@@ -1019,6 +1062,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     let operation = selectedOperation
     timeGroup.isHidden = operation != .clip && operation != .frames
     frameHintLabel.isHidden = operation != .frames
+    frameFormatGroup.isHidden = operation != .frames
     rotationGroup.isHidden = operation != .rotate
     conversionGroup.isHidden = operation != .convert
     playbackGroup.isHidden = operation == .convert
@@ -1055,6 +1099,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     runButton.isEnabled = currentLocalMediaURL != nil && !active && !hasActiveShortcutRotation
     conversionFormatPopup.isEnabled = !active && !hasActiveShortcutRotation
     conversionModePopup.isEnabled = !active && !hasActiveShortcutRotation
+    frameFormatPopup.isEnabled = !active && !hasActiveShortcutRotation
     cancelButton.isHidden = !ownsActiveTask && !hasActiveShortcutRotation
     cancelButton.isEnabled = taskManager.snapshot?.phase != .cancelling
     revealButton.isHidden = taskManager.snapshot?.outputURL == nil

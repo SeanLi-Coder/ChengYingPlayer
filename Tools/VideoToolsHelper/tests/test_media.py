@@ -646,10 +646,12 @@ def test_rotation_rejects_interlaced_video_before_starting_a_job(
         manager.create(VideoSource("interlaced", sample_video, metadata), degrees=90)
 
 
+@pytest.mark.parametrize("frame_format", ["jpg", "png"])
 def test_frame_extraction_keeps_every_frame_and_original_dimensions(
     tmp_path: Path,
     ffmpeg: str,
     ffprobe: str,
+    frame_format: str,
 ) -> None:
     source_path = tmp_path / "frame boundary.mkv"
     completed = subprocess.run(
@@ -679,7 +681,8 @@ def test_frame_extraction_keeps_every_frame_and_original_dimensions(
         probe_video(source_path, ffprobe=ffprobe),
     )
     manager = FrameExtractionManager(ffmpeg=ffmpeg, ffprobe=ffprobe)
-    job = manager.create(source, start=0.25, end=0.75, output_directory=tmp_path)
+    options = {} if frame_format == "jpg" else {"frame_format": frame_format}
+    job = manager.create(source, start=0.25, end=0.75, output_directory=tmp_path, **options)
     snapshot = _wait_for_job(job)
 
     assert snapshot["status"] == "completed", snapshot
@@ -688,9 +691,19 @@ def test_frame_extraction_keeps_every_frame_and_original_dimensions(
     assert snapshot["estimated_remaining_seconds"] == 0
     assert job.output_path.is_dir()
     assert _sha256(source_path) == original_digest
-    frames = sorted(job.output_path.glob("frame_*.png"))
-    assert [path.name for path in frames] == [f"frame_{number:06d}.png" for number in range(1, 6)]
+    assert snapshot["frame_format"] == frame_format
+    frames = sorted(job.output_path.glob(f"frame_*.{frame_format}"))
+    assert [path.name for path in frames] == [f"frame_{number:06d}.{frame_format}" for number in range(1, 6)]
     for frame in frames:
+        if frame_format == "jpg":
+            assert frame.read_bytes().startswith(b"\xff\xd8")
+            assert frame.read_bytes().endswith(b"\xff\xd9")
+            stream = manager._probe_still(frame)
+            assert (stream["width"], stream["height"]) == (160, 90)
+            assert stream["codec_name"] == "mjpeg"
+            assert stream["pix_fmt"] == "yuvj444p"
+            assert stream["nb_read_frames"] == "1"
+            continue
         header = frame.read_bytes()[:26]
         assert header[:8] == b"\x89PNG\r\n\x1a\n"
         assert int.from_bytes(header[16:20], "big") == 160
@@ -698,10 +711,12 @@ def test_frame_extraction_keeps_every_frame_and_original_dimensions(
         assert header[24] == 8
 
 
+@pytest.mark.parametrize("frame_format", ["jpg", "png"])
 def test_frame_extraction_does_not_duplicate_or_drop_variable_rate_frames(
     tmp_path: Path,
     ffmpeg: str,
     ffprobe: str,
+    frame_format: str,
 ) -> None:
     source_path = tmp_path / "variable-rate.mkv"
     completed = subprocess.run(
@@ -754,18 +769,20 @@ def test_frame_extraction_does_not_duplicate_or_drop_variable_rate_frames(
     )
     source = VideoSource("variable-rate", source_path, probe_video(source_path, ffprobe=ffprobe))
     manager = FrameExtractionManager(ffmpeg=ffmpeg, ffprobe=ffprobe)
-    job = manager.create(source, start=start, end=end, output_directory=tmp_path)
+    job = manager.create(source, start=start, end=end, output_directory=tmp_path, frame_format=frame_format)
     snapshot = _wait_for_job(job)
 
     assert snapshot["status"] == "completed", snapshot
     assert snapshot["frame_count"] == expected_count
-    assert len(list(job.output_path.glob("frame_*.png"))) == expected_count
+    assert len(list(job.output_path.glob(f"frame_*.{frame_format}"))) == expected_count
 
 
+@pytest.mark.parametrize("frame_format", ["jpg", "png"])
 def test_frame_extraction_handles_a_nonzero_container_start_time(
     tmp_path: Path,
     ffmpeg: str,
     ffprobe: str,
+    frame_format: str,
 ) -> None:
     source_path = tmp_path / "nonzero-start.ts"
     completed = subprocess.run(
@@ -810,12 +827,12 @@ def test_frame_extraction_handles_a_nonzero_container_start_time(
 
     source = VideoSource("nonzero-start", source_path, probe_video(source_path, ffprobe=ffprobe))
     manager = FrameExtractionManager(ffmpeg=ffmpeg, ffprobe=ffprobe)
-    job = manager.create(source, start=0.25, end=0.75, output_directory=tmp_path)
+    job = manager.create(source, start=0.25, end=0.75, output_directory=tmp_path, frame_format=frame_format)
     snapshot = _wait_for_job(job)
 
     assert snapshot["status"] == "completed", snapshot
     assert snapshot["frame_count"] == 5
-    assert len(list(job.output_path.glob("frame_*.png"))) == 5
+    assert len(list(job.output_path.glob(f"frame_*.{frame_format}"))) == 5
 
 
 def test_frame_extraction_keeps_every_frame_after_a_long_gop(

@@ -42,6 +42,13 @@ let preview = property("rangePreviewButton", as: NSButton.self)
 let navigation = property("rangeNavigationControl", as: NSSegmentedControl.self)
 let modes = property("modeControl", as: NSSegmentedControl.self)
 let run = property("runButton", as: NSButton.self)
+let frameFormat = property("frameFormatPopup", as: NSPopUpButton.self)
+let frameFormatGroup = property("frameFormatGroup", as: NSStackView.self)
+let frameFormatHint = property("frameFormatHintLabel", as: NSTextField.self)
+check(frameFormat.numberOfItems == 2 && frameFormat.indexOfSelectedItem == 0,
+      "A fresh frame extraction panel defaults to JPG and retains a lossless option")
+check(frameFormatGroup.isHidden && frameFormatHint.stringValue == NSLocalizedString("videotools.frames.hint.jpg", comment: ""),
+      "Frame format is scoped to extraction and explains lossy JPEG quality")
 let faster = property("fasterButton", as: NSButton.self)
 let slower = property("slowerButton", as: NSButton.self)
 let mediaInfo = property("mediaInfoButton", as: NSButton.self)
@@ -166,11 +173,38 @@ action(preview)
 check(player.mpv.getString("count") == "0" && player.mpv.getFlag("pause") && near(player.mpv.getDouble("time"), 18.987654), "Stopping preview restores original position and pause")
 modes.selectedSegment = 1; action(modes)
 check(end.stringValue == "00:17.123456", "Frame mode defaults end to start plus five seconds")
+check(!frameFormatGroup.isHidden && frameFormat.isEnabled,
+      "Frame extraction exposes its format selector")
 player.mpv.values["time"] = 118.25; action(setStart)
 check(end.stringValue == "02:00.000000", "Frame range end clamps to duration")
 player.mpv.values["time"] = 10.0; action(setStart)
 action(run)
 check(VideoToolsTaskManager.shared.request?.operation == .frames && VideoToolsTaskManager.shared.request?.start == 10 && VideoToolsTaskManager.shared.request?.end == 15, "Run sends exact frame extraction range")
+check(VideoToolsTaskManager.shared.request?.frameFormat == "jpg",
+      "A default extraction sends JPG to the actual request model")
+let jpgRequestJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(VideoToolsTaskManager.shared.request!)) as! [String: Any]
+check(jpgRequestJSON["frame_format"] as? String == "jpg", "Frame format encodes with the helper protocol key")
+frameFormat.selectItem(at: 1); action(frameFormat)
+action(run)
+check(VideoToolsTaskManager.shared.request?.frameFormat == "png" && Preference.string(for: .frameExtractionFormat) == "png",
+      "An explicit PNG selection is dispatched and remembered")
+check(frameFormatHint.stringValue == NSLocalizedString("videotools.frames.hint.png", comment: ""),
+      "The lossless selection explains PNG and EXR behavior")
+do {
+  let remembered = VideoToolsViewController(player: PlayerCore(), mainWindow: MainWindowController())
+  _ = remembered.view
+  let popup = Mirror(reflecting: remembered).children.first(where: { $0.label == "frameFormatPopup" })!.value as! NSPopUpButton
+  check(popup.indexOfSelectedItem == 1, "A reopened panel keeps the saved PNG choice")
+}
+Preference.set("unsupported", for: .frameExtractionFormat)
+do {
+  let invalidPreference = VideoToolsViewController(player: PlayerCore(), mainWindow: MainWindowController())
+  _ = invalidPreference.view
+  let popup = Mirror(reflecting: invalidPreference).children.first(where: { $0.label == "frameFormatPopup" })!.value as! NSPopUpButton
+  check(popup.indexOfSelectedItem == 0 && Preference.string(for: .frameExtractionFormat) == "unsupported",
+        "An unsupported saved format falls back safely without rewriting the stored choice")
+}
+frameFormat.selectItem(at: 0); action(frameFormat)
 start.stringValue = "11.123456"; controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: start))
 check(end.stringValue == "00:16.123456", "Typing start updates frame end")
 RunLoop.main.run(until: Date().addingTimeInterval(0.45))
@@ -376,6 +410,7 @@ check(taskManager.requests.count == 3 && cancel.isHidden && run.isEnabled, "Canc
 
 // A different window's helper job must not be taken over or cancelled by this UI.
 try taskManager.start(operation: .frames, inputURL: rotationSource, start: 0, end: 1, degrees: nil, outputDirectory: nil)
+check(!frameFormat.isEnabled, "An active helper task locks frame format changes")
 let foreignTaskID = taskManager.snapshot!.id
 let cancellationsBeforeBusy = taskManager.cancellations.count
 controller.requestPermanentRotation(clockwiseQuarterTurns: 1)
@@ -383,6 +418,7 @@ check(player.mpv.getInt("rotation") == 180 && status.stringValue == localized("v
 action(cancel)
 check(taskManager.snapshot?.id == foreignTaskID && taskManager.cancellations.count == cancellationsBeforeBusy, "The panel cannot cancel a helper task owned by another window")
 taskManager.finishTask(.completed)
+check(frameFormat.isEnabled, "Completing a helper task unlocks the frame format selector")
 
 controller.requestPermanentRotation(clockwiseQuarterTurns: 1)
 pumpTasks { taskManager.requests.count == 5 }
@@ -466,7 +502,7 @@ let conversionRequestData = try JSONEncoder().encode(taskManager.request!)
 let conversionRequestJSON = try JSONSerialization.jsonObject(with: conversionRequestData) as! [String: Any]
 check(conversionRequestJSON["operation"] as? String == "convert" && conversionRequestJSON["target_format"] as? String == "mp4" && conversionRequestJSON["conversion_mode"] as? String == "copy",
       "Conversion request fields use the helper's snake-case protocol names")
-check(conversionRequestJSON["start"] == nil && conversionRequestJSON["end"] == nil && conversionRequestJSON["degrees"] == nil,
+check(conversionRequestJSON["start"] == nil && conversionRequestJSON["end"] == nil && conversionRequestJSON["degrees"] == nil && conversionRequestJSON["frame_format"] == nil,
       "Whole-file conversion omits unrelated JSON fields")
 let cancelledConversionID = taskManager.snapshot!.id
 action(cancel)
@@ -491,11 +527,11 @@ for (formatIndex, formatName) in [(1, "mkv"), (2, "mov")] {
 }
 let cancelRequestData = try JSONEncoder().encode(VideoToolsRequest.cancel(id: "cancel", targetID: "convert"))
 let cancelRequestJSON = try JSONSerialization.jsonObject(with: cancelRequestData) as! [String: Any]
-check(cancelRequestJSON["target_format"] == nil && cancelRequestJSON["conversion_mode"] == nil,
+check(cancelRequestJSON["target_format"] == nil && cancelRequestJSON["conversion_mode"] == nil && cancelRequestJSON["frame_format"] == nil,
       "Cancel requests do not leak conversion settings")
 let shutdownRequestData = try JSONEncoder().encode(VideoToolsRequest.shutdown(id: "shutdown"))
 let shutdownRequestJSON = try JSONSerialization.jsonObject(with: shutdownRequestData) as! [String: Any]
-check(shutdownRequestJSON["target_format"] == nil && shutdownRequestJSON["conversion_mode"] == nil,
+check(shutdownRequestJSON["target_format"] == nil && shutdownRequestJSON["conversion_mode"] == nil && shutdownRequestJSON["frame_format"] == nil,
       "Shutdown requests do not leak conversion settings")
 modes.selectedSegment = 0; action(modes)
 check(conversionGroup.isHidden && !timeGroup.isHidden && !playbackGroup.isHidden,

@@ -1,5 +1,12 @@
 import Cocoa
 
+enum Preference {
+  enum Key: Hashable { case frameExtractionFormat }
+  static var values: [Key: String] = [:]
+  static func string(for key: Key) -> String? { values[key] }
+  static func set(_ value: String, for key: Key) { values[key] = value }
+}
+
 final class MainWindowController: NSObject {}
 final class FlippedView: NSView { override var isFlipped: Bool { true } }
 final class VideoTime { var second: Double; init(_ second: Double) { self.second = second } }
@@ -73,11 +80,11 @@ final class VideoToolsTaskManager: VideoToolsRotationTaskManaging {
   var simulatesTaskLifecycle = false
   var startError: Error?
   @discardableResult
-  func start(operation: VideoToolsOperation, inputURL: URL, start: Double?, end: Double?, degrees: Int?, targetFormat: String? = nil, conversionMode: String? = nil, outputDirectory: URL?) throws -> String {
+  func start(operation: VideoToolsOperation, inputURL: URL, start: Double?, end: Double?, degrees: Int?, targetFormat: String? = nil, conversionMode: String? = nil, frameFormat: String? = nil, outputDirectory: URL?) throws -> String {
     if snapshot?.isActive == true { throw VideoToolsClientError.busy }
     if let startError { throw startError }
     let id = "test-\(requests.count + 1)"
-    let newRequest = VideoToolsRequest.start(id: id, operation: operation, inputURL: inputURL, start: start, end: end, degrees: degrees, targetFormat: targetFormat, conversionMode: conversionMode, outputDirectory: outputDirectory)
+    let newRequest = VideoToolsRequest.start(id: id, operation: operation, inputURL: inputURL, start: start, end: end, degrees: degrees, targetFormat: targetFormat, conversionMode: conversionMode, frameFormat: frameFormat, outputDirectory: outputDirectory)
     request = newRequest
     requests.append(newRequest)
     if simulatesTaskLifecycle {

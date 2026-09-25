@@ -93,6 +93,8 @@ def helper_process(ffmpeg: str, ffprobe: str) -> Iterator[subprocess.Popen[str]]
     assert ready["operations"] == ["probe", "clip", "frames", "rotate", "convert"]
     assert ready["supported_conversion_formats"] == ["mkv", "mov", "mp4"]
     assert ready["supported_conversion_modes"] == ["copy", "h264", "hevc"]
+    assert ready["default_frame_format"] == "jpg"
+    assert ready["supported_frame_formats"] == ["jpg", "png"]
     try:
         yield process
     finally:
@@ -174,7 +176,43 @@ def test_frames_default_end_is_five_seconds_after_start(
     assert completed["frame_count"] > 0
     output_path = Path(completed["output_path"])
     assert output_path.parent == tmp_path
-    assert len(list(output_path.glob("frame_*.png"))) == completed["frame_count"]
+    assert completed["frame_format"] == "jpg"
+    assert len(list(output_path.glob("frame_*.jpg"))) == completed["frame_count"]
+
+
+@pytest.mark.parametrize("frame_format", ["jpg", "png"])
+def test_explicit_frame_format_round_trip(
+    helper_process: subprocess.Popen[str], sample_video: Path, tmp_path: Path,
+    frame_format: str,
+) -> None:
+    _send(helper_process, {
+        "id": "frame-format", "command": "start", "operation": "frames",
+        "input_path": str(sample_video), "start": 0.1, "end": 0.2,
+        "output_directory": str(tmp_path), "frame_format": frame_format,
+    })
+    completed = _events_until_terminal(helper_process, request_id="frame-format")[-1]
+    assert completed["type"] == "completed", completed
+    assert completed["frame_format"] == frame_format
+    assert completed["frame_count"] == 3
+    frames = list(Path(completed["output_path"]).iterdir())
+    assert len(frames) == 3
+    assert all(path.suffix == f".{frame_format}" for path in frames)
+    signature = b"\xff\xd8" if frame_format == "jpg" else b"\x89PNG\r\n\x1a\n"
+    assert all(path.read_bytes().startswith(signature) for path in frames)
+
+
+@pytest.mark.parametrize("frame_format", [None, True, 1, [], {}, "jpeg", "JPG", "exr", "../jpg", ""])
+def test_bad_frame_format_is_rejected_before_opening_source(
+    helper_process: subprocess.Popen[str], frame_format,
+) -> None:
+    _send(helper_process, {
+        "id": "bad-frame-format", "command": "start", "operation": "frames",
+        "input_path": "/not/a/source.mp4", "start": 0, "frame_format": frame_format,
+    })
+    failed = _events_until_terminal(helper_process, request_id="bad-frame-format")[-1]
+    assert failed["type"] == "failed"
+    assert failed["error_code"] == "invalid_request"
+    assert failed["error"] == "frame_format must be jpg or png"
 
 
 def test_invalid_request_is_rejected_without_stopping_service(

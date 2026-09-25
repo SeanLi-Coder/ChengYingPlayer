@@ -87,6 +87,11 @@
 "videotools.preview_rotation" = "預覽旋轉";
 "videotools.stop_preview" = "停止預覽";
 "videotools.frames_hint" = "每次最多擷取 5 秒。修改起點後，終點會自動設為起點之後 5 秒。";
+"videotools.frames.format" = "圖片格式";
+"videotools.frames.format.jpg" = "JPG · 高品質";
+"videotools.frames.format.png" = "PNG · 無損";
+"videotools.frames.hint.jpg" = "以原解析度輸出高品質 JPG。JPEG 為 8 位有損壓縮；HDR、廣色域、透明或浮點素材請改選無損 PNG/EXR。";
+"videotools.frames.hint.png" = "無損 PNG 保留解析度、位深及透明度；浮點或超高位深素材使用 EXR。所選格式會自動記住。";
 "videotools.rotation" = "旋轉角度";
 "videotools.output_folder" = "儲存目錄";
 "videotools.output_default" = "預設儲存至原影片同級目錄";

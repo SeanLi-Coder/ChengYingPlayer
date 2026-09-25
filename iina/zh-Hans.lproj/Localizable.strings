@@ -104,6 +104,11 @@
 "videotools.preview_rotation" = "预览旋转";
 "videotools.stop_preview" = "停止预览";
 "videotools.frames_hint" = "每次最多截取 5 秒。修改起点后，终点会自动设为起点之后 5 秒。";
+"videotools.frames.format" = "图片格式";
+"videotools.frames.format.jpg" = "JPG · 高质量";
+"videotools.frames.format.png" = "PNG · 无损";
+"videotools.frames.hint.jpg" = "按原分辨率输出高质量 JPG。JPEG 为 8 位有损压缩；HDR、广色域、透明或浮点素材请改选无损 PNG/EXR。";
+"videotools.frames.hint.png" = "无损 PNG 保留分辨率、位深和透明度；浮点或超高位深素材使用 EXR。所选格式会自动记住。";
 "videotools.rotation" = "旋转角度";
 "videotools.output_folder" = "保存目录";
 "videotools.output_default" = "默认保存到原视频同级目录";

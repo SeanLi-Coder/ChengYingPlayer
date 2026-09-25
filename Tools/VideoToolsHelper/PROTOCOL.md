@@ -15,7 +15,7 @@ allows one active media task at a time.
 After validating both executable paths, the helper emits a `ready` event:
 
 ```json
-{"type":"ready","protocol_version":1,"helper":"chengying-video-tools-helper","helper_version":"1.1.0","operations":["probe","clip","frames","rotate","convert"],"max_frame_extraction_seconds":5.0,"default_frame_extraction_seconds":5.0,"supported_rotation_degrees":[90,180,270,360],"supported_conversion_formats":["mkv","mov","mp4"],"supported_conversion_modes":["copy","h264","hevc"]}
+{"type":"ready","protocol_version":1,"helper":"chengying-video-tools-helper","helper_version":"1.1.0","operations":["probe","clip","frames","rotate","convert"],"max_frame_extraction_seconds":5.0,"default_frame_extraction_seconds":5.0,"default_frame_format":"jpg","supported_frame_formats":["jpg","png"],"supported_rotation_degrees":[90,180,270,360],"supported_conversion_formats":["mkv","mov","mp4"],"supported_conversion_modes":["copy","h264","hevc"]}
 ```
 
 An invalid executable path produces one `failed` event with `error_code` set to
@@ -46,6 +46,22 @@ Extract every frame from a range no longer than five seconds:
 `extract_frames` is accepted as an alias for `frames`. If `end` is omitted, the helper
 uses five seconds after `start`, clamped to the source duration. If `output_directory`
 is omitted for `clip` or `frames`, the source directory is used.
+
+`frame_format` accepts `jpg` (the default) or `png`. JPG produces real `.jpg` images
+using high-quality MJPEG (`q=1`), full-range 8-bit 4:4:4 YCbCr and JPEG's conventional
+BT.601 matrix. Source dimensions and selected frame timestamps are preserved, but
+JPEG is lossy and high-bit-depth SDR is quantized to 8 bits; progress and completion
+messages explicitly describe this. HDR, transparent/paletted, floating-point,
+above-16-bit, and unsupported color-profile sources are rejected in JPG mode with
+an instruction to select lossless PNG/EXR. There is no silent tone mapping, alpha
+removal, format fallback, or extension-only renaming.
+
+Choose `"frame_format":"png"` to retain the existing lossless image mode: 8/16-bit
+PNG with alpha where present, or 32-bit float EXR when the source needs it. This
+retains the existing pixel-depth safeguards; it does not promise complete HDR
+metadata transfer into a still-image color profile. Null, aliases such as `jpeg`,
+and other unsupported values are invalid requests. The completed event includes
+`frame_format` with the actual file format (`jpg`, `png`, or `exr`).
 
 Permanently rotate a video clockwise:
 
@@ -116,7 +132,7 @@ Successful processing returns an absolute published output path:
 ```
 
 A successful probe returns its result in `metadata`. Frame extraction completion also
-contains `frame_count`. A cancelled task has type `cancelled` and never contains an
+contains `frame_count` and the actual `frame_format`. A cancelled task has type `cancelled` and never contains an
 output path.
 
 Failures have stable machine-readable `error_code` and human-readable `error` fields:
@@ -135,6 +151,8 @@ The helper never overwrites the source or an existing destination. It writes to 
 owned partial file or directory, validates dimensions, codecs, pixel depth, color
 metadata, audio parameters, duration, and rotation as applicable, and publishes only
 after verification. Cancellation and failure remove owned partial output.
+JPG verification decodes every image, checks real MJPEG encoding, full-range 4:4:4
+pixel format, dimensions, frame count, sequential names, and JPEG boundary markers.
 Dynamic HDR formats whose per-frame metadata cannot be preserved safely are rejected
 before clipping, rotation, or conversion; they are never silently converted to static
 HDR or SDR. Conversion also verifies track count, supported track metadata,

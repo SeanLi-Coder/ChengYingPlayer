@@ -97,6 +97,7 @@ struct Preference {
     static let screenshotFolder = Key("screenShotFolder")
     static let screenshotIncludeSubtitle = Key("screenShotIncludeSubtitle")
     static let screenshotFormat = Key("screenShotFormat")
+    static let frameExtractionFormat = Key("frameExtractionFormat")
     static let screenshotTemplate = Key("screenShotTemplate")
     static let screenshotShowPreview = Key("screenshotShowPreview")
 
@@ -599,7 +600,7 @@ struct Preference {
     case webp
     case jxl
 
-    static var defaultValue = ScreenshotFormat.png
+    static var defaultValue = ScreenshotFormat.jpg
 
     init?(key: Key) {
       self.init(rawValue: Preference.integer(for: key))
@@ -1016,7 +1017,8 @@ struct Preference {
     .screenshotCopyToClipboard: false,
     .screenshotFolder: "~/Pictures/Screenshots",
     .screenshotIncludeSubtitle: true,
-    .screenshotFormat: ScreenshotFormat.png.rawValue,
+    .screenshotFormat: ScreenshotFormat.jpg.rawValue,
+    .frameExtractionFormat: "jpg",
     .screenshotTemplate: "%F-%n",
     .screenshotShowPreview: true,
 

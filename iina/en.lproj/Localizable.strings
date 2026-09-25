@@ -104,6 +104,11 @@
 "videotools.preview_rotation" = "Preview Rotation";
 "videotools.stop_preview" = "Stop Preview";
 "videotools.frames_hint" = "A frame range can be up to 5 seconds. Changing the start time sets the end time to 5 seconds later.";
+"videotools.frames.format" = "Image format";
+"videotools.frames.format.jpg" = "JPG · High quality";
+"videotools.frames.format.png" = "PNG · Lossless";
+"videotools.frames.hint.jpg" = "Full-resolution, high-quality JPG. JPEG is lossy and 8-bit; use lossless PNG/EXR for HDR, wide gamut, transparency or floating-point sources.";
+"videotools.frames.hint.png" = "Lossless PNG preserves resolution, bit depth and transparency. Floating-point or very high-bit-depth sources use EXR. Your format choice is remembered.";
 "videotools.rotation" = "ROTATION";
 "videotools.output_folder" = "OUTPUT FOLDER";
 "videotools.output_default" = "Same folder as source";

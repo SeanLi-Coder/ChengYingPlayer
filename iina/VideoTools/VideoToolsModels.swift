@@ -48,6 +48,7 @@ struct VideoToolsRequest: Encodable {
   let degrees: Int?
   let targetFormat: String?
   let conversionMode: String?
+  let frameFormat: String?
   let outputDirectory: String?
   let targetID: String?
 
@@ -61,6 +62,7 @@ struct VideoToolsRequest: Encodable {
     case degrees
     case targetFormat = "target_format"
     case conversionMode = "conversion_mode"
+    case frameFormat = "frame_format"
     case outputDirectory = "output_directory"
     case targetID = "target_id"
   }
@@ -74,6 +76,7 @@ struct VideoToolsRequest: Encodable {
     degrees: Int? = nil,
     targetFormat: String? = nil,
     conversionMode: String? = nil,
+    frameFormat: String? = nil,
     outputDirectory: URL? = nil
   ) -> VideoToolsRequest {
     VideoToolsRequest(
@@ -86,6 +89,7 @@ struct VideoToolsRequest: Encodable {
       degrees: degrees,
       targetFormat: targetFormat,
       conversionMode: conversionMode,
+      frameFormat: operation == .frames ? (frameFormat ?? "jpg") : nil,
       outputDirectory: outputDirectory?.path,
       targetID: nil
     )
@@ -102,6 +106,7 @@ struct VideoToolsRequest: Encodable {
       degrees: nil,
       targetFormat: nil,
       conversionMode: nil,
+      frameFormat: nil,
       outputDirectory: nil,
       targetID: targetID
     )
@@ -118,6 +123,7 @@ struct VideoToolsRequest: Encodable {
       degrees: nil,
       targetFormat: nil,
       conversionMode: nil,
+      frameFormat: nil,
       outputDirectory: nil,
       targetID: nil
     )

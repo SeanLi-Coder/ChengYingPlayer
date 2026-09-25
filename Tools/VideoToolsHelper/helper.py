@@ -19,6 +19,7 @@ from conversion import (
 )
 from media import (
     MAX_FRAME_EXTRACTION_SECONDS,
+    SUPPORTED_FRAME_FORMATS,
     SUPPORTED_ROTATION_DEGREES,
     ExportManager,
     FrameExtractionManager,
@@ -114,6 +115,13 @@ def _conversion_options(request: dict[str, Any]) -> tuple[str, str]:
     if any(request.get(key) is not None for key in ("start", "end", "degrees")):
         raise RequestError("convert processes the complete video; range and rotation fields are not supported")
     return target_format, mode
+
+
+def _frame_format(request: dict[str, Any]) -> str:
+    value = request.get("frame_format", "jpg")
+    if not isinstance(value, str) or value not in SUPPORTED_FRAME_FORMATS:
+        raise RequestError("frame_format must be jpg or png")
+    return value
 
 
 def _json_safe(value: Any) -> Any:
@@ -419,6 +427,7 @@ class ProtocolServer:
             }
             if "frame_count" in snapshot:
                 event["frame_count"] = snapshot["frame_count"]
+                event["frame_format"] = snapshot["frame_format"]
             self._emit_terminal(task, event)
             return
         if status == "cancelled":
@@ -446,6 +455,7 @@ class ProtocolServer:
             conversion_options = (
                 _conversion_options(task.request) if task.operation == "convert" else None
             )
+            frame_format = _frame_format(task.request) if task.operation == "frames" else None
             source = self._source_for_task(task)
             if task.operation == "probe":
                 if task.cancel_event.is_set():
@@ -499,6 +509,7 @@ class ProtocolServer:
                     start=start,
                     end=end,
                     output_directory=output_directory,
+                    frame_format=frame_format,
                 )
             elif task.operation == "rotate":
                 if "degrees" not in task.request:
@@ -647,6 +658,8 @@ class ProtocolServer:
                 "operations": ["probe", "clip", "frames", "rotate", "convert"],
                 "max_frame_extraction_seconds": MAX_FRAME_EXTRACTION_SECONDS,
                 "default_frame_extraction_seconds": MAX_FRAME_EXTRACTION_SECONDS,
+                "default_frame_format": "jpg",
+                "supported_frame_formats": sorted(SUPPORTED_FRAME_FORMATS),
                 "supported_rotation_degrees": sorted(SUPPORTED_ROTATION_DEGREES),
                 "supported_conversion_formats": sorted(SUPPORTED_CONVERSION_FORMATS),
                 "supported_conversion_modes": sorted(SUPPORTED_CONVERSION_MODES),

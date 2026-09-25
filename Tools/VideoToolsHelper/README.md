@@ -8,7 +8,8 @@ The helper supports:
 
 - media probing;
 - frame-accurate high-fidelity clipping;
-- lossless still-frame extraction for ranges up to five seconds;
+- full-resolution, high-quality JPG frame extraction for ranges up to five seconds,
+  with an explicit lossless PNG/EXR option;
 - permanent clockwise rotation by 90, 180, 270, or 360 degrees; and
 - whole-video MP4 / MKV / MOV conversion, with lossless stream copy by default or
   explicit high-quality H.264 / HEVC video re-encoding.

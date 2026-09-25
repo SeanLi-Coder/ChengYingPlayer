@@ -342,6 +342,9 @@ class MPVController: NSObject {
     setUserOption(PK.screenshotSaveToFile, type: .other, forName: MPVOption.Screenshot.screenshotDir,
                   level: .verbose, transformer: setScreenshotPath)
 
+    // Keep JPEG screenshots at maximum encoder quality without resizing the frame.
+    chkErr(setOptionInt(MPVOption.Screenshot.screenshotJpegQuality, 100, level: .verbose))
+
     setUserOption(PK.screenshotFormat, type: .other, forName: MPVOption.Screenshot.screenshotFormat,
                   verboseIfDefault: true) { key in
       let v = Preference.integer(for: key)
