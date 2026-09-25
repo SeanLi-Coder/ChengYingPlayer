@@ -203,6 +203,10 @@ Release status: not released / draft / publicly verified
 
 ## 9. 最新 Codex review 交接
 
+**GLM 下一轮修补先读：**
+[`Codex 评审后的修补与验收清单`](handoffs/2026-09-25-glm-fix-guidance.md)。
+其中 R1–R7 给出复现条件、修补要求和验收证据；基于 `7372e9cb`，不是已修复声明。
+
 快手视频、图片/图集和 Chrome Cookie 脱敏诊断的完整需求、实现范围、测试结果、真实站点阻塞和 review 清单见：
 
 [`docs/handoffs/2026-09-25-kuaishou-codex-review.md`](handoffs/2026-09-25-kuaishou-codex-review.md)。

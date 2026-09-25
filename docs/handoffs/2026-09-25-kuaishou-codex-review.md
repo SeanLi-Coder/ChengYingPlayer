@@ -1,5 +1,9 @@
 # 快手下载与 Chrome Cookie 诊断交接（供 Codex Review）
 
+后续 Codex 评审已完成；GLM 修补请先读
+[修补与验收清单](2026-09-25-glm-fix-guidance.md)。下文保留当时的实现记录，
+不代表已通过该清单中的新增回归或真实站点验收。
+
 - 日期：2026-09-25
 - 仓库：`SeanLi-Coder/ChengYingPlayer`
 - 当前分支：`main`
@@ -294,7 +298,6 @@ page host: www.kuaishou.com
 scheme: https
 port: omitted or 443
 profile id: 3x62baa74fujidm
-short-link id: X1MM7OtmlFNd11q
 ```
 
 代码将短链解析后的最终作品重新绑定到站点实际返回的作品 ID；不根据短链字符串猜测媒体 ID。

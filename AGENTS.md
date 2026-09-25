@@ -4,6 +4,10 @@
   shared handoff for Codex and the user's GLM agent on an Apple Silicon Mac.
 - For downloader changes, also read `Tools/DownloaderHelper/UPSTREAM.md` before
   editing the vendored engine or its integrity manifest.
+- For the Kuaishou review follow-up, read
+  `docs/handoffs/2026-09-25-glm-fix-guidance.md`. It records reproducible findings
+  against commit `7372e9cb` and the required regression evidence; recheck later
+  commits before assuming a finding remains open.
 - Start by checking the branch, commit and working tree. Preserve other agents'
   uncommitted work; use a separate topic branch for concurrent implementation.
 - The standalone Kuaishou test/download kits were discontinued at the user's
