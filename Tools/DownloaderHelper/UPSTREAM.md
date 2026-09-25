@@ -115,6 +115,23 @@ plus declared-dimension checks for images, the FFprobe quality gate for videos.
 A truncated, user-modified, moved or missing file is re-downloaded instead of
 being trusted, and an existing user file is never overwritten.
 
+Starting with the post-v0.2.38 review, completion receipts also include a SHA-256
+digest of the local bytes and a SHA-256 fingerprint of the complete trusted source
+candidate set, including signed query strings. Raw candidate URLs are never
+persisted. File hashing uses bounded chunks, cancellation checks, and file-state
+checks around verification. A same-size replacement, a reordered image with a
+different source, or a receipt missing these hashes cannot be silently reused.
+Video reuse checks the actual matching highest-quality candidate, not only the
+first codec variant. Incremental album updates preserve valid receipts for later
+members that have not yet been retried.
+
+Source equality does not prove that a remote object has never changed. This is a
+conservative reuse rule: changed signatures or candidate sets can cause a fresh
+download even when the visual content is unchanged. Legacy receipts without hash
+evidence are preserved but not trusted for reuse; existing files are not replaced.
+The interface distinguishes bounded retries within the current browser session
+from a user-initiated retry, which rediscovers the profile with fresh cursors.
+
 Resume is delivered at four levels: in-session pagination continues from the
 interrupted cursor; a retried or restarted task skips works already completed
 and retries failed ones, keeping unmatched profile items queued while discovery

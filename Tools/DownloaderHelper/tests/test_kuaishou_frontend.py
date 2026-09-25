@@ -260,7 +260,10 @@ def test_profile_interruption_keeps_works_and_names_the_reason():
     )
     assert "本次读取不完整" in result
     assert "已保存的文件都会保留" in result
-    assert "从中断的位置继续" in result
+    assert "重新读取主页" in result
+    assert "校验后复用" in result
+    assert "从中断的位置继续" not in result
+    assert "不会从头重走" not in result
     assert "网站限制了请求频率" in result
     assert "rate_limited" in result
     assert "Kuaishou" not in result

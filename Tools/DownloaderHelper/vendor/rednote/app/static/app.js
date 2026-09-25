@@ -1194,7 +1194,7 @@
       return `快手暂时限制了主页请求，程序正在等待后从当前位置继续读取（第 ${retry[1]}/${retry[2]} 次）。已验证的作品不会丢失，也不会从头重新读取；你可以随时取消。`;
     }
     if (text.startsWith("Kuaishou stopped serving further profile pages")) {
-      return `快手已停止继续提供主页内容，本次读取不完整。已验证的作品会继续下载，已保存的文件都会保留。请等待几分钟后点击“继续任务”，程序会从中断的位置继续，不会从头重走。${localizeKuaishouSuffixes(text)}`;
+      return `快手已停止继续提供主页内容，本次读取不完整。已验证的作品会继续下载，已保存的文件都会保留。请等待几分钟后点击“继续任务”：程序会重新读取主页以获取有效分页信息；未完成作品中已有的文件会在校验后复用，无法确认一致时会重新下载且不覆盖旧文件。${localizeKuaishouSuffixes(text)}`;
     }
     if (text.startsWith("Kuaishou stopped serving the author feed before any work")) {
       return `快手在返回任何可验证作品前就停止了，因此没有加入任何下载项。这不是主页为空，程序也没有把限流当成“没有作品”。请等待几分钟后从原主页重试。${localizeKuaishouSuffixes(text)}`;

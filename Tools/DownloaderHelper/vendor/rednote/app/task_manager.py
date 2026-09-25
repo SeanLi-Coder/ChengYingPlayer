@@ -87,6 +87,8 @@ _KUAISHOU_SAVED_ASSET_FIELDS = {
     "height": int,
     "size": int,
     "format_id": str,
+    "local_sha256": str,
+    "source_sha256": str,
 }
 _KUAISHOU_SAVED_ASSET_KINDS = frozenset({"video", "image"})
 
@@ -109,6 +111,8 @@ def _public_kuaishou_saved_asset(record: object) -> dict[str, object] | None:
         if kind is int and isinstance(value, bool):
             continue
         if not isinstance(value, kind):
+            continue
+        if name in {"local_sha256", "source_sha256"} and not re.fullmatch(r"[0-9a-f]{64}", value):
             continue
         cleaned[name] = value
     if not isinstance(cleaned.get("media_id"), str) or not cleaned["media_id"]:
@@ -2092,12 +2096,16 @@ class DownloadManager:
                 # Persist each verified asset immediately so a retry, a
                 # cancellation or a restart reuses it instead of re-downloading
                 # it under a new collision-avoidance name.
-                cleaned = [
-                    _public_kuaishou_saved_asset(record) for record in asset_records
-                ]
-                item.metadata[KUAISHOU_SAVED_ASSETS_KEY] = [
-                    record for record in cleaned if record is not None
-                ]
+                previous = item.metadata.get(KUAISHOU_SAVED_ASSETS_KEY)
+                # A restarted attempt can fail before revisiting a later saved
+                # image. Do not discard that image's receipt when image one is
+                # committed again. Reuse still checks current source and bytes.
+                receipts = {}
+                for raw in [*(previous if isinstance(previous, list) else []), *asset_records]:
+                    record = _public_kuaishou_saved_asset(raw)
+                    if record is not None and record["media_id"] == item.media_id:
+                        receipts[(record["media_kind"], record["index"])] = record
+                item.metadata[KUAISHOU_SAVED_ASSETS_KEY] = list(receipts.values())
             if event.event == "postprocessing":
                 item.status = ItemStatus.POSTPROCESSING
             elif event.event == "downloading":

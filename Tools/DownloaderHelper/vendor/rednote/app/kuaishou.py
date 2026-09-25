@@ -53,6 +53,7 @@ MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_PROFILE_PAGES = 500
 MAX_PROFILE_ITEMS = 10_000
 MAX_BROWSER_SECONDS = 300
+MAX_IMAGE_ENTRIES = 100
 PROFILE_INCOMPLETE = (
     "Kuaishou profile discovery is incomplete. Only verified videos were queued; "
     "retry the original profile to continue. The site did not confirm the end of the list."
@@ -60,7 +61,8 @@ PROFILE_INCOMPLETE = (
 PROFILE_INTERRUPTED = (
     "Kuaishou stopped serving further profile pages, so discovery is incomplete. "
     "Only verified videos were queued; the already saved files are kept. Wait a few "
-    "minutes, then retry the original profile to continue where it stopped."
+    "minutes, then retry the original profile to rediscover its works and reuse "
+    "verified saved files."
 )
 # A recoverable interruption must not discard works that were already verified.
 # Login, verification, identity and security problems stay fatal: they are never
@@ -196,8 +198,14 @@ def fulfill_checked_route(
         response = route.fetch(
             url=current_url,
             method=method,
-            post_data=body,
-            headers=headers,
+            # In Python Playwright, None inherits the original request body.
+            # Empty bytes explicitly clear it after a POST-to-GET redirect and
+            # serialize as no body; they are not JSON null or a new payload.
+            post_data=body if body is not None else b"",
+            # Playwright treats {} as omitted and restores original headers.
+            # HTTP's implicit Accept policy is */*, so materialize that policy
+            # when nothing remains rather than resurrecting stripped credentials.
+            headers=headers or {"accept": "*/*"},
             max_redirects=0,
             timeout=max(1, int(remaining * 1000)),
         )
@@ -222,7 +230,7 @@ def fulfill_checked_route(
                         "Kuaishou cross-origin browser submission redirect was blocked"
                     )
                 if (
-                    response.status == 303
+                    response.status == 303 and method != "HEAD"
                     or response.status in {301, 302}
                     and method == "POST"
                 ):
@@ -385,6 +393,11 @@ def _image_variants(group: list, duration: float | None) -> RemoteAsset | None:
         if pixels > best_pixels:
             best_pixels = pixels
             best = (list(dict.fromkeys(urls)), width, height)
+        elif best is not None and (width, height) == best[1:]:
+            # These entries belong to the same declared image group. Preserve
+            # same-dimension backups without admitting lower-quality variants or
+            # treating equal pixel counts with different shapes as equivalent.
+            best[0].extend(url for url in urls if url not in best[0])
     if best is None:
         return None
     urls, width, height = best
@@ -469,29 +482,31 @@ def _structured_image_groups(photo: dict) -> list[list]:
             and _positive(obj.get("height") or obj.get("h"))
         )
 
-    groups: list[list] = []
     album = photo.get("photoUrls")
     if isinstance(album, list) and album:
-        sized: list[list] = []
-        unsized: list[dict] = []
-        for entry in album[:100]:
-            if isinstance(entry, list):
-                if any(is_image_entry(item) for item in entry):
-                    sized.append(entry)
-            elif is_image_entry(entry):
-                (sized.append([entry]) if has_own_size(entry) else unsized.append(entry))
-        if sized and unsized:
-            # Cannot tell whether a sizeless entry is a further backup of a listed
-            # image or another image. Fail closed rather than guess identities.
+        if len(album) > MAX_IMAGE_ENTRIES:
+            # A bounded prefix is not the whole album. Refuse it instead of
+            # reporting success after silently omitting later members.
             return []
-        if sized:
-            return sized
-        # Only sizeless entries: a video work's cover backups, not an album.
-        return []
+        groups: list[list] = []
+        for entry in album:
+            if isinstance(entry, list):
+                if len(entry) > MAX_IMAGE_ENTRIES or not any(
+                    is_image_entry(item) for item in entry
+                ):
+                    return []
+                groups.append(entry)
+            elif is_image_entry(entry) and has_own_size(entry):
+                groups.append([entry])
+            else:
+                # An unverifiable distinct member must invalidate the album,
+                # not disappear and renumber every later image for resume.
+                return []
+        return groups
     single = photo.get("photoUrl")
     if is_image_entry(single):
         return [[single]]
-    if isinstance(single, list) and single:
+    if isinstance(single, list) and 0 < len(single) <= MAX_IMAGE_ENTRIES:
         if any(is_image_entry(entry) for entry in single):
             return [single]
     return []
@@ -545,7 +560,6 @@ def parse_video(
     # Structured image evidence, not "we failed to parse a video stream", decides
     # the media type. A cover thumbnail is never a substitute for the work.
     is_image_work = _has_sized_image_entry(photo)
-    image_groups = _structured_image_groups(photo)
     assets: list[RemoteAsset] = []
     bitrate_ranks: dict[int, int] = {}
     for field_name in ("manifest", "manifestH265", "videoResource"):
@@ -751,9 +765,13 @@ def _resolve_refs(
             for key, item in value.items()
         }
     if isinstance(value, list):
+        if len(value) > MAX_PROFILE_ITEMS:
+            # Truncation would hide omitted works from ProfileCollector while
+            # retaining a terminal cursor, falsely certifying a complete list.
+            raise DiscoveryError("Kuaishou Apollo list exceeded the safe item limit")
         return [
             _resolve_refs(item, cache, seen, depth + 1)
-            for item in value[:MAX_PROFILE_ITEMS]
+            for item in value
         ]
     return value
 

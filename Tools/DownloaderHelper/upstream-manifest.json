@@ -11,8 +11,8 @@
     "app/main.py": "Optional user-owned writable-path environment hooks; redact Kuaishou share query values from public responses.",
     "app/models.py": "Add the Kuaishou platform enum without changing existing values; add a whitelisted local diagnostic category field to the job and item records.",
     "app/platforms.py": "Recognize strictly validated Kuaishou video, profile and share URLs.",
-    "app/downloader.py": "Connect original Kuaishou discovery to the existing verified media transfer, proxy, progress and cancellation paths; download one video from its single filtered candidate set; download each album image separately with a full decode check; persist unified per-asset completion records for both video and image work and reuse a verified file instead of re-downloading it; share one per-platform output directory calculation.",
-    "app/task_manager.py": "Bind resolved Kuaishou share identities and preserve incomplete-profile retry semantics; persist unified asset completion records so a retry or restart resumes; keep unmatched Kuaishou profile items queued while discovery is incomplete; reuse the shared output directory calculation; and carry the whitelisted Cookie diagnostic category into task state.",
+    "app/downloader.py": "Connect original Kuaishou discovery to the existing verified media transfer, proxy, progress and cancellation paths; download one video from its single filtered candidate set; fully decode each album image before publication; persist source and local-byte SHA-256 receipts and conservatively verify them before reuse, including non-first codec candidates; hash in cancellable bounded chunks; share one per-platform output directory calculation.",
+    "app/task_manager.py": "Bind resolved Kuaishou share identities and preserve incomplete-profile retry semantics; persist whitelisted asset receipts with SHA-256 evidence, merging incremental updates without losing later saved members; keep unmatched Kuaishou profile items queued while discovery is incomplete; reuse the shared output directory calculation; and carry the whitelisted Cookie diagnostic category into task state.",
     "app/static/app.js": "Add Kuaishou labels, localized progress and error guidance; recognize resolved share profile jobs; localize each whitelisted Chrome Cookie diagnostic category with its own guidance; localize profile interruption, bounded retry status and the skipped-work reason summary instead of collapsing into one generic message.",
     "app/static/index.html": "Advertise Kuaishou single-video, share and author-profile inputs with login and permission guidance.",
     "tests/test_stop.py": "Isolate the no-server test from real localhost services and cover a disappearing legacy listener; production stop.py is unchanged.",
@@ -64,7 +64,7 @@
     {
       "path": "app/downloader.py",
       "upstream_sha256": "0401b8290cd9cda5b71a61a6d8086a3d59e7ad6f36d395bac9ec988f3e182573",
-      "vendored_sha256": "60baa40f5580b98d4fdef50306b1d7be8a33a25af8c5499b7130a9fc4b8926fb"
+      "vendored_sha256": "cffeaaf504e73e99ee0f750036b39736e3e513205f634128e48f7038d13cd6f4"
     },
     {
       "path": "app/errors.py",
@@ -109,7 +109,7 @@
     {
       "path": "app/static/app.js",
       "upstream_sha256": "c88f22bce27cd49ad5f289155f2d0a6ee6bfe2f7aab0fee54a22307dd5bbcbb8",
-      "vendored_sha256": "0041eafad8b4ac829c678881a2dedfb3606b23eb4bae63ddb4e76b18c55a8b6e"
+      "vendored_sha256": "9c6ee5ae65ede18c470914f92b4abe12124f5cf33be8cb881ba414611663d818"
     },
     {
       "path": "app/static/favicon.svg",
@@ -134,7 +134,7 @@
     {
       "path": "app/task_manager.py",
       "upstream_sha256": "2264717a9ed202fc1db757d54140dea575c14799ec49bef48815fb679a862236",
-      "vendored_sha256": "0f1bdeaf482a88ad192f026caabac389e48c80187a6814b620e9eedfcac7e506"
+      "vendored_sha256": "3c2672949bb7eb96957b754df489de574398ec826d8b217d5232afe33e22b98c"
     },
     {
       "path": "app/xiaohongshu.py",
@@ -371,7 +371,7 @@
     {
       "path": "app/kuaishou.py",
       "license": "GPL-3.0-or-later",
-      "sha256": "4a30e3caf3f74d1ae5f889a04eec7a98931941645ae587542b2438b88c05236f"
+      "sha256": "67a722a70b2c842261259ced3e43a4bbdb92bd303e57d5c15176fae26aa18460"
     }
   ]
 }

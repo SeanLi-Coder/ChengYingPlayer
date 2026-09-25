@@ -1796,6 +1796,7 @@ def test_download_refreshes_links_and_reuses_ffprobe_pipeline(monkeypatch, tmp_p
     def transfer(ydl, assets, *args, **kwargs):
         captured.update(kwargs)
         assert assets[0].candidates == [MEDIA + "?fresh"]
+        (tmp_path / "result.mp4").write_bytes(b"verified transfer fixture")
         return tmp_path / "result.mp4", RemoteAsset([MEDIA], 1, width=1920, height=1080)
 
     monkeypatch.setattr(downloader, "_download_first_available_asset", transfer)
@@ -1921,6 +1922,7 @@ def test_video_renditions_are_one_candidate_set_producing_one_file(
 
     def transfer(ydl, assets, *args, **kwargs):
         calls.append((list(assets), kwargs))
+        (tmp_path / "one.mp4").write_bytes(b"verified transfer fixture")
         return tmp_path / "one.mp4", RemoteAsset(
             [MEDIA], 1, width=1920, height=1080
         )
@@ -2169,7 +2171,9 @@ def test_existing_album_image_is_reused_only_when_verified(tmp_path):
         format_id="kuaishou-image-1",
     )
     reused = downloader._existing_kuaishou_image_asset(
-        {"media_id": "3xalbum1", "index": 1, "path": str(saved)},
+        downloader._kuaishou_completion_record(
+            saved, asset, "3xalbum1", "image", 1, should_cancel=lambda: False,
+        ),
         tmp_path,
         asset,
         should_cancel=lambda: False,
@@ -2181,7 +2185,9 @@ def test_existing_album_image_is_reused_only_when_verified(tmp_path):
     truncated = make_real_jpeg(tmp_path, 1600, 1200, color="green", name="broken.jpg")
     truncated.write_bytes(truncated.read_bytes()[:3000])
     assert downloader._existing_kuaishou_image_asset(
-        {"media_id": "3xalbum1", "index": 1, "path": str(truncated)},
+        downloader._kuaishou_completion_record(
+            truncated, asset, "3xalbum1", "image", 1, should_cancel=lambda: False,
+        ),
         tmp_path,
         asset,
         should_cancel=lambda: False,
@@ -2192,7 +2198,9 @@ def test_existing_album_image_is_reused_only_when_verified(tmp_path):
     moved = outside / "saved.jpg"
     shutil.copy(saved, moved)
     assert downloader._existing_kuaishou_image_asset(
-        {"media_id": "3xalbum1", "index": 1, "path": str(moved)},
+        downloader._kuaishou_completion_record(
+            moved, asset, "3xalbum1", "image", 1, should_cancel=lambda: False,
+        ),
         tmp_path,
         asset,
         should_cancel=lambda: False,
@@ -2221,12 +2229,9 @@ def test_existing_video_is_reused_only_after_ffprobe_verification(tmp_path):
         [MEDIA + "?high"], index=1, width=720, height=1280,
         format_id="kuaishou-high", video_codec="h264",
     )
-    record = {
-        "media_id": "3xvideo1",
-        "index": 1,
-        "media_kind": "video",
-        "path": str(saved),
-    }
+    record = downloader._kuaishou_completion_record(
+        saved, asset, "3xvideo1", "video", 1, should_cancel=lambda: False,
+    )
     reused = downloader._existing_kuaishou_video_asset(
         record, tmp_path, asset, should_cancel=lambda: False
     )
@@ -2239,7 +2244,9 @@ def test_existing_video_is_reused_only_after_ffprobe_verification(tmp_path):
     truncated = make_real_mp4(tmp_path, 720, 1280, color="green", name="broken.mp4")
     truncated.write_bytes(truncated.read_bytes()[: truncated.stat().st_size // 3])
     assert downloader._existing_kuaishou_video_asset(
-        {**record, "path": str(truncated)},
+        downloader._kuaishou_completion_record(
+            truncated, asset, "3xvideo1", "video", 1, should_cancel=lambda: False,
+        ),
         tmp_path,
         asset,
         should_cancel=lambda: False,
@@ -2248,7 +2255,9 @@ def test_existing_video_is_reused_only_after_ffprobe_verification(tmp_path):
     # A file below the declared resolution must be re-downloaded, never reused.
     lower = make_real_mp4(tmp_path, 360, 640, color="red", name="lower.mp4")
     assert downloader._existing_kuaishou_video_asset(
-        {**record, "path": str(lower)},
+        downloader._kuaishou_completion_record(
+            lower, asset, "3xvideo1", "video", 1, should_cancel=lambda: False,
+        ),
         tmp_path,
         asset,
         should_cancel=lambda: False,
@@ -2288,14 +2297,10 @@ def test_completed_video_is_not_downloaded_again_after_restart(
 
     downloader, item = discovered_item(monkeypatch)
     item.metadata[KUAISHOU_SAVED_ASSETS_KEY] = [
-        {
-            "media_id": "3xvideo1",
-            "index": 1,
-            "media_kind": "video",
-            "path": str(saved),
-            "width": 720,
-            "height": 1280,
-        }
+        downloader._kuaishou_completion_record(
+            saved, ks.parse_video(feed()).assets[0], "3xvideo1", "video", 1,
+            should_cancel=lambda: False,
+        )
     ]
     requests = []
 
@@ -2329,6 +2334,7 @@ def test_video_completion_record_is_reported_with_its_media_kind(
     events = []
 
     def transfer(ydl, assets, *args, **kwargs):
+        (tmp_path / "one.mp4").write_bytes(b"x" * 4321)
         return tmp_path / "one.mp4", RemoteAsset(
             [MEDIA], 1, width=720, height=1280, format_id="kuaishou-high",
             size=4321,
@@ -2649,6 +2655,10 @@ def test_album_records_survive_restart_and_are_reused_not_renamed(
                         "width": 800,
                         "height": 600,
                         "candidates": [MEDIA + "?first"],
+                        **engine.MediaDownloader._kuaishou_completion_record(
+                            saved, RemoteAsset([MEDIA + "?first"], 1, width=800, height=600),
+                            "3xalbum1", "image", 1, should_cancel=lambda: False,
+                        ),
                     }
                 ],
             ),

@@ -89,7 +89,9 @@ check(preferenceCompact.contains("staticfuncbool(forkey:Key)->Bool{returnud.bool
       "Preference.bool continues to read the persistent key through UserDefaults")
 check(playerCoreCompact.contains("info.hdrEnabled=Preference.bool(for:.enableHdrSupport)openMainWindow("),
       "Opening a media file applies the user's HDR preference before creating its window")
-check(quickSettingsCompact.contains("funchdrAction(_sender:NSSwitch){self.player.info.hdrEnabled=sender.state==.onself.player.refreshEdrMode()}"),
+let manualHDRAction = "funchdrAction(_sender:NSSwitch){self.player.info.hdrEnabled=sender.state==.on"
+  + "self.player.refreshEdrMode()}"
+check(quickSettingsCompact.contains(manualHDRAction),
       "The existing HDR switch can still manually enable or disable the current player")
 check(quickSettingsCompact.contains("hdrSwitch.isEnabled=player.info.hdrAvailable") &&
       quickSettingsCompact.contains("hdrSwitch.state=(player.info.hdrAvailable&&player.info.hdrEnabled)?.on:.off"),
