@@ -1,6 +1,6 @@
 # 快手下载与 Chrome Cookie 诊断交接（供 Codex Review）
 
-后续 Codex 评审已完成；GLM 修补请先读
+后续 Codex 评审已完成；接续修补请先读
 [修补与验收清单](2026-09-25-glm-fix-guidance.md)。下文保留当时的实现记录，
 不代表已通过该清单中的新增回归或真实站点验收。
 

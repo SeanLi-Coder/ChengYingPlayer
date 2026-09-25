@@ -1,7 +1,10 @@
 # Cross-machine collaboration
 
 - Before changing this project, read `docs/AI_COLLABORATION.md`. It contains the
-  shared handoff for Codex and the user's GLM agent on an Apple Silicon Mac.
+  shared handoff for Codex and the user's Qwen agent on an Apple Silicon Mac.
+  The user switched the M4 Max collaborator from GLM to Qwen on 2026-09-25.
+  Preserve historical GLM attribution and filenames; they are not current task
+  assignments. `QWEN.md` is a pointer to these shared instructions.
 - For downloader changes, also read `Tools/DownloaderHelper/UPSTREAM.md` before
   editing the vendored engine or its integrity manifest.
 - For the Kuaishou review follow-up, read

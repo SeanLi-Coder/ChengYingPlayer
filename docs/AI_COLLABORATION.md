@@ -1,8 +1,12 @@
-# M4 Max / GLM 联合开发交接
+# M4 Max / Qwen 联合开发交接
 
 这份文档供同一 GitHub 项目的不同机器和编程助手共用。入口是根目录
-[`AGENTS.md`](../AGENTS.md)；支持读取 `CLAUDE.md` 的客户端也有对应入口。
-如果客户端不会自动读取，请在任务开头明确要求它阅读这两个文件。
+[`AGENTS.md`](../AGENTS.md)；另有 [`QWEN.md`](../QWEN.md) 和兼容的 `CLAUDE.md` 简短入口。
+如果客户端不会自动读取，请在任务开头明确要求它阅读 `AGENTS.md` 与本交接文档。
+
+**当前协作者：**用户于 2026-09-25 将 M4 Max 上的编程助手从 GLM 改为 Qwen。
+后续交接面向 Qwen；已有 GLM 提交、日志和文件名保留历史归属，不批量改名，也不要求继续使用 GLM。
+此变更只涉及联合开发助手，不更换播放器内的字幕或总结模型，也不自动指定谁负责下一次发布。
 
 仓库：[SeanLi-Coder/ChengYingPlayer](https://github.com/SeanLi-Coder/ChengYingPlayer)。
 这是澄影视界播放器，不是独立的 Local Video Cutter 项目。
@@ -111,15 +115,16 @@
 先检查 Python、Node.js、FFmpeg／FFprobe 和 Google Chrome 是否可用；正式完整构建还需要
 完整 Xcode、原生 arm64 及仓库要求的 **CPython 3.13.2**。依赖锁以仓库文件为准，不随意升级。
 
-首次创建独立测试环境时使用一个未占用的路径，以下 `.build/glm-tests` 是示例：
+首次创建独立测试环境时使用一个未占用的路径，以下 `.build/m4-tests` 是示例：
 
 ```bash
-python3.13 -m venv .build/glm-tests
-source .build/glm-tests/bin/activate
+python3.13 -m venv .build/m4-tests
+source .build/m4-tests/bin/activate
 python -m pip install --require-hashes --only-binary=:all: -r Tools/DownloaderHelper/requirements-dev.txt
 ```
 
 已有环境就先核实并复用，不覆盖未知环境；不要安装到系统 Python。
+旧 `.build/glm-tests` 如仍可用也可以复用，不必因更换编程助手而重建或重命名。
 `.build/` 是忽略目录，不提交环境或下载数据。Google Chrome 是此集成的运行依赖，
 不要以安装另一个 Chromium 后端来掩盖 Chrome 特有行为。
 
@@ -203,9 +208,14 @@ Release status: not released / draft / publicly verified
 
 ## 9. 最新 Codex review 交接
 
-**GLM 下一轮修补先读：**
+**Qwen 接手时先读：**
 [`Codex 评审后的修补与验收清单`](handoffs/2026-09-25-glm-fix-guidance.md)。
-其中 R1–R7 给出复现条件、修补要求和验收证据；基于 `7372e9cb`，不是已修复声明。
+文件名保留历史称呼。其中 R1–R7 给出复现条件、修补要求和验收证据；基于 `7372e9cb`，不是已修复声明。
+GLM 后续已提交 `662d5a0e`，必须先核实最新分支和差异，不照着旧清单重复覆盖修补。
+
+HDR 默认关闭改动见 [PR #1](https://github.com/SeanLi-Coder/ChengYingPlayer/pull/1) 及
+[`HDR 交接`](handoffs/2026-09-25-hdr-default-off.md)。接手时重新核实 PR、CI 和发布状态；
+本次 Qwen 入口更新不代表已合并 HDR 或已发布新安装包。
 
 快手视频、图片/图集和 Chrome Cookie 脱敏诊断的完整需求、实现范围、测试结果、真实站点阻塞和 review 清单见：
 
