@@ -738,3 +738,56 @@ Release: draft/in-progress — 标签 v0.2.37 已推送并触发 CI，
          未完成匿名核实前，状态为「未确认发布生效」。
 ```
 
+---
+
+## 12. v0.2.37 CI 失败根因与修复（2026-09-26 追加）
+
+**现象**：标签 v0.2.37（提交 `662d5a0e`）触发的 CI run 中，
+`media-helper-tests` 作业最后一步 `Test private download-center adapter` 失败，
+前 20 步全过。本地多环境无法复现，CI 匿名日志接口返回 403。
+
+**取证**：通过登录态浏览器读取该 run 的失败步骤终端输出，定位到唯一失败命令是
+`python -m pytest -q Tools/DownloaderHelper/tests`：
+
+```
+1 failed, 472 passed, 62 subtests passed in 95.09s
+FAILED test_kuaishou.py::test_kuaishou_cookie_failure_carries_a_safe_diagnostic[cause3-cookie_access_unknown]
+E   AssertionError: assert 'chrome_data_directory_missing' == 'cookie_access_unknown'
+```
+
+**根因**：R5 新增的参数化用例第 4 项 `cookie_access_unknown` 依赖宿主机环境。
+`chrome_cookie_diagnostic()`（`vendor/rednote/app/browser.py:94-97`）在异常文本
+不含 marker 时会探测本机 Chrome 用户数据目录：
+
+- 本机装有 Chrome → 目录存在 → 探测全过 → 落到 `cookie_access_unknown`
+- CI macos-26 runner 无 Chrome → 目录缺失 → 提前返回 `chrome_data_directory_missing`
+
+前 3 个用例（permission/locked/decrypt）靠异常文本 marker 在文件系统探测前命中，
+故环境无关、稳定通过；只有"未分类"用例走到目录探测，导致 CI 必挂、本地永不复现。
+与本轮 resume / profile 中断逻辑无关。
+
+**修复**（`tests/test_kuaishou.py`，仅测试代码，未改生产逻辑）：
+给该参数化测试注入 `tmp_path`，构造一个完整的临时 Chrome profile
+（`Default/Network/Cookies`），并 monkeypatch `chrome_user_data_directory` 指向它，
+使诊断分类只取决于注入的异常文本，与宿主机是否安装 Chrome 无关。
+沿用同库 `vendor/rednote/tests/test_signing_diagnostics.py:399` 既有范式。
+
+**验证证据**（临时虚拟环境，与 CI 同款依赖 Python 3.13 + playwright 1.62.0）：
+```
+根因证明  chrome_cookie_diagnostic('Default', RuntimeError('some unclassified failure'))
+          real HOME  -> cookie_access_unknown
+          empty HOME -> chrome_data_directory_missing   （复现 CI 条件）
+目标用例  4 passed（真 HOME 与空 HOME 两种条件均通过）
+ruff check --exclude vendor                              All checks passed
+typos 1.50.2（CI 同版本，改动文件 + 全仓库）              exit=0
+全套 pytest（真 HOME）                                    470 passed，仅 cookie 相关用例全过
+```
+全套 pytest 在临时 venv 中另有 3 个失败（`test_distribution` license lock、
+`test_vendor` 可写路径隔离 ×2），根因为临时环境 anyio 版本与 lock 不符的本地
+环境漂移，不在改动文件内，CI 干净环境此前为 `1 failed, 472 passed`（仅 cookie
+用例挂），故不阻塞。最终以真实 macos-26 runner 的 CI 结果为准。
+
+**发布决策**：v0.2.37 是已推送的附注标签且其 release 从未产出（CI 失败，公开
+latest 仍为 v0.2.36），按「不移动已发布标签」规则，本修复连同此前两处（拼写
+`9c21162a`、工作日志 `1f9ea047`）以新版本 **v0.2.38** 发布。
+

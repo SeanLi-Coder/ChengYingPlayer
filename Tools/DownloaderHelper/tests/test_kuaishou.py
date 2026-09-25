@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "vendor/rednote"))
 
+from app import browser as chrome_browser
 from app import downloader as engine
 from app import kuaishou as ks
 from app.downloader import KUAISHOU_SAVED_ASSETS_KEY, DownloadItem, EngineEvent
@@ -1613,9 +1614,21 @@ COOKIE_FAILURE_CASES = [
 
 @pytest.mark.parametrize(("cause", "expected"), COOKIE_FAILURE_CASES)
 def test_kuaishou_cookie_failure_carries_a_safe_diagnostic(
-    monkeypatch, cause, expected
+    monkeypatch, tmp_path, cause, expected
 ):
-    """R5: the real Kuaishou path classifies the failure and never leaks details."""
+    """R5: the real Kuaishou path classifies the failure and never leaks details.
+
+    The diagnostic helper falls back to a filesystem probe when the error text
+    carries no marker. Pin that probe to a complete temporary profile so the
+    category depends only on the injected error, never on whether the host (for
+    example a bare CI runner) happens to have Chrome installed.
+    """
+    profile_dir = tmp_path / "Default"
+    (profile_dir / "Network").mkdir(parents=True)
+    (profile_dir / "Network" / "Cookies").write_bytes(b"")
+    monkeypatch.setattr(
+        chrome_browser, "chrome_user_data_directory", lambda *a, **k: tmp_path
+    )
     monkeypatch.setattr(ks, "_extract_chrome_cookies", Mock(side_effect=cause))
     monkeypatch.setattr(
         ks, "sync_playwright", Mock(side_effect=AssertionError("No anonymous launch"))
