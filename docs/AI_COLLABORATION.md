@@ -201,7 +201,14 @@ Release status: not released / draft / publicly verified
 - `main` push／PR 会触发现有 CI；当前只有版本标签才触发正式发布任务。
   普通 push 或 CI 绿灯不代表播放器已发布。纯文档交接不增加播放器版本或创建发布标签。
 
-给新助手的第一句话可以直接用：
+## 9. 最新 Codex review 交接
+
+快手视频、图片/图集和 Chrome Cookie 脱敏诊断的完整需求、实现范围、测试结果、真实站点阻塞和 review 清单见：
+
+[`docs/handoffs/2026-09-25-kuaishou-codex-review.md`](handoffs/2026-09-25-kuaishou-codex-review.md)。
+
+Codex review 前先确认当前 `main` 包含 `ca14c85e`，并重新核对公开 release 状态；不要把快手真实主页尚未通过登录态验收写成已完成。
+
 
 > 请先阅读根目录 AGENTS.md、docs/AI_COLLABORATION.md 和
 > Tools/DownloaderHelper/UPSTREAM.md，确认当前分支与现有改动。
