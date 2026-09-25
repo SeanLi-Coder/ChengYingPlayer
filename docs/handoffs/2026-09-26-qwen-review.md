@@ -77,6 +77,38 @@ Sparkle 相关命令使用本机已有的固定 2.10.0 artifact 设置 `SPARKLE_
 
 ## 发布状态
 
-已准备 `0.2.39` / build `50`，尚未创建标签或发布。由本轮 Codex 负责后续整合与发布，
-避免另一台机器同时创建同版本标签。必须先通过本轮代码回归及完整 CI，之后沿用既有
-签名身份、更新源和六资产发布流程；发布完成前不能称已安装播放器已获得这些修复。
+`v0.2.39` / build `50` 已于北京时间 **2026-09-26 05:11:31** 正式发布。
+本轮由 Codex 完成整合和发布，标签指向 `0d494317e3d5234da82dbc261cb0de1b80197e2b`。
+原 HDR / Qwen 文档 PR #1 已合并。没有移动旧标签或覆盖已发布附件。
+
+- [正式版本及六项附件](https://github.com/SeanLi-Coder/ChengYingPlayer/releases/tag/v0.2.39)
+- [完整主线 CI](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/36182275763)：通过；同 SHA 拼写检查通过。
+- [正式标签 CI](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/36186415604)：三个作业全部通过。
+- 发布作业先在草稿核对六资产的大小及 SHA-256，再公开；随后匿名 latest、实际客户端 feed、
+  完整 DMG 下载校验通过。源码包、源码校验和及第三方来源清单保留。
+- 本机再次匿名访问 latest，返回 HTTP 200 并指向 `v0.2.39`；实际客户端 feed 为本次签名版本。
+  本机完整匿名下载 DMG 后，大小为 **167838637 bytes**，SHA-256 为
+  `7145c222850941551515eefceb60ca1712e02cd1dcc4a9e0d6bbeb5bf612dddd`，
+  与公开校验文件、GitHub 资产 digest 和签名 feed 长度一致。
+- 公开 feed 的 SHA-256 为
+  `3c406638a407baa9afaf1efe353339d420449b69529a811ad8c2f93f9d0dc667`。
+  本机以 `v0.2.38` 公钥重新验签通过；只读挂载公开 DMG，`verify_appcast.py` 验证 feed、
+  归档签名、包内版本、更新身份及 ARM64 / macOS 策略通过，`codesign --verify --deep --strict`
+  通过。验证后已卸载镜像，未启动或覆盖本机安装的播放器。
+
+已保留原 Bundle ID、更新源、公钥以及用户明确保存的关闭自动更新选择。
+发布与公开交付已验证不等于用户机器已经安装；是否实际更新仍取决于该设备的设置和任务状态。
+本次发行继续使用 ad-hoc 签名，未获得 Apple Developer ID 公证。
+
+## CI 证据的适用范围
+
+- 本轮主线日志确认 helper `509 passed, 62 subtests passed`、上游 `1405 passed`，新增下载测试未跳过；
+  图片 UI 142、真实后端 52、幻灯片 UI 120 项通过。其他模块有环境／条件跳过（媒体 helper 1、字幕 5），
+  不能称“全 CI 零跳过”。
+- 实际更新安装测试使用本次 App 内的 Sparkle 和生产更新逻辑，临时测试 App 完成可见下载、
+  空闲屏障、替换和重启；等长篡改 DMG 被拒绝，旧测试版本未变、没有重启。
+  这不是用户已安装 `v0.2.38` 到 `v0.2.39` 的整机现场测试。
+- 主线 4K 持续播放实际运行 180 秒：`3840×2160` 源、`640×360` framebuffer、Apple Software Renderer，
+  `hardware_verified=0`、`software_verified=1`；缩放／平移为 178 checks、61 帧实际软件解码渲染。
+  这些检查未因环境跳过，但不能称为硬件解码或原生 4K framebuffer 验证。
+- 快手整主页全量、明确末页、真实图集以及 M4 Max 实体屏幕验证仍需在可访问的目标机器执行。

@@ -208,14 +208,26 @@ Release status: not released / draft / publicly verified
 
 ## 9. 最新 Codex review 交接
 
-**Qwen 接手时先读：**
+**Qwen 接手时先读本轮最新记录：**
+[`2026-09-26 Qwen 提交复核与发布交接`](handoffs/2026-09-26-qwen-review.md)。
+本轮已核实 Qwen 的 `v0.2.38` 与追加工作日志，并在 `10610845`、`0d494317` 修补
+图集完整性、请求重放、恢复收据校验和动图跨圈暂停问题；完整主线 CI `36182275763` 通过。
+`v0.2.39` / build `50` 已于北京时间 2026-09-26 05:11:31 正式发布，标签 CI `36186415604`
+全部通过，六资产、旧公钥验签、匿名更新源及完整公开 DMG 校验通过，详见上述记录。
+本轮发版已完成；不要重建或移动同版本标签，下次发版仍须先协调唯一负责人并核实实际远端状态。
+新增解析、真实浏览器重放和收据回归位于 `test_kuaishou_album_integrity.py`、
+`test_kuaishou_request_replay.py`、`test_kuaishou_resume_fingerprints.py`，均在正式 helper 测试目录。
+旧恢复记录缺少摘要或签名 URL 变化时会保守重新下载，不覆盖旧文件；不能恢复“不从头读主页”的错误承诺。
+整主页全量、明确末页和真实图集仍未完整验收。软件解码／渲染回归不能替代 M4 Max 硬件验证。
+
+**以下为历史 review，需先对照上述新记录：**
 [`Codex 评审后的修补与验收清单`](handoffs/2026-09-25-glm-fix-guidance.md)。
 文件名保留历史称呼。其中 R1–R7 给出复现条件、修补要求和验收证据；基于 `7372e9cb`，不是已修复声明。
 GLM 后续已提交 `662d5a0e`，必须先核实最新分支和差异，不照着旧清单重复覆盖修补。
 
 HDR 默认关闭改动见 [PR #1](https://github.com/SeanLi-Coder/ChengYingPlayer/pull/1) 及
-[`HDR 交接`](handoffs/2026-09-25-hdr-default-off.md)。接手时重新核实 PR、CI 和发布状态；
-本次 Qwen 入口更新不代表已合并 HDR 或已发布新安装包。
+[`HDR 交接`](handoffs/2026-09-25-hdr-default-off.md)。该 PR 已在本轮合入主线；
+保留用户明确保存的开关偏好，实体 HDR 屏幕表现仍需在目标机器验证。
 
 快手视频、图片/图集和 Chrome Cookie 脱敏诊断的完整需求、实现范围、测试结果、真实站点阻塞和 review 清单见：
 
