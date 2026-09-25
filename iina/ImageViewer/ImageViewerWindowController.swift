@@ -561,7 +561,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     }
   }
 
-  private func requestFrame(_ index: Int) {
+  private func requestFrame(_ index: Int, completesLoop: Bool = false) {
     guard let details, (0..<details.frameCount).contains(index), !closed, !isEditingImage else { return }
     framePending = true
     frameGeneration = UUID()
@@ -584,6 +584,8 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
         DispatchQueue.main.async { [weak self] in
           guard let self, !self.closed, self.sourceGeneration == generation, self.frameGeneration == request else { return }
           self.framePending = false
+          // A paused or replaced request must not consume an undisplayed loop.
+          if completesLoop { self.completedLoops += 1 }
           self.frameIndex = index
           self.frameDuration = self.validDuration(duration)
           self.canvas.display(image, resetZoom: false)
@@ -724,11 +726,15 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
   private func advanceAnimation() {
     guard isAnimating, !framePending, let details else { return }
-    var next = frameIndex + 1
+    let next = frameIndex + 1
     if next >= details.frameCount {
-      completedLoops += 1
-      if details.loopCount > 0 && completedLoops >= details.loopCount { stopAnimation(); return }
-      next = 0
+      if details.loopCount > 0 && completedLoops + 1 >= details.loopCount {
+        completedLoops += 1
+        stopAnimation()
+        return
+      }
+      requestFrame(0, completesLoop: true)
+      return
     }
     requestFrame(next)
   }

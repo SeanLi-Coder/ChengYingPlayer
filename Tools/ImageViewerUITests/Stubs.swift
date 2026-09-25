@@ -21,7 +21,12 @@ final class ImageDocument {
   static let lock = NSLock()
   static var mainThreadDecodeCount = 0
   private static var startedURLs: [URL] = []
+  private static var durationObserver: ((URL, Int) -> Void)?
   static var starts: [URL] { lock.lock(); defer { lock.unlock() }; return startedURLs }
+  static func observeFrameDurations(_ observer: ((URL, Int) -> Void)?) {
+    lock.lock(); defer { lock.unlock() }
+    durationObserver = observer
+  }
   let url: URL
   let width = 240
   let height = 120
@@ -55,7 +60,13 @@ final class ImageDocument {
     context.fill(CGRect(x: 0, y: 0, width: width, height: height))
     return context.makeImage()!
   }
-  func frameDuration(at index: Int) -> TimeInterval { [0.025, 0.04, 0.06][index % 3] }
+  func frameDuration(at index: Int) -> TimeInterval {
+    Self.lock.lock()
+    let observer = Self.durationObserver
+    Self.lock.unlock()
+    observer?(url, index)
+    return [0.025, 0.04, 0.06][index % 3]
+  }
 }
 
 enum ImageConversionFormat: CaseIterable {

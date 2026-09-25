@@ -35,6 +35,10 @@ v0.2.38 的 tag 工作流 `36168070575` 三个作业均成功，包含前稳定�
 5. Python Playwright 的空参数会回继原请求：POST 重定向为 GET 后原正文可能再次发送；
    过滤后为空的请求头可能重新带出认证信息，HEAD 303 也被误转为 GET。
    已用真实 Chrome 和本地 HTTP 服务复现并修正，不放宽可信域、TLS 或逐跳检查。
+6. 追查前一版图片 UI 偶发失败，确定性复现有限循环动图在异步跨圈换帧时暂停，
+   会提前消费圈数，恢复后少播一圈。非末圈现在只在新首帧成功提交时计数；取消或过期
+   回调不计数，最后一圈正常停止及完整重播语义保留。使用受控解码队列验证真实生产逻辑，
+   不用删除断言或增加任意等待来让旧失败消失。
 
 ## 本机最终回归
 
@@ -53,6 +57,8 @@ v0.2.38 的 tag 工作流 `36168070575` 三个作业均成功，包含前稳定�
 | `bash Tools/SimplificationTests/run.sh` | 144 checks |
 | `bash Tools/PreferenceSearchTests/run.sh` | 11 checks |
 | `bash Tools/ICCProfileTests/run.sh` | 6161 checks，12 次真实离屏渲染；计数随像素差异变化 |
+| `bash Tools/ImageViewerUITests/run.sh` | 142 UI + 52 真实图片后端 checks，macOS 10.15 Intel 类型检查通过；新跨圈取消回归修补前失败、修补后通过 |
+| `bash Tools/ImageSlideshowUITests/run.sh` | 120 checks |
 | `bash Tools/SparkleUpdateTests/run.sh` | 16 项签名 feed／DMG 测试通过，使用临时测试密钥 |
 | `bash Tools/AppUpdateTests/run.sh` | 131 checks |
 | `bash Tools/UpdateActivityTests/run.sh` | 49 activity + 24 helper drain checks |

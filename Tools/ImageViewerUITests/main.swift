@@ -20,6 +20,27 @@ func waitFor(_ message: String, _ condition: () -> Bool) {
   while !condition() && Date() < deadline { pump() }
   expect(condition(), message)
 }
+final class FrameWrapGate {
+  private let lock = NSLock()
+  private let release = DispatchSemaphore(value: 0)
+  private var zeroRequests = 0
+  private var blocked = false
+  private var timedOut = false
+  var isBlocked: Bool { lock.lock(); defer { lock.unlock() }; return blocked }
+  var didTimeOut: Bool { lock.lock(); defer { lock.unlock() }; return timedOut }
+  func observe(_ index: Int) {
+    guard index == 0 else { return }
+    lock.lock()
+    zeroRequests += 1
+    let shouldBlock = zeroRequests == 2
+    if shouldBlock { blocked = true }
+    lock.unlock()
+    if shouldBlock && release.wait(timeout: .now() + 5) == .timedOut {
+      lock.lock(); timedOut = true; lock.unlock()
+    }
+  }
+  func resume() { release.signal() }
+}
 func textContent(_ view: NSView) -> String {
   let own = (view as? NSTextField)?.stringValue ?? ""
   return ([own] + view.subviews.map(textContent)).joined(separator: "\n")
@@ -264,6 +285,45 @@ expect(!viewer.isAnimating, "Finite animation pauses mid-sequence")
 NSApp.sendAction(viewer.animationButton.action!, to: viewer.animationButton.target, from: viewer.animationButton)
 waitFor("Finite animation resumes and completes") { !viewer.isAnimating && viewer.frameIndex == 2 }
 expect(observedLoopStarts == 3, "Pause and resume do not reset completed finite loops")
+viewer.canvas.onZoomChanged = originalZoomCallback
+
+// Hold the first wrap on the real decode queue, including cached-frame requests.
+// Pausing must invalidate that callback without counting an undisplayed loop.
+let wrapURL = root.appendingPathComponent("wrap-triple.gif")
+try Data([0]).write(to: wrapURL)
+let wrapGate = FrameWrapGate()
+ImageDocument.observeFrameDurations { observedURL, index in
+  if observedURL == wrapURL { wrapGate.observe(index) }
+}
+var wrapLoopStarts = 0
+var lastWrapFrame = -1
+viewer.canvas.onZoomChanged = { zoom in
+  originalZoomCallback?(zoom)
+  if viewer.canvas.image != nil && viewer.frameIndex != lastWrapFrame {
+    lastWrapFrame = viewer.frameIndex
+    if lastWrapFrame == 0 { wrapLoopStarts += 1 }
+  }
+}
+viewer.open(urls: [wrapURL, url])
+waitFor("Loop wrap waits for its asynchronous frame") { wrapGate.isBlocked }
+expect(viewer.frameIndex == 2 && wrapLoopStarts == 1,
+       "The pending wrap has not displayed a new loop")
+NSApp.sendAction(viewer.animationButton.action!, to: viewer.animationButton.target, from: viewer.animationButton)
+expect(!viewer.isAnimating, "Pause cancels a pending loop wrap")
+wrapGate.resume()
+pump(0.1)
+expect(!viewer.isAnimating && viewer.frameIndex == 2 && wrapLoopStarts == 1,
+       "A cancelled wrap callback cannot change the paused frame")
+expect(!wrapGate.didTimeOut, "The controlled decode gate was explicitly released")
+NSApp.sendAction(viewer.animationButton.action!, to: viewer.animationButton.target, from: viewer.animationButton)
+waitFor("Animation resumes after cancelling a pending wrap") { !viewer.isAnimating && viewer.frameIndex == 2 }
+expect(wrapLoopStarts == 3,
+       "A cancelled wrap must not consume a finite animation loop")
+ImageDocument.observeFrameDurations(nil)
+NSApp.sendAction(viewer.animationButton.action!, to: viewer.animationButton.target, from: viewer.animationButton)
+waitFor("Completed multi-loop animation can replay") { !viewer.isAnimating && viewer.frameIndex == 2 }
+expect(wrapLoopStarts == 6,
+       "Explicit replay starts three new loops without counting its initial frame as a wrap")
 viewer.canvas.onZoomChanged = originalZoomCallback
 
 viewer.open(urls: [root.appendingPathComponent("slow.png")])
