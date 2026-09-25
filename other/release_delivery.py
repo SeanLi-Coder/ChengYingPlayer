@@ -13,13 +13,21 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from verify_appcast import FEED_URL, RELEASES, REPOSITORY, SPARKLE, require, signed_content
+from verify_appcast import (
+    FEED_URL,
+    RELEASES,
+    REPOSITORY,
+    SPARKLE,
+    delta_enclosures,
+    require,
+    signed_content,
+)
 
 
-def asset_names(tag):
+def asset_names(tag, feed_data=None):
     require(re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag), "Invalid stable release tag.")
     prefix = f"ChengYingPlayer-{tag}"
-    return (
+    base = (
         prefix + "-Apple-Silicon.dmg",
         prefix + "-Apple-Silicon.dmg.sha256",
         prefix + "-Release-Source.tar.gz",
@@ -27,6 +35,32 @@ def asset_names(tag):
         prefix + "-Third-Party-Source-Manifest.txt",
         "appcast.xml",
     )
+    if feed_data is None:
+        return base
+    content, _ = signed_content(feed_data)
+    additional = tuple(name for delta in delta_enclosures(content, tag)
+                       for name in (delta["name"], delta["name"] + ".sha256"))
+    return base + additional
+
+
+def delta_manifest(tag, feed_data, directory):
+    """Use signed metadata as the allowlist, never an unchecked directory glob."""
+    content, _ = signed_content(feed_data)
+    result = {}
+    for delta in delta_enclosures(content, tag):
+        path = directory / delta["name"]
+        require(path.is_file() and not path.is_symlink() and path.stat().st_size == delta["length"],
+                "Missing, unsafe or wrong-sized local delta.")
+        with path.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        checksum = directory / (delta["name"] + ".sha256")
+        expected_checksum = f"{digest}  {delta['name']}\n".encode("ascii")
+        require(checksum.is_file() and not checksum.is_symlink()
+                and checksum.stat().st_size == len(expected_checksum)
+                and checksum.read_bytes() == expected_checksum, "Delta checksum does not match verified local bytes.")
+        result[delta["name"]] = (delta, digest)
+        result[checksum.name] = (None, hashlib.sha256(expected_checksum).hexdigest())
+    return result
 
 
 def gh(*arguments):
@@ -53,7 +87,12 @@ def draft_assets(tag, expected_names, run):
 
 
 def upload_assets(tag, directory, run=gh, wait=time.sleep):
-    expected = asset_names(tag)
+    feed_path = directory / "appcast.xml"
+    require(feed_path.is_file() and not feed_path.is_symlink() and feed_path.stat().st_size <= 1024 * 1024,
+            "Missing or unsafe release feed.")
+    feed_data = feed_path.read_bytes()
+    expected = asset_names(tag, feed_data)
+    delta_manifest(tag, feed_data, directory)
     manifest = {}
     for name in expected:
         local = directory / name
@@ -90,7 +129,7 @@ def upload_assets(tag, directory, run=gh, wait=time.sleep):
     final = draft_assets(tag, expected, run)
     require(set(final) == set(expected) and all(matches(final[name], name) for name in expected),
             "Draft asset set changed during upload verification.")
-    print("All six stable draft assets are uploaded and match their local SHA-256 digests.")
+    print(f"All {len(expected)} stable draft assets are uploaded and match their local SHA-256 digests.")
 
 
 def safe_url(url):
@@ -136,22 +175,23 @@ def verify_download(url, expected_size, expected_digest, opener=None, clock=time
     digest = hashlib.sha256()
     received = 0
     with opener.open(request, timeout=20) as response:
-        require(response.status == 200, "Public DMG download failed.")
+        require(response.status == 200, "Public archive download failed.")
         while True:
-            require(clock() - started < 300, "Public DMG download exceeded its time limit.")
+            require(clock() - started < 300, "Public archive download exceeded its time limit.")
             chunk = response.read1(min(1024 * 1024, expected_size - received + 1))
-            require(clock() - started < 300, "Public DMG download exceeded its time limit.")
+            require(clock() - started < 300, "Public archive download exceeded its time limit.")
             if not chunk:
                 break
             received += len(chunk)
-            require(received <= expected_size, "Public DMG download exceeds the verified size.")
+            require(received <= expected_size, "Public archive download exceeds the verified size.")
             digest.update(chunk)
     require(received == expected_size and digest.hexdigest() == expected_digest,
-            "Public DMG download bytes differ from the verified build artifact.")
+            "Public archive download bytes differ from the verified build artifact.")
 
 
 def verify_public(tag, feed_data, local_archive, request=public_request, download=verify_download):
-    names = asset_names(tag)
+    names = asset_names(tag, feed_data)
+    deltas = delta_manifest(tag, feed_data, local_archive.parent)
     require(local_archive.name == names[0] and local_archive.is_file() and not local_archive.is_symlink(),
             "Expected the exact locally verified DMG.")
     with local_archive.open("rb") as stream:
@@ -184,10 +224,17 @@ def verify_public(tag, feed_data, local_archive, request=public_request, downloa
             "Public DMG asset digest differs from the verified build artifact.")
     require(by_name["appcast.xml"].get("digest") == "sha256:" + hashlib.sha256(feed_data).hexdigest(),
             "Public feed asset digest differs from the verified build artifact.")
+    for name, (_, digest) in deltas.items():
+        require(by_name[name].get("digest") == "sha256:" + digest
+                and by_name[name].get("size") == (local_archive.parent / name).stat().st_size,
+                "Public delta asset differs from verified local bytes.")
     public_feed, _ = request(FEED_URL)
     require(public_feed == feed_data, "The exact installed-app feed URL returned stale or changed bytes.")
     download(archive_url, int(size), archive_digest)
-    print("The public latest release, installed-app feed URL and anonymously downloaded DMG match the verified build.")
+    for delta, digest in deltas.values():
+        if delta is not None:
+            download(delta["url"], delta["length"], digest)
+    print("The public latest release, installed-app feed URL and anonymously downloaded archives match the verified build.")
 
 
 def main():

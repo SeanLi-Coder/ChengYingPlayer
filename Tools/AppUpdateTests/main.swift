@@ -115,11 +115,10 @@ check(UpdateInstallationLocation.evaluate(path: "/Applications/ChengYing.app", i
 let suite = "org.chengying.tests.updates.\(UUID().uuidString)"
 let defaults = UserDefaults(suiteName: suite)!
 let unrelatedPreference = "ChengYingTestsPreferredSubtitleLanguage"
-defaults.set(false, forKey: AppUpdatePreferences.automaticChecksKey)
 defaults.set(true, forKey: "SUAutomaticallyUpdate")
 defaults.set("ja", forKey: unrelatedPreference)
 AppUpdatePreferences.migrate(defaults)
-check(defaults.bool(forKey: AppUpdatePreferences.automaticChecksKey), "Legacy disabled default migrates once")
+check(defaults.bool(forKey: AppUpdatePreferences.automaticChecksKey), "A missing automatic-check preference receives the new-install default")
 check(!defaults.bool(forKey: "SUAutomaticallyUpdate"), "Migration selects visible downloads over Sparkle silent downloads")
 for launch in 1...3 {
   // Recreate the preferences object using the same domain, as a later version does.
@@ -147,6 +146,35 @@ for launch in 1...3 {
         "Opted-out launch \(launch) keeps the visible download policy")
   check(upgradedDefaults.string(forKey: unrelatedPreference) == "en",
         "Opted-out launch \(launch) preserves subsequent user preference changes")
+}
+defaults.removePersistentDomain(forName: suite)
+// Existing users can have an explicit opt-out even without our migration marker.
+let retainedPreferences: [String: Any] = [
+  AppUpdatePreferences.automaticChecksKey: false,
+  "enableHdrSupport": true,
+  "oscPosition": 1,
+  "enableControlBarAutoHide": false,
+  "showRemainingTime": false,
+  "softVolume": 27,
+  "userInputConfigs": ["Personal": "/fixture/input.conf"],
+  "ChengYingTestsBookmark": Data([0, 1, 2, 255]),
+  "ChengYingTestsProxy": "http://127.0.0.1:7897",
+  "ChengYingTestsSort": ["name", "ascending"],
+]
+defaults.setPersistentDomain(retainedPreferences, forName: suite)
+defaults.register(defaults: [AppUpdatePreferences.automaticChecksKey: true, "enableHdrSupport": false])
+for launch in 1...3 {
+  let upgradedDefaults = UserDefaults(suiteName: suite)!
+  AppUpdatePreferences.migrate(upgradedDefaults)
+  check(!upgradedDefaults.bool(forKey: AppUpdatePreferences.automaticChecksKey),
+        "Pre-migration explicit opt-out survives upgrade launch \(launch)")
+  var actual = upgradedDefaults.persistentDomain(forName: suite)!
+  check(actual.removeValue(forKey: AppUpdatePreferences.migrationKey) as? Bool == true,
+        "Retained preferences record the completed migration on launch \(launch)")
+  check(actual.removeValue(forKey: "SUAutomaticallyUpdate") as? Bool == false,
+        "Retained preferences use visible downloads on launch \(launch)")
+  check(NSDictionary(dictionary: actual).isEqual(to: retainedPreferences),
+        "Upgrade launch \(launch) preserves all stored preference keys, types, and values")
 }
 defaults.removePersistentDomain(forName: suite)
 defaults.set(true, forKey: AppUpdatePreferences.automaticChecksKey)

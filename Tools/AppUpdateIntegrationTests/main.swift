@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Sparkle
 
 // This disposable app exercises the production user driver and real Sparkle installer.
@@ -58,11 +59,52 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate
     DispatchQueue.main.async { NSApp.terminate(nil) }
   }
 
+  func verifyUserData(version: String, seedPreferences: Bool = false) -> Bool {
+    let expected = Bundle.main.object(forInfoDictionaryKey: "FixturePreferences") as! [String: Any]
+    let defaults = UserDefaults.standard
+    if seedPreferences {
+      for (key, value) in expected { defaults.set(value, forKey: key) }
+      guard defaults.synchronize() else {
+        record("failure:fixture-preferences-not-persisted")
+        return false
+      }
+    }
+    for (key, value) in expected {
+      guard let stored = defaults.object(forKey: key),
+            NSDictionary(dictionary: [key: stored]).isEqual(to: [key: value]) else {
+        record("failure:fixture-preference-changed:\(key)")
+        return false
+      }
+    }
+    record("preferences-preserved:\(version)")
+    let support = URL(fileURLWithPath:
+      Bundle.main.object(forInfoDictionaryKey: "FixtureSupportDirectory") as! String)
+    let hashes = Bundle.main.object(forInfoDictionaryKey: "FixtureSupportHashes") as! [String: String]
+    do {
+      for (relative, expectedHash) in hashes {
+        let data = try Data(contentsOf: support.appendingPathComponent(relative))
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard hash == expectedHash else {
+          record("failure:fixture-support-file-changed:\(relative)")
+          return false
+        }
+      }
+    } catch {
+      record("failure:fixture-support-file-unreadable")
+      return false
+    }
+    record("support-preserved:\(version)")
+    return true
+  }
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as! String
     record("launched:\(version):\(ProcessInfo.processInfo.processIdentifier)")
+    guard verifyUserData(version: version, seedPreferences: version == "1") else {
+      NSApp.terminate(nil)
+      return
+    }
     if version == "2" {
-      UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
       record("replacement-relaunched")
       NSApp.terminate(nil)
       return
@@ -83,6 +125,9 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     if driver != nil { observeDriver() }
+    if driver != nil {
+      guard verifyUserData(version: "before-termination") else { return .terminateCancel }
+    }
     if driver?.isInstalling == true {
       record("barrier:\(activity.installationBarrierIsSafe)")
       return activity.installationBarrierIsSafe ? .terminateNow : .terminateCancel

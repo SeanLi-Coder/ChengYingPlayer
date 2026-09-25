@@ -6,6 +6,7 @@ import base64
 import copy
 import os
 import plistlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -137,6 +138,108 @@ class SignedUpdates(unittest.TestCase):
         )
 
     def test_actual_sparkle_signed_dmg_and_feed(self):
+        self.verify()
+
+    def add_signed_delta(self, mutate=None):
+        self.delta_path = self.archive.parent / f"ChengYingPlayer-{self.tag}-from-99-Apple-Silicon.delta"
+        self.delta_path.unlink(missing_ok=True)
+        # Patch application is covered by the real installer suite; here we test authenticity.
+        self.delta_path.write_bytes(b"delta signature fixture")
+        result = subprocess.run(
+            [str(self.sparkle / "bin/sign_update"), "--ed-key-file", "-", str(self.delta_path)],
+            input=self.key, capture_output=True, check=True,
+        )
+        match = re.search(rb'sparkle:edSignature="([A-Za-z0-9+/=]+)"', result.stdout)
+        self.assertIsNotNone(match)
+        attributes = {
+            "url": f"{policy.RELEASES}/download/{self.tag}/{self.delta_path.name}",
+            "length": str(self.delta_path.stat().st_size), "type": "application/octet-stream",
+            policy.SPARKLE + "deltaFrom": "99", policy.SPARKLE + "edSignature": match[1].decode(),
+        }
+        def insert(item):
+            container = ET.SubElement(item, policy.SPARKLE + "deltas")
+            enclosure = ET.SubElement(container, "enclosure", attributes)
+            if mutate is not None:
+                mutate(item, container, enclosure)
+        self.signed_mutation(insert)
+
+    def test_signed_delta_and_full_fallback_both_verify(self):
+        self.add_signed_delta()
+        self.verify()
+        content, _ = policy.signed_content(self.feed.read_bytes())
+        metadata = policy.delta_enclosures(content, self.tag)
+        self.assertEqual([item["from_build"] for item in metadata], ["99"])
+        self.assertEqual(metadata[0]["name"], self.delta_path.name)
+
+    def test_changed_delta_same_size_is_rejected_even_with_valid_feed(self):
+        self.add_signed_delta()
+        self.delta_path.write_bytes(b"X" * self.delta_path.stat().st_size)
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.verify()
+
+    def test_missing_wrong_sized_and_symlink_delta_fail_closed(self):
+        for scenario in ("missing", "size", "symlink"):
+            with self.subTest(scenario=scenario):
+                self.add_signed_delta()
+                if scenario == "missing":
+                    self.delta_path.unlink()
+                elif scenario == "size":
+                    self.delta_path.write_bytes(b"x")
+                else:
+                    target = self.directory / "delta-target"
+                    target.write_bytes(self.delta_path.read_bytes())
+                    self.delta_path.unlink()
+                    self.delta_path.symlink_to(target)
+                with self.assertRaisesRegex(ValueError, "delta archive"):
+                    self.verify()
+
+    def test_historical_full_verification_does_not_require_old_deltas(self):
+        self.add_signed_delta()
+        self.delta_path.unlink()
+        policy.verify(self.feed, self.archive, self.info, self.tag, self.verifier, verify_deltas=False)
+        self.add_signed_delta(lambda item, container, delta: delta.set(policy.SPARKLE + "deltaFrom", "100"))
+        with self.assertRaises(ValueError):
+            policy.verify(self.feed, self.archive, self.info, self.tag, self.verifier, verify_deltas=False)
+
+    def test_delta_metadata_is_restricted_to_older_pinned_builds(self):
+        cases = [
+            (policy.SPARKLE + "deltaFrom", value) for value in ("100", "101", "0", "099", "-1", "1.2", "../99")
+        ] + [("length", value) for value in ("0", "-1", "01", str(self.archive.stat().st_size))] + [
+            ("type", "application/zip"), (policy.SPARKLE + "installationType", "package"),
+            (policy.SPARKLE + "edSignature", "invalid"),
+            (policy.SPARKLE + "deltaFromSparkleExecutableSize", "0"),
+            (policy.SPARKLE + "deltaFromSparkleLocales", "en,en"),
+            (policy.SPARKLE + "deltaFromSparkleLocales", "en,../secret"),
+            ("url", f"{policy.RELEASES}/download/{self.tag}/../different.delta"),
+            ("url", f"{policy.RELEASES}/download/v99.0.0/old.delta"),
+            ("url", "https://github.com/another/project/releases/download/v99.0.1/test.delta"),
+        ]
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                self.add_signed_delta(lambda item, container, delta, key=key, value=value: delta.set(key, value))
+                with self.assertRaises(ValueError):
+                    self.verify()
+
+    def test_delta_duplicate_containers_bases_and_nested_data_rejected(self):
+        changes = [
+            lambda item, container, delta: item.append(copy.deepcopy(container)),
+            lambda item, container, delta: container.append(copy.deepcopy(delta)),
+            lambda item, container, delta: ET.SubElement(delta, "script"),
+            lambda item, container, delta: container.set("external", "true"),
+            lambda item, container, delta: setattr(container, "text", "untrusted"),
+            lambda item, container, delta: item.remove(item.find("enclosure")),
+        ]
+        for index, mutate in enumerate(changes):
+            with self.subTest(case=index):
+                self.add_signed_delta(mutate)
+                with self.assertRaises(ValueError):
+                    self.verify()
+
+    def test_delta_preflight_metadata_is_optional_but_validated(self):
+        def preflight(item, container, delta):
+            delta.set(policy.SPARKLE + "deltaFromSparkleExecutableSize", "12345")
+            delta.set(policy.SPARKLE + "deltaFromSparkleLocales", "en,zh-Hans,zh-Hant")
+        self.add_signed_delta(preflight)
         self.verify()
 
     def test_changed_feed_bytes(self):

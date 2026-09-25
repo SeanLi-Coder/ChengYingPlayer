@@ -9,9 +9,18 @@ import plistlib
 import shutil
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from verify_appcast import RELEASES, require, validate_info, verify
+from build_delta_update import build_delta, verify_archive_application
+from verify_appcast import (
+    RELEASES,
+    SPARKLE,
+    require,
+    signed_content,
+    validate_info,
+    verify,
+)
 
 SPARKLE_VERSION = "2.10.0"
 
@@ -40,7 +49,25 @@ def validate_sparkle(root):
     return tool
 
 
-def generate(app, archive, destination, tag, sparkle_root):
+def sign_file(tool, path, secret, *, print_signature=False):
+    command = [str(tool), "--ed-key-file", "-"]
+    if print_signature:
+        command.append("-p")
+    result = subprocess.run(
+        command + [str(path)],
+        input=secret.encode(),
+        capture_output=True,
+        check=False,
+        timeout=600,
+    )
+    # Never print raw signing diagnostics or include credentials in exceptions.
+    require(result.returncode == 0, "Sparkle could not sign the verified delta update.")
+    return result.stdout.decode("ascii").strip() if print_signature else None
+
+
+def generate(
+    app, archive, destination, tag, sparkle_root, *, previous_release_directory=None
+):
     # Remove the secret from child environments. Only the signing tool gets stdin.
     secret = os.environ.pop("SPARKLE_ED25519_PRIVATE_KEY", "")
     require(bool(secret.strip()), "The release signing secret is not configured.")
@@ -70,8 +97,23 @@ def generate(app, archive, destination, tag, sparkle_root):
     before = digest(archive)
     with tempfile.TemporaryDirectory(prefix="chengying-feed-sign-") as directory:
         staging = Path(directory)
-        staged_archive = staging / archive.name
-        # A separate workspace prevents Sparkle from discovering other archives or deltas.
+        verify_archive_application(archive, app, info, staging)
+        delta = None
+        if previous_release_directory is not None:
+            delta = build_delta(
+                app,
+                archive,
+                tag,
+                info,
+                previous_release_directory,
+                sparkle_root,
+                staging,
+            )
+        # Keep the official full-feed generator isolated from old archives and
+        # prebuilt deltas; our delta was already round-tripped before signing.
+        signing = staging / "signing"
+        signing.mkdir()
+        staged_archive = signing / archive.name
         shutil.copyfile(archive, staged_archive)
         result = subprocess.run(
             [
@@ -84,14 +126,13 @@ def generate(app, archive, destination, tag, sparkle_root):
                 f"{RELEASES}/download/{tag}/",
                 "--link",
                 RELEASES,
-                str(staging),
+                str(signing),
             ],
             input=secret.encode(),
             capture_output=True,
             check=False,
             timeout=600,
         )
-        secret = ""
         # Never echo signing-tool diagnostics: malformed credential input must stay private.
         require(
             result.returncode == 0,
@@ -101,9 +142,61 @@ def generate(app, archive, destination, tag, sparkle_root):
             digest(staged_archive) == before and digest(archive) == before,
             "Archive changed during signing.",
         )
-        generated = staging / "appcast.xml"
-        verify(generated, archive, info, tag)
+        generated = signing / "appcast.xml"
+        extra_assets = []
+        if delta is not None:
+            delta_file, delta_attributes = delta
+            signing_tool = sparkle_root / "bin/sign_update"
+            require(
+                signing_tool.is_file() and os.access(signing_tool, os.X_OK),
+                "Missing pinned Sparkle delta signing tool.",
+            )
+            before_delta = digest(delta_file)
+            delta_signature = sign_file(
+                signing_tool, delta_file, secret, print_signature=True
+            )
+            content, _ = signed_content(generated.read_bytes())
+            ET.register_namespace("sparkle", SPARKLE[1:-1])
+            tree = ET.fromstring(content)
+            item = tree.find("channel/item")
+            require(item is not None, "Missing generated release item.")
+            deltas = ET.SubElement(item, SPARKLE + "deltas")
+            ET.SubElement(
+                deltas,
+                "enclosure",
+                {
+                    "url": f"{RELEASES}/download/{tag}/{delta_file.name}",
+                    "length": str(delta_file.stat().st_size),
+                    "type": "application/octet-stream",
+                    SPARKLE + "edSignature": delta_signature,
+                    **delta_attributes,
+                },
+            )
+            generated.write_bytes(
+                ET.tostring(tree, encoding="utf-8", xml_declaration=True)
+            )
+            sign_file(signing_tool, generated, secret)
+            require(digest(delta_file) == before_delta, "Delta changed during signing.")
+            checksum = delta_file.with_suffix(".delta.sha256")
+            checksum.write_text(
+                f"{before_delta}  {delta_file.name}\n", encoding="ascii"
+            )
+            extra_assets = [delta_file, checksum]
+        secret = ""
+        verify(generated, archive, info, tag, delta_directory=staging)
         destination.parent.mkdir(parents=True, exist_ok=True)
+        require(
+            all(
+                not (destination.parent / asset.name).exists() for asset in extra_assets
+            ),
+            "Refusing to overwrite existing delta release assets.",
+        )
+        for asset in extra_assets:
+            with (
+                asset.open("rb") as source,
+                (destination.parent / asset.name).open("xb") as output,
+            ):
+                shutil.copyfileobj(source, output)
         with destination.open("xb") as output:
             output.write(generated.read_bytes())
     print(
@@ -118,8 +211,16 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--sparkle-root", required=True, type=Path)
+    parser.add_argument("--previous-release-directory", type=Path)
     args = parser.parse_args()
-    generate(args.app, args.archive, args.output, args.tag, args.sparkle_root)
+    generate(
+        args.app,
+        args.archive,
+        args.output,
+        args.tag,
+        args.sparkle_root,
+        previous_release_directory=args.previous_release_directory,
+    )
 
 
 if __name__ == "__main__":

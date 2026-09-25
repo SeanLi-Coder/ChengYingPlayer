@@ -98,6 +98,71 @@ def signed_content(data):
     return content, match[1].decode()
 
 
+def delta_enclosures(content, tag):
+    """Read only bounded, version-pinned Sparkle deltas; never infer local paths from URLs."""
+    require(re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag), "Invalid release tag.")
+    require(len(content) <= 1024 * 1024, "Feed exceeds the release size limit.")
+    require(b"<!DOCTYPE" not in content.upper() and b"<!ENTITY" not in content.upper(),
+            "External XML declarations are forbidden.")
+    root = ET.fromstring(content)
+    items = root.findall("channel/item")
+    require(len(items) == 1 and len(root.findall(".//item")) == 1,
+            "Expected exactly one release item.")
+    item = items[0]
+    containers = item.findall(SPARKLE + "deltas")
+    require(len(containers) <= 1 and len(root.findall(".//" + SPARKLE + "deltas")) == len(containers),
+            "Unexpected or duplicate delta container.")
+    if not containers:
+        return []
+    container = containers[0]
+    require(not container.attrib and not (container.text or "").strip() and 1 <= len(container) <= 3,
+            "Expected one to three delta enclosures.")
+    build = item.findtext(SPARKLE + "version", "")
+    require(re.fullmatch(r"[1-9][0-9]{0,17}", build), "Invalid delta target build.")
+    full = item.find("enclosure")
+    require(full is not None, "Delta updates require a full archive fallback.")
+    full_size = full.get("length", "")
+    require(re.fullmatch(r"[1-9][0-9]{0,17}", full_size), "Invalid full archive size.")
+    required = {"url", "length", "type", SPARKLE + "edSignature", SPARKLE + "deltaFrom"}
+    optional = {SPARKLE + "deltaFromSparkleExecutableSize", SPARKLE + "deltaFromSparkleLocales"}
+    seen = set()
+    result = []
+    for enclosure in container:
+        require(enclosure.tag == "enclosure" and len(enclosure) == 0
+                and not (enclosure.text or "").strip() and not (enclosure.tail or "").strip(),
+                "Unexpected nested delta metadata.")
+        attributes = set(enclosure.attrib)
+        require(required <= attributes <= required | optional, "Unexpected delta attributes.")
+        previous = enclosure.get(SPARKLE + "deltaFrom", "")
+        require(re.fullmatch(r"[1-9][0-9]{0,17}", previous)
+                and int(previous) < int(build) and previous not in seen,
+                "Delta bases must be unique, older numeric builds.")
+        seen.add(previous)
+        name = f"ChengYingPlayer-{tag}-from-{previous}-Apple-Silicon.delta"
+        url = f"{RELEASES}/download/{tag}/{name}"
+        require(enclosure.get("url") == url, "Delta URL is not this repository's exact tagged asset.")
+        length = enclosure.get("length", "")
+        require(re.fullmatch(r"[1-9][0-9]{0,17}", length) and int(length) < int(full_size),
+                "Delta must be nonempty and smaller than the full archive.")
+        require(enclosure.get("type") == "application/octet-stream", "Unexpected delta type.")
+        signature = enclosure.get(SPARKLE + "edSignature", "")
+        require(re.fullmatch(r"[A-Za-z0-9+/]{86}==", signature), "Invalid delta signature.")
+        raw_signature = base64.b64decode(signature, validate=True)
+        require(len(raw_signature) == 64 and base64.b64encode(raw_signature).decode() == signature,
+                "Noncanonical delta signature.")
+        executable_size = enclosure.get(SPARKLE + "deltaFromSparkleExecutableSize")
+        if executable_size is not None:
+            require(re.fullmatch(r"[1-9][0-9]{0,17}", executable_size), "Invalid delta executable size.")
+        locales = enclosure.get(SPARKLE + "deltaFromSparkleLocales")
+        if locales is not None:
+            require(len(locales) <= 4096 and re.fullmatch(r"[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*", locales)
+                    and len(set(locales.split(","))) == len(locales.split(",")),
+                    "Invalid delta locale preflight.")
+        result.append({"name": name, "url": url, "length": int(length),
+                       "signature": signature, "from_build": previous})
+    return result
+
+
 def validate_feed(content, archive, info, tag):
     root = ET.fromstring(content)
     require(
@@ -121,6 +186,7 @@ def validate_feed(content, archive, info, tag):
             "shortVersionString",
             "minimumSystemVersion",
             "hardwareRequirements",
+            "deltas",
         )
     }
     require(
@@ -131,6 +197,8 @@ def validate_feed(content, archive, info, tag):
         len({child.tag for child in item}) == len(item), "Duplicate update metadata."
     )
     for child in item:
+        if child.tag == SPARKLE + "deltas":
+            continue
         require(len(child) == 0, "Nested update metadata is forbidden.")
         if child.tag != "enclosure":
             require(not child.attrib, "Unexpected update metadata attributes.")
@@ -176,6 +244,7 @@ def validate_feed(content, archive, info, tag):
         re.fullmatch(r"[A-Za-z0-9+/]{86}==", signature),
         "Invalid update archive signature.",
     )
+    delta_enclosures(content, tag)
     return signature
 
 
@@ -199,12 +268,13 @@ def verify_feed_signature(data, public_key, verifier=None):
     return content
 
 
-def verify(appcast, archive, info, tag, verifier=None):
+def verify(appcast, archive, info, tag, verifier=None, *, delta_directory=None, verify_deltas=True):
     for path in (appcast, archive):
         require(
             path.is_file() and not path.is_symlink(),
             "Release input must be a regular file.",
         )
+    require(appcast.stat().st_size <= 1024 * 1024, "Feed exceeds the release size limit.")
     public_key = validate_info(info, tag)
     with tempfile.TemporaryDirectory(prefix="chengying-feed-verify-") as directory:
         temporary = Path(directory)
@@ -216,6 +286,16 @@ def verify(appcast, archive, info, tag, verifier=None):
         subprocess.run(
             [str(verifier), public_key, archive_signature, str(archive)], check=True
         )
+        # Historical full archives can be verified without fetching their obsolete patches.
+        # New releases always verify every advertised delta; the CLI has no bypass switch.
+        if verify_deltas:
+            directory = delta_directory if delta_directory is not None else archive.parent
+            for delta in delta_enclosures(content, tag):
+                path = directory / delta["name"]
+                require(path.is_file() and not path.is_symlink()
+                        and path.stat().st_size == delta["length"],
+                        "Missing, unsafe or wrong-sized delta archive.")
+                subprocess.run([str(verifier), public_key, delta["signature"], str(path)], check=True)
     print("Signed feed, archive, version, repository, macOS and ARM64 policy verified.")
 
 

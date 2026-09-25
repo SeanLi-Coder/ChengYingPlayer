@@ -37,13 +37,16 @@
   Preserve the corresponding source, licenses, checksums and source manifest.
 - Run the update policy, native updater and signed-installation regression tests.
   Verify the new feed with the previous stable version's public key before publishing.
-- Upload and verify all six required assets in a stable draft before publication.
+- Upload and verify all six base assets plus every advertised delta and its checksum
+  in a stable draft before publication. Authenticate the previous full archive before
+  mounting it, round-trip each delta, and verify that delta and full archive install
+  exactly the same signed application. Keep the full archive as a safe fallback.
   Retry missing uploads without replacing existing assets; fail on conflicting
   remote bytes. Never overwrite an already published release to repair a version;
   prepare a newer release instead.
 - A release is not fully verified until an unauthenticated request confirms the
   public latest version, the exact installed-app feed URL and the downloaded DMG's
-  complete size and SHA-256 digest.
+  complete size and SHA-256 digest, plus those of every advertised delta.
   A local build, Git tag, draft release or authenticated download alone is not proof
   that installed players can update. Report failures and unverified states accurately.
 - Keep automatic downloads visible and defer replacement while playback, editing,

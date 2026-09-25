@@ -46,6 +46,7 @@ jobs:
         run: |
           python3 -B Tools/SparkleUpdateTests/test_release_policy.py
           python3 -B Tools/SparkleUpdateTests/test_release_delivery.py
+          python3 -B Tools/SparkleUpdateTests/test_delta_assets.py
 
       - name: Test pinned playback source downloads
         run: python3 -B Tools/PlaybackBuildTests/test_sources.py
@@ -445,10 +446,11 @@ jobs:
           done
 
       - name: Test signed update archives and feed rejection
-        timeout-minutes: 5
-        run: >-
-          SPARKLE_TEST_ROOT="$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle"
+        timeout-minutes: 10
+        run: |
+          export SPARKLE_TEST_ROOT="$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle"
           bash Tools/SparkleUpdateTests/run.sh
+          python -B Tools/SparkleUpdateTests/test_delta_builder.py
 
       - name: Test native update interface and state transitions
         timeout-minutes: 5
@@ -457,12 +459,16 @@ jobs:
           bash Tools/AppUpdateTests/run.sh
 
       - name: Test real signed update installation and relaunch
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           export SPARKLE_TEST_ROOT="$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle"
           export SPARKLE_INSTALLED_APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
           python -B Tools/AppUpdateIntegrationTests/run.py
           python -B Tools/AppUpdateIntegrationTests/run.py --scenario tampered-dmg
+          python -B Tools/AppUpdateIntegrationTests/run.py --scenario delta-upgrade
+          python -B Tools/AppUpdateIntegrationTests/run.py --scenario tampered-delta
+          python -B Tools/AppUpdateIntegrationTests/run.py --scenario mismatched-delta
+          python -B Tools/AppUpdateIntegrationTests/run.py --scenario tampered-delta-and-dmg
 
       - name: Test real application loop boundaries
         timeout-minutes: 5
@@ -496,9 +502,19 @@ jobs:
             echo "checksum=${dmg_path}.sha256"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Sign and independently verify the release update feed
+      - name: Download the immutable previous stable delta base
         if: startsWith(github.ref, 'refs/tags/') && github.repository == 'SeanLi-Coder/ChengYingPlayer'
-        timeout-minutes: 15
+        timeout-minutes: 30
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -B other/download_previous_release.py \
+            --tag "$GITHUB_REF_NAME" \
+            --output-directory "$RUNNER_TEMP/previous-update"
+
+      - name: Build verified delta and sign the release update feed
+        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'SeanLi-Coder/ChengYingPlayer'
+        timeout-minutes: 55
         id: appcast
         env:
           SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
@@ -509,6 +525,7 @@ jobs:
             --archive "${{ steps.dmg.outputs.path }}" \
             --output "$RUNNER_TEMP/appcast.xml" \
             --tag "$GITHUB_REF_NAME" \
+            --previous-release-directory "$RUNNER_TEMP/previous-update" \
             --sparkle-root "$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle"
           echo "path=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_OUTPUT"
 
@@ -571,6 +588,8 @@ jobs:
             ${{ steps.package.outputs.source_checksum }}
             ${{ steps.package.outputs.source_manifest }}
             ${{ steps.appcast.outputs.path }}
+            ${{ runner.temp }}/*.delta
+            ${{ runner.temp }}/*.delta.sha256
           if-no-files-found: error
           retention-days: 14
 
@@ -606,8 +625,9 @@ jobs:
           checksums=(dist/*.sha256)
           manifests=(dist/*-Third-Party-Source-Manifest.txt)
           appcasts=(dist/appcast.xml)
-          if (( ${#archives[@]} != 1 || ${#dmgs[@]} != 1 || ${#checksums[@]} != 2 || ${#manifests[@]} != 1 )) || [[ ! -s dist/appcast.xml ]]; then
-            echo "Expected one DMG, one release-source archive, both checksums, one source manifest, and a signed appcast." >&2
+          deltas=(dist/*.delta)
+          if (( ${#archives[@]} != 1 || ${#dmgs[@]} != 1 || ${#checksums[@]} != 2 + ${#deltas[@]} || ${#manifests[@]} != 1 )) || [[ ! -s dist/appcast.xml ]]; then
+            echo "Expected the full six release assets plus every signed delta and checksum." >&2
             find dist -maxdepth 2 -type f -print >&2
             exit 1
           fi
@@ -623,7 +643,27 @@ jobs:
           for checksum in "${checksums[@]}"; do
             (cd dist && sha256sum --check "$(basename "$checksum")")
           done
-          release_assets=("${dmgs[@]}" "${archives[@]}" "${checksums[@]}" "${manifests[@]}" "${appcasts[@]}")
+          python3 - "$GITHUB_REF_NAME" > "$RUNNER_TEMP/expected-assets.txt" <<'PY'
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "other")
+          from release_delivery import asset_names, delta_manifest
+
+          directory = Path("dist")
+          feed = (directory / "appcast.xml").read_bytes()
+          names = asset_names(sys.argv[1], feed)
+          if {path.name for path in directory.iterdir()} != set(names):
+              raise SystemExit("Release artifact set differs from the signed update manifest.")
+          delta_manifest(sys.argv[1], feed, directory)
+          print("\n".join(names))
+          PY
+          mapfile -t allowed_assets < "$RUNNER_TEMP/expected-assets.txt"
+          release_assets=()
+          for asset in "${allowed_assets[@]}"; do
+            test -s "dist/$asset"
+            release_assets+=("dist/$asset")
+          done
 
           # Serialize publication and never move the stable feed to an older version.
           latest_tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
@@ -647,14 +687,6 @@ jobs:
               echo "Refusing to modify an already published release; use a new version tag." >&2
               exit 1
             fi
-            allowed_assets=(
-              "$(basename "${dmgs[0]}")"
-              "$(basename "${archives[0]}")"
-              "$(basename "${checksums[0]}")"
-              "$(basename "${checksums[1]}")"
-              "$(basename "${manifests[0]}")"
-              "appcast.xml"
-            )
             mapfile -t existing_assets < <(
               gh release view "$GITHUB_REF_NAME" \
                 --repo "$GITHUB_REPOSITORY" \
@@ -719,12 +751,16 @@ jobs:
           import sys
           from pathlib import Path
 
+          sys.path.insert(0, "other")
+          from release_delivery import asset_names
+
           release = json.loads(Path(sys.argv[1]).read_text())
           expected = {Path(path).name: Path(path) for path in sys.argv[4:]}
+          required_names = asset_names(sys.argv[3], expected["appcast.xml"].read_bytes())
           assets = release["assets"]
           if release.get("id") != int(sys.argv[2]) or release.get("tag_name") != sys.argv[3] or release.get("draft") is not True or release.get("prerelease") is not False:
               raise SystemExit("The resolved release identity or draft state changed before verification.")
-          if len(expected) != 6 or len(assets) != len(expected) or {asset["name"] for asset in assets} != set(expected):
+          if set(expected) != set(required_names) or len(assets) != len(expected) or {asset["name"] for asset in assets} != set(expected):
               raise SystemExit("The draft release does not contain exactly the verified asset set.")
           for asset in assets:
               path = expected[asset["name"]]
@@ -732,7 +768,7 @@ jobs:
                   digest = hashlib.file_digest(stream, "sha256").hexdigest()
               if asset["state"] != "uploaded" or asset["size"] != path.stat().st_size or asset.get("digest") != f"sha256:{digest}":
                   raise SystemExit(f"Uploaded release asset failed integrity verification: {path.name}")
-          print("All DMG, corresponding source, checksum, manifest and signed appcast assets are complete and verified.")
+          print("All full and delta update assets, source, checksums and signed appcast are complete and verified.")
           PY
           gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest
           python3 -B other/release_delivery.py verify-public \

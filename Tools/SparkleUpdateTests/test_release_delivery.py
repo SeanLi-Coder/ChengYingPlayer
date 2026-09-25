@@ -4,14 +4,15 @@ import copy
 import hashlib
 import io
 import json
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "other"))
 import release_delivery as delivery
@@ -28,6 +29,31 @@ class DeliveryTests(unittest.TestCase):
         self.uploads = []
         for name in self.names:
             (self.directory / name).write_bytes(b"Release fixture: " + name.encode())
+        self.write_feed()
+
+    def write_feed(self, delta=False):
+        size = (self.directory / self.names[0]).stat().st_size
+        root = ET.Element("rss", {"version": "2.0"})
+        item = ET.SubElement(ET.SubElement(root, "channel"), "item")
+        ET.SubElement(item, delivery.SPARKLE + "version").text = "100"
+        ET.SubElement(item, delivery.SPARKLE + "shortVersionString").text = self.tag[1:]
+        ET.SubElement(item, "enclosure", {
+            "url": f"{delivery.RELEASES}/download/{self.tag}/{self.names[0]}", "length": str(size)})
+        if delta:
+            name = f"ChengYingPlayer-{self.tag}-from-99-Apple-Silicon.delta"
+            data = b"delta fixture"
+            (self.directory / name).write_bytes(data)
+            (self.directory / (name + ".sha256")).write_text(
+                f"{hashlib.sha256(data).hexdigest()}  {name}\n", encoding="ascii")
+            ET.SubElement(ET.SubElement(item, delivery.SPARKLE + "deltas"), "enclosure", {
+                "url": f"{delivery.RELEASES}/download/{self.tag}/{name}", "length": str(len(data)),
+                "type": "application/octet-stream", delivery.SPARKLE + "deltaFrom": "99",
+                delivery.SPARKLE + "edSignature": "A" * 86 + "=="})
+        content = ET.tostring(root)
+        # The delivery layer consumes feeds already verified by the macOS signature job.
+        feed = content + b'<!-- sparkle-signatures:\nedSignature: ' + b'A' * 86 + b'==\nlength: ' + str(len(content)).encode() + b'\n-->\n'
+        (self.directory / "appcast.xml").write_bytes(feed)
+        return feed
 
     def asset(self, name):
         data = (self.directory / name).read_bytes()
@@ -131,16 +157,93 @@ class DeliveryTests(unittest.TestCase):
 
     def public_fixture(self):
         (self.directory / self.names[0]).write_bytes(b"d" * 123)
-        content = (f'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item>'
-                   f'<sparkle:shortVersionString>{self.tag[1:]}</sparkle:shortVersionString>'
-                   f'<enclosure url="{delivery.RELEASES}/download/{self.tag}/{self.names[0]}" length="123"/>'
-                   '</item></channel></rss>').encode()
-        feed = content + b'<!-- sparkle-signatures:\nedSignature: ' + b'A' * 86 + b'==\nlength: ' + str(len(content)).encode() + b'\n-->\n'
+        feed = self.write_feed()
         release = {"tag_name": self.tag, "draft": False, "prerelease": False,
                    "assets": [self.asset(name) for name in self.names]}
         release["assets"][0]["size"] = 123
         release["assets"][-1]["digest"] = "sha256:" + hashlib.sha256(feed).hexdigest()
         return feed, release
+
+    def test_delta_assets_are_atomic_and_resume_without_overwriting(self):
+        feed = self.write_feed(delta=True)
+        names = delivery.asset_names(self.tag, feed)
+        self.assertEqual(len(names), 8)
+        delivery.upload_assets(self.tag, self.directory, self.run_gh, lambda _: self.fail("Unexpected retry"))
+        self.assertEqual(self.uploads, list(names))
+        delivery.upload_assets(self.tag, self.directory, self.run_gh, lambda _: self.fail("Unexpected retry"))
+        self.assertEqual(self.uploads, list(names))
+
+    def test_delta_checksum_missing_wrong_size_or_symlink_stops_before_upload(self):
+        feed = self.write_feed(delta=True)
+        delta, checksum = [self.directory / name for name in delivery.asset_names(self.tag, feed)[-2:]]
+        original_delta, original_checksum = delta.read_bytes(), checksum.read_bytes()
+        for scenario in ("missing", "size", "hash", "symlink", "checksum-symlink"):
+            with self.subTest(scenario=scenario):
+                delta.unlink(missing_ok=True)
+                checksum.unlink(missing_ok=True)
+                delta.write_bytes(original_delta)
+                checksum.write_bytes(original_checksum)
+                if scenario == "missing":
+                    delta.unlink()
+                elif scenario == "size":
+                    delta.write_bytes(original_delta + b"X")
+                elif scenario == "hash":
+                    delta.write_bytes(b"X" * len(original_delta))
+                elif scenario == "symlink":
+                    target = self.directory / "delta-target"
+                    target.write_bytes(original_delta)
+                    delta.unlink()
+                    delta.symlink_to(target)
+                else:
+                    target = self.directory / "checksum-target"
+                    target.write_bytes(original_checksum)
+                    checksum.unlink()
+                    checksum.symlink_to(target)
+                with self.assertRaises(ValueError):
+                    delivery.upload_assets(self.tag, self.directory, self.run_gh, lambda _: None)
+        self.assertEqual(self.uploads, [])
+
+    def test_public_delta_is_fully_downloaded_and_digest_checked(self):
+        self.public_fixture()
+        feed = self.write_feed(delta=True)
+        names = delivery.asset_names(self.tag, feed)
+        release = {"tag_name": self.tag, "draft": False, "prerelease": False,
+                   "assets": [self.asset(name) for name in names]}
+        def request(url, method="GET"):
+            return (json.dumps(release).encode(), {}) if "api.github.com" in url else (feed, {})
+        download = Mock()
+        delivery.verify_public(self.tag, feed, self.directory / self.names[0], request, download)
+        self.assertEqual(download.call_count, 2)
+        delta = self.directory / names[-2]
+        download.assert_any_call(f"{delivery.RELEASES}/download/{self.tag}/{delta.name}",
+                                 delta.stat().st_size, hashlib.sha256(delta.read_bytes()).hexdigest())
+        release["assets"][-2]["digest"] = "sha256:" + "0" * 64
+        with self.assertRaisesRegex(ValueError, "delta asset"):
+            delivery.verify_public(self.tag, feed, self.directory / self.names[0], request, Mock())
+
+    def test_missing_public_delta_or_checksum_cannot_pass(self):
+        self.public_fixture()
+        feed = self.write_feed(delta=True)
+        assets = [self.asset(name) for name in delivery.asset_names(self.tag, feed)]
+        for index in (-1, -2):
+            release = {"tag_name": self.tag, "draft": False, "prerelease": False,
+                       "assets": [value for i, value in enumerate(assets) if i != len(assets) + index]}
+            with self.subTest(index=index), self.assertRaisesRegex(ValueError, "required asset set"):
+                delivery.verify_public(self.tag, feed, self.directory / self.names[0],
+                                       lambda *args, release=release: (json.dumps(release).encode(), {}), Mock())
+
+    def test_corrupt_public_delta_download_cannot_pass(self):
+        self.public_fixture()
+        feed = self.write_feed(delta=True)
+        release = {"tag_name": self.tag, "draft": False, "prerelease": False,
+                   "assets": [self.asset(name) for name in delivery.asset_names(self.tag, feed)]}
+        def request(url, method="GET"):
+            return (json.dumps(release).encode(), {}) if "api.github.com" in url else (feed, {})
+        def download(url, size, digest):
+            if url.endswith(".delta"):
+                raise ValueError("Delta bytes differ")
+        with self.assertRaisesRegex(ValueError, "Delta bytes differ"):
+            delivery.verify_public(self.tag, feed, self.directory / self.names[0], request, download)
 
     def test_public_exact_feed_and_archive_verified_without_credentials(self):
         feed, release = self.public_fixture()
@@ -165,7 +268,7 @@ class DeliveryTests(unittest.TestCase):
             changed = dict(release, **fields)
             with self.subTest(fields=list(fields)), self.assertRaises(ValueError):
                 delivery.verify_public(self.tag, feed, self.directory / self.names[0],
-                                       lambda *args: (json.dumps(changed).encode(), {}))
+                                       lambda *args, changed=changed: (json.dumps(changed).encode(), {}))
         def stale(url, method="GET"):
             return (json.dumps(release).encode(), {}) if "api.github.com" in url else (b"old feed", {})
         with self.assertRaisesRegex(ValueError, "stale or changed"):

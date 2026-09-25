@@ -20,5 +20,8 @@ and responder types remain real.
 The suite targets stale animation completions, window closing, stable shown
 controls, nested interactions, pointer and mouse-button guards, sidebar editing,
 non-destructive idle hiding, explicit sidebar closing and switching, migration
-idempotence, visible hit testing, and bounded auto-hide delay. It type-checks for
+idempotence, retention of pre-migration control preferences and launch arguments,
+registered defaults without needlessly persisting them, visible hit testing, and
+bounded auto-hide delay. All preference cases use a temporary test domain, not
+the user's player settings. It type-checks for
 Intel macOS 10.15 and runs the host binary with Address Sanitizer.

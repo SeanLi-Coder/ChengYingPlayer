@@ -19,9 +19,15 @@ cancelled windows, already-installing updates, busy countdown reset, asynchronou
 barrier races, safe retry after termination veto, and quiet background failures.
 
 Preference regressions recreate `UserDefaults` with the same random test domain
-for three simulated later-version launches. They verify migrated automatic checks,
-an explicit user opt-out, visible downloads (`SUAutomaticallyUpdate = false`),
-and unrelated user preferences all persist. Command-line disable remains an
+for three simulated later-version launches. They verify new-install automatic checks,
+explicit user opt-outs both before and after the first migration, visible downloads
+(`SUAutomaticallyUpdate = false`), and unrelated user preferences all persist.
+The retained-domain fixture compares every stored key, type, and value, including
+HDR, control layout, volume, a custom keybinding path, synthetic bookmark bytes,
+a credential-free proxy URL, and sorting settings. No real preferences are read.
+The silent-downloader flag remains false as the existing safety policy: this player
+requires visible download progress and waits for protected work before replacement.
+It is not a reset of the user's automatic-check choice. Command-line disable remains an
 argument-domain override: it does not overwrite stored settings or consume the
 migration, which runs on a later normal launch. These tests simulate preference
 reuse; they do not claim to perform sequential application replacements.

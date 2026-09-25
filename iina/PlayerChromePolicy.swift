@@ -6,9 +6,15 @@ enum PlayerChromePolicy {
 
   static func migratePreferences(_ defaults: UserDefaults) {
     guard defaults.integer(forKey: migrationKey) < 1 else { return }
-    defaults.set(2, forKey: "oscPosition")
-    defaults.set(true, forKey: "enableControlBarAutoHide")
-    defaults.set(true, forKey: "showRemainingTime")
+    // Updating the default appearance must not reset existing or launch-time choices.
+    let initialValues: [String: Any] = [
+      "oscPosition": 2,
+      "enableControlBarAutoHide": true,
+      "showRemainingTime": true,
+    ]
+    for (key, value) in initialValues where defaults.object(forKey: key) == nil {
+      defaults.set(value, forKey: key)
+    }
     defaults.set(1, forKey: migrationKey)
   }
 

@@ -76,7 +76,11 @@ enum AppUpdatePreferences {
     // Command-line flags are deliberately respected by smoke tests and support tools.
     guard defaults.volatileDomain(forName: UserDefaults.argumentDomain)[automaticChecksKey] == nil,
           !defaults.bool(forKey: migrationKey) else { return }
-    defaults.set(true, forKey: automaticChecksKey)
+    // A missing migration marker does not imply that an existing opt-out was a default.
+    // Preserve saved, managed, and registered choices; initialize only an absent value.
+    if defaults.object(forKey: automaticChecksKey) == nil {
+      defaults.set(true, forKey: automaticChecksKey)
+    }
     defaults.set(true, forKey: migrationKey)
     // Our user driver downloads with visible progress, not Sparkle's silent downloader.
     defaults.set(false, forKey: "SUAutomaticallyUpdate")

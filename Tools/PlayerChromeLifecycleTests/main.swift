@@ -417,8 +417,8 @@ defaults.set(false, forKey: "enableControlBarAutoHide")
 defaults.set(false, forKey: "showRemainingTime")
 defaults.set("preserved", forKey: "unrelatedPreference")
 PlayerChromePolicy.migratePreferences(defaults)
-check(defaults.integer(forKey: "oscPosition") == 2 && defaults.bool(forKey: "enableControlBarAutoHide") && defaults.bool(forKey: "showRemainingTime"),
-      "The production upgrade moves floating controls to bottom-edge defaults")
+check(defaults.integer(forKey: "oscPosition") == 0 && !defaults.bool(forKey: "enableControlBarAutoHide") && !defaults.bool(forKey: "showRemainingTime"),
+      "The first production migration preserves existing control preferences")
 check(defaults.integer(forKey: PlayerChromePolicy.migrationKey) == 1 && defaults.string(forKey: "unrelatedPreference") == "preserved",
       "Migration records its version without modifying unrelated preferences")
 defaults.set(1, forKey: "oscPosition")
@@ -431,6 +431,30 @@ defaults.set(2, forKey: PlayerChromePolicy.migrationKey)
 PlayerChromePolicy.migratePreferences(defaults)
 check(defaults.integer(forKey: PlayerChromePolicy.migrationKey) == 2 && defaults.integer(forKey: "oscPosition") == 1,
       "An older migration never downgrades a future preference version")
+defaults.removePersistentDomain(forName: ChromeDefaults.suite)
+PlayerChromePolicy.migratePreferences(defaults)
+check(defaults.integer(forKey: "oscPosition") == 2 && defaults.bool(forKey: "enableControlBarAutoHide") && defaults.bool(forKey: "showRemainingTime"),
+      "Missing control preferences receive the bottom-edge defaults")
+defaults.removePersistentDomain(forName: ChromeDefaults.suite)
+let originalArguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+var overriddenArguments = originalArguments
+overriddenArguments["oscPosition"] = 1
+overriddenArguments["enableControlBarAutoHide"] = false
+defaults.setVolatileDomain(overriddenArguments, forName: UserDefaults.argumentDomain)
+PlayerChromePolicy.migratePreferences(defaults)
+check(defaults.integer(forKey: "oscPosition") == 1 && !defaults.bool(forKey: "enableControlBarAutoHide"),
+      "Control launch arguments remain effective during migration")
+check(defaults.persistentDomain(forName: ChromeDefaults.suite)?["oscPosition"] == nil
+      && defaults.persistentDomain(forName: ChromeDefaults.suite)?["enableControlBarAutoHide"] == nil,
+      "Control launch arguments do not create replacement stored settings")
+defaults.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain)
+defaults.removePersistentDomain(forName: ChromeDefaults.suite)
+defaults.register(defaults: ["oscPosition": 2, "enableControlBarAutoHide": true, "showRemainingTime": true])
+PlayerChromePolicy.migratePreferences(defaults)
+check(defaults.integer(forKey: "oscPosition") == 2 && defaults.bool(forKey: "enableControlBarAutoHide") && defaults.bool(forKey: "showRemainingTime"),
+      "Registered application defaults remain effective for new users")
+check(defaults.persistentDomain(forName: ChromeDefaults.suite)?.count == 1,
+      "Registered defaults are not needlessly copied into stored user choices")
 
 withFixture { controller in
   let window = controller.window!
