@@ -235,6 +235,7 @@ class Video:
     title: str
     upload_date: str | None
     assets: list[RemoteAsset] = field(default_factory=list)
+    media_type: str = "video"
 
     @property
     def url(self) -> str:
@@ -249,6 +250,35 @@ class Result:
     complete: bool = True
     warning: str | None = None
 
+
+def _image_assets(photo: dict, duration: float | None) -> list[RemoteAsset]:
+    """Extract page-returned image variants without treating a cover as video."""
+    assets: list[RemoteAsset] = []
+    values: list[Any] = []
+    for name in ("photoUrl", "photoH265Url", "photoUrls", "coverUrl"):
+        value = photo.get(name)
+        if isinstance(value, list):
+            values.extend(value[:100])
+        elif value:
+            values.append(value)
+    for index, value in enumerate(values, 1):
+        entry = _object(value)
+        candidates = _urls(entry or value)
+        if not candidates:
+            continue
+        width = _positive(entry.get("width") or entry.get("w"))
+        height = _positive(entry.get("height") or entry.get("h"))
+        assets.append(RemoteAsset(
+            candidates=candidates, index=index, width=width, height=height,
+            format_id=f"kuaishou-image-{index}", duration=duration,
+        ))
+    if not assets:
+        return []
+    sized = [a for a in assets if a.width and a.height]
+    if not sized:
+        return []
+    highest = max((a.width or 0) * (a.height or 0) for a in sized)
+    return [a for a in assets if (a.width or 0) * (a.height or 0) == highest]
 
 def parse_video(
     value: dict, *, expected_id: str | None = None, owner_id: str | None = None
@@ -272,6 +302,11 @@ def parse_video(
     # that the real page returned for this exact, identity-bound video.
     duration_ms = _positive(photo.get("duration"))
     duration = duration_ms / 1000 if duration_ms else None
+    image_hint = any(
+        isinstance(photo.get(name), list)
+        and any(isinstance(entry, dict) for entry in photo.get(name, []))
+        for name in ("photoUrl", "photoUrls")
+    )
     assets: list[RemoteAsset] = []
     bitrate_ranks: dict[int, int] = {}
     for field_name in ("manifest", "manifestH265", "videoResource"):
@@ -376,17 +411,24 @@ def parse_video(
                 .date()
                 .isoformat()
             )
+    if not assets or image_hint:
+        image_assets = _image_assets(photo, duration)
+        if image_hint:
+            return Video(
+                media_id, author_id, str(author.get("name") or author_id),
+                str(photo.get("caption") or photo.get("originCaption") or "Untitled Kuaishou image"),
+                upload_date, image_assets, "image",
+            )
+        if image_assets:
+            return Video(
+                media_id, author_id, str(author.get("name") or author_id),
+                str(photo.get("caption") or photo.get("originCaption") or "Untitled Kuaishou image"),
+                upload_date, image_assets, "image",
+            )
     return Video(
-        media_id,
-        author_id,
-        str(author.get("name") or author_id),
-        str(
-            photo.get("caption")
-            or photo.get("originCaption")
-            or "Untitled Kuaishou video"
-        ),
-        upload_date,
-        selected,
+        media_id, author_id, str(author.get("name") or author_id),
+        str(photo.get("caption") or photo.get("originCaption") or "Untitled Kuaishou video"),
+        upload_date, selected, "video",
     )
 
 

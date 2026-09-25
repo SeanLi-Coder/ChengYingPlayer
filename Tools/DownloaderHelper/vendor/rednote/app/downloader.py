@@ -968,7 +968,7 @@ class MediaDownloader:
             id=_item_key(Platform.KUAISHOU, video.media_id, video.url, index),
             media_id=video.media_id, source_url=video.url, title=video.title,
             author=video.author, upload_date=video.upload_date, playlist_index=index,
-            extractor_key="Kuaishou", media_type=MediaType.VIDEO,
+            extractor_key="Kuaishou", media_type=(MediaType.IMAGE if video.media_type == "image" else MediaType.VIDEO),
             metadata={
                 "kuaishou_author_id": video.author_id,
                 "kuaishou_source_kind": result.source_kind,
@@ -5402,25 +5402,35 @@ class MediaDownloader:
         if not item.metadata.get("kuaishou_author_id") or video.author_id != item.metadata["kuaishou_author_id"]:
             raise MediaDownloadError("Kuaishou author identity changed; download was blocked")
         if not video.assets:
-            raise MediaDownloadError("Kuaishou video has no trusted media stream; no cover image was substituted")
+            raise MediaDownloadError("Kuaishou item has no trusted highest-quality media assets")
         if callback:
             callback(EngineEvent(event="metadata", title=video.title, author=video.author,
-                                 upload_date=video.upload_date, media_type=MediaType.VIDEO))
-        # CDN requests do not need account cookies. Keep the native YoutubeDL
-        # proxy transport, checked redirects, atomic writes and FFprobe gates.
+                                 upload_date=video.upload_date,
+                                 media_type=(MediaType.IMAGE if video.media_type == "image" else MediaType.VIDEO)))
+        media_type = MediaType.IMAGE if video.media_type == "image" else MediaType.VIDEO
+        if video.media_type == "image":
+            for asset_index, asset in enumerate(video.assets, 1):
+                asset.index = asset_index
         with YoutubeDL(self._base_options(False)) as ydl:
-            path, chosen = self._download_first_available_asset(
-                ydl, video.assets, output_dir, video.upload_date, video.title,
-                video.media_id, video.url, platform=Platform.KUAISHOU,
-                media_type=MediaType.VIDEO, callback=callback,
-                should_cancel=should_cancel, verify_declared_dimensions=True,
-            )
+            output_paths: list[str] = []
+            chosen_assets: list[RemoteAsset] = []
+            for asset_index, asset in enumerate(video.assets, 1):
+                path, chosen = self._download_first_available_asset(
+                    ydl, [asset], output_dir, video.upload_date, video.title,
+                    video.media_id, video.url, platform=Platform.KUAISHOU,
+                    media_type=media_type, callback=callback,
+                    should_cancel=should_cancel, asset_index=(asset_index if media_type == MediaType.IMAGE else None),
+                    verify_declared_dimensions=True,
+                )
+                output_paths.append(str(path))
+                chosen_assets.append(chosen)
+        chosen = chosen_assets[0]
         resolution = f"{chosen.width}x{chosen.height}" if chosen.width and chosen.height else None
         if callback:
-            callback(EngineEvent(event="asset_completed", output_paths=[str(path)]))
-        return DownloadOutcome(output_paths=[str(path)], title=video.title,
+            callback(EngineEvent(event="asset_completed", output_paths=output_paths))
+        return DownloadOutcome(output_paths=output_paths, title=video.title,
                                author=video.author, upload_date=video.upload_date,
-                               media_type=MediaType.VIDEO, selected_format=chosen.format_id,
+                               media_type=media_type, selected_format=chosen.format_id,
                                resolution=resolution)
 
     def _download_xhs_item(

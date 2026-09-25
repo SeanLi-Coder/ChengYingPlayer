@@ -61,7 +61,7 @@
     {
       "path": "app/downloader.py",
       "upstream_sha256": "0401b8290cd9cda5b71a61a6d8086a3d59e7ad6f36d395bac9ec988f3e182573",
-      "vendored_sha256": "fad17fe94a55999d94085246b9bffc44ba8d0d88ee7886fb0580fc729295d657"
+      "vendored_sha256": "6dbe63f48b0104c3f35869c46572f037dde2160f54824faf769c42847360ab62"
     },
     {
       "path": "app/errors.py",
@@ -368,7 +368,7 @@
     {
       "path": "app/kuaishou.py",
       "license": "GPL-3.0-or-later",
-      "sha256": "cdaab939251417e3fa80f542149f67f852f226e83ca0c960937fed4fe8b96902"
+      "sha256": "318877693fc1d7ae10f3c6fd61ddbed4c59e5421c985fe3e47503c4aa22ac8b4"
     }
   ]
 }

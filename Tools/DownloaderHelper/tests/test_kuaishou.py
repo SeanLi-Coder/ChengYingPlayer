@@ -165,7 +165,36 @@ def test_apollo_old_reference_layout_and_cycle():
     assert ks.parse_video(data).author_id == "3xowner1"
 
 
-def test_highest_dimensions_no_silent_lower_fallback():
+def test_parse_image_post_selects_highest_sized_variant():
+    value = feed(
+        photoUrl=[
+            {"url": MEDIA + "?small", "width": 720, "height": 720},
+            {"url": MEDIA + "?large", "width": 1440, "height": 1440},
+        ],
+        manifest=None,
+        photoH265Url=None,
+        photoUrls=None,
+    )
+    value["photo"].pop("photoUrl", None)
+    value["photo"]["photoUrl"] = [
+        {"url": MEDIA + "?small", "width": 720, "height": 720},
+        {"url": MEDIA + "?large", "width": 1440, "height": 1440},
+    ]
+    parsed = ks.parse_video(value)
+    assert parsed.media_type == "image"
+    assert [(asset.width, asset.height) for asset in parsed.assets] == [(1440, 1440)]
+    assert parsed.assets[0].candidates == [MEDIA + "?large"]
+
+
+def test_image_post_without_declared_dimensions_is_not_claimed_highest_quality():
+    value = feed(photoUrl=[{"url": MEDIA + "?unknown"}], manifest=None)
+    value["photo"].pop("photoUrl", None)
+    value["photo"]["photoUrl"] = [{"url": MEDIA + "?unknown"}]
+    parsed = ks.parse_video(value)
+    assert parsed.media_type == "image"
+    assert not parsed.assets
+
+
     manifest = {
         "adaptationSet": [
             {
