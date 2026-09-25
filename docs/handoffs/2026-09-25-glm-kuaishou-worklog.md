@@ -740,7 +740,7 @@ Release: draft/in-progress — 标签 v0.2.37 已推送并触发 CI，
 
 ---
 
-## 12. v0.2.37 CI 失败根因与修复（2026-09-26 追加）
+## 15. v0.2.37 CI 失败根因与修复（2026-09-26 追加）
 
 **现象**：标签 v0.2.37（提交 `662d5a0e`）触发的 CI run 中，
 `media-helper-tests` 作业最后一步 `Test private download-center adapter` 失败，
