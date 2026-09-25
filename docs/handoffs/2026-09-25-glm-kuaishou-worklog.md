@@ -791,3 +791,22 @@ typos 1.50.2（CI 同版本，改动文件 + 全仓库）              exit=0
 latest 仍为 v0.2.36），按「不移动已发布标签」规则，本修复连同此前两处（拼写
 `9c21162a`、工作日志 `1f9ea047`）以新版本 **v0.2.38** 发布。
 
+**v0.2.38 发布结果与匿名核实（2026-09-26）**：
+```
+真实 runner CI: media-helper-tests / build-apple-silicon / publish-release
+                三作业均 completed/success（run 36168070575，tag v0.2.38）
+公开 latest   : v0.2.38（非 draft），六附件齐全
+                appcast.xml / DMG / DMG.sha256 / Release-Source.tar.gz /
+                tar.gz.sha256 / Third-Party-Source-Manifest.txt
+feed URL 匿名 : installed-app feed 可读，item 为 0.2.38 / build 49 / arm64，
+                enclosure length=167990611，含 edSignature
+DMG 匿名核实  : 下载完整大小 167990611 字节（与 enclosure 一致）
+                SHA-256 17fbfcdc504ec47a83a2c52834ff2e765d7aab5cdd17645ec2ba6f450aecca8d
+                与公告 .sha256 完全一致
+构建产物验签  : 从 DMG 提取构建后 Info.plist（bundle id / 0.2.38 / build 49 / adhoc）
+                other/verify_appcast.py 对 feed 与 archive 两次 Ed25519 验签通过，
+                exit=0：Signed feed, archive, version, repository, macOS and ARM64
+                policy verified.
+```
+结论：v0.2.38 已发布并完成匿名核实，已安装播放器可经稳定 feed 信任并更新到该版本。
+
