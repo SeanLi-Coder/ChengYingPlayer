@@ -6,7 +6,8 @@
 - Branch：`codex/incremental-updates`。
 - 目标版本：`v0.2.40` / build `51`。
 - 用户要求：减少升级下载量，保留原有配置；沿现有授权完成正式发布。
-- 本节写入时：实现及本地专项验证完成，正式 CI、公开发布和真实发行补丁体积待验证。
+- 实现提交：`49534044`，标签 `v0.2.40` 指向该提交。
+- **已于北京时间 2026-09-26 06:17:33 正式发布并完成公开交付核验。**
   不能据此声称用户已安装新版或每次升级都必定走增量。
 
 ## 实现
@@ -77,8 +78,29 @@ bash Tools/VideoWindowSizingTests/run.sh
 Intel 10.15 类型检查）、HDRPreferenceTests 42 checks、VideoWindowSizingTests 70 checks。
 两处迁移新增用例先在修复前复现失败，再在修复后通过。
 
-## 发布后必须补充
+## 正式发布证据
 
-正式 main / tag CI 结果、tag 对应提交、发布时间、实际 DMG 与 delta 字节数／SHA-256、
-匿名 latest / feed / 完整附件验证，以及从公开旧版应用公开补丁后与公开新版逐文件一致性。
-不能把小 fixture 的下载量节省比例冒充正式播放器的节省比例。
+- [主线完整 CI 36192458001](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/36192458001)
+  通过；主线不执行正式发布步骤，不能单独当作发布证据。
+- [正式标签 CI 36192556109](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/36192556109)
+  三个任务全部通过，包含真实增量安装、坏补丁／旧包不匹配回退、双坏包拒绝、正式补丁往返、
+  上一稳定版公钥验证，以及发布后匿名完整下载验证。
+- [v0.2.40 正式发布](https://github.com/SeanLi-Coder/ChengYingPlayer/releases/tag/v0.2.40)，
+  发布时间 `2026-09-25T22:17:33Z`，build `51`，精确八个附件：六个基础资产及补丁／校验和。
+- 本机独立匿名核实 `/releases/latest` 指向 `v0.2.40`；从安装客户端的精确 feed 地址
+  `/releases/latest/download/appcast.xml` 下载，并完整下载 DMG、补丁及两个校验和。
+  大小和 SHA-256 均与发行元数据一致。匿名 REST API 本机额度耗尽（HTTP 403、remaining 0），
+  因此发行元数据使用已认证 API 读取；实际 latest、feed 和全部更新载荷仍为匿名下载，未改网络策略。
+- 以先前已校验的公开 `v0.2.39` 完整包为基线，旧公钥先验证公开新 feed、完整包和 delta，
+  再只读挂载新完整包。实际应用公开补丁后，与公开新版逐文件比较 bytes / modes / symlinks 全部一致，
+  新版与还原版的深度严格代码签名均通过。没有启动或覆盖用户已安装的播放器、读取真实设置或模型。
+
+| 附件 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| 完整 DMG | 167994145 | `b74b4c4a3147087fb954ef0ef9786be3736bc46e9d0da799de9dd11a8df55e89` |
+| 从 build 50 的 delta | 997706 | `47c4cf9fcf95d120d921f2379fa34157906b3590e04b8bb37d65c8e72977b89d` |
+| appcast.xml | 1981 | `e5177dc03deb64efb353787ef0f16b58ffa3c860ded6e83edbd247091e79fa12` |
+
+此次真实发行增量约 **1 MB**，对比约 **168 MB** 的完整包减少 **99.4061%** 下载量。
+这不是 fixture 的估计，不保证下一版相同比例。更旧版本、改过 App 的版本或损坏补丁可能走完整包。
+功能发布完成；尚未在用户实际 M4 Max 上安装，不把临时测试 App 的设置／模型标记验证说成用户实机验收。
