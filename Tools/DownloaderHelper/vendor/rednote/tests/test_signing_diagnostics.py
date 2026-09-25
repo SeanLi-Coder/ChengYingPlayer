@@ -289,26 +289,10 @@ def test_authentication_failures_keep_verification_url_and_classification(
 @pytest.mark.parametrize(
     ("cause", "expected_type", "expected_issue"),
     [
-        (
-            signing._NetworkFilterSigningFailure(UNTRUSTED_DETAIL),
-            TemporaryAccessError,
-            SiteIssueCode.NETWORK_ERROR,
-        ),
-        (
-            signing._CookieAccessSigningFailure(UNTRUSTED_DETAIL),
-            TemporaryAccessError,
-            SiteIssueCode.COOKIE_UNAVAILABLE,
-        ),
-        (
-            RuntimeError(f"network request timed out: {UNTRUSTED_DETAIL}"),
-            TemporaryAccessError,
-            SiteIssueCode.NETWORK_ERROR,
-        ),
-        (
-            ImportError(f"Missing browser module: {UNTRUSTED_DETAIL}"),
-            DiscoveryError,
-            SiteIssueCode.LOCAL_CONFIGURATION,
-        ),
+        (signing._NetworkFilterSigningFailure(UNTRUSTED_DETAIL), TemporaryAccessError, SiteIssueCode.NETWORK_ERROR),
+        (signing._CookieAccessSigningFailure(UNTRUSTED_DETAIL), TemporaryAccessError, SiteIssueCode.COOKIE_UNAVAILABLE),
+        (RuntimeError(f"network request timed out: {UNTRUSTED_DETAIL}"), TemporaryAccessError, SiteIssueCode.NETWORK_ERROR),
+        (ImportError(f"Missing browser module: {UNTRUSTED_DETAIL}"), DiscoveryError, SiteIssueCode.LOCAL_CONFIGURATION),
     ],
 )
 def test_operational_errors_do_not_become_generic_integrity_failures(
@@ -318,7 +302,6 @@ def test_operational_errors_do_not_become_generic_integrity_failures(
 ) -> None:
     with pytest.raises(expected_type) as captured:
         signing._raise_signing_error(VIDEO_URL, cause)
-
     error = captured.value
     assert type(error) is expected_type
     assert error.issue_code == expected_issue
@@ -326,3 +309,14 @@ def test_operational_errors_do_not_become_generic_integrity_failures(
     assert "Diagnostic code:" not in str(error)
     for secret in SECRET_MARKERS:
         assert secret not in str(error)
+
+
+def test_cookie_access_failure_includes_safe_diagnostic_code():
+    cause = signing._CookieAccessSigningFailure(
+        "Chrome cookies could not be read (diagnostic: cookie_permission_denied)"
+    )
+    with pytest.raises(Exception) as captured:
+        signing._raise_signing_error(VIDEO_URL, cause)
+    message = str(captured.value)
+    assert "Diagnostic: cookie_permission_denied." in message
+    assert "SECRET" not in message

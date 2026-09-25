@@ -15,7 +15,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from yt_dlp.cookies import extract_cookies_from_browser
 
-from .browser import chrome_user_agent
+from .browser import chrome_cookie_diagnostic, chrome_user_agent
 from .errors import (
     AuthenticationRequiredError,
     DiscoveryError,
@@ -647,7 +647,10 @@ def _load_chrome_cookie_jar(cookie_profile: str | None) -> CookieJar:
             "chrome", profile=cookie_profile, logger=_QuietCookieLogger()
         )
     except Exception as exc:
-        raise _CookieAccessSigningFailure("Chrome cookies could not be read") from exc
+        reason = chrome_cookie_diagnostic(cookie_profile, exc)
+        raise _CookieAccessSigningFailure(
+            f"Chrome cookies could not be read (diagnostic: {reason})"
+        ) from exc
 
 
 def _cookie_jar_to_playwright(cookie_jar: CookieJar) -> list[dict[str, Any]]:
@@ -2032,8 +2035,9 @@ def _run_with_signing_page(
         except (DownloadCancelledError, _SigningFailure):
             raise
         except Exception as exc:
+            diagnostic = chrome_cookie_diagnostic(cookie_profile, exc)
             raise _CookieAccessSigningFailure(
-                "Chrome cookies could not be read"
+                f"Chrome cookies could not be read (diagnostic: {diagnostic})"
             ) from exc
         budget.remaining_seconds()
         browser_cookies = _cookie_jar_to_playwright(cookie_jar)
@@ -2266,11 +2270,13 @@ def _raise_signing_error(
             issue_code=code,
         ) from cause
     if isinstance(cause, _CookieAccessSigningFailure):
+        diagnostic = re.search(r"diagnostic: ([a-z0-9_]+)", str(cause))
+        suffix = f" Diagnostic: {diagnostic.group(1)}." if diagnostic else ""
         raise TemporaryAccessError(
             "Chrome cookies could not be read. Fully quit Chrome and retry, approve "
             "any system cookie-access prompt, or disable Chrome Cookie in settings "
             "to continue explicitly without login and create a new task. Opening a "
-            "verification page is not required.",
+            "verification page is not required." + suffix,
             issue_code=SiteIssueCode.COOKIE_UNAVAILABLE,
         ) from cause
     if isinstance(cause, _AuthenticationSigningFailure):

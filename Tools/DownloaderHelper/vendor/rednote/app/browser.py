@@ -48,6 +48,40 @@ def chrome_user_data_directory(platform_name: str | None = None) -> Path | None:
     return root / "google-chrome"
 
 
+def chrome_cookie_diagnostic(
+    profile: str | None, error: BaseException | None = None
+) -> str:
+    """Return a safe, actionable reason without exposing paths or cookie data."""
+    messages: list[str] = []
+    current: BaseException | None = error
+    while current is not None and len(messages) < 4:
+        messages.append(str(current).lower())
+        current = current.__cause__ or current.__context__
+    text = " ".join(messages)
+    if any(marker in text for marker in ("decrypt", "keychain", "secretbox", "encryption")):
+        return "cookie_decryption_failed"
+    if any(marker in text for marker in ("permission denied", "access denied", "operation not permitted")):
+        return "cookie_permission_denied"
+    if any(marker in text for marker in ("locked", "database is busy", "resource busy")):
+        return "cookie_database_locked"
+    root = chrome_user_data_directory()
+    if root is None or not root.is_dir():
+        return "chrome_data_directory_missing"
+    selected = profile or "Default"
+    if not _CHROME_PROFILE_DIRECTORY_RE.fullmatch(selected):
+        return "chrome_profile_invalid"
+    profile_dir = root / selected
+    if not profile_dir.is_dir():
+        return "chrome_profile_missing"
+    databases = (
+        profile_dir / "Network/Cookies",
+        profile_dir / "Cookies",
+    )
+    if not any(path.is_file() for path in databases):
+        return "cookie_database_missing"
+    return "cookie_access_unknown"
+
+
 def _chrome_profile_order(user_data_dir: Path) -> list[str]:
     info_cache: dict[str, object] = {}
     last_used = ""

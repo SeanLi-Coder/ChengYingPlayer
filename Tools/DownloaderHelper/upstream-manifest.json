@@ -15,7 +15,10 @@
     "app/task_manager.py": "Bind resolved Kuaishou share identities and preserve incomplete-profile retry semantics.",
     "app/static/app.js": "Add Kuaishou labels, localized progress and error guidance; recognize resolved share profile jobs.",
     "app/static/index.html": "Advertise Kuaishou single-video, share and author-profile inputs with login and permission guidance.",
-    "tests/test_stop.py": "Isolate the no-server test from real localhost services and cover a disappearing legacy listener; production stop.py is unchanged."
+    "tests/test_stop.py": "Isolate the no-server test from real localhost services and cover a disappearing legacy listener; production stop.py is unchanged.",
+    "app/browser.py": "Add safe Chrome Cookie access diagnostics without exposing profile paths or cookie values.",
+    "app/douyin_signing.py": "Include sanitized Chrome Cookie diagnostic categories in cookie-unavailable errors.",
+    "tests/test_signing_diagnostics.py": "Test sanitized Chrome Cookie diagnostic categories."
   },
   "files": [
     {
@@ -41,7 +44,7 @@
     {
       "path": "app/browser.py",
       "upstream_sha256": "5bdd4a9b642ba056f2fcea29b592a352f4e8aeff53b781b39c28c3ec4a7a42fc",
-      "vendored_sha256": "5bdd4a9b642ba056f2fcea29b592a352f4e8aeff53b781b39c28c3ec4a7a42fc"
+      "vendored_sha256": "a928fa023df08f0c952d92b27ef8df204667a7662f45b6eb67f9cf7b1ab1ab5b"
     },
     {
       "path": "app/build_info.py",
@@ -56,7 +59,7 @@
     {
       "path": "app/douyin_signing.py",
       "upstream_sha256": "ea11f7a2545a82dd20e3bb5db2b8e2a80856281aed23efd30d62c426767e4cb8",
-      "vendored_sha256": "ea11f7a2545a82dd20e3bb5db2b8e2a80856281aed23efd30d62c426767e4cb8"
+      "vendored_sha256": "66b55164effb4c1c17123f5fcfd3b190dadcd32251f0419061aae1e52ab823c5"
     },
     {
       "path": "app/downloader.py",
@@ -341,7 +344,7 @@
     {
       "path": "tests/test_signing_diagnostics.py",
       "upstream_sha256": "e9575cbc1174d8fa441866de8eec3400efcb846da8d650627d9cf4420ac02a5b",
-      "vendored_sha256": "e9575cbc1174d8fa441866de8eec3400efcb846da8d650627d9cf4420ac02a5b"
+      "vendored_sha256": "b4ea7ee8d0320e37c5767baa89b340c1a359b379260fe04329bda8e97e56f389"
     },
     {
       "path": "tests/test_stop.py",
