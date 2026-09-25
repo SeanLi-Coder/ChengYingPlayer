@@ -75,6 +75,7 @@ jobs:
           ./Tools/VideoToolsTests/run.sh
           bash Tools/VideoWindowSizingTests/run.sh
           bash Tools/VideoViewportTests/run.sh
+          bash Tools/HDRPreferenceTests/run.sh
 
       - name: Test edge player controls and visibility lifecycle
         run: |

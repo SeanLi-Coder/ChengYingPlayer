@@ -25,6 +25,10 @@
 - 设置中移除旧的无效更新选项、“恢复隐藏提示”，以及 ReplayGain、手动解码线程、强制独显、实验音频驱动、音乐无缝播放、SPDIF 直通等高级项目；自动更新改由独立更新窗口管理。旧偏好数据不会被删除，但不再影响这些已移除功能。
 - 保留硬件解码、HDR、ICC 色彩管理、音频输出设备、字幕/音画同步、播放速度与 A/B 循环；设置搜索仅显示仍然可用的项目。
 
+HDR 播放输出默认关闭：新安装以及从未手动保存 HDR 偏好的用户不会因打开 HDR 视频自动启用 HDR 输出。
+仍可在设置中开启默认 HDR，或在播放时用快捷设置的 HDR 开关临时开启；已明确保存的开启／关闭选择不会被升级覆盖。
+此选项只控制播放显示，不修改源视频、HDR 元数据或剪辑／转码的输出策略。
+
 ## 下载与安装
 
 安装版在 [GitHub Releases](https://github.com/SeanLi-Coder/ChengYingPlayer/releases) 提供 `ChengYingPlayer-v<版本>-Apple-Silicon.dmg`，原生支持 Apple Silicon Mac，包括 **M4 Max MacBook Pro**。早期标有 Source Only 的版本仅有源码，不是安装包。
