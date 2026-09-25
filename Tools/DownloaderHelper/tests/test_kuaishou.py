@@ -2451,7 +2451,8 @@ def test_saved_asset_records_require_a_known_media_kind():
     assert _public_kuaishou_saved_asset({**valid, "media_kind": "video"}) is not None
     assert _public_kuaishou_saved_asset({**valid, "media_kind": "gif"}) is None
     assert _public_kuaishou_saved_asset({**valid, "media_kind": ""}) is None
-    # A missing media_kind is rejected too, so old records are never mis-read.
+    # A missing media_kind is rejected too, so a record without one is never
+    # treated as valid.
     without_kind = {k: v for k, v in valid.items() if k != "media_kind"}
     assert _public_kuaishou_saved_asset(without_kind) is None
     assert _public_kuaishou_saved_asset({**valid, "media_kind": 123}) is None
