@@ -273,7 +273,304 @@ Result: passed / blocked / incomplete with exact reason
 
 不要把 Cookie、token、签名 URL、原始网页、真实个人媒体或浏览器资料写入报告。
 
-## 8. 交接状态
+## 8. 详细数据与现场证据（脱敏）
+
+本章节专门给无法访问快手网络的 Codex 使用。所有数据均来自脱敏日志、合成 fixture 或固定字段统计；没有保存 Cookie 值、token、签名媒体 URL、HAR、原始网页或个人媒体。
+
+### 8.1 目标输入
+
+```text
+Profile:
+https://www.kuaishou.com/profile/3x62baa74fujidm
+
+Single item:
+https://www.kuaishou.com/f/X1MM7OtmlFNd11q
+```
+
+目标主页和单视频都必须通过以下身份约束：
+
+```text
+page host: www.kuaishou.com
+scheme: https
+port: omitted or 443
+profile id: 3x62baa74fujidm
+short-link id: X1MM7OtmlFNd11q
+```
+
+代码将短链解析后的最终作品重新绑定到站点实际返回的作品 ID；不根据短链字符串猜测媒体 ID。
+
+### 8.2 本机真实请求证据
+
+使用 Google Chrome 154.0.8037.58 arm64、headless browser、默认浏览器请求头和直接网络模式观察目标主页。结果如下：
+
+```text
+GET https://www.kuaishou.com/profile/3x62baa74fujidm
+HTTP status: 200
+page title: target author title was returned
+
+POST /rest/v/profile/feed
+request body shape:
+{"user_id":"<target-profile-id>","pcursor":"","page":"profile"}
+
+response shape:
+{"result":109,"error_id":"","loginUrl":"<redacted>"}
+
+GET /rest/v/profile/get
+HTTP status: 200
+response shape:
+{"result":109}
+```
+
+`loginUrl` 中包含站点内部跳转地址，未写入仓库或报告。`result=109` 表示当前请求没有获得可验证的作者作品列表，不能据此推断“主页为空”，也不能把推荐内容当作目标作者作品。
+
+单视频短链页面在匿名/无有效站点会话时同样可能返回登录要求或空状态响应；因此本机没有把它伪造为“真实下载已通过”。
+
+### 8.3 Cookie Profile 现场数据
+
+本机 Chrome `chrome://version` 显示：
+
+```text
+Chrome version: 154.0.8037.58 (arm64)
+Chrome user data root: <user-home>/Library/Application Support/Google/Chrome
+Selected profile directory: Default
+```
+
+直接使用开发环境的 yt-dlp Cookie reader 读取结果：
+
+```text
+profile: Default
+cookie database: readable
+Kuaishou-domain cookies: 12
+Douyin-domain cookies: 73
+
+profile: Profile 3
+cookie database: readable
+Kuaishou-domain cookies: 0
+Douyin-domain cookies: 0
+
+profile: Profile 4
+cookie database: readable
+Kuaishou-domain cookies: 4
+Douyin-domain cookies: 13
+```
+
+只记录数量和域名类别，不记录 Cookie 名称、值、有效期或加密内容。对目标快手登录态，当前应优先使用 `Default`，但“能读取 Cookie”不等于站点一定授权了目标主页；仍需实际 feed 响应证明。
+
+### 8.4 Cookie 失败诊断类别
+
+Cookie reader 的底层异常现在映射到固定字符串：
+
+| 类别 | 含义 | 不代表什么 |
+| --- | --- | --- |
+| `cookie_decryption_failed` | macOS 钥匙串/Chrome 加密值解密失败 | 不代表账号退出 |
+| `cookie_permission_denied` | 文件或系统权限拒绝 | 不代表 Chrome 必须重装 |
+| `cookie_database_locked` | 数据库被锁或忙 | 不代表站点验证码 |
+| `chrome_data_directory_missing` | Chrome 根目录不存在 | 不代表网络不可达 |
+| `chrome_profile_invalid` | Profile 参数不符合允许格式 | 不代表 Cookie 过期 |
+| `chrome_profile_missing` | 选定 Profile 目录不存在 | 不代表账号退出 |
+| `cookie_database_missing` | Profile 下没有 Cookies 数据库 | 不代表站点没有作品 |
+| `cookie_access_unknown` | 其他未分类底层错误 | 需要结合本地日志继续定位 |
+
+这些类别禁止包含完整本地路径、Cookie 值、token、钥匙串内容或原始异常堆栈。
+
+### 8.5 快手解析模型的详细字段约定
+
+#### 页面身份
+
+```text
+photo.id          -> media_id
+author.id         -> author_id
+photo.caption     -> title（优先）
+photo.originCaption -> title fallback
+photo.timestamp   -> upload_date（UTC date）
+```
+
+身份校验规则：
+
+- `photo.id` 和 `author.id` 必须符合安全 ID 字符集。
+- 单视频必须匹配请求的作品 ID。
+- 主页条目必须匹配目标作者 ID。
+- 不接受推荐作品、其他作者作品或响应串线。
+
+#### 视频 rendition
+
+当前代码观察这些页面返回容器：
+
+```text
+photo.manifest
+photo.manifestH265
+photo.videoResource
+photo.videoResource.h264
+photo.videoResource.hevc
+photo.videoResource.h265
+```
+
+每个 representation 可使用的字段：
+
+```text
+url / backupUrl
+width / height
+fileSize
+avgBitrate
+videoCodec
+id
+```
+
+选择顺序：
+
+1. 过滤不在快手 CDN 白名单内的 URL。
+2. 按 `width * height` 建立最高分辨率 floor。
+3. 丢弃低于最高像素的 rendition。
+4. 同分辨率、同 codec 内保留最高 `avgBitrate`。
+5. 不把不同 codec 的 bitrate 直接跨 codec 比较。
+6. 按页面候选顺序保留备用 URL。
+7. 下载后用文件长度、文件头、FFprobe、尺寸、codec、时长等再次核验。
+8. 最高档候选全部失败时报告失败，不静默降档。
+
+#### 图片/图集候选
+
+当前扩展尝试读取页面返回的：
+
+```text
+photo.photoUrl
+photo.photoH265Url
+photo.photoUrls
+photo.coverUrl
+```
+
+图片条目允许的候选形状包括：
+
+```json
+{"url":"https://<trusted-kuaishou-cdn>/...","width":1440,"height":1440}
+```
+
+或页面返回的 URL 字符串/URL 列表。对图片：
+
+- 只接受可信 HTTPS CDN。
+- 必须有可核验的 `width` 和 `height` 才能声称最高质量。
+- 按像素面积选择最高尺寸。
+- 图集按页面顺序建立 asset index。
+- 下载后检查图片文件头、Content-Type 和实际尺寸。
+- 没有尺寸信息时不把未知 URL 当成最高质量。
+- `coverUrl` 不能替代缺失的视频流。
+
+### 8.6 分页和完整性数据契约
+
+主页分页状态：
+
+```text
+initial cursor: ""
+next cursor field: pcursor
+terminal marker: "no_more"
+max pages: 500
+max items: 10000
+browser wall-clock budget: 300 seconds
+stall threshold: 12 no-new-item cycles
+```
+
+只有以下条件同时满足时才标记 `complete=True`：
+
+- 页面返回连续 cursor 链；
+- 每一页作者 ID 与目标作者一致；
+- 作品 ID 去重后没有串线；
+- 页面返回明确的 `pcursor == "no_more"`；
+- 没有未支持或无法核验的媒体条目；
+- 没有触及页面/作品保护上限。
+
+页面停滞、cursor 缺失、响应结构变化、无视频/图片资产、达到上限都必须标记 incomplete 并给出 warning，不能显示“全部完成”。
+
+### 8.7 输出数据契约
+
+```text
+<output_root>/Kuaishou/<safe-author-name>/
+```
+
+视频示例：
+
+```text
+2026-09-19-<safe-title>.mp4
+```
+
+图片示例：
+
+```text
+2026-09-19-<safe-title>-001.jpg
+2026-09-19-<safe-title>-002.jpg
+```
+
+同名冲突：
+
+```text
+2026-09-19-<safe-title> [<safe-media-id>].mp4
+```
+
+所有文件：
+
+- 使用安全化标题，移除路径分隔符和控制字符。
+- 不覆盖已有用户文件。
+- 使用临时文件 + 原子替换。
+- 取消或失败后清理 `.part` 和临时文件。
+- 不把下载 URL 写入持久化任务状态。
+
+### 8.8 离线 fixture 的已验证数据
+
+现有快手测试使用合成数据，代表以下情况：
+
+```text
+video id: 3xvideo1
+profile id: 3xowner1
+media host: v1.kwaicdn.com
+low rendition: 640x360
+high rendition: 1920x1080
+high backup: same trusted CDN family
+profile pages: 2
+first cursor: ""
+second cursor: "next"
+terminal cursor: "no_more"
+```
+
+已覆盖：
+
+- 最高分辨率选择。
+- 同 codec 最高 bitrate。
+- 未知 codec 不跨 codec 排序。
+- 外作者/外作品阻断。
+- 连续 cursor、去重和 `no_more`。
+- 无明确终页时 incomplete。
+- unsupported media 不假报 complete。
+- 单视频刷新 URL。
+- CDN 重定向安全。
+- 取消时无残留文件。
+- 图片最高尺寸 fixture。
+- 图集 asset index 和输出路径。
+- 日期文件名和冲突 ID 后缀。
+
+这些 fixture 不代表目标主页真实作品数量，也不代表真实网站当前 schema 永不变化。
+
+### 8.9 Codex 在无快手网络环境下的 review 方法
+
+Codex 无法访问快手时，应重点做静态和离线审查：
+
+1. 检查 `parse_video()` 对视频/图片的媒体类型分支。
+2. 检查 `_download_kuaishou_item()` 是否对每个 asset 单独执行通用传输和校验。
+3. 检查 `ProfileCollector` 是否只接受同作者、连续 cursor 和 `no_more`。
+4. 检查 manifest、allowlist 和 `verify_vendor.py` 是否同步。
+5. 运行所有脱敏 fixture，不要求访问快手。
+6. 不要因为本机无法访问快手而放宽 HTTPS、CDN、作者身份或质量校验。
+7. 不要把 `result=109`、网络超时或登录失败改成空主页成功。
+8. 如果要修改真实站点适配器，先新增脱敏 fixture，再写实现。
+
+Codex 可以将以下证据作为当前网络事实，而不是代码正确性的替代：
+
+```text
+live profile feed response: result=109
+live profile item count: unknown
+live page completion: unverified
+live video/image split: unknown
+live highest quality: unverified
+```
+
+## 9. 交接状态
 
 ```text
 Base commit: d87b5c1a for Kuaishou feature; ca14c85e for Cookie diagnostics
