@@ -555,6 +555,34 @@ git diff --check
    - 断点续传：中断后重试**零媒体请求**且无重复文件，删除文件后确实重下
      （反向对照证明复用生效）
 
+6. ✅ **Spelling CI 核对（R7 遗留项）**：`main` 上的 Spelling 工作流**失败**，
+   本地用与 CI 相同版本（`typos-cli 1.50.2`）复现，定位为唯一一处：
+   本轮新增测试的一行注释里有个连字符复合词，被拆词后前半段判为拼写错误
+   （建议改成 miss / mist）。已改写该注释措辞修复，
+   **未关闭拼写检查、未扩大忽略列表、未把该词加入词典**，
+   以保持门禁有效。修复后 `typos` exit=0，快手专项 176 passed。
+   注意：`v0.2.37` 标签仍指向含该问题的提交 `662d5a0e`，修复在后续提交
+   `9c21162a`。按"不移动已发布标签"的约定**未改动该标签**；
+   Spelling 只在 `push: branches:[main]` 与 PR 触发、**不含 tag**，
+   因此不影响 `v0.2.37` 的发布流程。
+
+### 进行中
+
+7. 🔄 **发布流程已触发**：`main` 已推送（`6e8e396a..662d5a0e`），
+   标签 `v0.2.37` 已创建并推送（带注释标签，指向 `662d5a0e`）。
+   版本号 `MARKETING_VERSION 0.2.36 → 0.2.37`、
+   `CURRENT_PROJECT_VERSION 47 → 48`，与标签一致（满足 CI 门禁
+   "标签版本必须匹配 `MARKETING_VERSION`"、build number 必须严格递增）。
+   提交身份使用仓库既有隐私邮箱 `SeanLi-Coder@users.noreply.github.com`，
+   通过 `git -c` 传参，**未修改任何 git 配置**。
+   `.zcode/` 已加入 `.gitignore`（原先未被忽略，存在误提交风险），
+   `.build/` 本已忽略；两者均未提交。
+   已确认 `gh` **未鉴权**，但发布由 `publish-release` 作业用工作流自身的
+   `contents: write` 与 `GITHUB_TOKEN` 完成，故不构成本地阻碍；
+   公开 latest 在发版前为 `v0.2.36`（6 个资产齐全）。
+   轮询记录：`media-helper-tests` 与 `build-apple-silicon` 均 `in_progress`。
+   **最终结论、六个附件核验、匿名 latest/feed/DMG 校验尚未取得，见下方待办。**
+
 ### 尚未完成（勿视为已交付）
 
 1. ⚠️ **图片作品真实验收**：未取证到真实图片/图集作品（见 8.5），
@@ -563,8 +591,11 @@ git diff --check
 2. ⚠️ **主页全量 183 条下载未执行**：体积较大且本机限流已加重，
    按"先抽样验证链路、再由用户决定全量范围"处理。全量下载与
    `no_more` 终止证据仍未取得，因此不能声称"主页全部作品已下载"。
-3. ⬜ 递增版本、提交推送、打标签触发 release、匿名核实 latest/feed/DMG
-4. ⬜ Spelling CI 核对
+3. ⬜ **发布完成后的匿名核实**：待 CI 完成后需核实六个附件齐全、
+   公开 latest 已切到 `v0.2.37`、客户端 feed URL、DMG 完整大小与 SHA-256。
+   本地构建、Git 标签、草稿发布或带鉴权的下载**都不构成**发布已生效的证据。
+4. ⬜ 拼写修复提交 `9c21162a` 需在发布完成后推送到 `main`，
+   使 Spelling 门禁在主线恢复绿色（刻意未提前推送，避免干扰进行中的发布）。
 5. ⬜ 按指引第四节结构补最终交接文档（逐项 R1–R7 结论）
 
 ---
@@ -608,4 +639,102 @@ docs/handoffs/2026-09-25-glm-kuaishou-worklog.md   （本文件，新增）
    正确拒绝复用。已改为生成 5 秒视频，使复用能通过同一道画质门禁。
 
 这四处都是测试预期错误，源码行为正确；均已修正并附失败回归或对照证据。
+
+---
+
+## 14. 按指引第四节结构的逐项结论（供 Codex 直接对照）
+
+```text
+Base / final commit: 6e8e396a (base) -> 662d5a0e (fixes) -> 9c21162a (spelling)
+Branch / PR: glm/kuaishou-review-fixes，已快进合并到 main 并推送；未开 PR
+
+R1: fixed
+    证据: 修复前 8 项新增测试失败；修复后通过。真实主页 143/183 条全部判为 video，
+          without_assets=0，parse_errors={}。可核实视频流优先于图片启发式；
+          coverUrl 不再兜底；裸字符串 photoUrl 仍视为视频文件。
+
+R2: fixed（真实图集结构未取证）
+    证据: 修复前失败（800x600 被全局最大像素筛掉）；修复后逐张保留、顺序稳定、
+          每张内部选最高档；任一成员缺尺寸则整组 unsupported，主页不报 complete。
+    限制: 真实多图图集结构未取证（见 8.5），仅有合成 fixture 覆盖。
+
+R3: fixed
+    证据: 修复前探针 transfer calls=2 / assets per call=[1,1] / output files=2；
+          修复后 calls=1 / assets=[2] / files=1。首个候选普通传输失败时尝试第二个
+          （断言请求顺序 ?h264 -> ?hevc）；全部失败报 All highest-available 且不降档；
+          取消不残留 .part。含本地 HTTP fixture + 真实 JPEG 字节传输回归。
+
+R4: fixed
+    证据: 修复前 asset_completed=0 而磁盘已有 1 文件；修复后 events=1 / records=[1]。
+          真实流程验收：中断后重试媒体请求数=0、无重复文件、任务恢复 completed；
+          反向对照删除文件后请求数=1（证明确实复用而非空跑）。
+          复用需完整解码（截断 1/3 时 ffmpeg exit=183）或 FFprobe 校验；
+          截断/低清/移出目录/缺失/无记录均不复用。
+
+R5: fixed
+    证据: 修复前 test_signing_diagnostics 新增用例 11 failed，探针 diagnostic_code=None、
+          消息不含类别；修复后快手路径携带 cookie_permission_denied 等结构化码。
+          八个类别各有独立中文说明与操作建议；标题为「Chrome Cookie 读取失败：<原因>」；
+          旧任务仅有文本时可恢复类别；抖音签名码不会被误判为 Cookie 类别；
+          恶意值与未知值一律丢弃。前端测试用 run_ui() 实际执行 app.js 验证格式化。
+
+R6: fixed
+    证据: 修复前探针 diagnostic helper raised PermissionError；修复后返回
+          cookie_access_unknown。只捕获 OSError，KeyboardInterrupt/SystemExit 仍传播。
+          抖音 Cookie 失败不再被重标为签名完整性失败或 site_response_changed。
+
+R7: fixed
+    - test_kuaishou_output_directory_is_separate 改为验证真实生产路径计算、
+      持久化、重启恢复与作者名越权防护（../../escape、/absolute/name、..、a/b\c、空白）。
+    - 恢复函数名被删、断言成为死代码的最高视频尺寸测试。
+    - UPSTREAM.md 补齐 browser.py / douyin_signing.py / 诊断测试补丁说明，
+      并修正「test_stop.py 是唯一上游测试改动」的过时表述。
+    - 每个改动文件只更新对应哈希；未改写任何 upstream_sha256；未扩大忽略列表；
+      未批量重写哈希。allowed_patches 说明同步为实际范围。
+    - Spelling CI 失败已定位并修复（测试注释中的连字符复合词被拆词判错），
+      未关闭检查、未加词典。
+
+Tests（最终实测）:
+    verify_vendor.py                                    通过
+    ruff check --exclude vendor                         All checks passed
+    test_kuaishou.py + test_kuaishou_frontend.py        244 passed   (基线 100)
+    Tools/DownloaderHelper/tests                        473 passed, 62 subtests (基线 321)
+    run_upstream_tests.py                               1405 passed (Codex 基线 1382)
+    DownloaderProxyUITests/main.mjs                     PASS 63 checks
+    DownloadCenterTests/run.sh                          227 checks passed
+    SparkleUpdateTests/test_release_policy.py           19 passed
+    SparkleUpdateTests/test_release_delivery.py         通过（六个附件与本地摘要一致）
+    git diff --check                                    无空白问题
+    typos 1.50.2（与 CI 同版本）                         exit=0
+    skipped: 仅 FFmpeg/FFprobe 或 Chrome 缺失时跳过；本机均可用，故实际 0 skip。
+
+Live verification: performed（登录态 Chrome Default，直连，未用代理）
+    单视频: performed — 落盘 1 个 mp4，720x1280 h264+aac，43.13s，13697992 bytes，
+            FFmpeg 完整解码 exit=0，日期开头命名，complete=True
+    主页发现: performed — 修复后采集 183 条，全部 video，作者唯一，
+              without_assets=0；修复前为 0 条（阻断性缺陷 A）
+    主页下载: performed（抽样 3 条）— 全部 ok，独立目录 Kuaishou/<作者名>/，
+              日期前缀取自各作品真实 upload_date，FFprobe 实测 720x1280 h264，
+              三者完整解码 exit=0
+    续传: performed — 中断后重试零媒体请求且无重复文件；删除文件后确实重下
+    限流: 真实触发并验证 — 保留已验证作品、警告带 Reason category: request_rejected
+    主页全量: not performed — 183 条未全量下载，且未取得 pcursor=="no_more" 终止证据，
+              因此不声称「主页全部作品已下载」
+    图片/图集: not performed — 7 种入口均未找到图片作品，无真实结构证据
+    代理模式: not performed — 本轮仅验证直连；代理链路仅由既有离线测试覆盖
+    账号: 使用用户本机 Chrome Default 已登录会话，未切换账号、未导入其他浏览器资料
+
+Remaining risks:
+    1. 真实多图图集结构未取证，图片路径仅合成 fixture 覆盖。
+    2. 主页全量与 no_more 终止证据未取得；抽样下载不等于全量验收。
+    3. 本机对目标主页抓取密集，限流已加重，后续真实验收需降频。
+    4. v0.2.37 标签指向含拼写问题的 662d5a0e；修复在 9c21162a，未移动已发布标签。
+    5. 发布最终结论与匿名核实（六附件 / latest / feed URL / DMG 大小与 SHA-256）
+       尚未取得，故本轮不能声称发布已生效。
+
+Release: draft/in-progress — 标签 v0.2.37 已推送并触发 CI，
+         轮询显示 media-helper-tests 与 build-apple-silicon 进行中，
+         release 尚未创建。公开 latest 在发版前为 v0.2.36。
+         未完成匿名核实前，状态为「未确认发布生效」。
+```
 
