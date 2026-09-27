@@ -40,7 +40,7 @@ class VideoView: NSView {
 
   lazy var subsystem = Logger.makeSubsystem("video\(player.playerNumber)")
 
-  static let SRGB = CGColorSpaceCreateDeviceRGB()
+  static let SRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 
   // record the last mouse up event which lands on video view
   var lastEventId: Int?
@@ -318,6 +318,7 @@ class VideoView: NSView {
 
   private func setICCProfile() {
     let screenColorSpace = player.mainWindow.window?.screen?.colorSpace
+    var usesScreenICCProfile = false
     if !Preference.bool(for: .loadIccProfile) {
       logHDR("Not using ICC profile due to user preference")
       player.mpv.setFlag(MPVOption.GPURendererOptions.iccProfileAuto, false)
@@ -331,10 +332,16 @@ class VideoView: NSView {
       if !videoLayer.setRenderICCProfile(screenColorSpace) {
         player.mpv.setFlag(MPVOption.GPURendererOptions.iccProfileAuto, false)
         logHDR("Screen ICC profile could not be applied; automatic ICC correction is disabled", level: .warning)
+      } else {
+        usesScreenICCProfile = true
       }
+    } else {
+      player.mpv.setFlag(MPVOption.GPURendererOptions.iccProfileAuto, false)
     }
 
-    let sdrColorSpace = screenColorSpace?.cgColorSpace ?? VideoView.SRGB
+    // A display profile describes the output only after mpv has applied it.
+    // Otherwise use explicit sRGB output and let Core Animation manage it.
+    let sdrColorSpace = (usesScreenICCProfile ? screenColorSpace?.cgColorSpace : nil) ?? VideoView.SRGB
     if videoLayer.colorspace != sdrColorSpace {
       let name: String = {
         if let name = sdrColorSpace.name { return name as String }
@@ -343,14 +350,16 @@ class VideoView: NSView {
       }()
       log("Setting layer color space to \(name)")
       videoLayer.colorspace = sdrColorSpace
-      videoLayer.wantsExtendedDynamicRangeContent = false
-      player.mpv.setString(MPVOption.GPURendererOptions.targetTrc, "auto")
-      player.mpv.setString(MPVOption.GPURendererOptions.targetPrim, "auto")
-      player.mpv.setString(MPVOption.GPURendererOptions.targetPeak, "auto")
-      player.mpv.setString(MPVOption.GPURendererOptions.toneMapping, "auto")
-      player.mpv.setString(MPVOption.GPURendererOptions.toneMappingParam, "default")
-      player.mpv.setFlag(MPVOption.Screenshot.screenshotTagColorspace, false)
     }
+    // Layer identity does not describe mpv's current output state. Restore SDR
+    // on every transition, including a reused layer on the same display.
+    videoLayer.wantsExtendedDynamicRangeContent = false
+    player.mpv.setString(MPVOption.GPURendererOptions.targetTrc, usesScreenICCProfile ? "auto" : "srgb")
+    player.mpv.setString(MPVOption.GPURendererOptions.targetPrim, usesScreenICCProfile ? "auto" : "bt.709")
+    player.mpv.setString(MPVOption.GPURendererOptions.targetPeak, "auto")
+    player.mpv.setString(MPVOption.GPURendererOptions.toneMapping, "auto")
+    player.mpv.setString(MPVOption.GPURendererOptions.toneMappingParam, "default")
+    player.mpv.setFlag(MPVOption.Screenshot.screenshotTagColorspace, false)
   }
 
   // MARK: - Error Logging

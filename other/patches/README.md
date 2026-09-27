@@ -5,7 +5,7 @@ The checksum-pinned mpv 0.38.0 archive remains unmodified in the source cache.
 `playback-patches.tsv` before compilation, with no fuzz and with checksums of
 every affected source file both before and after patching.
 
-Modified by ChengYingPlayer maintainers on 2026-09-17 and 2026-09-21:
+Modified by ChengYingPlayer maintainers on 2026-09-17, 2026-09-21 and 2026-09-28:
 
 1. `mpv-0.38.0-icc-profile-ownership.patch` backports the complete upstream fix
    [6f619d5ef43b070d728e43f0b2fe0571449de1a8](https://github.com/mpv-player/mpv/commit/6f619d5ef43b070d728e43f0b2fe0571449de1a8)
@@ -27,6 +27,27 @@ Modified by ChengYingPlayer maintainers on 2026-09-17 and 2026-09-21:
    to the release archive. This prevents an `on_unload` hook's video-rotation
    refresh from invalidating playback teardown state; a successfully executed
    seek still clears end-of-file normally. The teardown assertion remains intact.
+4. `mpv-0.38.0-dovi-base-layer-colors.patch` backports upstream's Dolby Vision
+   base-layer fallback for renderers without Dolby Vision reshaping. The shared
+   OpenGL initialization follows
+   [c02aa154ab45d3534e2c507f5f7a7e1b1c4e81f2](https://github.com/mpv-player/mpv/commit/c02aa154ab45d3534e2c507f5f7a7e1b1c4e81f2),
+   which consolidated the earlier vo_gpu and embedded libmpv fixes. The complete
+   dependency commits are identified in the patch header: original color tags
+   are retained through attribute copies and AVFrame round-trips, and explicit
+   `format:dolbyvision=no` restores the base-layer tags before applying overrides.
+   The gamma-change check also includes the upstream fix
+   [c9cf510d6aab4409273278e33280fb5893640301](https://github.com/mpv-player/mpv/commit/c9cf510d6aab4409273278e33280fb5893640301).
+
+   The pinned mpv 0.38.0 decoder infers PQ display light and Dolby Vision peaks
+   before GL setup. This project adaptation also saves and restores the original
+   HDR metadata and light model, clears the unused mapping pointer, and detects
+   changes in original color tags and static HDR mastering metadata during
+   renderer reconfiguration, while ignoring per-frame metadata changes. This lets
+   HLG-compatible Dolby Vision use the HLG base layer instead of interpreting
+   its pixel values as PQ. Plain SDR, HDR10/PQ and HLG keep their original path.
+   Dolby Vision side data remains available to capable renderers and FFmpeg;
+   this is not Dolby Vision reshaping support for embedded OpenGL. No public
+   libmpv header, library version, or dependency ABI is changed.
 
 These modifications retain mpv's applicable license terms. Original upstream
 notices are preserved byte-for-byte separately, not rewritten to imply that the
@@ -41,3 +62,7 @@ exercises caller-owned buffer lifetime and real managed-color pixels; the App
 smoke test covers the production Swift integration. `Tools/PlaybackRotationTests`
 reproduces the original end-of-file rotation failure and checks patched playback
 teardown, repeated rotation, and seek behavior.
+`Tools/HDRSourceTests` compiles actual image and format-filter functions with
+the pinned libplacebo and bundled FFmpeg, reproduces the unpatched HLG failure,
+then checks synthetic Dolby Vision/HLG, PQ and SDR metadata through fallback,
+attribute copies, and AVFrame round-trips under ASan/UBSan.

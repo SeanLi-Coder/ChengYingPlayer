@@ -30,6 +30,10 @@ HDR 播放输出默认关闭：新安装以及从未手动保存 HDR 偏好的�
 仍可在设置中开启默认 HDR，或在播放时用快捷设置的 HDR 开关临时开启；已明确保存的开启／关闭选择不会被升级覆盖。
 此选项只控制播放显示，不修改源视频、HDR 元数据或剪辑／转码的输出策略。
 
+兼容 HLG / HDR10 基础层的 Dolby Vision 视频在当前 OpenGL 播放路径中按基础层正确映射，
+避免把 HLG 错当 PQ 而出现过曝、偏黄。换片与 HDR/SDR 切换会重新同步显示色彩状态；
+这不代表支持所有 Dolby Vision 动态处理，尤其不承诺无兼容基础层的 Profile 5 完整还原。
+
 ## 下载与安装
 
 安装版在 [GitHub Releases](https://github.com/SeanLi-Coder/ChengYingPlayer/releases) 提供 `ChengYingPlayer-v<版本>-Apple-Silicon.dmg`，原生支持 Apple Silicon Mac，包括 **M4 Max MacBook Pro**。早期标有 Source Only 的版本仅有源码，不是安装包。
@@ -316,6 +320,12 @@ open iina.xcodeproj
 `build_playback_libraries.sh` 从固定源码构建 libmpv、播放 FFmpeg 和 AV1 / 字幕 / 色彩管理依赖，保留 VideoToolbox 硬解、OpenGL、CoreAudio、ICC 与 HDR 所需能力。它与视频处理使用的 FFmpeg CLI 独立；不再从其他播放器的 DMG 提取动态库。原 `download_libs.sh` 仅保留作历史开发参考，不能用于发行构建。播放依赖目前仅支持原生 arm64 构建。
 
 播放库包含明确记录的 ICC 内存所有权修复与配置同步补丁，避免加载屏幕色彩配置时崩溃或配置未生效。`bash Tools/ICCProfileTests/run.sh` 使用真实 OpenGL / LCMS 检查借用内存、重复切换和 sRGB / Display P3 渲染像素；补丁、原始源码及修改前后校验值随对应 Release 源码包提供。
+
+Dolby Vision 基础层色彩回退另有固定源码回归 `bash Tools/HDRSourceTests/run.sh`，
+实际编译 `mp_image` / format filter 并验证原版失败、补丁版通过；需要 Meson / Ninja。
+`bash Tools/HDRRenderingTests/run.sh` 使用自生成 SDR / PQ / HLG 视频检查实际 OpenGL / ICC 渲染像素，
+`bash Tools/HDRColorStateTests/run.sh` 验证 App 新文件与 ICC/SDR 状态恢复。
+这些测试不包含个人视频，也不能替代实体 HDR 屏幕或全部 Dolby Vision 格式验收。
 
 播放库另回移了 [mpv 官方 EOF seek 状态修复](https://github.com/mpv-player/mpv/commit/d59f4fd3ec141693da4f7f6677aa729e1bb92f4d)，保留引擎断言，不以禁用检查规避崩溃。`bash Tools/PlaybackRotationTests/run_source.sh` 对锁定的原始与补丁后源码执行回归，`bash Tools/PlaybackRotationTests/run.sh` 使用实际编译的 libmpv 验证卸载时还原旋转角度、EOF、停止与换片。完整 App 快速旋转检查及其键盘权限限制见 [旋转测试说明](Tools/VideoToolsTests/README.md)。
 

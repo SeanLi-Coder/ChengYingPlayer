@@ -2281,6 +2281,13 @@ class PlayerCore: NSObject {
     // restart even while paused. See issue #5337.
     syncUI(.time)
     reloadSavedIINAfilters()
+
+    // A new file may have the same color tags as the previous one, or its color
+    // events may arrive before loading finishes. Restore color state once the
+    // new frame is ready, without reapplying ICC on ordinary seeks or loops.
+    if info.justOpenedFile || info.justStartedFile {
+      refreshEdrMode()
+    }
     
     // The new video's size is guaranteed to be available. Reset the flags used for window resizing.
     // We can't put this in MPV_EVENT_VIDEO_RECONFIG because it can be emitted with the old video's size

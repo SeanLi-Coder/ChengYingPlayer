@@ -46,4 +46,7 @@ extend-ignore-re = [
 "ScreenshootOSDView" = "ScreenshootOSDView"
 "tak" = "tak"
 "videoParamsMaxCll" = "videoParamsMaxCll"
+# Exact FFmpeg and libplacebo content-light-level metadata fields.
+"MaxCLL" = "MaxCLL"
+"max_cll" = "max_cll"
 "CPSProcessSerNum" = "CPSProcessSerNum"

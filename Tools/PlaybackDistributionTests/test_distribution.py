@@ -305,6 +305,7 @@ class DistributionTests(unittest.TestCase):
                 ("mpv-icc-ownership", "mpv-0.38.0-icc-profile-ownership.patch"),
                 ("mpv-icc-option-refresh", "mpv-0.38.0-icc-option-refresh.patch"),
                 ("mpv-unload-seek-state", "mpv-0.38.0-unload-seek-state.patch"),
+                ("mpv-dovi-base-layer-colors", "mpv-0.38.0-dovi-base-layer-colors.patch"),
             ],
         )
         for value in patches.values():

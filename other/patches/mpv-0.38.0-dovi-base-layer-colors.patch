@@ -1,0 +1,213 @@
+From: ChengYingPlayer maintainers
+Subject: [PATCH] Restore Dolby Vision base-layer colors for embedded OpenGL
+
+Backport the fallback colorspace implementation from upstream mpv:
+14d3a8ed287e878611b33b89f8b5923d0ead62b2 (save original colorspace)
+e35a559ce1b15bb4af54134e81ddf3d20341abfe (restore only Dolby Vision)
+9b571a7aa711b9587e6acf68572e2003e2ddd51e and
+98ed9722462bcd93edb2d00820a9f20901cea9d3 (copy original attributes)
+f46975c2d20f9304b780c398daded1b9fca17ebd (AVFrame round-trip)
+2a72e6cb20c2af302041a0b30dbf0d1b93990a4a and
+1f33889c0355b9ea9323e6cc2a52ce3911eb76eb, consolidated by
+c02aa154ab45d3534e2c507f5f7a7e1b1c4e81f2 (shared GL fallback)
+c4d85fc0c42850dde1b5714596a6bd07b21c6637 (format filter fallback)
+c9cf510d6aab4409273278e33280fb5893640301 (gamma-change detection)
+
+Adaptation for pinned mpv 0.38.0 / libplacebo 6.338.2:
+Preserve original HDR metadata and light model as well as color tags,
+because the decoder has already inferred PQ light/peaks before GL setup.
+Restore before explicit format-filter overrides, clear the unused DOVI
+mapping pointer, and include fallback tags and static HDR metadata in
+format-change detection without reconfiguring for per-frame metadata.
+No public libmpv headers or ABI version are changed.
+
+diff --git a/video/filter/vf_format.c b/video/filter/vf_format.c
+index f226bf2..03bb900 100644
+--- a/video/filter/vf_format.c
++++ b/video/filter/vf_format.c
+@@ -74,7 +74,7 @@ static void set_params(struct vf_format_opts *p, struct mp_image_params *out,
+     if (p->primaries)
+         out->color.primaries = p->primaries;
+     if (p->gamma) {
+-        enum pl_color_transfer in_gamma = p->gamma;
++        enum pl_color_transfer in_gamma = out->color.transfer;
+         out->color.transfer = p->gamma;
+         if (in_gamma != out->color.transfer) {
+             // When changing the gamma function explicitly, also reset stuff
+@@ -134,6 +134,9 @@ static void vf_format_process(struct mp_filter *f)
+             struct mp_image_params par = img->params;
+             int outfmt = priv->opts->fmt;
+ 
++            if (!priv->opts->dovi)
++                mp_image_params_restore_dovi_mapping(&par);
++
+             // If we convert from RGB to YUV, default to limited range.
+             if (mp_imgfmt_get_forced_csp(img->imgfmt) == PL_COLOR_SYSTEM_RGB &&
+                 outfmt && mp_imgfmt_get_forced_csp(outfmt) == PL_COLOR_SYSTEM_UNKNOWN)
+@@ -163,13 +166,14 @@ static void vf_format_process(struct mp_filter *f)
+             goto write_out;
+ 
+         if (!priv->opts->convert) {
++            if (!priv->opts->dovi)
++                mp_image_params_restore_dovi_mapping(&img->params);
+             set_params(priv->opts, &img->params, false);
+             mp_image_params_guess_csp(&img->params);
+         }
+ 
+         if (!priv->opts->dovi) {
+-            if (img->params.repr.sys == PL_COLOR_SYSTEM_DOLBYVISION)
+-                img->params.repr.sys = PL_COLOR_SYSTEM_BT_2020_NC;
++            mp_image_params_restore_dovi_mapping(&img->params);
+             // Map again to strip any DV metadata set to common fields.
+             img->params.color.hdr = (struct pl_hdr_metadata){0};
+             pl_map_hdr_metadata(&img->params.color.hdr, &(struct pl_av_hdr_metadata) {
+diff --git a/video/mp_image.c b/video/mp_image.c
+index 609fb17..684bbfb 100644
+--- a/video/mp_image.c
++++ b/video/mp_image.c
+@@ -522,6 +522,11 @@ void mp_image_copy_attributes(struct mp_image *dst, struct mp_image *src)
+     dst->params.chroma_location = src->params.chroma_location;
+     dst->params.crop = src->params.crop;
+     dst->nominal_fps = src->nominal_fps;
++    dst->params.primaries_orig = src->params.primaries_orig;
++    dst->params.transfer_orig = src->params.transfer_orig;
++    dst->params.sys_orig = src->params.sys_orig;
++    dst->params.hdr_orig = src->params.hdr_orig;
++    dst->params.light_orig = src->params.light_orig;
+ 
+     // ensure colorspace consistency
+     enum pl_color_system dst_forced_csp = mp_image_params_get_forced_csp(&dst->params);
+@@ -833,6 +838,11 @@ bool mp_image_params_equal(const struct mp_image_params *p1,
+            p1->force_window == p2->force_window &&
+            pl_color_space_equal(&p1->color, &p2->color) &&
+            pl_color_repr_equal(&p1->repr, &p2->repr) &&
++           p1->primaries_orig == p2->primaries_orig &&
++           p1->transfer_orig == p2->transfer_orig &&
++           p1->sys_orig == p2->sys_orig &&
++           p1->light_orig == p2->light_orig &&
++           pl_hdr_metadata_equal(&p1->hdr_orig, &p2->hdr_orig) &&
+            p1->light == p2->light &&
+            p1->chroma_location == p2->chroma_location &&
+            p1->rotate == p2->rotate &&
+@@ -848,7 +858,33 @@ bool mp_image_params_static_equal(const struct mp_image_params *p1,
+     struct mp_image_params b = *p2;
+     a.repr.dovi = b.repr.dovi = NULL;
+     a.color.hdr = b.color.hdr = (struct pl_hdr_metadata){0};
+-    return mp_image_params_equal(&a, &b);
++    // Base-layer mastering metadata affects the GL fallback configuration;
++    // per-frame HDR10+ and CIE-Y metadata must not force reconfiguration.
++    const struct pl_hdr_metadata *ha = &p1->hdr_orig, *hb = &p2->hdr_orig;
++    a.hdr_orig = b.hdr_orig = (struct pl_hdr_metadata){0};
++    return mp_image_params_equal(&a, &b) &&
++           pl_raw_primaries_equal(&ha->prim, &hb->prim) &&
++           ha->min_luma == hb->min_luma && ha->max_luma == hb->max_luma &&
++           ha->max_cll == hb->max_cll && ha->max_fall == hb->max_fall;
++}
++
++// Restore the base-layer colorspace for renderers without Dolby Vision support.
++void mp_image_params_restore_dovi_mapping(struct mp_image_params *params)
++{
++    if (params->repr.sys != PL_COLOR_SYSTEM_DOLBYVISION)
++        return;
++    params->color.primaries = params->primaries_orig;
++    params->color.transfer = params->transfer_orig;
++    params->repr.sys = params->sys_orig;
++    params->repr.dovi = NULL;
++    // mpv 0.38 has already inferred PQ light and peaks before renderer setup.
++    // Restore pre-mapping metadata so HLG can infer its own reference display.
++    params->color.hdr = params->hdr_orig;
++    params->light = params->light_orig;
++    if (!pl_color_transfer_is_hdr(params->transfer_orig))
++        params->color.hdr = (struct pl_hdr_metadata){0};
++    if (params->transfer_orig != PL_COLOR_TRC_PQ)
++        params->color.hdr.max_pq_y = params->color.hdr.avg_pq_y = 0;
+ }
+ 
+ // Set most image parameters, but not image format or size.
+@@ -1089,6 +1125,11 @@ struct mp_image *mp_image_from_av_frame(struct AVFrame *src)
+     if (sd)
+         dst->a53_cc = sd->buf;
+ 
++    dst->params.primaries_orig = dst->params.color.primaries;
++    dst->params.transfer_orig = dst->params.color.transfer;
++    dst->params.sys_orig = dst->params.repr.sys;
++    dst->params.hdr_orig = dst->params.color.hdr;
++    dst->params.light_orig = dst->params.light;
+     AVBufferRef *dovi = NULL;
+ #if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 16, 100)
+     sd = av_frame_get_side_data(src, AV_FRAME_DATA_DOVI_METADATA);
+@@ -1203,13 +1244,16 @@ struct AVFrame *mp_image_to_av_frame(struct mp_image *src)
+     if (src->fields & MP_IMGFIELD_REPEAT_FIRST)
+         dst->repeat_pict = 1;
+ 
+-    pl_avframe_set_repr(dst, src->params.repr);
++    // Image params without dovi mapped; should be passed as side data instead.
++    struct mp_image_params params = src->params;
++    mp_image_params_restore_dovi_mapping(&params);
++    pl_avframe_set_repr(dst, params.repr);
+ 
+-    dst->chroma_location = pl_chroma_to_av(src->params.chroma_location);
++    dst->chroma_location = pl_chroma_to_av(params.chroma_location);
+ 
+     dst->opaque_ref = av_buffer_alloc(sizeof(struct mp_image_params));
+     MP_HANDLE_OOM(dst->opaque_ref);
+-    *(struct mp_image_params *)dst->opaque_ref->data = src->params;
++    *(struct mp_image_params *)dst->opaque_ref->data = params;
+ 
+     if (src->icc_profile) {
+         AVFrameSideData *sd =
+@@ -1219,14 +1263,14 @@ struct AVFrame *mp_image_to_av_frame(struct mp_image *src)
+         new_ref->icc_profile = NULL;
+     }
+ 
+-    pl_avframe_set_color(dst, src->params.color);
++    pl_avframe_set_color(dst, params.color);
+ 
+     {
+         AVFrameSideData *sd = av_frame_new_side_data(dst,
+                                                      AV_FRAME_DATA_DISPLAYMATRIX,
+                                                      sizeof(int32_t) * 9);
+         MP_HANDLE_OOM(sd);
+-        av_display_rotation_set((int32_t *)sd->data, src->params.rotate);
++        av_display_rotation_set((int32_t *)sd->data, params.rotate);
+     }
+ 
+     // Add back side data, but only for types which are not specially handled
+diff --git a/video/mp_image.h b/video/mp_image.h
+index af0d9fd..fc1700d 100644
+--- a/video/mp_image.h
++++ b/video/mp_image.h
+@@ -50,6 +50,13 @@ struct mp_image_params {
+     bool force_window;          // fake image created by handle_force_window
+     struct pl_color_space color;
+     struct pl_color_repr repr;
++    // Original values before Dolby Vision metadata mapping.
++    enum pl_color_primaries primaries_orig;
++    enum pl_color_transfer transfer_orig;
++    enum pl_color_system sys_orig;
++    struct pl_hdr_metadata hdr_orig;
++    enum mp_csp_light light_orig;
++
+     enum mp_csp_light light;
+     enum pl_chroma_location chroma_location;
+     // The image should be rotated clockwise (0-359 degrees).
+@@ -177,6 +184,7 @@ bool mp_image_params_equal(const struct mp_image_params *p1,
+                            const struct mp_image_params *p2);
+ bool mp_image_params_static_equal(const struct mp_image_params *p1,
+                                   const struct mp_image_params *p2);
++void mp_image_params_restore_dovi_mapping(struct mp_image_params *params);
+ 
+ void mp_image_params_get_dsize(const struct mp_image_params *p,
+                                int *d_w, int *d_h);
+diff --git a/video/out/gpu/video.c b/video/out/gpu/video.c
+index 3dd7c8c..88570bf 100644
+--- a/video/out/gpu/video.c
++++ b/video/out/gpu/video.c
+@@ -917,6 +917,7 @@ static void init_video(struct gl_video *p)
+     }
+     p->color_swizzle[4] = '\0';
+ 
++    mp_image_params_restore_dovi_mapping(&p->image_params);
+     mp_image_params_guess_csp(&p->image_params);
+ 
+     av_lfg_init(&p->lfg, 1);

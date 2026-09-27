@@ -77,6 +77,7 @@ jobs:
           bash Tools/VideoWindowSizingTests/run.sh
           bash Tools/VideoViewportTests/run.sh
           bash Tools/HDRPreferenceTests/run.sh
+          bash Tools/HDRColorStateTests/run.sh
 
       - name: Test edge player controls and visibility lifecycle
         run: |
@@ -219,6 +220,12 @@ jobs:
 
       - name: Test real ICC profile memory ownership
         run: bash Tools/ICCProfileTests/run.sh
+
+      - name: Test actual HDR-to-SDR rendering
+        run: bash Tools/HDRRenderingTests/run.sh
+
+      - name: Test Dolby Vision compatible base-layer source regression
+        run: bash Tools/HDRSourceTests/run.sh
 
       - name: Build bundled video tools
         run: |
