@@ -1039,6 +1039,27 @@ struct Preference {
 
   static private let ud = UserDefaults.standard
 
+  /// Registered defaults do not count as a user choice. Explicit launch arguments remain transient
+  /// overrides; otherwise preserve legacy mpv configuration until a repeat setting has been saved.
+  static func savedLoopMode(in defaults: UserDefaults, domain: String?) -> LoopMode? {
+    let stored = domain.flatMap { defaults.persistentDomain(forName: $0) } ?? [:]
+    let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+    guard [stored, arguments].contains(where: {
+      $0[Key.autoRepeat.rawValue] != nil || $0[Key.defaultRepeatMode.rawValue] != nil
+    }) else { return nil }
+    guard defaults.bool(forKey: Key.autoRepeat.rawValue) else { return .off }
+    return defaults.integer(forKey: Key.defaultRepeatMode.rawValue) == DefaultRepeatMode.file.rawValue ? .file : .playlist
+  }
+
+  static func saveLoopMode(_ mode: LoopMode, in defaults: UserDefaults) {
+    // Retain the last enabled mode when turning repetition off, matching the settings popup.
+    if mode != .off {
+      defaults.set(mode == .file ? DefaultRepeatMode.file.rawValue : DefaultRepeatMode.playlist.rawValue,
+                   forKey: Key.defaultRepeatMode.rawValue)
+    }
+    defaults.set(mode != .off, forKey: Key.autoRepeat.rawValue)
+  }
+
   /// Preserve the selected device while ignoring the retired experimental audio driver.
   /// The stored value remains untouched until the user explicitly selects another device.
   static var effectiveAudioDeviceName: String {

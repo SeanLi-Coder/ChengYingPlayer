@@ -516,7 +516,7 @@
                 </button>
                 <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="H91-rO-GsT">
                     <rect key="frame" x="120" y="8" width="214" height="16"/>
-                    <buttonCell key="cell" type="check" title="When a file is opened manually:" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="jok-kc-HjX">
+                    <buttonCell key="cell" type="check" title="Repeat playback (all videos):" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="jok-kc-HjX">
                         <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                         <font key="font" metaFont="system"/>
                     </buttonCell>

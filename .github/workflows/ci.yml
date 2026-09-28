@@ -78,6 +78,8 @@ jobs:
           bash Tools/VideoViewportTests/run.sh
           bash Tools/HDRPreferenceTests/run.sh
           bash Tools/HDRColorStateTests/run.sh
+          bash Tools/PlaybackModeTests/run.sh
+          bash Tools/PlaybackModeUITests/run.sh
 
       - name: Test edge player controls and visibility lifecycle
         run: |
@@ -260,6 +262,9 @@ jobs:
 
       - name: Test live playlist reordering
         run: PATH="$PWD/deps/executable:$PATH" PLAYLIST_REQUIRE_LIVE_TESTS=1 bash Tools/PlaylistPlaybackTests/run.sh
+
+      - name: Test real playback mode transitions and EOF
+        run: PATH="$PWD/deps/executable:$PATH" bash Tools/PlaybackModeLiveTests/run.sh
 
       - name: Test live filter node safety
         run: bash Tools/PlaybackLifecycleTests/run_live.sh

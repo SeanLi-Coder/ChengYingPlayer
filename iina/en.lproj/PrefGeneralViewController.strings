@@ -158,8 +158,8 @@
 /* Class = "NSMenuItem"; title = "Show welcome window"; ObjectID = "z9T-8h-1T0"; */
 "z9T-8h-1T0.title" = "Show welcome window";
 
-/* Class = "NSButtonCell"; title = "When a file is opened manually:"; ObjectID = "jok-kc-HjX"; */
-"jok-kc-HjX.title" = "When a file is opened manually:";
+/* Class = "NSButtonCell"; title = "Repeat playback (all videos):"; ObjectID = "jok-kc-HjX"; */
+"jok-kc-HjX.title" = "Repeat playback (all videos):";
 
 /* Class = "NSMenuItem"; title = "Loop playlist"; ObjectID = "5WC-Sp-6mg"; */
 "5WC-Sp-6mg.title" = "Loop playlist";

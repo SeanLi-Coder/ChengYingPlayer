@@ -163,6 +163,8 @@ def main():
         preferences = {
             "volume": 13,
             "enableHdrSupport": False,
+            "autoRepeat": True,
+            "defaultRepeatMode": 1,
             "FixtureSubtitleSize": 47,
             "FixtureScreenshotDirectory": str(work / "saved-screenshots"),
             "FixtureShortcut": "Meta+Shift+r",

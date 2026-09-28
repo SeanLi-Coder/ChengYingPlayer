@@ -137,6 +137,10 @@ extension MainMenuActionHandler {
     player.toggleFileLoop()
   }
 
+  @objc func menuNoLoop(_ sender: NSMenuItem) {
+    player.setLoopMode(.off)
+  }
+
   @objc func menuPlaylistLoop(_ sender: NSMenuItem) {
     player.togglePlaylistLoop()
   }

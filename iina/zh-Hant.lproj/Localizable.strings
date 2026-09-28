@@ -566,3 +566,10 @@
 "plugin.install_error.cannot_load" = "ChengYing 無法載入此外掛程式，可能使用了錯誤的格式。";
 "plugin.check_for_updates" = "檢查更新";
 "plugin.updating" = "正在下載更新…";
+/* Global playback mode */
+"playback_mode.label" = "播放模式";
+"playback_mode.accessibility" = "播放模式";
+"playback_mode.off" = "順序播放（不循環）";
+"playback_mode.file" = "單檔循環";
+"playback_mode.playlist" = "列表循環";
+"playback_mode.scope" = "自動記住此模式，適用於所有播放視窗、之後開啟的影片及應用程式重新啟動後。與 A-B 循環獨立。";

@@ -256,6 +256,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
         return false
       }
     } else {
+      if player.handleLoopModeKeyBinding(keyBinding.action) { return true }
       if handleGuardedPlaybackCommand(keyBinding.action) { return true }
       // - mpv command
       let returnValue: Int32

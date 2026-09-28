@@ -108,6 +108,7 @@ class MenuController: NSObject, NSMenuDelegate {
   @IBOutlet weak var advancedScreenshot: NSMenuItem!
   @IBOutlet weak var abLoop: NSMenuItem!
   @IBOutlet weak var fileLoop: NSMenuItem!
+  private var noLoop: NSMenuItem?
   @IBOutlet weak var playlistPanel: NSMenuItem!
   @IBOutlet weak var playlist: NSMenuItem!
   @IBOutlet weak var playlistLoop: NSMenuItem!
@@ -277,6 +278,7 @@ class MenuController: NSObject, NSMenuDelegate {
     playlistMenu.delegate = self
     chapterMenu.delegate = self
     playlistLoop.action = #selector(MainMenuActionHandler.menuPlaylistLoop(_:))
+    installPlaybackModeMenu()
     playlistPanel.action = #selector(MainWindowController.menuShowPlaylistPanel(_:))
     chapterPanel.action = #selector(MainWindowController.menuShowChaptersPanel(_:))
 
@@ -489,6 +491,18 @@ class MenuController: NSObject, NSMenuDelegate {
     }
   }
 
+  private func installPlaybackModeMenu() {
+    if noLoop == nil {
+      let item = NSMenuItem(title: PlaybackModeMenu.title(for: .off),
+                            action: #selector(MainMenuActionHandler.menuNoLoop(_:)), keyEquivalent: "")
+      playbackMenu.insertItem(item, at: playbackMenu.index(of: fileLoop))
+      noLoop = item
+    }
+    fileLoop.title = PlaybackModeMenu.title(for: .file)
+    playlistLoop.title = PlaybackModeMenu.title(for: .playlist)
+    [noLoop, fileLoop, playlistLoop].forEach { $0?.toolTip = PlaybackModeMenu.scopeDescription }
+  }
+
   private func updatePlaybackMenu() {
     let player = PlayerCore.active
     let playlistPanelVisible = player.isInMiniPlayer ? player.miniPlayer.isPlaylistVisible : player.mainWindow.sideBarStatus == .playlist
@@ -499,6 +513,7 @@ class MenuController: NSObject, NSMenuDelegate {
     pause.title = player.info.state == .paused ? Constants.String.resume : Constants.String.pause
     abLoop.state = player.isABLoopActive ? .on : .off
     let loopMode = player.getLoopMode()
+    noLoop?.state = loopMode == .off ? .on : .off
     fileLoop.state = loopMode == .file ? .on : .off
     playlistLoop.state = loopMode == .playlist ? .on : .off
     let speed = player.info.playSpeed.groupedStringUpTo6Decimals

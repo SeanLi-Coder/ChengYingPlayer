@@ -568,16 +568,12 @@ class PlayerCore: NSObject {
     mpv.setFlag(MPVOption.GPURendererOptions.iccProfileAuto, false)
 
     // Send load file command
+    restoreSavedLoopMode()
     info.justOpenedFile = true
     info.state = .loading
     playlistMutationLock.lock()
     mpv.command(.loadfile, args: [path], level: .verbose)
     playlistMutationLock.unlock()
-
-    if Preference.bool(for: .autoRepeat) {
-       let loopMode = Preference.DefaultRepeatMode(rawValue: Preference.integer(for: .defaultRepeatMode))
-       setLoopMode(loopMode == .file ? .file : .playlist)
-     }
   }
 
   static func loadKeyBindings() {
@@ -639,6 +635,7 @@ class PlayerCore: NSObject {
 
   func startMPV() {
     mpv.mpvInit()
+    restoreSavedLoopMode()
     events.emit(.mpvInitialized)
 
     let audioDevice = Preference.effectiveAudioDeviceName
@@ -1191,16 +1188,38 @@ class PlayerCore: NSObject {
   }
 
   func setLoopMode(_ newMode: LoopMode) {
-    switch newMode {
-    case .playlist:
-      mpv.setString(MPVOption.PlaybackControl.loopPlaylist, "inf")
-      mpv.setString(MPVOption.PlaybackControl.loopFile, "no")
-    case .file:
-      mpv.setString(MPVOption.PlaybackControl.loopFile, "inf")
-    case .off:
-      mpv.setString(MPVOption.PlaybackControl.loopPlaylist, "no")
-      mpv.setString(MPVOption.PlaybackControl.loopFile, "no")
+    Preference.saveLoopMode(newMode, in: .standard)
+    applyLoopMode(newMode)
+    // Existing and idle windows share the same selection. Future cores restore it on startup.
+    for player in PlayerCore.playerCores where player !== self {
+      player.applyLoopMode(newMode)
     }
+  }
+
+  /// Restore only an explicit app preference; untouched defaults leave advanced mpv options alone.
+  func restoreSavedLoopMode() {
+    guard let mode = Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) else { return }
+    applyLoopMode(mode)
+  }
+
+  /// Apply whole-file/list repetition without changing A-B markers or saving incidental mpv state.
+  private func applyLoopMode(_ newMode: LoopMode) {
+    guard info.state != .shuttingDown, info.state != .shutDown, mpv.mpv != nil else { return }
+    let loopFile = newMode == .file ? "inf" : "no"
+    let loopPlaylist = newMode == .playlist ? "inf" : "no"
+    if mpv.getString(MPVOption.PlaybackControl.loopPlaylist) != loopPlaylist {
+      mpv.setString(MPVOption.PlaybackControl.loopPlaylist, loopPlaylist)
+    }
+    if mpv.getString(MPVOption.PlaybackControl.loopFile) != loopFile {
+      mpv.setString(MPVOption.PlaybackControl.loopFile, loopFile)
+    }
+  }
+
+  /// Handle standard repeat shortcuts as app choices. Custom finite-repeat commands stay in mpv.
+  func handleLoopModeKeyBinding(_ tokens: [String]) -> Bool {
+    guard let mode = LoopMode.fromKeyBinding(tokens, current: getLoopMode()) else { return false }
+    setLoopMode(mode)
+    return true
   }
 
   func nextLoopMode() {

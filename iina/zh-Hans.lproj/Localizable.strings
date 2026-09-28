@@ -574,3 +574,10 @@
 "videotools.rotation.shortcut_queued" = "当前任务完成后，将继续导出最新累计角度。";
 "videotools.rotation.shortcut_saved" = "已保存到原视频同级目录；播放器继续预览旋转后的原视频。";
 "videotools.viewport.status" = "画面 %.0f%% · 水平 %+.0f%% / 垂直 %+.0f%% · ⇧⌘0 复位";
+/* Global playback mode */
+"playback_mode.label" = "播放模式";
+"playback_mode.accessibility" = "播放模式";
+"playback_mode.off" = "顺序播放（不循环）";
+"playback_mode.file" = "单文件循环";
+"playback_mode.playlist" = "列表循环";
+"playback_mode.scope" = "自动记住此模式，适用于所有播放窗口、之后打开的视频及应用重启后。与 A-B 循环独立。";

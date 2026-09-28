@@ -20,4 +20,5 @@ struct MPVHook: RawRepresentable {
   static let onLoadFail = MPVHook("on_load_fail")
   static let onPreLoaded = MPVHook("on_preloaded")
   static let onUnLoad = MPVHook("on_unload")
+  static let onAfterEndFile = MPVHook("on_after_end_file")
 }

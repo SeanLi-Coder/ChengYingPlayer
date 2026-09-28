@@ -152,6 +152,8 @@ defaults.removePersistentDomain(forName: suite)
 let retainedPreferences: [String: Any] = [
   AppUpdatePreferences.automaticChecksKey: false,
   "enableHdrSupport": true,
+  "autoRepeat": true,
+  "defaultRepeatMode": 1,
   "oscPosition": 1,
   "enableControlBarAutoHide": false,
   "showRemainingTime": false,

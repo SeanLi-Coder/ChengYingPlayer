@@ -210,6 +210,11 @@ Release status: not released / draft / publicly verified
 
 ## 9. 最新 Codex review 交接
 
+全局播放模式记忆与选择入口见
+[`2026-09-29 播放模式交接`](handoffs/2026-09-29-persistent-playback-mode.md)。
+目标 `v0.2.44` / build `55`；正式发布状态以该文档末尾的交付记录为准。
+沿用既有循环偏好，保留 A/B 区间独立性、HDR 与下载器修复。
+
 抖音 Cookie 修复与 HDR 默认开启见
 [`2026-09-28 Cookie / HDR 交接`](handoffs/2026-09-28-douyin-cookie-hdr-on.md)。
 `v0.2.43` / build `54` 已于北京时间 2026-09-29 00:02:36 正式发布，标签提交 `3e88ef9f`。

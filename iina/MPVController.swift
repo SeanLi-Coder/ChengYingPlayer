@@ -543,6 +543,14 @@ class MPVController: NSObject {
 
     // Register before any load command, including playlist navigation performed by mpv itself.
     addSilentVideoOpenHook()
+    addSavedLoopModeHook()
+
+    // The settings window still binds these legacy keys. Defer their paired updates to the main
+    // queue so all cores see the complete selection, without persisting mpv property events.
+    for key in [PK.autoRepeat, PK.defaultRepeatMode] {
+      UserDefaults.standard.addObserver(self, forKeyPath: key.rawValue, options: .new, context: nil)
+      optionObservers[key.rawValue] = []
+    }
 
     // The option watch-later-options is not available until after the mpv instance is initialized.
     // Workaround for mpv issue #14417, watch-later-options missing secondary subtitle delay and sid.
@@ -960,6 +968,19 @@ class MPVController: NSObject {
   }
 
   // MARK: - Hooks
+
+  /// Restore after loading file-local options and after their unload backups are restored.
+  /// The latter barrier runs before mpv decides whether the playlist should wrap at its end.
+  private func addSavedLoopModeHook() {
+    for name in [MPVHook.onPreLoaded, MPVHook.onAfterEndFile] {
+      addHook(name, priority: 100, hook: MPVHookValue(withBlock: { [weak self] next in
+        DispatchQueue.main.async {
+          defer { next() }
+          self?.player.restoreSavedLoopMode()
+        }
+      }))
+    }
+  }
 
   /// Start each newly loaded video silently, before mpv creates its audio decoder or output.
   /// Pure audio and album art keep their existing volume. A file-local option restores that
@@ -1646,6 +1667,10 @@ class MPVController: NSObject {
   }
 
   override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+    if keyPath == PK.autoRepeat.rawValue || keyPath == PK.defaultRepeatMode.rawValue {
+      DispatchQueue.main.async { [weak self] in self?.player.restoreSavedLoopMode() }
+      return
+    }
     guard !(change?[NSKeyValueChangeKey.oldKey] is NSNull) else { return }
 
     guard let keyPath = keyPath else { return }

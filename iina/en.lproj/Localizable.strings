@@ -574,3 +574,11 @@
 "videotools.rotation.shortcut_queued" = "The latest angle will be exported after the current task.";
 "videotools.rotation.shortcut_saved" = "Saved beside the original. Playback keeps the rotated original preview.";
 "videotools.viewport.status" = "Picture %.0f%% · X %+.0f%% / Y %+.0f%% · ⇧⌘0 resets";
+
+/* Global playback mode */
+"playback_mode.label" = "Mode";
+"playback_mode.accessibility" = "Playback mode";
+"playback_mode.off" = "In order (no repeat)";
+"playback_mode.file" = "Repeat one file";
+"playback_mode.playlist" = "Repeat playlist";
+"playback_mode.scope" = "Remembered for all player windows, newly opened videos, and after restarting the app. Independent of A-B repeat.";

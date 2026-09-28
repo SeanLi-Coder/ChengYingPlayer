@@ -5,6 +5,66 @@
 
 import Foundation
 
+enum LoopMode {
+  case off
+  case file
+  case playlist
+
+  func next() -> LoopMode {
+    switch self {
+    case .off: return .file
+    case .file: return .playlist
+    case .playlist: return .off
+    }
+  }
+
+  /// Recognize the standard three-state shortcuts without interpreting arbitrary mpv scripts.
+  /// Finite counts and compound commands remain untouched for advanced configurations.
+  static func fromKeyBinding(_ tokens: [String], current: LoopMode) -> LoopMode? {
+    var args = tokens
+    while let first = args.first, ["no-osd", "osd-auto", "osd-bar", "osd-msg", "osd-msg-bar"].contains(first) {
+      args.removeFirst()
+    }
+    guard args.count >= 2 else { return nil }
+    let backwards = args[0] == "cycle-values" && args[1] == "!reverse"
+    if backwards { args.remove(at: 1) }
+    guard args.count >= 2 else { return nil }
+    let property = args[1]
+    guard ["loop", "loop-file", "loop-playlist"].contains(property) else { return nil }
+    let enabled: LoopMode = property == "loop-playlist" ? .playlist : .file
+    func value(_ token: String) -> String {
+      if token.count >= 2, let first = token.first, let last = token.last,
+         (first == "\"" && last == "\"") || (first == "'" && last == "'") {
+        return String(token.dropFirst().dropLast())
+      }
+      return token
+    }
+    func mode(_ token: String) -> LoopMode? {
+      switch value(token) {
+      case "no", "0": return .off
+      case "inf": return enabled
+      default: return nil
+      }
+    }
+    switch args[0] {
+    case "set" where args.count == 3:
+      guard let requested = mode(args[2]) else { return nil }
+      return requested == .off && current != enabled ? current : requested
+    case "cycle" where args.count == 2 || (args.count == 3 && ["up", "down"].contains(args[2])):
+      return current == enabled ? .off : enabled
+    case "cycle-values" where args.count >= 4:
+      let values = Array(args.dropFirst(2))
+      let modes = values.compactMap(mode)
+      guard modes.count == values.count, modes.count >= 2, Set(modes).count == 2 else { return nil }
+      let effective = current == enabled ? enabled : .off
+      guard let index = modes.firstIndex(of: effective) else { return modes.first }
+      return modes[(index + (backwards ? modes.count - 1 : 1)) % modes.count]
+    default:
+      return nil
+    }
+  }
+}
+
 /// Shared, testable rules for local folder loading and non-destructive playlist ordering.
 enum PlaylistPlaybackPolicy {
   struct Move: Equatable {

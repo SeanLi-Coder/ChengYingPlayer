@@ -157,8 +157,8 @@
 /* Class = "NSMenuItem"; title = "Show welcome window"; ObjectID = "z9T-8h-1T0"; */
 "z9T-8h-1T0.title" = "显示欢迎窗口";
 
-/* Class = "NSButtonCell"; title = "When a file is opened manually:"; ObjectID = "jok-kc-HjX"; */
-"jok-kc-HjX.title" = "手动打开文件时：";
+/* Class = "NSButtonCell"; title = "Repeat playback (all videos):"; ObjectID = "jok-kc-HjX"; */
+"jok-kc-HjX.title" = "循环播放（所有视频）：";
 
 /* Class = "NSMenuItem"; title = "Loop playlist"; ObjectID = "5WC-Sp-6mg"; */
 "5WC-Sp-6mg.title" = "列表循环播放";

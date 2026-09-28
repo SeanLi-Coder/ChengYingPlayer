@@ -16,6 +16,40 @@ fileprivate let MenuItemTagCopy = 602
 fileprivate let MenuItemTagPaste = 603
 fileprivate let MenuItemTagDelete = 604
 
+enum PlaybackModeMenu {
+  static let modes: [LoopMode] = [.off, .file, .playlist]
+
+  static var label: String { NSLocalizedString("playback_mode.label", comment: "Playback mode label") }
+  static var accessibilityLabel: String {
+    NSLocalizedString("playback_mode.accessibility", comment: "Playback mode accessibility label")
+  }
+  static var scopeDescription: String {
+    NSLocalizedString("playback_mode.scope", comment: "Global playback mode persistence")
+  }
+
+  static func title(for mode: LoopMode) -> String {
+    switch mode {
+    case .off: return NSLocalizedString("playback_mode.off", comment: "Sequential playback without repeating")
+    case .file: return NSLocalizedString("playback_mode.file", comment: "Repeat the current file")
+    case .playlist: return NSLocalizedString("playback_mode.playlist", comment: "Repeat the playlist")
+    }
+  }
+
+  static func makeMenu(selected mode: LoopMode, target: AnyObject?, action: Selector?) -> NSMenu {
+    let menu = NSMenu(title: accessibilityLabel)
+    menu.autoenablesItems = false
+    for option in modes {
+      let item = NSMenuItem(title: title(for: option), action: action, keyEquivalent: "")
+      item.target = target
+      item.representedObject = option
+      item.state = option == mode ? .on : .off
+      item.toolTip = scopeDescription
+      menu.addItem(item)
+    }
+    return menu
+  }
+}
+
 class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, SidebarViewController, NSMenuItemValidation {
 
   override var nibName: NSNib.Name {
@@ -36,6 +70,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
    view is ready. The value will be handled after loaded.
    */
   private var pendingSwitchRequest: TabViewType?
+  private let playbackModePopup = NSPopUpButton(frame: .zero, pullsDown: false)
 
   var playlistChangeObserver: NSObjectProtocol?
   private var activationObserver: NSObjectProtocol?
@@ -140,13 +175,13 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     }
 
     deleteBtn.toolTip = NSLocalizedString("mini_player.delete", comment: "delete")
-    loopBtn.toolTip = NSLocalizedString("mini_player.loop", comment: "loop")
     shuffleBtn.toolTip = NSLocalizedString("mini_player.shuffle", comment: "shuffle")
     addBtn.toolTip = NSLocalizedString("mini_player.add", comment: "add")
     removeBtn.toolTip = NSLocalizedString("mini_player.remove", comment: "remove")
     sortBtn.toolTip = NSLocalizedString("mini_player.sort", comment: "sort")
     installSortControls()
     installFolderBrowser()
+    installPlaybackModeControls()
     playlistTableView.rowHeight = 44
 
     hideTotalLength()
@@ -566,6 +601,69 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
     default:    loopBtn.state = .mixed
     }
     loopBtn.alternateImage = NSImage.init(named: loopBtn.state == .on ? "loop_file" : "loop_dark")
+    let title = PlaybackModeMenu.title(for: loopMode)
+    let help = "\(PlaybackModeMenu.accessibilityLabel): \(title). \(PlaybackModeMenu.scopeDescription)"
+    loopBtn.toolTip = help
+    loopBtn.setAccessibilityLabel(PlaybackModeMenu.accessibilityLabel)
+    loopBtn.setAccessibilityValue(title)
+    loopBtn.setAccessibilityHelp(help)
+    for item in playbackModePopup.itemArray {
+      item.state = (item.representedObject as? LoopMode) == loopMode ? .on : .off
+      if item.state == .on { playbackModePopup.select(item) }
+    }
+    playbackModePopup.toolTip = help
+    playbackModePopup.setAccessibilityValue(title)
+    playbackModePopup.setAccessibilityHelp(help)
+  }
+
+  // MARK: - Playback mode controls
+
+  private func installPlaybackModeControls() {
+    guard let container = browserModeControl.superview else { return }
+    let label = NSTextField(labelWithString: PlaybackModeMenu.label)
+    label.font = .systemFont(ofSize: 11, weight: .medium)
+    label.textColor = .secondaryLabelColor
+    label.setContentCompressionResistancePriority(.required, for: .horizontal)
+    playbackModePopup.font = .systemFont(ofSize: 11)
+    playbackModePopup.controlSize = .small
+    playbackModePopup.identifier = NSUserInterfaceItemIdentifier("playlist.playback-mode")
+    playbackModePopup.setAccessibilityLabel(PlaybackModeMenu.accessibilityLabel)
+    playbackModePopup.menu = PlaybackModeMenu.makeMenu(selected: player.getLoopMode(), target: nil, action: nil)
+    playbackModePopup.target = self
+    playbackModePopup.action = #selector(selectPlaybackMode(_:))
+    playbackModePopup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    let controls = NSStackView(views: [label, playbackModePopup])
+    controls.orientation = .horizontal
+    controls.alignment = .centerY
+    controls.spacing = 8
+    controls.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(controls)
+    // Keep this choice visible in both the folder browser and the playback queue.
+    NSLayoutConstraint.deactivate(container.constraints.filter {
+      (($0.firstItem as? NSView) === sortControls || ($0.firstItem as? NSView) === folderBrowser) &&
+        $0.firstAttribute == .top && ($0.secondItem as? NSView) === browserModeControl
+    })
+    NSLayoutConstraint.activate([
+      controls.topAnchor.constraint(equalTo: browserModeControl.bottomAnchor, constant: 4),
+      controls.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+      controls.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+      controls.heightAnchor.constraint(equalToConstant: 26),
+      sortControls.topAnchor.constraint(equalTo: controls.bottomAnchor, constant: 4),
+      folderBrowser.topAnchor.constraint(equalTo: controls.bottomAnchor, constant: 4)
+    ])
+    updateLoopBtnStatus()
+  }
+
+  @objc private func selectPlaybackMode(_ sender: NSPopUpButton) {
+    guard let mode = sender.selectedItem?.representedObject as? LoopMode else { return }
+    player.setLoopMode(mode)
+    updateLoopBtnStatus()
+  }
+
+  @objc private func selectLoopMode(_ sender: NSMenuItem) {
+    guard let mode = sender.representedObject as? LoopMode else { return }
+    player.setLoopMode(mode)
+    updateLoopBtnStatus()
   }
 
   // MARK: - Tab switching
@@ -814,7 +912,10 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   }
 
   @IBAction func loopBtnAction(_ sender: NSButton) {
-    player.nextLoopMode()
+    updateLoopBtnStatus()
+    let menu = PlaybackModeMenu.makeMenu(selected: player.getLoopMode(), target: self,
+                                         action: #selector(selectLoopMode(_:)))
+    menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY), in: sender)
   }
 
   @IBAction func shuffleBtnAction(_ sender: AnyObject) {
