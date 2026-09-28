@@ -68,6 +68,30 @@ added. `tests/test_signing_diagnostics.py` covers the classification, the
 helper's own error fallback, control-signal propagation and the chain end to end,
 using synthetic exceptions, fictional profiles and temporary directories.
 
+The Chrome Cookie adapter now accepts yt-dlp's `only_once` / `once` warning
+arguments and retains only whitelisted failure categories, never the warning
+text. Both `app/douyin_signing.py` and the intentionally patched `app/douyin.py`
+browser fallback use it. An unavailable site session after a decryption warning
+remains a Cookie failure rather than silently becoming anonymous discovery;
+cancellation propagates unchanged. Unspecified profiles are no longer diagnosed
+as if the extractor always chose `Default`.
+The generic yt-dlp failure path in `app/downloader.py` also preserves these fixed
+diagnostics for single videos, without changing explicitly enabled anonymous
+fallback or cancellation behavior.
+
+The settings interface exposes the existing `chrome_profile` setting. Saving a
+profile affects new tasks only, preserves the independent downloader's original
+state boundary, and never switches an existing task's identity. New profile
+choices accept Chrome directory names, not arbitrary paths. Decryption guidance
+does not assert that macOS denied authorization when the cause is unknown.
+
+`cookie_smoke.py` adds actual AES and pinned yt-dlp extraction to the frozen
+helper's offline self-test, using only a generated SQLite database and a mocked
+keychain process. It covers usable cookies, an unrelated corrupt cookie and an
+unavailable key. It never reads a real profile, calls the real keychain, or emits
+fixture values. Additional helper-level tests cover these boundaries and the
+real settings handlers; preserved upstream tests remain intact.
+
 `app/kuaishou.py` is an original ChengYing extension, licensed GPL-3.0-or-later,
 not part of the MIT upstream snapshot. It observes the site's normal Chrome
 page responses and author-feed pagination. It does not copy third-party signing
@@ -252,3 +276,8 @@ non-loopback socket connections blocked in the pytest process. The seven
 additional vendoring and writable-path isolation checks also passed. The engine
 tests use synthetic browser-cookie databases and mocked browser launches; real
 network smoke scripts are preserved but were not executed during this check.
+
+The isolated runner also supplies a per-test temporary Chrome diagnostic root,
+so generic error-classification tests cannot probe the developer's Chrome
+directories. Explicit browser fixtures remain free to supply their own temporary
+roots. The runner does not replace HOME or change production runtime settings.

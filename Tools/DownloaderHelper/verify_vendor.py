@@ -15,7 +15,7 @@ UPSTREAM_VERSION = "1.2.23"
 PATCHED_FILES = {
     "app/main.py", "app/models.py", "app/platforms.py", "app/downloader.py",
     "app/task_manager.py", "app/static/app.js", "app/static/index.html",
-    "app/browser.py", "app/douyin_signing.py",
+    "app/browser.py", "app/douyin_signing.py", "app/douyin.py",
     "tests/test_stop.py", "tests/test_signing_diagnostics.py",
 }
 INTEGRATION_FILES = {"app/kuaishou.py"}

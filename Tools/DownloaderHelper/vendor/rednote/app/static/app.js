@@ -9,6 +9,7 @@
     authRetryButton: document.querySelector("#auth-retry-button"),
     cancelButton: document.querySelector("#cancel-button"),
     chromeCookies: document.querySelector("#chrome-cookies"),
+    chromeProfile: document.querySelector("#chrome-profile"),
     connectionStatus: document.querySelector("#connection-status"),
     downloadButton: document.querySelector("#download-button"),
     downloadDir: document.querySelector("#download-dir"),
@@ -64,6 +65,7 @@
     pollingTick: 0,
     refreshTimer: null,
     selectedJobId: null,
+    settingsSaving: false,
     versionBlocked: false
   };
 
@@ -160,8 +162,8 @@
   // local path, cookie value or token can be echoed here.
   const cookieDiagnosticMessages = {
     cookie_decryption_failed: {
-      description: "macOS 钥匙串拒绝了 Chrome Cookie 的解密请求：程序能打开 Cookie 数据库，但无法解密其中的登录凭证。这不代表账号已退出。",
-      solution: "在钥匙串授权弹窗中选择“始终允许”；若没有弹窗，请打开“钥匙串访问”，找到 Chrome Safe Storage 条目，在其访问控制中允许本程序访问，然后重试。"
+      description: "Chrome Cookie 未能解密：可能未取得钥匙串密钥，或部分 Cookie 已损坏。此提示本身不能证明钥匙串拒绝授权，也不代表账号已退出。",
+      solution: "如 macOS 弹出 Chrome Safe Storage 授权，请先核对是否由本播放器触发，再决定是否允许。也请确认使用了已登录的 Chrome Profile，并在 Chrome 中重新访问目标网站后重试。不要删除钥匙串条目或发送 Cookie 内容。"
     },
     cookie_permission_denied: {
       description: "系统拒绝了读取 Chrome Cookie 文件的权限。这是本机权限问题，不是登录失效，也不是网站验证码。",
@@ -194,7 +196,7 @@
   };
 
   const cookieDiagnosticLabels = {
-    cookie_decryption_failed: "钥匙串解密被拒绝",
+    cookie_decryption_failed: "Chrome Cookie 解密失败",
     cookie_permission_denied: "文件读取权限被拒绝",
     cookie_database_locked: "Cookie 数据库被占用",
     chrome_data_directory_missing: "未找到 Chrome 用户数据目录",
@@ -2424,10 +2426,27 @@
     }
   }
 
+  function draftChromeProfile() {
+    if (!elements.chromeProfile) return state.chromeProfile;
+    const raw = elements.chromeProfile.value;
+    // A legacy explicit path must survive unchanged when the user only edits
+    // another setting; normalization applies to a genuinely new profile choice.
+    return raw === (state.chromeProfile || "") ? state.chromeProfile : (raw.trim() || null);
+  }
+
   async function createJob(event) {
     event.preventDefault();
     if (state.versionBlocked) return;
     elements.formError.textContent = "";
+    if (state.settingsSaving) {
+      elements.formError.textContent = "下载设置正在保存，请稍后再创建任务。";
+      return;
+    }
+    if (draftChromeProfile() !== state.chromeProfile) {
+      elements.formError.textContent = "Chrome Profile 已修改，请先保存下载设置，再创建新任务。";
+      elements.chromeProfile.focus();
+      return;
+    }
     const url = elements.urlInput.value.trim();
     if (!url || !/https?:\/\//i.test(url)) {
       elements.formError.textContent = "请输入链接，或粘贴包含链接的分享文案";
@@ -2471,6 +2490,7 @@
       const cookieValue = cookieKey ? config[cookieKey] : true;
       elements.chromeCookies.checked = Boolean(cookieValue);
       state.chromeProfile = firstDefined(config.chrome_profile, config.browser_profile) ?? null;
+      if (elements.chromeProfile) elements.chromeProfile.value = state.chromeProfile || "";
       elements.downloadDir.value = firstDefined(config.download_dir, config.output_dir, config.download_path, "downloads");
       return true;
     } catch (error) {
@@ -2481,13 +2501,23 @@
 
   async function saveConfig(event) {
     event.preventDefault();
-    if (state.versionBlocked) return;
+    if (state.versionBlocked || state.settingsSaving) return;
     const directory = elements.downloadDir.value.trim();
+    const profile = draftChromeProfile();
+    // Preserve an existing legacy value, but only accept explicit Chrome profile
+    // names for new choices. A profile change never rebinds an existing job.
+    if (profile !== state.chromeProfile && profile !== null && !/^(?:Default|Profile [1-9][0-9]*)$/.test(profile)) {
+      showToast("请填写 Default、Profile 1 等 Chrome Profile 文件夹名称，或留空使用自动选择。", "error");
+      elements.chromeProfile?.focus();
+      return;
+    }
     if (!directory) {
       showToast("请填写下载目录", "error");
       elements.downloadDir.focus();
       return;
     }
+    state.settingsSaving = true;
+    if (elements.chromeProfile) elements.chromeProfile.disabled = true;
     elements.saveSettingsButton.disabled = true;
     elements.saveSettingsButton.textContent = "保存中…";
     elements.settingsSaved.textContent = "";
@@ -2497,17 +2527,22 @@
         body: JSON.stringify({
           download_dir: directory,
           use_chrome_cookies: elements.chromeCookies.checked,
-          chrome_profile: state.chromeProfile
+          chrome_profile: profile
         })
       });
+      const profileChanged = profile !== state.chromeProfile;
+      state.chromeProfile = profile;
+      if (elements.chromeProfile) elements.chromeProfile.value = profile || "";
       elements.settingsSaved.textContent = "已保存";
-      showToast("下载设置已保存");
+      showToast(profileChanged ? "Chrome Profile 已保存；请从原链接创建新任务，旧任务保留原来的设置。" : "下载设置已保存");
       window.setTimeout(() => {
         elements.settingsSaved.textContent = "";
       }, 3000);
     } catch (error) {
       showToast(`保存设置失败：${localizeRuntimeMessage(error.message)}`, "error");
     } finally {
+      state.settingsSaving = false;
+      if (elements.chromeProfile) elements.chromeProfile.disabled = false;
       elements.saveSettingsButton.disabled = false;
       elements.saveSettingsButton.textContent = "保存设置";
     }

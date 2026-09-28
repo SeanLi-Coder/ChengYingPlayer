@@ -11,7 +11,12 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from yt_dlp.cookies import extract_cookies_from_browser
 
-from .browser import chrome_user_agent
+from .browser import (
+    ChromeCookieAccessError,
+    chrome_cookie_diagnostic,
+    chrome_user_agent,
+    extract_chrome_cookie_jar,
+)
 from .douyin_signing import (
     fetch_signed_aweme_detail,
     fetch_signed_profile_awemes,
@@ -76,20 +81,6 @@ class DouyinProfile:
     def __iter__(self):
         yield self.author
         yield self.video_urls
-
-
-class _QuietCookieLogger:
-    def debug(self, message: str) -> None:
-        pass
-
-    def info(self, message: str) -> None:
-        pass
-
-    def warning(self, message: str) -> None:
-        pass
-
-    def error(self, message: str) -> None:
-        pass
 
 
 class _VisibleTextParser(HTMLParser):
@@ -1079,8 +1070,9 @@ def _cookie_jar_to_playwright(cookie_jar: CookieJar) -> list[dict[str, Any]]:
 
 
 def _extract_cookies(profile: str | None) -> CookieJar:
-    return extract_cookies_from_browser(
-        "chrome", profile=profile, logger=_QuietCookieLogger()
+    return extract_chrome_cookie_jar(
+        extract_cookies_from_browser, profile, domain="douyin.com",
+        required_cookie_names=("sessionid", "sessionid_ss"),
     )
 
 
@@ -1244,13 +1236,19 @@ def discover_profile(
             browser_cookies = _cookie_jar_to_playwright(
                 _extract_cookies(cookie_profile)
             )
+        except DownloadCancelledError:
+            raise
         except Exception as exc:
-            if not allow_cookie_fallback:
+            if not allow_cookie_fallback or isinstance(exc, ChromeCookieAccessError):
+                diagnostic = chrome_cookie_diagnostic(cookie_profile, exc)
                 raise TemporaryAccessError(
                     "Chrome cookies could not be read. Fully quit Chrome and retry, "
                     "approve any system cookie-access prompt, or disable Chrome Cookie "
                     "in settings to continue explicitly without login and create a new "
-                    "task. Opening a verification page is not required.",
+                    "task. Opening a verification page is not required. "
+                    f"Diagnostic: {diagnostic}.",
+                    issue_code=SiteIssueCode.COOKIE_UNAVAILABLE,
+                    diagnostic_code=diagnostic,
                 ) from exc
             cookie_fallback_used = True
         _profile_discovery_budget_remaining(progress_budget, should_cancel)

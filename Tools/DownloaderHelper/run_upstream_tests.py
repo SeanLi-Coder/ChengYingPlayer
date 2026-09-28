@@ -143,7 +143,22 @@ OFFLINE_TEST_BOOTSTRAP = (
     + '''
 
 import pytest
-raise SystemExit(pytest.main(["-p", "no:cacheprovider", "tests", *sys.argv[1:]]))
+
+class BrowserDiagnosticIsolation:
+    @pytest.fixture(autouse=True)
+    def isolate_browser_diagnostics(self, monkeypatch, tmp_path):
+        from app import browser
+        # Error classification must not probe the developer's Chrome directory.
+        # Individual browser fixtures may replace this with their own test root.
+        monkeypatch.setattr(
+            browser, "chrome_user_data_directory",
+            lambda *args, **kwargs: tmp_path / "isolated-chrome",
+        )
+
+raise SystemExit(pytest.main(
+    ["-p", "no:cacheprovider", "tests", *sys.argv[1:]],
+    plugins=[BrowserDiagnosticIsolation()],
+))
 '''
 )
 

@@ -19,6 +19,7 @@ from .browser import (
     COOKIE_DIAGNOSTIC_CODES,
     chrome_cookie_diagnostic,
     chrome_user_agent,
+    extract_chrome_cookie_jar,
     public_cookie_diagnostic_code,
 )
 from .errors import (
@@ -360,20 +361,6 @@ def _transient_site_issue_code(category: str) -> SiteIssueCode:
     }.get(category, SiteIssueCode.SITE_RESPONSE_CHANGED)
 
 
-class _QuietCookieLogger:
-    def debug(self, message: str) -> None:
-        pass
-
-    def info(self, message: str) -> None:
-        pass
-
-    def warning(self, message: str) -> None:
-        pass
-
-    def error(self, message: str) -> None:
-        pass
-
-
 def _is_trusted_script_url(value: str) -> bool:
     parsed = urlsplit(value)
     if not parsed.scheme and not parsed.netloc:
@@ -656,9 +643,12 @@ def _build_signing_document(glue_tags: tuple[str, ...]) -> str:
 
 def _load_chrome_cookie_jar(cookie_profile: str | None) -> CookieJar:
     try:
-        return extract_cookies_from_browser(
-            "chrome", profile=cookie_profile, logger=_QuietCookieLogger()
+        return extract_chrome_cookie_jar(
+            extract_cookies_from_browser, cookie_profile, domain="douyin.com",
+            required_cookie_names=("sessionid", "sessionid_ss"),
         )
+    except DownloadCancelledError:
+        raise
     except Exception as exc:
         reason = public_cookie_diagnostic_code(
             chrome_cookie_diagnostic(cookie_profile, exc)

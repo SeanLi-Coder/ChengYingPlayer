@@ -72,10 +72,10 @@ if CommandLine.arguments.count == 6 && CommandLine.arguments[2] == "--read-suite
 }
 
 check(key == "enableHdrSupport", "Keep the existing persistent HDR preference key")
-check(!productionDefault, "The actual registered production HDR default is off")
+check(productionDefault, "The actual registered production HDR default is on")
 let playbackSource = try source("PlaybackInfo", root: sourceRoot)
 let initialValues = try captures(#"^\s*var hdrEnabled\s*:\s*Bool\s*=\s*(true|false)"#, in: playbackSource)
-check(initialValues == ["false"], "PlaybackInfo starts with HDR off before preferences are applied")
+check(initialValues == ["true"], "PlaybackInfo starts with HDR on before preferences are applied")
 
 let preferenceCompact = compact(preferenceSource)
 let appDelegateCompact = compact(try source("AppDelegate", root: sourceRoot))
@@ -99,7 +99,7 @@ check(quickSettingsCompact.contains("hdrSwitch.isEnabled=player.info.hdrAvailabl
 let hdrGuard = videoViewCompact.range(of: "guardplayer.info.hdrEnabledelse{returnnil}")
 let edrEnable = videoViewCompact.range(of: "videoLayer.wantsExtendedDynamicRangeContent=true")
 check(hdrGuard != nil && edrEnable != nil && hdrGuard!.lowerBound < edrEnable!.lowerBound,
-      "The renderer checks the HDR opt-in before enabling extended dynamic range")
+      "The renderer checks the selected HDR preference before enabling extended dynamic range")
 check(videoViewCompact.contains("ifedrEnabled!=true{setICCProfile()}"),
       "HDR-disabled playback retains the existing ICC/SDR rendering fallback")
 
@@ -112,7 +112,7 @@ let hdrCells = hdrControl.elements(forName: "buttonCell")
 check(hdrCells.count == 1 && hdrCells[0].attribute(forName: "type")?.stringValue == "check",
       "The global HDR preference remains a user-operable checkbox")
 let hdrCellState = hdrCells[0].attribute(forName: "state")?.stringValue
-check(hdrCellState == nil || hdrCellState == "off", "The HDR checkbox does not start visually checked in the XIB")
+check(hdrCellState == "on", "The HDR checkbox starts visually checked in the XIB")
 let hdrBindings = try hdrControl.nodes(forXPath: "connections/binding[@name='value' and @keyPath='values.enableHdrSupport']")
 let boundController = (hdrBindings[0] as! XMLElement).attribute(forName: "destination")?.stringValue
 let sharedControllers = try codecXIB.nodes(forXPath: "//userDefaultsController[@representsSharedInstance='YES']")
@@ -156,35 +156,35 @@ func verifyRestart(expected: Bool, persisted: Bool?, description: String) {
 }
 
 defaults.register(defaults: [key: productionDefault])
-check(!defaults.bool(forKey: key), "An unset HDR preference resolves to the new off default")
-check(storedChoice() == nil, "Registering the off default does not manufacture an explicit saved choice")
-verifyRestart(expected: false, persisted: nil, description: "An untouched installation remains HDR-off after restart")
+check(defaults.bool(forKey: key), "An unset HDR preference resolves to the new on default")
+check(storedChoice() == nil, "Registering the on default does not manufacture an explicit saved choice")
+verifyRestart(expected: true, persisted: nil, description: "An untouched installation remains HDR-on after restart")
 
-defaults.register(defaults: [key: true])
-check(defaults.bool(forKey: key), "The isolated fixture models the previous implicit HDR-on default")
+defaults.register(defaults: [key: false])
+check(!defaults.bool(forKey: key), "The isolated fixture models the previous implicit HDR-off default")
 check(storedChoice() == nil, "The previous implicit default is not a stored user choice")
 defaults.register(defaults: [key: productionDefault])
-check(!defaults.bool(forKey: key), "Replacing the old registered default changes an implicit choice to HDR-off")
+check(defaults.bool(forKey: key), "Replacing the old registered default changes an implicit choice to HDR-on")
 check(storedChoice() == nil, "Updating the default does not persist a forced migration")
-verifyRestart(expected: false, persisted: nil, description: "An old implicit default remains off when the updated app restarts")
+verifyRestart(expected: true, persisted: nil, description: "An old implicit default becomes on when the updated app restarts")
 
 defaults.set(true, forKey: key)
 defaults.register(defaults: [key: productionDefault])
-check(defaults.bool(forKey: key), "An explicitly saved HDR-on choice overrides the new off default")
+check(defaults.bool(forKey: key), "An explicitly saved HDR-on choice remains enabled with the new on default")
 check(storedChoice() == true, "The explicit HDR-on choice is preserved without overwrite")
 verifyRestart(expected: true, persisted: true, description: "An explicit HDR-on preference survives a fresh process")
 
 defaults.set(false, forKey: key)
-defaults.register(defaults: [key: true])
-check(!defaults.bool(forKey: key), "An explicit HDR-off choice also overrides an old registered on default")
+defaults.register(defaults: [key: false])
+check(!defaults.bool(forKey: key), "An explicit HDR-off choice remains disabled with the old off default")
 defaults.register(defaults: [key: productionDefault])
-check(!defaults.bool(forKey: key) && storedChoice() == false, "The explicit HDR-off choice is preserved by the updated default")
+check(!defaults.bool(forKey: key) && storedChoice() == false, "The explicit HDR-off choice overrides the updated on default")
 verifyRestart(expected: false, persisted: false, description: "An explicit HDR-off preference survives a fresh process")
 
 defaults.removeObject(forKey: key)
 check(storedChoice() == nil, "Removing the isolated saved choice actually clears its persistent entry")
-check(!defaults.bool(forKey: key), "Removing a saved choice returns to the production HDR-off default")
-verifyRestart(expected: false, persisted: nil, description: "Removing a saved choice stays HDR-off after restart")
+check(defaults.bool(forKey: key), "Removing a saved choice returns to the production HDR-on default")
+verifyRestart(expected: true, persisted: nil, description: "Removing a saved choice stays HDR-on after restart")
 
 print("HDR preference checks passed: \(checks)")
 print("Coverage: production source wiring and native UserDefaults only; no HDR display or media playback acceptance was performed.")

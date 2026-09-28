@@ -14,6 +14,7 @@ def _check() -> dict[str, object]:
     import playwright
     import requests
     import yt_dlp
+    from cookie_smoke import verify_cookie_runtime
     from ejs_smoke import verify_ejs_runtime
     from playwright.sync_api import sync_playwright
     from yt_dlp.extractor import gen_extractor_classes
@@ -95,6 +96,7 @@ def _check() -> dict[str, object]:
         raise RuntimeError("The bundled YouTube JavaScript solver is unavailable")
 
     node_version = verify_ejs_runtime()
+    cookie_runtime = verify_cookie_runtime()
     import decimal
     import sqlite3
     import ssl
@@ -134,6 +136,7 @@ def _check() -> dict[str, object]:
         "node_version": node_version,
         "native_library_versions": native_versions,
         "ejs_challenges": "n-and-signature-solved-offline",
+        "chrome_cookies": cookie_runtime,
         "playwright_driver": "ready",
         "browser": "external-google-chrome",
         "minimum_macos": manifest["minimum_macos"],

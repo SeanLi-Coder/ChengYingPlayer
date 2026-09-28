@@ -12,10 +12,10 @@ bash Tools/HDRPreferenceTests/run.sh
 
 验证范围：
 
-- 从实际 `Preference.swift` 读取现有 key 和默认值，要求默认关闭 HDR。
+- 从实际 `Preference.swift` 读取现有 key 和默认值，要求默认开启 HDR。
 - 检查 `PlaybackInfo` 初始状态，以及 AppDelegate、PlayerCore、QuickSetting 和 VideoView 的现有连接。
-- 解析偏好设置的实际 XIB，要求 HDR 复选框初始未勾选，同时保留已有 `values.enableHdrSupport` 绑定和手动勾选能力。
-- 在随机 UUID 命名的 `UserDefaults` suite 中验证：未设置时关闭；旧隐式默认开启升级后变为关闭；明确保存的开启／关闭选择不被覆盖；删除保存值后回到默认关闭。
+- 解析偏好设置的实际 XIB，要求 HDR 复选框初始勾选，同时保留已有 `values.enableHdrSupport` 绑定和手动切换能力。
+- 在随机 UUID 命名的 `UserDefaults` suite 中验证：未设置时开启；旧隐式默认关闭升级后变为开启；明确保存的开启／关闭选择不被覆盖；删除保存值后回到默认开启。
 - 启动独立子进程，验证上述状态在重新读取偏好时仍成立。
 
 测试不读取或修改播放器真实偏好；只清理本次创建的 UUID suite 和临时编译目录。

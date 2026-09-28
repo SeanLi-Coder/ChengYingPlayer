@@ -40,6 +40,7 @@ from yt_dlp.networking.exceptions import (
 from yt_dlp.postprocessor.common import PostProcessor
 from yt_dlp.utils import DownloadCancelled, DownloadError, variadic
 
+from .browser import chrome_cookie_diagnostic, public_cookie_diagnostic_code
 from .douyin import discover_profile as discover_douyin_profile
 from .douyin import discover_item_metadata_from_profile
 from .douyin import is_complete_profile_media_metadata
@@ -1477,7 +1478,16 @@ class MediaDownloader:
                         raise DownloadCancelledError("Task cancelled") from cancelled
                     except DownloadError as fallback_error:
                         self._raise_download_error(fallback_error, url)
-                raise TemporaryAccessError(COOKIE_ACCESS_MESSAGE) from exc
+                diagnostic = public_cookie_diagnostic_code(
+                    chrome_cookie_diagnostic(self.config.cookie_profile, exc)
+                    if self.config.cookie_browser == "chrome"
+                    else None
+                )
+                raise TemporaryAccessError(
+                    f"{COOKIE_ACCESS_MESSAGE} Diagnostic code: {diagnostic}.",
+                    issue_code=SiteIssueCode.COOKIE_UNAVAILABLE,
+                    diagnostic_code=diagnostic,
+                ) from exc
             self._raise_download_error(exc, url)
         raise AssertionError("Unreachable")
 

@@ -17,6 +17,30 @@ SPEC.loader.exec_module(RUNNER)
 
 
 class UpstreamRunnerTests(unittest.TestCase):
+    def test_cookie_diagnostics_use_fixture_roots_without_overriding_explicit_mocks(self):
+        with tempfile.TemporaryDirectory(prefix="chengying-cookie-guard-") as name:
+            root = Path(name)
+            (root / "app").mkdir()
+            (root / "tests").mkdir()
+            (root / "app/__init__.py").write_text("")
+            (root / "app/browser.py").write_text(
+                "def chrome_user_data_directory(*args, **kwargs):\n"
+                "    raise AssertionError('Real browser probe was not isolated')\n"
+            )
+            (root / "tests/test_isolation.py").write_text(
+                "from app import browser\n"
+                "def test_root(tmp_path, monkeypatch):\n"
+                "    assert browser.chrome_user_data_directory() == tmp_path / 'isolated-chrome'\n"
+                "    monkeypatch.setattr(browser, 'chrome_user_data_directory', lambda: tmp_path / 'explicit')\n"
+                "    assert browser.chrome_user_data_directory() == tmp_path / 'explicit'\n"
+            )
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", RUNNER.OFFLINE_TEST_BOOTSTRAP, "-q"],
+                cwd=root, env=RUNNER.isolated_environment(os.environ),
+                capture_output=True, text=True, timeout=20, check=True,
+            )
+            self.assertIn("1 passed", result.stdout)
+
     def test_host_runtime_paths_and_plugins_are_not_inherited(self):
         original = {
             "HOME": "/example/home", "PATH": "/usr/bin:/bin",

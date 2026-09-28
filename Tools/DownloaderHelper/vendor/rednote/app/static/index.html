@@ -248,6 +248,19 @@
                 </span>
               </label>
 
+              <label class="field-label" for="chrome-profile">
+                Chrome 用户配置（Profile）
+                <span class="path-input">
+                  <input id="chrome-profile" type="text" autocomplete="off" spellcheck="false" list="chrome-profile-examples" placeholder="自动选择（留空）" aria-describedby="chrome-profile-help">
+                </span>
+                <datalist id="chrome-profile-examples">
+                  <option value="Default"></option>
+                  <option value="Profile 1"></option>
+                  <option value="Profile 2"></option>
+                </datalist>
+              </label>
+              <p class="settings-note" id="chrome-profile-help">在已登录的 Chrome 中打开 chrome://version，查看“个人资料路径”最后一级名称（如 Default 或 Profile 1），只填写名称。抖音留空时使用最近更新的 Cookie 数据库，不保证是当前账号。本播放器不继承独立下载器设置；保存修改后请新建任务，重试旧任务仍使用原设置。</p>
+
               <label class="field-label" for="download-dir">
                 下载目录
                 <span class="path-input">

@@ -8,7 +8,9 @@ import sqlite3
 import subprocess
 import sys
 import time
+from http.cookiejar import CookieJar
 from pathlib import Path
+from typing import Callable
 
 
 def chrome_user_agent(
@@ -68,6 +70,88 @@ def public_cookie_diagnostic_code(value: object) -> str:
     return code if code in COOKIE_DIAGNOSTIC_CODES else "cookie_access_unknown"
 
 
+def _cookie_message_diagnostic(message: str) -> str | None:
+    text = message.lower()
+    if any(marker in text for marker in (
+        "decrypt", "keychain", "secretbox", "encryption", "find-generic-password",
+    )):
+        return "cookie_decryption_failed"
+    if any(marker in text for marker in (
+        "permission denied", "access denied", "operation not permitted",
+    )):
+        return "cookie_permission_denied"
+    if any(marker in text for marker in ("locked", "database is busy", "resource busy")):
+        return "cookie_database_locked"
+    return None
+
+
+class ChromeCookieLogger:
+    """Suppress private extractor output while retaining a fixed failure code."""
+
+    def __init__(self) -> None:
+        self.diagnostic_code: str | None = None
+
+    def debug(self, message: str, **kwargs: object) -> None:
+        pass
+
+    def info(self, message: str, **kwargs: object) -> None:
+        # yt-dlp can report skipped cookies in its final extraction summary.
+        code = _cookie_message_diagnostic(message)
+        if code is not None:
+            self.diagnostic_code = code
+
+    def warning(
+        self, message: str, only_once: bool = False, *, once: bool = False,
+        **kwargs: object,
+    ) -> None:
+        self.diagnostic_code = (
+            _cookie_message_diagnostic(message)
+            or self.diagnostic_code
+            or "cookie_access_unknown"
+        )
+
+    def error(self, message: str, **kwargs: object) -> None:
+        self.warning(message)
+
+
+class ChromeCookieAccessError(RuntimeError):
+    """A sanitized extraction failure without profile, warning, or cookie data."""
+
+    def __init__(self, diagnostic_code: str) -> None:
+        self.diagnostic_code = public_cookie_diagnostic_code(diagnostic_code)
+        super().__init__(f"Chrome cookies could not be read: {self.diagnostic_code}")
+
+
+def extract_chrome_cookie_jar(
+    extractor: Callable[..., CookieJar], profile: str | None, *, domain: str,
+    required_cookie_names: tuple[str, ...],
+) -> CookieJar:
+    logger = ChromeCookieLogger()
+    jar = extractor("chrome", profile=profile, logger=logger)
+    if logger.diagnostic_code is None:
+        return jar
+    now = time.time()
+    for cookie in jar:
+        cookie_domain = cookie.domain.lower().lstrip(".")
+        if cookie_domain not in {domain, f"www.{domain}"} or cookie.path != "/":
+            continue
+        if cookie.name not in required_cookie_names or not cookie.value:
+            continue
+        expires = cookie.expires
+        if expires:
+            if expires > 10_000_000_000_000:
+                expires = expires / 1_000_000 - _CHROME_EPOCH_OFFSET_SECONDS
+            if expires <= now:
+                continue
+        # The session must cover the www page and API, not another subdomain
+        # or an unrelated path. A bad unrelated cookie must not discard it.
+        # Non-authentication cookies alone cannot justify continuing after a
+        # failed extraction: doing so could silently switch to anonymous access.
+        return jar
+    # Do not turn a failed extraction into an apparently anonymous session.
+    raise ChromeCookieAccessError(logger.diagnostic_code)
+
+
 def chrome_cookie_diagnostic(
     profile: str | None, error: BaseException | None = None
 ) -> str:
@@ -82,20 +166,37 @@ def chrome_cookie_diagnostic(
     messages: list[str] = []
     current: BaseException | None = error
     while current is not None and len(messages) < 4:
+        structured = getattr(current, "diagnostic_code", None)
+        if isinstance(structured, str) and structured in COOKIE_DIAGNOSTIC_CODES:
+            return structured
         messages.append(str(current).lower())
         current = current.__cause__ or current.__context__
     text = " ".join(messages)
-    if any(marker in text for marker in ("decrypt", "keychain", "secretbox", "encryption")):
-        return "cookie_decryption_failed"
-    if any(marker in text for marker in ("permission denied", "access denied", "operation not permitted")):
-        return "cookie_permission_denied"
-    if any(marker in text for marker in ("locked", "database is busy", "resource busy")):
-        return "cookie_database_locked"
+    message_code = _cookie_message_diagnostic(text)
+    if message_code is not None:
+        return message_code
     try:
         root = chrome_user_data_directory()
         if root is None or not root.is_dir():
             return "chrome_data_directory_missing"
-        selected = profile or "Default"
+        if profile is None:
+            # yt-dlp chooses the newest Cookies database across this root, not
+            # necessarily Default or the last foreground Chrome profile.
+            profiles = [
+                path for path in root.iterdir()
+                if _CHROME_PROFILE_DIRECTORY_RE.fullmatch(path.name)
+                and not path.is_symlink() and path.is_dir()
+            ]
+            databases = (
+                path / relative for path in [root, *profiles]
+                for relative in ("Network/Cookies", "Cookies")
+            )
+            if any(path.is_file() for path in databases):
+                return "cookie_access_unknown"
+            if not profiles:
+                return "chrome_profile_missing"
+            return "cookie_database_missing"
+        selected = profile
         if not _CHROME_PROFILE_DIRECTORY_RE.fullmatch(selected):
             return "chrome_profile_invalid"
         profile_dir = root / selected

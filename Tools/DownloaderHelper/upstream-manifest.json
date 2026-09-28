@@ -11,13 +11,14 @@
     "app/main.py": "Optional user-owned writable-path environment hooks; redact Kuaishou share query values from public responses.",
     "app/models.py": "Add the Kuaishou platform enum without changing existing values; add a whitelisted local diagnostic category field to the job and item records.",
     "app/platforms.py": "Recognize strictly validated Kuaishou video, profile and share URLs.",
-    "app/downloader.py": "Connect original Kuaishou discovery to the existing verified media transfer, proxy, progress and cancellation paths; download one video from its single filtered candidate set; fully decode each album image before publication; persist source and local-byte SHA-256 receipts and conservatively verify them before reuse, including non-first codec candidates; hash in cancellable bounded chunks; share one per-platform output directory calculation.",
+    "app/downloader.py": "Connect Kuaishou discovery to verified transfer, proxy, progress and cancellation; validate album bytes, source/local SHA-256 receipts, non-first codec candidates and bounded hashing; share per-platform output paths; preserve fixed Cookie diagnostics through the generic yt-dlp failure path without changing explicit anonymous fallback.",
     "app/task_manager.py": "Bind resolved Kuaishou share identities and preserve incomplete-profile retry semantics; persist whitelisted asset receipts with SHA-256 evidence, merging incremental updates without losing later saved members; keep unmatched Kuaishou profile items queued while discovery is incomplete; reuse the shared output directory calculation; and carry the whitelisted Cookie diagnostic category into task state.",
-    "app/static/app.js": "Add Kuaishou labels, localized progress and error guidance; recognize resolved share profile jobs; localize each whitelisted Chrome Cookie diagnostic category with its own guidance; localize profile interruption, bounded retry status and the skipped-work reason summary instead of collapsing into one generic message.",
-    "app/static/index.html": "Advertise Kuaishou single-video, share and author-profile inputs with login and permission guidance.",
+    "app/static/app.js": "Add Kuaishou labels, localized progress and error guidance; recognize resolved share profile jobs; localize each whitelisted Chrome Cookie diagnostic category; expose explicit Chrome profile saving without rebinding old tasks, preserve legacy values, and block creation during settings saves; localize bounded retry and skipped-work summaries.",
+    "app/static/index.html": "Advertise Kuaishou inputs and expose Chrome profile directory-name settings with explicit new-task and independent-configuration guidance.",
     "tests/test_stop.py": "Isolate the no-server test from real localhost services and cover a disappearing legacy listener; production stop.py is unchanged.",
-    "app/browser.py": "Add safe Chrome Cookie access diagnostics without exposing profile paths or cookie values; the diagnostic probe falls back to a fixed category on its own filesystem errors instead of masking the original cookie failure.",
-    "app/douyin_signing.py": "Include sanitized Chrome Cookie diagnostic categories in cookie-unavailable errors, carried as a whitelisted structured code that is never relabelled as a signing integrity failure.",
+    "app/browser.py": "Add whitelisted Cookie diagnostics and a private-output logger compatible with yt-dlp warning arguments; keep usable site session cookies on unrelated-cookie failure, reject authentication loss, and avoid assuming an automatic profile is Default.",
+    "app/douyin_signing.py": "Use the compatible private Cookie logger, preserve cancellation, and carry sanitized Cookie diagnostics without relabelling them as signing integrity failures.",
+    "app/douyin.py": "Use the shared Cookie extraction adapter for browser fallback, preserve cancellation and explicit failure diagnostics, and prevent silent anonymous fallback after a diagnosed extraction failure.",
     "tests/test_signing_diagnostics.py": "Test sanitized Chrome Cookie diagnostic categories, the diagnostic helper's own filesystem-error fallback, control-signal propagation, and whitelisted structured codes through the signing chain."
   },
   "files": [
@@ -44,7 +45,7 @@
     {
       "path": "app/browser.py",
       "upstream_sha256": "5bdd4a9b642ba056f2fcea29b592a352f4e8aeff53b781b39c28c3ec4a7a42fc",
-      "vendored_sha256": "59ec9fad638a76e017c239e88704fa61d46fdb57d5ec0ecc8e2179f015f4eedc"
+      "vendored_sha256": "22723dbc082d5923f9fe7d16dc31e1d873b9032f3c1396abff3ce622271c3294"
     },
     {
       "path": "app/build_info.py",
@@ -54,17 +55,17 @@
     {
       "path": "app/douyin.py",
       "upstream_sha256": "f5064af0d499c03e2fde98428b67886974d0783ad344dac332a79b196478912d",
-      "vendored_sha256": "f5064af0d499c03e2fde98428b67886974d0783ad344dac332a79b196478912d"
+      "vendored_sha256": "33716638e3c405d82ab6d09d8e0375547a242467ebdbe19783fe91546059b359"
     },
     {
       "path": "app/douyin_signing.py",
       "upstream_sha256": "ea11f7a2545a82dd20e3bb5db2b8e2a80856281aed23efd30d62c426767e4cb8",
-      "vendored_sha256": "642d4c50b785e753fc98a42c96369e097d14ec92ff5288c3e1ed99a65ed0bc87"
+      "vendored_sha256": "7575109eb771879a4c868acce7e675990235287b87dd1528e89c8390f3885a05"
     },
     {
       "path": "app/downloader.py",
       "upstream_sha256": "0401b8290cd9cda5b71a61a6d8086a3d59e7ad6f36d395bac9ec988f3e182573",
-      "vendored_sha256": "cffeaaf504e73e99ee0f750036b39736e3e513205f634128e48f7038d13cd6f4"
+      "vendored_sha256": "539610f171c7da253b16abc6c73db15c44e03d173bcb1f0661efcbab56a4bfd5"
     },
     {
       "path": "app/errors.py",
@@ -109,7 +110,7 @@
     {
       "path": "app/static/app.js",
       "upstream_sha256": "c88f22bce27cd49ad5f289155f2d0a6ee6bfe2f7aab0fee54a22307dd5bbcbb8",
-      "vendored_sha256": "9c6ee5ae65ede18c470914f92b4abe12124f5cf33be8cb881ba414611663d818"
+      "vendored_sha256": "5aabe7d0755dad3fbb7c09524f3c2349d3e40769eb4e56d382e1e889c2ac3032"
     },
     {
       "path": "app/static/favicon.svg",
@@ -119,7 +120,7 @@
     {
       "path": "app/static/index.html",
       "upstream_sha256": "70a385836d05dacad77876c7c8f7e59c4ab565348f740c61395552da2d7c1141",
-      "vendored_sha256": "9e6feeb09683554e817d4c31fa637eee0a0ca35e2c0bd71a04ae9e3e4cd74bf2"
+      "vendored_sha256": "c4576426f30d553aa86e1a0d1ada4e59e79122f7b85941304f89ec0f6bd431b5"
     },
     {
       "path": "app/static/styles.css",
