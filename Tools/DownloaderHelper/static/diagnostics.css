@@ -1,0 +1,99 @@
+.desktop-diagnostics-entry {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 16px 0;
+}
+
+.desktop-diagnostics-panel {
+  margin: 16px 0 24px;
+  padding: 20px;
+  border: 1px solid var(--border-strong, #485164);
+  border-radius: var(--radius-md, 16px);
+  background: var(--surface-solid, #111623);
+  color: var(--text, #f5f7fb);
+}
+
+.desktop-diagnostics-panel[hidden] {
+  display: none;
+}
+
+.desktop-diagnostics-panel h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.desktop-diagnostics-note {
+  margin: 6px 0;
+  color: var(--text-soft, #b4bdcd);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.desktop-diagnostics-label {
+  display: block;
+  margin: 16px 0 8px;
+  font-size: 13px;
+}
+
+.desktop-diagnostics-text {
+  display: block;
+  width: 100%;
+  min-height: 220px;
+  max-height: 60vh;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--border-strong, #485164);
+  border-radius: 8px;
+  background: var(--bg, #080b12);
+  color: var(--text, #f5f7fb);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
+  overflow: auto;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.desktop-diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.desktop-diagnostics-button {
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong, #485164);
+  border-radius: 8px;
+  background: var(--surface-raised, #171d2c);
+  color: var(--text, #f5f7fb);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.desktop-diagnostics-primary,
+#desktop-diagnostics-open {
+  border-color: var(--accent, #ff4365);
+}
+
+.desktop-diagnostics-button:focus-visible,
+.desktop-diagnostics-text:focus-visible {
+  outline: 2px solid var(--accent-light, #ff718b);
+  outline-offset: 3px;
+}
+
+.desktop-diagnostics-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.desktop-diagnostics-status {
+  min-height: 22px;
+  margin: 12px 0 0;
+  color: var(--text-soft, #b4bdcd);
+  font-size: 13px;
+  line-height: 1.6;
+}

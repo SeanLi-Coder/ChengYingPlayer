@@ -327,6 +327,113 @@ if DownloadCenterService.supportsRuntime {
         "The preserved frontend and desktop adapter run without JavaScript errors")
   check(fullPageValue("document.querySelectorAll('.download-item').length") as? Int == 2,
         "The preserved frontend renders both completed media items")
+  func diagnosticsFixture(_ payload: String? = nil) {
+    let options = payload.map { "{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(\($0))}" } ?? "{cache:'no-store'}"
+    _ = fullPageValue("""
+      window.fixtureDiagnosticsDone = false;
+      fetch('/api/fixture/diagnostics-mode', \(options)).then(response => {
+        if (!response.ok) throw new Error('Fixture request failed');
+        return response.json();
+      }).then(data => { window.fixtureDiagnosticsSnapshot = data; window.fixtureDiagnosticsDone = true; });
+      undefined
+      """)
+    waitForPage("The authenticated diagnostic fixture request completes", "window.fixtureDiagnosticsDone === true")
+  }
+  waitForPage("The actual diagnostic adapter presents its entry beside the page heading", """
+    (() => {
+      const entry = document.querySelector('#desktop-diagnostics-entry');
+      const open = document.querySelector('#desktop-diagnostics-open');
+      if (!entry || !open || open.disabled) return false;
+      const rect = open.getBoundingClientRect();
+      return entry.previousElementSibling === document.querySelector('.hero')
+        && rect.width >= 60 && rect.height >= 30 && rect.top >= 0 && rect.bottom <= innerHeight;
+    })()
+    """)
+  diagnosticsFixture()
+  check(fullPageValue("""
+    window.fixtureDiagnosticsSnapshot.reads === 0 && window.fixtureDiagnosticsSnapshot.mutations === 0
+      && window.fixtureClipboard.writes.length === 0 && window.fixtureClipboard.legacyCopies === 0
+      && document.querySelector('#desktop-diagnostics-panel').hidden
+    """) as? Bool == true,
+        "Loading the downloader never reads a report, uploads it, or touches the system clipboard")
+  _ = fullPageValue("document.querySelector('#desktop-diagnostics-open').click(); undefined")
+  waitForPage("An explicit diagnostic click loads the safe English report into a read-only preview", """
+    !document.querySelector('#desktop-diagnostics-panel').hidden
+      && document.querySelector('#desktop-diagnostics-text').readOnly
+      && document.querySelector('#desktop-diagnostics-text').value.includes('fixture_revision=1')
+      && document.querySelector('#desktop-diagnostics-text').value.includes('cookie_access_unknown')
+      && !document.querySelector('#desktop-diagnostics-copy').disabled
+      && document.querySelector('#desktop-diagnostics-open').getAttribute('aria-expanded') === 'true'
+    """)
+  check(fullPageValue("window.fixtureClipboard.writes.length === 0 && window.fixtureClipboard.legacyCopies === 0 && document.querySelector('#desktop-diagnostics-scope').textContent.includes('10')") as? Bool == true,
+        "Viewing a report does not copy it and clearly describes the recent-task scope")
+  diagnosticsFixture("{refresh:true}")
+  check(fullPageValue("document.querySelector('#desktop-diagnostics-text').value.includes('fixture_revision=1')") as? Bool == true,
+        "An existing preview remains a stable snapshot until the user requests refresh")
+  _ = fullPageValue("document.querySelector('#desktop-diagnostics-refresh').click(); undefined")
+  waitForPage("Explicit refresh replaces the preview with the latest diagnostic snapshot", """
+    document.querySelector('#desktop-diagnostics-text').value.includes('fixture_revision=2')
+      && !document.querySelector('#desktop-diagnostics-copy').disabled
+    """)
+  diagnosticsFixture()
+  check(fullPageValue("window.fixtureDiagnosticsSnapshot.reads === 2 && window.fixtureClipboard.writes.length === 0") as? Bool == true,
+        "Opening and refreshing each perform one read without an automatic clipboard write")
+  _ = fullPageValue("""
+    window.fixtureExpectedReport = document.querySelector('#desktop-diagnostics-text').value;
+    document.querySelector('#desktop-diagnostics-copy').click(); undefined
+    """)
+  waitForPage("A separate copy click passes exactly the preview to the intercepted Clipboard API", """
+    window.fixtureClipboard.writes.length === 1
+      && window.fixtureClipboard.writes[0] === window.fixtureExpectedReport
+      && window.fixtureClipboard.legacyCopies === 0
+      && document.querySelector('#desktop-diagnostics-status').textContent.includes('已复制')
+    """)
+  _ = fullPageValue("window.fixtureClipboard.mode = 'reject'; document.querySelector('#desktop-diagnostics-copy').click(); undefined")
+  waitForPage("Clipboard rejection falls back to selecting the exact read-only report in real WebKit", """
+    window.fixtureClipboard.writes.length === 2 && window.fixtureClipboard.legacyCopies === 1
+      && window.fixtureClipboard.selected === window.fixtureExpectedReport
+      && document.querySelector('#desktop-diagnostics-status').textContent.includes('已复制')
+      && !document.body.textContent.includes('raw-clipboard-secret')
+    """)
+  _ = fullPageValue("window.fixtureClipboard.legacyResult = false; document.querySelector('#desktop-diagnostics-copy').click(); undefined")
+  waitForPage("When both copy APIs refuse, WebKit keeps all report text selected for manual Command+C", """
+    (() => {
+      const text = document.querySelector('#desktop-diagnostics-text');
+      return window.fixtureClipboard.writes.length === 3 && window.fixtureClipboard.legacyCopies === 2
+        && document.activeElement === text && text.selectionStart === 0 && text.selectionEnd === text.value.length
+        && text.value === window.fixtureExpectedReport && text.readOnly
+        && document.querySelector('#desktop-diagnostics-status').textContent.includes('Command+C')
+        && !document.body.textContent.includes('raw-clipboard-secret');
+    })()
+    """)
+  for errorMode in ["unavailable", "schema", "oversized"] {
+    diagnosticsFixture("{error:'\(errorMode)'}")
+    _ = fullPageValue("document.querySelector('#desktop-diagnostics-refresh').click(); undefined")
+    waitForPage("A \(errorMode) diagnostic response clears stale text and displays only the fixed safe failure", """
+      document.querySelector('#desktop-diagnostics-status').textContent === '无法读取诊断日志，请稍后重试。'
+        && document.querySelector('#desktop-diagnostics-text').value === ''
+        && document.querySelector('#desktop-diagnostics-copy').disabled
+        && !document.querySelector('#desktop-diagnostics-refresh').disabled
+        && !document.body.textContent.includes('raw-diagnostic-secret')
+      """)
+  }
+  diagnosticsFixture("{error:''}")
+  _ = fullPageValue("document.querySelector('#desktop-diagnostics-refresh').click(); undefined")
+  waitForPage("A successful retry restores the diagnostic preview without copying it", """
+    document.querySelector('#desktop-diagnostics-text').value === window.fixtureExpectedReport
+      && !document.querySelector('#desktop-diagnostics-copy').disabled
+      && window.fixtureClipboard.writes.length === 3 && window.fixtureClipboard.legacyCopies === 2
+    """)
+  diagnosticsFixture()
+  check(fullPageValue("""
+    window.fixtureDiagnosticsSnapshot.mutations === 0 && window.fixtureBeaconCalls === 0
+      && window.fixtureRequests.every(request => !request.external)
+      && window.fixtureRequests.filter(request => request.path === '/api/native/diagnostics').every(request => request.method === 'GET')
+    """) as? Bool == true,
+        "Diagnostic interactions only read the authenticated local endpoint and never upload a report")
+  _ = fullPageValue("document.querySelector('#desktop-diagnostics-close').click(); undefined")
+  check(fullPageValue("document.querySelector('#desktop-diagnostics-panel').hidden && document.querySelector('#desktop-diagnostics-text').value === '' && document.querySelector('#desktop-diagnostics-open').getAttribute('aria-expanded') === 'false'") as? Bool == true,
+        "Closing diagnostics removes the report from the preview and resets its disclosure state")
   // A real refresh replaces the item nodes synchronously, while the desktop
   // adapter decorates them on the next animation frame. Observe that genuine
   // interval and prove why a selector saved across evaluations is not stable.
@@ -658,18 +765,51 @@ if DownloadCenterService.supportsRuntime {
   proxyFixture()
   check(fullPageValue("window.fixtureProxySnapshot.writes === 7 && !window.fixtureProxySnapshot.configured && !window.fixtureProxySnapshot.has_credentials") as? Bool == true,
         "Confirmed reset removes the endpoint and credentials in exactly one explicit write")
+  _ = fullPageValue("document.querySelector('#desktop-diagnostics-open').click(); undefined")
+  waitForPage("The current diagnostic preview is ready before the live version gate changes", """
+    document.querySelector('#desktop-diagnostics-text').value.includes('fixture_revision=2')
+      && !document.querySelector('#desktop-diagnostics-copy').disabled
+    """)
+  diagnosticsFixture()
+  _ = fullPageValue("""
+    window.fixtureDiagnosticsBeforeBlock = {
+      reads: window.fixtureDiagnosticsSnapshot.reads,
+      copies: window.fixtureClipboard.writes.length,
+      legacyCopies: window.fixtureClipboard.legacyCopies
+    }; undefined
+    """)
   _ = fullPageValue("window.fixtureWritesBeforeBlock = window.fixtureProxySnapshot.writes; window.fixtureTestsBeforeBlock = window.fixtureProxySnapshot.tests; document.body.classList.add('version-blocked'); undefined")
   waitForPage("A live version mismatch disables every proxy control in real WebKit", """
     [...document.querySelector('#desktop-proxy-form').querySelectorAll('button,input')].every(control => control.disabled)
+    """)
+  waitForPage("A live version mismatch clears diagnostics and disables entry, refresh, and copy", """
+    document.querySelector('#desktop-diagnostics-open').disabled
+      && document.querySelector('#desktop-diagnostics-refresh').disabled
+      && document.querySelector('#desktop-diagnostics-copy').disabled
+      && document.querySelector('#desktop-diagnostics-text').value === ''
     """)
   _ = fullPageValue("""
     document.querySelector('#desktop-proxy-form').dispatchEvent(new Event('submit', {bubbles:true,cancelable:true}));
     document.querySelector('#desktop-proxy-test').dispatchEvent(new Event('click'));
     document.querySelector('#desktop-proxy-clear').dispatchEvent(new Event('click')); undefined
     """)
+  _ = fullPageValue("""
+    document.querySelector('#desktop-diagnostics-open').dispatchEvent(new Event('click'));
+    document.querySelector('#desktop-diagnostics-refresh').dispatchEvent(new Event('click'));
+    document.querySelector('#desktop-diagnostics-copy').dispatchEvent(new Event('click')); undefined
+    """)
   proxyFixture()
   check(fullPageValue("window.fixtureProxySnapshot.writes === window.fixtureWritesBeforeBlock && window.fixtureProxySnapshot.tests === window.fixtureTestsBeforeBlock") as? Bool == true,
         "Programmatic events cannot bypass the live version gate to save, clear, or test")
+  diagnosticsFixture()
+  check(fullPageValue("""
+    window.fixtureDiagnosticsSnapshot.reads === window.fixtureDiagnosticsBeforeBlock.reads
+      && window.fixtureDiagnosticsSnapshot.mutations === 0
+      && window.fixtureClipboard.writes.length === window.fixtureDiagnosticsBeforeBlock.copies
+      && window.fixtureClipboard.legacyCopies === window.fixtureDiagnosticsBeforeBlock.legacyCopies
+      && window.fixtureBeaconCalls === 0
+    """) as? Bool == true,
+        "Programmatic events cannot bypass the version gate to read, upload, or copy diagnostic text")
   check(fullPageValue("window.fixtureErrors.length") as? Int == 0,
         "All real proxy interactions finish without page errors or unhandled promise rejections")
   fullController.close()

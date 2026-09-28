@@ -208,10 +208,12 @@ def main(argv=None):
         lock = ProjectLock(args.data_dir / "desktop.lock")
         lock.acquire()
         engine = importlib.import_module("app.main")
+        from diagnostic_log import install_diagnostic_log
         from js_runtime import install_js_runtime
         from proxy_config import ProxySettings
         from proxy_transport import install_proxy_transports
 
+        install_diagnostic_log(engine.manager)
         proxy_settings = ProxySettings(args.data_dir, engine.manager)
         restore_js_runtime = install_js_runtime()
         restore_proxy_transports = install_proxy_transports(proxy_settings.proxy_url)

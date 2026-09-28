@@ -29,7 +29,7 @@ def client(tmp_path):
         index=lambda: HTMLResponse(
             "<html><head><title>原迹下载器</title></head></html>"
         ),
-        manager=SimpleNamespace(get_job=lambda _: None),
+        manager=SimpleNamespace(get_job=lambda _: None, list_jobs=list),
     )
     install_desktop_adapter(engine, token=TOKEN, origin=ORIGIN, assets=tmp_path)
     return TestClient(app, base_url=ORIGIN)
@@ -43,6 +43,8 @@ def client(tmp_path):
         "/api/jobs",
         "/api/events",
         "/native/desktop.js",
+        "/native/diagnostics.js",
+        "/api/native/diagnostics",
         "/static/app.js",
     ],
 )
@@ -90,10 +92,76 @@ def test_authenticated_page_includes_only_desktop_additions(client):
     assert response.status_code == 200
     assert "澄影 · 下载中心" in response.text
     assert "/native/desktop.js" in response.text
+    assert "/native/diagnostics.js" in response.text
+    assert "/native/diagnostics.css" in response.text
     assert TOKEN not in response.text
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
     assert response.headers["referrer-policy"] == "no-referrer"
     assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_diagnostic_export_is_authenticated_readonly_and_no_store(client, monkeypatch):
+    import diagnostic_identity
+    import diagnostic_log
+
+    calls = []
+    monkeypatch.setattr(diagnostic_identity, "runtime_identity", lambda: {"player_build": "58"})
+
+    def report(manager, *, job_id, identity):
+        calls.append((job_id, identity))
+        return {"schema_version": 1, "text": "ChengYing diagnostic report\n"}
+
+    monkeypatch.setattr(diagnostic_log, "diagnostic_report", report)
+    url = "/api/native/diagnostics?job_id=synthetic-task"
+    assert client.get(url).status_code == 403
+    assert calls == []
+    headers = {"Cookie": f"{COOKIE_NAME}={TOKEN}", "Origin": ORIGIN}
+    response = client.get(url, headers=headers)
+    assert response.status_code == 200
+    assert "no-store" in response.headers["cache-control"]
+    assert response.json() == {"schema_version": 1, "text": "ChengYing diagnostic report\n"}
+    assert calls == [("synthetic-task", {"player_build": "58"})]
+    assert client.post(url, headers=headers).status_code == 405
+    assert client.get(url, headers={**headers, "Origin": "https://invalid.example"}).status_code == 403
+
+
+def test_diagnostic_endpoint_uses_safe_collector_even_with_unsafe_identity(client, monkeypatch):
+    import diagnostic_identity
+
+    monkeypatch.setattr(diagnostic_identity, "runtime_identity", lambda: {
+        "player_version": "0.2.47", "player_build": "58",
+        "helper_build_id": "https://private.invalid/?token=secret", "private": "/Users/private",
+    })
+    response = client.get("/api/native/diagnostics", headers={"Cookie": f"{COOKIE_NAME}={TOKEN}"})
+    assert response.status_code == 200
+    report = response.json()
+    assert report["schema_version"] == 1 and "0.2.47" in report["text"]
+    assert "secret" not in report["text"] and "/Users/" not in report["text"]
+    assert "private.invalid" not in report["text"] and TOKEN not in report["text"]
+
+
+@pytest.mark.parametrize("selector", ["", "private-cookie-selector" * 30])
+def test_diagnostic_invalid_selector_is_not_echoed(client, selector):
+    response = client.get("/api/native/diagnostics", params={"job_id": selector},
+                          headers={"Cookie": f"{COOKIE_NAME}={TOKEN}"})
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Invalid diagnostic task selection."}
+
+
+@pytest.mark.parametrize("error,status", [(KeyError("private task"), 404), (RuntimeError("Cookie=secret /Users/private"), 503)])
+def test_diagnostic_failure_does_not_export_exception_text(client, monkeypatch, error, status):
+    import diagnostic_identity
+    import diagnostic_log
+
+    monkeypatch.setattr(diagnostic_identity, "runtime_identity", dict)
+
+    def reject(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(diagnostic_log, "diagnostic_report", reject)
+    response = client.get("/api/native/diagnostics", headers={"Cookie": f"{COOKIE_NAME}={TOKEN}"})
+    assert response.status_code == status
+    assert "private" not in response.text and "secret" not in response.text
 
 
 def test_native_session_request_without_origin_is_allowed(client):

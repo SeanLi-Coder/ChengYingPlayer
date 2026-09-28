@@ -3936,36 +3936,46 @@ class MediaDownloader:
         timeout_seconds: float,
         should_cancel: CancelCallback,
     ) -> bytes | None:
-        try:
-            process = subprocess.Popen(
-                command,
-                stdin=(
-                    subprocess.PIPE if input_data is not None else subprocess.DEVNULL
-                ),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-            )
-        except OSError as exc:
-            raise MediaDownloadError(FFPROBE_START_MESSAGE) from exc
-
-        deadline = time.monotonic() + max(0.1, timeout_seconds)
-        pending_input = input_data
-        while True:
-            if should_cancel():
-                self._terminate_process(process)
-                raise DownloadCancelled("Task cancelled")
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                self._terminate_process(process)
-                raise TimeoutError("FFprobe timed out while reading media")
+        with contextlib.ExitStack() as cleanup:
             try:
-                stdout, _ = process.communicate(
-                    input=pending_input,
-                    timeout=min(DOUYIN_PROCESS_POLL_SECONDS, remaining),
+                stdin = subprocess.DEVNULL
+                if input_data is not None:
+                    # A timed-out communicate(input=...) may leave bytes unwritten;
+                    # retrying with input=None does not resume stdin on Python 3.13.
+                    # An anonymous input file keeps output polling cancellable without
+                    # a writer thread, private subprocess state or a longer deadline.
+                    stdin = cleanup.enter_context(tempfile.TemporaryFile())
+                    stdin.write(input_data)
+                    stdin.seek(0)
+                process = subprocess.Popen(
+                    command,
+                    stdin=stdin,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
                 )
-                return stdout or None
-            except subprocess.TimeoutExpired:
-                pending_input = None
+            except OSError as exc:
+                raise MediaDownloadError(FFPROBE_START_MESSAGE) from exc
+
+            deadline = time.monotonic() + max(0.1, timeout_seconds)
+            try:
+                while True:
+                    if should_cancel():
+                        raise DownloadCancelled("Task cancelled")
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("FFprobe timed out while reading media")
+                    try:
+                        stdout, _ = process.communicate(
+                            timeout=min(DOUYIN_PROCESS_POLL_SECONDS, remaining),
+                        )
+                        return stdout or None
+                    except subprocess.TimeoutExpired:
+                        continue
+            finally:
+                if process.poll() is None:
+                    self._terminate_process(process)
+                if process.stdout is not None:
+                    process.stdout.close()
 
     @staticmethod
     def _terminate_process(process: subprocess.Popen[bytes]) -> None:

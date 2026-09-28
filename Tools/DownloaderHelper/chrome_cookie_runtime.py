@@ -12,6 +12,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from diagnostic_log import record_cookie_event
+
 SNAPSHOT_TIMEOUT_SECONDS = 5.0
 SNAPSHOT_SLEEP_SECONDS = 0.025
 _cancel_check = contextvars.ContextVar("chrome_cookie_cancel_check", default=None)
@@ -54,6 +56,7 @@ def _open_database_snapshot(database_path, tmpdir, *, process_cancel=None):
     snapshot = None
     succeeded = False
     last_status = sqlite3.SQLITE_OK
+    record_cookie_event("snapshot_start")
 
     def progress(status, remaining, total):
         nonlocal last_status
@@ -65,7 +68,9 @@ def _open_database_snapshot(database_path, tmpdir, *, process_cancel=None):
                 if status in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
                 else "cookie_storage_failed"
             )
-            raise CookieSnapshotError(code)
+            error = CookieSnapshotError(code)
+            record_cookie_event("snapshot_timeout", error=error, diagnostic_code=code)
+            raise error
 
     try:
         progress(sqlite3.SQLITE_OK, 0, 0)
@@ -85,11 +90,13 @@ def _open_database_snapshot(database_path, tmpdir, *, process_cancel=None):
         result = destination.cursor()
         destination = None
         succeeded = True
+        record_cookie_event("snapshot_complete")
         return result
     except (sqlite3.Error, OSError) as error:
         from app.browser import _cookie_system_diagnostic
 
         diagnostic = _cookie_system_diagnostic(error) or "cookie_storage_failed"
+        record_cookie_event("snapshot_failed", error=error, diagnostic_code=diagnostic)
         raise CookieSnapshotError(diagnostic) from None
     finally:
         if source is not None:
@@ -118,11 +125,13 @@ def _cookie_processor(original, cookies):
                 return original(
                     decryptor, host_key, name, value, encrypted_value, path, expires_utc, is_secure
                 )
-            except UnicodeDecodeError:
+            except UnicodeDecodeError as error:
                 # Chrome metadata and plaintext fields can contain invalid UTF-8.
                 # Only this malformed-data error is recoverable here; backend,
                 # cancellation, programming and native-library errors propagate.
-                pass
+                record_cookie_event("row_rejected", error=error, diagnostic_code="cookie_decryption_failed")
+        else:
+            record_cookie_event("row_rejected", diagnostic_code="cookie_decryption_failed")
         decryptor._logger.warning(_MALFORMED_COOKIE_WARNING, only_once=True)
         return bool(not value and encrypted_value), None
 
@@ -133,6 +142,18 @@ def _cookie_processor(original, cookies):
 def _chrome_extractor(original):
     @functools.wraps(original)
     def extract(browser_name, profile, keyring, logger):
+        if browser_name != "chrome":
+            return original(browser_name, profile, keyring, logger)
+        record_cookie_event("extract_start")
+        try:
+            result = extract_guarded(browser_name, profile, keyring, logger)
+        except BaseException as error:
+            record_cookie_event("extract_failed", error=error)
+            raise
+        record_cookie_event("extract_complete")
+        return result
+
+    def extract_guarded(browser_name, profile, keyring, logger):
         guard = _session_guard.get()
         if browser_name != "chrome" or guard is None:
             return original(browser_name, profile, keyring, logger)

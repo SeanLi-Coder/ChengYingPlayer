@@ -117,6 +117,15 @@ def run_smoke(command, ffmpeg, ffprobe):
                 script_status, script_body, _ = request(url + "static/app.js", token=token)
                 assert script_status == 200 and b"kuaishouMessage" in script_body
                 assert request(url + "native/desktop.js", token=token)[0] == 200
+                assert request(url + "native/diagnostics.js", token=token)[0] == 200
+                diagnostic_endpoint = url + "api/native/diagnostics"
+                assert request(diagnostic_endpoint)[0] == 403
+                status, body, headers = request(diagnostic_endpoint, token=token)
+                report = json.loads(body)
+                assert status == 200 and report["schema_version"] == 1
+                assert isinstance(report["text"], str) and len(body) < 70_000
+                assert token not in report["text"] and str(root) not in report["text"]
+                assert "no-store" in headers["cache-control"]
                 assert request(url + "api/jobs", token=token)[1] == b"[]"
                 config = json.loads(request(url + "api/config", token=token)[1])
                 assert config["download_dir"] == str(root / "downloads")

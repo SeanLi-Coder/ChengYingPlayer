@@ -230,7 +230,9 @@ def install_desktop_adapter(
         document = document.replace(
             "</head>",
             '<link rel="stylesheet" href="/native/desktop.css">'
-            '<script src="/native/desktop.js" defer></script></head>',
+            '<script src="/native/desktop.js" defer></script>'
+            '<link rel="stylesheet" href="/native/diagnostics.css">'
+            '<script src="/native/diagnostics.js" defer></script></head>',
             1,
         )
         return HTMLResponse(document)
@@ -254,6 +256,22 @@ def install_desktop_adapter(
     @application.get("/api/native/activity", include_in_schema=False)
     def native_activity():
         return maintenance.activity()
+
+    @application.get("/api/native/diagnostics", include_in_schema=False)
+    def native_diagnostics(job_id: str | None = None):
+        from diagnostic_identity import runtime_identity
+        from diagnostic_log import diagnostic_report
+
+        # FastAPI's default validation body echoes invalid inputs. Keep even
+        # malformed diagnostic selectors out of error responses.
+        if job_id is not None and not 0 < len(job_id) <= 256:
+            raise HTTPException(status_code=422, detail="Invalid diagnostic task selection.")
+        try:
+            return diagnostic_report(engine.manager, job_id=job_id, identity=runtime_identity())
+        except KeyError:
+            raise HTTPException(status_code=404, detail="The selected diagnostic task is unavailable.") from None
+        except Exception:  # noqa: BLE001 -- Never expose raw report-generation errors.
+            raise HTTPException(status_code=503, detail="Diagnostic report is unavailable.") from None
 
     @application.put("/api/native/maintenance/{identifier}", include_in_schema=False)
     def acquire_maintenance(identifier: UUID):

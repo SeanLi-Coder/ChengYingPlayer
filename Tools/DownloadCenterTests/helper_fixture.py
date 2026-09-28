@@ -22,6 +22,42 @@ PROXY_LOCK = threading.RLock()
 PROXY = {"enabled": False, "url": "", "read_error": "", "busy": False,
          "reads": 0, "writes": 0, "tests": 0, "config_writes": 0}
 CONFIG = {"download_dir": "/tmp/fixture/downloads", "use_chrome_cookies": False, "chrome_profile": None}
+DIAGNOSTICS = {"reads": 0, "mutations": 0, "error": "", "revision": 1}
+FRONTEND_SAFETY_PROBES = """<script>
+window.fixtureErrors = [];
+addEventListener('error', event => fixtureErrors.push(event.message));
+addEventListener('unhandledrejection', event => fixtureErrors.push(String(event.reason)));
+window.fixtureClipboard = {mode: 'success', legacyResult: true, writes: [], legacyCopies: 0, selected: ''};
+Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {
+  writeText(value) {
+    fixtureClipboard.writes.push(String(value));
+    return fixtureClipboard.mode === 'success' ? Promise.resolve() : Promise.reject(new Error('raw-clipboard-secret'));
+  }
+}});
+const fixtureOriginalCommand = document.execCommand.bind(document);
+document.execCommand = function(command, ...args) {
+  if (String(command).toLowerCase() !== 'copy') return fixtureOriginalCommand(command, ...args);
+  fixtureClipboard.legacyCopies++;
+  const field = document.activeElement;
+  fixtureClipboard.selected = field && typeof field.value === 'string'
+    ? field.value.slice(field.selectionStart, field.selectionEnd) : String(getSelection());
+  return fixtureClipboard.legacyResult;
+};
+window.fixtureRequests = [];
+const fixtureOriginalFetch = window.fetch.bind(window);
+window.fetch = function(input, options) {
+  const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+  const method = options?.method || input?.method || 'GET';
+  fixtureRequests.push({path: url.pathname, method: String(method).toUpperCase(), external: url.origin !== location.origin});
+  if (url.origin !== location.origin) return Promise.reject(new Error('External fixture request blocked'));
+  return fixtureOriginalFetch(input, options);
+};
+window.fixtureBeaconCalls = 0;
+Object.defineProperty(navigator, 'sendBeacon', {configurable: true, value: () => {
+  fixtureBeaconCalls++;
+  return false;
+}});
+</script>"""
 PAGE = b"""<!doctype html><html><body><h1>Native bridge fixture</h1>
 <input id="download-dir"><p id="result">loaded</p>
 <script>
@@ -108,6 +144,11 @@ class Handler(BaseHTTPRequestHandler):
         if MODE != "frontend":
             self.json_response({}, 404)
             return
+        if urlsplit(self.path).path == "/api/native/diagnostics":
+            with PROXY_LOCK:
+                DIAGNOSTICS["mutations"] += 1
+            self.json_response({}, 405)
+            return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= 4096:
@@ -120,7 +161,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         with PROXY_LOCK:
-            if path == "/api/fixture/proxy-mode" and self.command == "POST":
+            if path == "/api/fixture/diagnostics-mode" and self.command == "POST":
+                if payload.get("error") in {"", "unavailable", "schema", "oversized"}:
+                    DIAGNOSTICS["error"] = payload["error"]
+                if payload.get("refresh") is True:
+                    DIAGNOSTICS["revision"] += 1
+                self.json_response(dict(DIAGNOSTICS))
+            elif path == "/api/fixture/proxy-mode" and self.command == "POST":
                 if "read_error" in payload:
                     PROXY["read_error"] = payload["read_error"]
                 if "busy" in payload:
@@ -183,7 +230,31 @@ class Handler(BaseHTTPRequestHandler):
             mime = "application/json"
         elif MODE == "frontend":
             path = urlsplit(self.path).path
-            if path == "/api/native/proxy":
+            if path == "/api/native/diagnostics":
+                with PROXY_LOCK:
+                    DIAGNOSTICS["reads"] += 1
+                    state = dict(DIAGNOSTICS)
+                if state["error"] == "unavailable":
+                    self.json_response({"detail": {"code": "diagnostics_unavailable", "message": "raw-diagnostic-secret"}}, 503)
+                elif state["error"] == "schema":
+                    self.json_response({"schema_version": 99, "text": "raw-diagnostic-secret"})
+                elif state["error"] == "oversized":
+                    self.json_response({"schema_version": 1, "text": "raw-diagnostic-secret" * 4000})
+                else:
+                    self.json_response({"schema_version": 1, "text": (
+                        "ChengYing Download Center Diagnostics\n"
+                        "schema_version=1\n"
+                        f"fixture_revision={state['revision']}\n"
+                        "job.1.platform=douyin\n"
+                        "job.1.diagnostic_code=cookie_access_unknown\n"
+                        "Privacy: no cookies, credentials, URLs or local paths.\n"
+                    )})
+                return
+            elif path == "/api/fixture/diagnostics-mode":
+                with PROXY_LOCK:
+                    self.json_response(dict(DIAGNOSTICS))
+                return
+            elif path == "/api/native/proxy":
                 with PROXY_LOCK:
                     PROXY["reads"] += 1
                     error = PROXY["read_error"]
@@ -203,11 +274,12 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/":
                 page = (VENDORED_ASSETS / "index.html").read_text()
                 page = page.replace("__APP_ID__", "native-fixture").replace("__APP_VERSION__", "1").replace("__BUILD_ID__", "fixture-build")
-                page = page.replace("<head>", "<head><script>window.fixtureErrors=[];addEventListener('error',e=>fixtureErrors.push(e.message));addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));</script>")
+                page = page.replace("<head>", "<head>" + FRONTEND_SAFETY_PROBES)
                 page = page.replace("</head>", "<script>new MutationObserver((records,observer)=>{const control=document.querySelector('#desktop-proxy-save');if(control){window.fixtureProxyInitiallyDisabled=control.disabled&&document.querySelector('#desktop-proxy-test').disabled&&document.querySelector('#desktop-proxy-url').disabled;observer.disconnect();}}).observe(document.documentElement,{childList:true,subtree:true});</script></head>")
                 page = page.replace("</head>", '<link rel="stylesheet" href="/native/desktop.css"><script src="/native/desktop.js" defer></script></head>')
+                page = page.replace("</head>", '<link rel="stylesheet" href="/native/diagnostics.css"><script src="/native/diagnostics.js" defer></script></head>')
                 content, mime = page.encode(), "text/html"
-            elif path in {"/static/app.js", "/static/styles.css", "/static/favicon.svg", "/native/desktop.js", "/native/desktop.css"}:
+            elif path in {"/static/app.js", "/static/styles.css", "/static/favicon.svg", "/native/desktop.js", "/native/desktop.css", "/native/diagnostics.js", "/native/diagnostics.css"}:
                 asset = (DESKTOP_ASSETS if path.startswith("/native/") else VENDORED_ASSETS) / path.rsplit("/", 1)[1]
                 content = asset.read_bytes()
                 mime = "application/javascript" if path.endswith(".js") else "text/css" if path.endswith(".css") else "image/svg+xml"

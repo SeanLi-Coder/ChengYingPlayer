@@ -44,7 +44,7 @@ for package, version in expected.items():
         raise SystemExit(f"Install the pinned build lock: {package} {version} is required, found {actual}.")
 PY
 
-for required in helper.py host.py proxy_config.py proxy_transport.py js_runtime.py chrome_cookie_runtime.py cookie_smoke.py bundle_smoke.py runtime-artifacts.json runtime-sources.json vendor/rednote/app/main.py; do
+for required in helper.py host.py proxy_config.py proxy_transport.py js_runtime.py chrome_cookie_runtime.py diagnostic_log.py diagnostic_identity.py static/diagnostics.js static/diagnostics.css cookie_smoke.py bundle_smoke.py runtime-artifacts.json runtime-sources.json vendor/rednote/app/main.py; do
   if [[ ! -s "$SCRIPT_DIR/$required" ]]; then
     echo "Required helper source is unavailable: $required" >&2
     exit 2
@@ -65,11 +65,13 @@ VENDOR_DIR="$WORK_DIR/vendor/rednote"
 
 "$HELPER_PYTHON" "$SCRIPT_DIR/collect_licenses.py" "$WORK_DIR/Legal"
 "$HELPER_PYTHON" "$SCRIPT_DIR/source_materials.py" notices "$WORK_DIR/Legal/Sources"
+"$HELPER_PYTHON" "$SCRIPT_DIR/diagnostic_identity.py" --output "$WORK_DIR/diagnostic-build.json"
 
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$VENDOR_DIR:$SCRIPT_DIR" \
   PYINSTALLER_STRICT_BUNDLE_CODESIGN_ERROR=1 PYINSTALLER_VERIFY_BUNDLE_SIGNATURE=1 \
   CHENGYING_HELPER_SOURCE_DIR="$SCRIPT_DIR" CHENGYING_HELPER_VENDOR_DIR="$VENDOR_DIR" \
   CHENGYING_HELPER_LEGAL_DIR="$WORK_DIR/Legal" \
+  CHENGYING_HELPER_DIAGNOSTIC_IDENTITY="$WORK_DIR/diagnostic-build.json" \
   CHENGYING_HELPER_SIGNING_IDENTITY="$CODESIGN_IDENTITY" CHENGYING_HELPER_TARGET_ARCH="$TARGET_ARCH" \
   "$HELPER_PYTHON" -m PyInstaller --clean --noconfirm \
     --distpath "$WORK_DIR/dist" --workpath "$WORK_DIR/work" "$SCRIPT_DIR/download_center.spec"

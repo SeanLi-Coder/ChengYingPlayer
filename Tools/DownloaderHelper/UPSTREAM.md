@@ -123,6 +123,43 @@ WAL, unrelated malformed rows, unusable target credentials and the actual
 `YoutubeDL.cookiejar` path. Passing these tests is not evidence of a successful
 download with a user's real Chrome account or of the exact cause on another Mac.
 
+### Opt-in diagnostic report export
+
+The native host adds an authenticated read-only `/api/native/diagnostics` endpoint
+and a separate diagnostic panel; the preserved engine UI and task persistence
+schema remain unchanged. The panel loads a report only when the user opens it,
+allows preview and explicit clipboard copying, and never uploads a report.
+Clipboard restrictions fall back to selected text and manual Command+C.
+
+`diagnostic_log.py` records a bounded in-memory timeline for this helper process.
+Both capture and export apply fixed allowlists: stage, status, issue category,
+numeric error codes, known exception types and trusted module/line locations.
+It never formats exception messages, stack source text, locals, cookie values,
+profile names, URLs, output paths or task titles. Reports contain at most ten
+anonymous tasks and 64 KiB of text. Older stored task states are distinguished
+from events observed in this process; their original application version is
+unknown, not inferred from the current build. Logs are not persisted across app
+restarts, and collection does not read Chrome, the keychain or unrelated files.
+
+`diagnostic_identity.py` creates a sealed build resource with the player version,
+build number and a source fingerprint of the native helper and static assets.
+These are separate from the original downloader engine's version and build ID.
+Frozen self-tests execute a synthetic capture/export privacy check and require
+the bundled identity; no real browser data or clipboard is accessed.
+
+### Cancellable FFprobe input delivery
+
+`app/downloader.py` supplies bounded in-memory media prefixes through a temporary
+input file instead of retrying `communicate(input=...)` after a timeout. On Python
+3.13, retrying with `input=None` can stop scheduling the remaining pipe writes,
+turning a short process-start delay into a media-probe timeout. FFprobe still uses
+the existing `pipe:0` protocol and unchanged total deadline and cancellation poll.
+The input file is anonymous on macOS and closed with the child output on every
+exit; local I/O failures use a fixed public error rather than exposing a path.
+Only this imported implementation hash changes, not the original upstream hash.
+Synthetic child-process regressions cover delayed reads, full input delivery,
+empty input, cancellation, real deadlines and cleanup without browser access.
+
 `app/kuaishou.py` is an original ChengYing extension, licensed GPL-3.0-or-later,
 not part of the MIT upstream snapshot. It observes the site's normal Chrome
 page responses and author-feed pagination. It does not copy third-party signing

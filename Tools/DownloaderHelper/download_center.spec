@@ -22,6 +22,7 @@ data_files = [
     (str(source / "runtime-artifacts.json"), "."),
     (str(source / "runtime-sources.json"), "."),
     (str(source / "upstream-manifest.json"), "."),
+    (os.environ["CHENGYING_HELPER_DIAGNOSTIC_IDENTITY"], "."),
     (str(legal), "Legal"),
 ]
 binaries = []

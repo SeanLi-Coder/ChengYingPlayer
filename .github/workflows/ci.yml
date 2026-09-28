@@ -155,6 +155,7 @@ jobs:
       - name: Test private download-center adapter
         run: |
           node Tools/DownloaderProxyUITests/main.mjs
+          node Tools/DownloaderDiagnosticsUITests/main.mjs
           python -m ruff check Tools/DownloaderHelper --exclude vendor
           python -m pytest -q Tools/DownloaderHelper/tests
           python Tools/DownloaderHelper/smoke_helper.py \
@@ -354,7 +355,24 @@ jobs:
           "$app_path/Contents/MacOS/chengying-video-tools-helper" --help
           "$app_path/Contents/MacOS/chengying-subtitle-tools-helper" --help
           "$download_center/Contents/MacOS/chengying-download-center-helper" --help
-          PATH="$download_center/Contents/MacOS:$PATH" "$download_center/Contents/MacOS/chengying-download-center-helper" --self-test
+          diagnostic_self_test="$RUNNER_TEMP/download-center-self-test.json"
+          PATH="$download_center/Contents/MacOS:$PATH" "$download_center/Contents/MacOS/chengying-download-center-helper" --self-test > "$diagnostic_self_test"
+          python - "$diagnostic_self_test" "$app_path/Contents/Info.plist" <<'PY'
+          import json
+          import plistlib
+          import sys
+          from pathlib import Path
+          result = json.loads(Path(sys.argv[1]).read_bytes())
+          app_info = plistlib.loads(Path(sys.argv[2]).read_bytes())
+          identity = result.get("diagnostic_identity", {})
+          if (result.get("status") != "ok"
+              or result.get("diagnostic_log") != "bounded-redacted-export-verified-offline"
+              or identity.get("identity_source") != "bundled"
+              or identity.get("player_version") != app_info["CFBundleShortVersionString"]
+              or identity.get("player_build") != app_info["CFBundleVersion"]):
+              raise SystemExit("Frozen diagnostic identity does not match the player application.")
+          print("Frozen diagnostic privacy and player identity verified.")
+          PY
           python Tools/DownloaderHelper/smoke_helper.py \
             --helper "$download_center/Contents/MacOS/chengying-download-center-helper" \
             --ffmpeg "$app_path/Contents/MacOS/ffmpeg" \
