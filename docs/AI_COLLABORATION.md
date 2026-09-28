@@ -212,8 +212,10 @@ Release status: not released / draft / publicly verified
 
 抖音 Cookie 修复与 HDR 默认开启见
 [`2026-09-28 Cookie / HDR 交接`](handoffs/2026-09-28-douyin-cookie-hdr-on.md)。
-目标版本 `v0.2.43` / build `54`，发布状态以该文档末尾的交付记录为准。
-本轮保留显式 HDR 偏好、旧任务账号绑定与 v0.2.42 色彩修复。
+`v0.2.43` / build `54` 已于北京时间 2026-09-29 00:02:36 正式发布，标签提交 `3e88ef9f`。
+主线 CI `36442510692`、标签 CI `36442519307` 通过；八资产、匿名公开更新交付、
+旧公钥验签、公开增量实际还原及发行包 Cookie 自检通过。从 v0.2.42 的增量约 1.14 MB。
+本轮保留显式 HDR 偏好、旧任务账号绑定与 v0.2.42 色彩修复；未替代真实 M4 Max 账号验收。
 
 最新 HDR / Dolby Vision 过曝修复见
 [`2026-09-28 播放色彩修复交接`](handoffs/2026-09-28-hdr-sdr-color.md)。
