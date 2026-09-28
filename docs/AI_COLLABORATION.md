@@ -210,6 +210,11 @@ Release status: not released / draft / publicly verified
 
 ## 9. 最新 Codex review 交接
 
+剪辑预览入口与 Dolby Vision 剪辑修复见
+[`2026-09-29 剪辑修复交接`](handoffs/2026-09-29-clip-preview-dolby-vision.md)。
+目标 v0.2.45 / build 56；本文初次提交时尚未正式发布，以下 v0.2.44 是上一已核实稳定版。
+保留原片、全局播放模式、自动增量更新与显式偏好；特定原始 MOV 仍需用户提供以便复测。
+
 全局播放模式记忆与选择入口见
 [`2026-09-29 播放模式交接`](handoffs/2026-09-29-persistent-playback-mode.md)。
 `v0.2.44` / build `55` 已于北京时间 2026-09-29 01:25:19 正式发布，标签提交 `8d98e0b8`。

@@ -78,6 +78,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     target: nil,
     action: nil
   )
+  private let previewStatusLabel = NSTextField(wrappingLabelWithString: "")
+  private var rangePreviewGroup = NSStackView()
   private let frameHintLabel = NSTextField(labelWithString: "")
   private let frameFormatPopup = NSPopUpButton(frame: .zero, pullsDown: false)
   private let frameFormatHintLabel = NSTextField(wrappingLabelWithString: "")
@@ -134,6 +136,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private var rotationMediaGeneration: UInt64?
   private var rotationInitialDisplayDegrees: Int?
   private var ownedTaskID: String?
+  private var presentedTaskFailureID: String?
   private var outputDirectoryURL: URL?
   private var observedSourceURL: URL?
   private var observers: [NSObjectProtocol] = []
@@ -141,6 +144,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private weak var toolsDocumentView: NSView?
   private weak var contentStack: NSStackView?
   private weak var taskButtonStack: NSStackView?
+  private weak var taskDetailsCard: NSView?
 
   init(player: PlayerCore, mainWindow: MainWindowController) {
     self.player = player
@@ -166,7 +170,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     let scrollView = NSScrollView()
     scrollView.drawsBackground = false
     scrollView.hasVerticalScroller = true
-    scrollView.autohidesScrollers = true
+    scrollView.autohidesScrollers = false
     scrollView.translatesAutoresizingMaskIntoConstraints = false
     container.addSubview(scrollView)
 
@@ -177,7 +181,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     let stack = NSStackView()
     stack.orientation = .vertical
     stack.alignment = .leading
-    stack.spacing = 14
+    stack.spacing = 10
     stack.detachesHiddenViews = true
     stack.translatesAutoresizingMaskIntoConstraints = false
     documentView.addSubview(stack)
@@ -223,6 +227,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     rangePreviewButton.target = self
     rangePreviewButton.action = #selector(toggleRangePreview(_:))
     ChengYingStyle.secondaryButton(rangePreviewButton)
+    previewStatusLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+    previewStatusLabel.textColor = .secondaryLabelColor
+    previewStatusLabel.maximumNumberOfLines = 2
+    previewStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    rangePreviewGroup = makeVerticalGroup([rangePreviewButton, previewStatusLabel], spacing: 4)
     rangeNavigationControl.target = self
     rangeNavigationControl.action = #selector(navigateToRangeBoundary(_:))
     rangeNavigationControl.segmentDistribution = .fillEqually
@@ -233,9 +242,10 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     markerHint.maximumNumberOfLines = 0
     markerHint.lineBreakMode = .byWordWrapping
     let timeContent = makeVerticalGroup([
-      startRow, endRow, rangeNavigationControl, rangePreviewButton, markerHint,
-    ], spacing: 10)
-    timeGroup = makeVerticalGroup([ChengYingStyle.card(timeContent)], spacing: 0)
+      startRow, endRow, rangeNavigationControl, markerHint,
+    ], spacing: 8)
+    timeGroup = makeVerticalGroup([ChengYingStyle.card(timeContent,
+      insets: NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12))], spacing: 0)
     stack.addArrangedSubview(timeGroup)
 
     frameFormatPopup.addItems(withTitles: Self.frameFormats.map {
@@ -357,7 +367,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     progressIndicator.minValue = 0
     progressIndicator.maxValue = 100
 
-    statusLabel.maximumNumberOfLines = 3
+    statusLabel.maximumNumberOfLines = 0
     statusLabel.lineBreakMode = .byWordWrapping
     statusLabel.font = .systemFont(ofSize: 11)
 
@@ -374,12 +384,18 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     ChengYingStyle.secondaryButton(revealButton)
     let taskButtons = makeHorizontalGroup([cancelButton, revealButton], spacing: 8)
     taskButtonStack = taskButtons
-    let taskContent = makeVerticalGroup([
-      runButton, progressIndicator, statusLabel, timingLabel, taskButtons,
-    ], spacing: 8)
-    let taskCard = ChengYingStyle.card(taskContent)
-    taskCard.translatesAutoresizingMaskIntoConstraints = false
-    container.addSubview(taskCard)
+    // Long failures belong in the scrollable document, not in a growing footer
+    // that can hide the range fields. Preview and confirmation stay reachable.
+    let detailsCard = ChengYingStyle.card(makeVerticalGroup([
+      progressIndicator, statusLabel, timingLabel,
+    ], spacing: 8))
+    taskDetailsCard = detailsCard
+    stack.addArrangedSubview(detailsCard)
+    let actionCard = ChengYingStyle.card(makeVerticalGroup([
+      rangePreviewGroup, runButton, taskButtons,
+    ], spacing: 8))
+    actionCard.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(actionCard)
 
     for arrangedView in stack.arrangedSubviews {
       arrangedView.translatesAutoresizingMaskIntoConstraints = false
@@ -389,14 +405,14 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     NSLayoutConstraint.activate([
       stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 14),
       stack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -14),
-      stack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 18),
+      stack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 12),
       scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
       scrollView.topAnchor.constraint(equalTo: container.topAnchor),
-      scrollView.bottomAnchor.constraint(equalTo: taskCard.topAnchor, constant: -12),
-      taskCard.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
-      taskCard.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
-      taskCard.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -14),
+      scrollView.bottomAnchor.constraint(equalTo: actionCard.topAnchor, constant: -8),
+      actionCard.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+      actionCard.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+      actionCard.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -14),
     ])
 
     toolsScrollView = scrollView
@@ -666,8 +682,6 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   @objc private func toggleRangePreview(_ sender: NSButton) {
     if previewSnapshot != nil {
       stopPreview(updateButton: true)
-    } else if player?.videoToolsLoopRange != nil {
-      clearLoop(sender)
     } else {
       previewRange(showValidationError: true)
     }
@@ -754,6 +768,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
         outputDirectory: operation == .rotate ? nil : outputDirectoryURL
       )
       updateTaskUI()
+      revealTaskDetails()
     } catch {
       showValidationError(error.localizedDescription)
     }
@@ -790,20 +805,21 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       if previewSnapshot != nil {
         stopPreview(updateButton: true)
       }
+      updatePreviewButtons()
       return
     }
-    previewTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+    let timer = Timer(timeInterval: 0.35, repeats: false) { [weak self] _ in
+      self?.previewTimer = nil
       self?.previewRange(showValidationError: false)
     }
+    previewTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
+    updatePreviewButtons()
   }
 
   private func previewRange(showValidationError: Bool) {
     guard let range = validatedRange(showError: showValidationError), let player else { return }
-    if previewSnapshot == nil, player.videoToolsLoopRange != nil {
-      player.videoToolsPreviewRange(start: range.start, end: range.end)
-      updatePreviewButtons()
-      return
-    }
+    cancelScheduledPreview()
     if previewSnapshot == nil {
       previewSnapshot = player.videoToolsCaptureSnapshot()
     }
@@ -815,6 +831,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     }
     player.videoToolsPreviewRange(start: range.start, end: range.end)
     updatePreviewButtons()
+    updatePlaybackControls()
   }
 
   private func stopPreview(updateButton: Bool, restorePlaybackState: Bool = true) {
@@ -843,10 +860,20 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private func updatePreviewButtons() {
     let isPreviewing = previewSnapshot != nil
     let stopTitle = NSLocalizedString("videotools.stop_preview", comment: "Stop preview")
-    rangePreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString(
-      player?.videoToolsLoopRange != nil ? "videotools.loop.clear" : "videotools.preview_range",
-      comment: "Clear the active loop or preview a range"
-    )
+    rangePreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString("videotools.preview_range", comment: "Preview in player")
+    let previewRange = isPreviewing && previewTimer == nil ? player?.videoToolsLoopRange : nil
+    if let range = previewRange {
+      previewStatusLabel.stringValue = String(format: NSLocalizedString(
+        "videotools.preview.active", comment: "Selected range is playing in the main player"
+      ), formatTimestamp(range.start), formatTimestamp(range.end))
+      previewStatusLabel.textColor = ChengYingStyle.accent
+    } else {
+      let key = previewTimer != nil ? "videotools.preview.pending" :
+        (validatedRange(showError: false) == nil ? "videotools.preview.invalid" : "videotools.preview.hint")
+      previewStatusLabel.stringValue = NSLocalizedString(key, comment: "Range preview status")
+      previewStatusLabel.textColor = .secondaryLabelColor
+    }
+    previewStatusLabel.toolTip = previewStatusLabel.stringValue
     rotationPreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString("videotools.preview_rotation", comment: "Preview rotation")
   }
 
@@ -1061,6 +1088,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private func updateModeUI(resetFrameEnd: Bool) {
     let operation = selectedOperation
     timeGroup.isHidden = operation != .clip && operation != .frames
+    rangePreviewGroup.isHidden = timeGroup.isHidden
     frameHintLabel.isHidden = operation != .frames
     frameFormatGroup.isHidden = operation != .frames
     rotationGroup.isHidden = operation != .rotate
@@ -1094,6 +1122,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       progressIndicator.isHidden = taskManager.snapshot == nil && !hasActiveShortcutRotation
       taskButtonStack?.isHidden = cancelButton.isHidden && revealButton.isHidden
       view.needsLayout = true
+      if let task = taskManager.snapshot, task.phase == .failed,
+         task.id == ownedTaskID, presentedTaskFailureID != task.id {
+        presentedTaskFailureID = task.id
+        revealTaskDetails()
+      }
     }
     let ownsActiveTask = active && taskManager.snapshot?.id == ownedTaskID
     runButton.isEnabled = currentLocalMediaURL != nil && !active && !hasActiveShortcutRotation
@@ -1185,6 +1218,15 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private func showValidationError(_ message: String) {
     statusLabel.stringValue = message
     statusLabel.textColor = .systemRed
+    revealTaskDetails()
+  }
+
+  private func revealTaskDetails() {
+    guard isViewLoaded, let taskDetailsCard else { return }
+    view.needsLayout = true
+    view.layoutSubtreeIfNeeded()
+    viewDidLayout()
+    taskDetailsCard.scrollToVisible(taskDetailsCard.bounds)
   }
 
   // MARK: - UI construction

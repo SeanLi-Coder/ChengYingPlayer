@@ -60,6 +60,32 @@ struct TaskManagerTests {
     }
     try client.emit(["id": id, "type": "accepted", "operation": "convert"])
     check(manager.snapshot?.phase == .running, "Conversion acceptance transitions to running")
+    for (stage, key) in [
+      ("Inspecting Dolby Vision frames in the selected range", "videotools.status.hdr_inspection"),
+      ("Verifying Dolby Vision metadata and selected frame timestamps", "videotools.status.hdr_verification"),
+    ] {
+      try client.emit(["id": id, "type": "progress", "operation": "convert", "progress": 90, "eta_seconds": 4.0])
+      check(manager.snapshot?.etaSeconds == 4, "Encoding progress can have an ETA before HDR validation")
+      try client.emit(["id": id, "type": "progress", "operation": "convert", "progress": 99, "message": stage])
+      let explanation = NSLocalizedString(key, comment: "HDR validation stage test")
+      check(explanation != key && manager.snapshot?.message == explanation,
+            "Known HDR validation progress displays its localized stage instead of raw helper text")
+      check(manager.snapshot?.etaSeconds == nil && manager.snapshot?.phase == .running && manager.snapshot?.progress == 99,
+            "Validation without an ETA clears the previous estimate and remains unfinished")
+      try client.emit([
+        "id": id, "type": "progress", "operation": "convert", "progress": 99,
+        "message": stage, "eta_seconds": 1.0,
+      ])
+      check(manager.snapshot?.etaSeconds == nil, "A stale encoding ETA cannot appear beside a known HDR validation stage")
+    }
+    for message in ["Unknown helper progress", "Inspecting Dolby Vision frames in the selected range: future detail"] {
+      try client.emit([
+        "id": id, "type": "progress", "operation": "convert", "progress": 91,
+        "message": message, "eta_seconds": 12.0,
+      ])
+      check(manager.snapshot?.message == NSLocalizedString("videotools.status.running", comment: "") && manager.snapshot?.etaSeconds == 12,
+            "Unknown progress retains the existing generic message and reported ETA")
+    }
     try client.emit([
       "id": id, "type": "progress", "operation": "convert", "progress": 47.5,
       "elapsed_seconds": 14.0, "eta_seconds": 16.0,
@@ -112,6 +138,62 @@ struct TaskManagerTests {
     let pngID = try manager.start(operation: .frames, inputURL: source, start: 1, end: 2, frameFormat: "png")
     check(client.requests.last?.frameFormat == "png", "Explicit lossless frame format reaches the helper request")
     try client.emit(["id": pngID, "type": "completed", "operation": "frames"])
+    let dolbyVisionFailures: [(String, String)] = [
+      ("Dynamic HDR clipping currently supports only single-layer Dolby Vision profile 8.1 or 8.4", "profile"),
+      ("Dolby Vision clipping requires progressive video", "progressive"),
+      ("Dolby Vision profile 8.1 clipping requires verified static HDR metadata", "static_metadata"),
+      ("Dolby Vision clipping requires MP4-compatible mono or stereo audio up to 24 bits", "audio"),
+      ("Dolby Vision clipping exceeds the supported picture size or frame rate", "dimensions"),
+      ("Dolby Vision frames have missing presentation timestamps", "timestamps"),
+      ("Dolby Vision frames have ambiguous presentation timestamps", "timestamps"),
+      ("Dolby Vision packets have ambiguous presentation timestamps", "timestamps"),
+      ("A selected frame is missing Dolby Vision metadata", "missing_metadata"),
+      ("A selected packet is missing Dolby Vision RPU data", "missing_metadata"),
+      ("The selected range contains no Dolby Vision video frames", "empty_range"),
+      ("Dolby Vision metadata inspection failed; no output was published", "inspection"),
+      ("Invalid Dolby Vision metadata fingerprint", "inspection"),
+      ("Dolby Vision metadata fingerprints are unavailable", "inspection"),
+      ("Output verification detected a changed Dolby Vision profile", "verification"),
+      ("Output verification detected a changed Dolby Vision display matrix", "verification"),
+      ("Output verification detected a changed Dolby Vision frame count", "verification"),
+      ("Output verification detected changed Dolby Vision frame timestamps", "verification"),
+      ("Output verification detected changed Dolby Vision RPU metadata", "verification"),
+      ("Output verification found no Dolby Vision frames", "verification"),
+      ("Output verification detected missing or hidden Dolby Vision frames", "verification"),
+    ]
+    for (detail, suffix) in dolbyVisionFailures {
+      let key = "videotools.error.dovi.\(suffix)"
+      let translated = NSLocalizedString(key, comment: "Dolby Vision diagnostic test")
+      check(translated != key, "Dolby Vision \(suffix) has a loaded localized explanation")
+      let failedClip = try manager.start(operation: .clip, inputURL: source, start: 1, end: 2)
+      try client.emit([
+        "id": failedClip, "type": "failed", "operation": "clip",
+        "error_code": "processing_failed", "error": detail,
+      ])
+      check(manager.snapshot?.message == String(format:
+        NSLocalizedString("videotools.status.failed_detail", comment: ""), "\(translated)\n\(detail)"),
+        "Known Dolby Vision failures display an explanation and their exact technical detail")
+      check(manager.snapshot?.error == detail && manager.snapshot?.errorCode == "processing_failed" && manager.snapshot?.outputURL == nil,
+            "Localization preserves raw failure evidence and never exposes an unverified output")
+    }
+    for detail in ["Unexpected future Dolby Vision failure", "Output verification detected an unknown Dolby Vision problem", "A different export failed"] {
+      check(VideoToolsFailureMessage.localizedDetail(detail) == detail,
+            "Unknown helper errors remain unmodified instead of being generalized")
+    }
+    let variableHDRDetail = "Variable static HDR metadata cannot be preserved safely"
+    let variableHDRKey = "videotools.error.hdr.variable_static_metadata"
+    let variableHDRExplanation = NSLocalizedString(variableHDRKey, comment: "Variable static HDR diagnostic test")
+    check(variableHDRExplanation != variableHDRKey, "Variable static HDR has a loaded localized explanation")
+    let variableHDRClip = try manager.start(operation: .clip, inputURL: source, start: 1, end: 2)
+    try client.emit([
+      "id": variableHDRClip, "type": "failed", "operation": "clip",
+      "error_code": "processing_failed", "error": variableHDRDetail,
+    ])
+    check(manager.snapshot?.message == String(format:
+      NSLocalizedString("videotools.status.failed_detail", comment: ""), "\(variableHDRExplanation)\n\(variableHDRDetail)"),
+      "Variable static HDR failures keep an explanation and exact technical detail")
+    check(manager.snapshot?.error == variableHDRDetail && manager.snapshot?.errorCode == "processing_failed" && manager.snapshot?.outputURL == nil,
+          "Variable HDR localization retains failure evidence without exposing an unverified output")
     client.sendError = VideoToolsClientError.launchFailed("Test failure")
     do {
       try manager.start(operation: .convert, inputURL: source)

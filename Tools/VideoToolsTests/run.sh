@@ -44,4 +44,6 @@ xcrun swiftc -o "$test_bundle/MacOS/TaskManagerTests" \
   "$project_root/iina/VideoTools/VideoToolsRotationCoordinator.swift" \
   "$project_root/iina/VideoTools/VideoToolsTaskManager.swift" \
   "$project_root/Tools/VideoToolsTests/TaskManagerTests.swift"
-"$test_bundle/MacOS/TaskManagerTests" -AppleLanguages '(en)'
+for language in en zh-Hans zh-Hant; do
+  "$test_bundle/MacOS/TaskManagerTests" -AppleLanguages "($language)"
+done

@@ -59,7 +59,7 @@ jobs:
       - name: Test media helper
         working-directory: Tools/VideoToolsHelper
         run: |
-          python -m ruff check helper.py media.py conversion.py tests ../VideoToolsTests/app_conversion_smoke.py ../VideoToolsTests/app_rotation_smoke.py ../VideoToolsTests/test_rotation_smoke.py ../PlaybackRotationTests
+          python -m ruff check helper.py media.py conversion.py dovi_clip.py tests ../VideoToolsTests/app_conversion_smoke.py ../VideoToolsTests/app_dolby_clip_smoke.py ../VideoToolsTests/app_rotation_smoke.py ../VideoToolsTests/test_rotation_smoke.py ../PlaybackRotationTests
           python -m pytest -q
           python -B ../VideoToolsTests/test_rotation_smoke.py
           python -B ../PlaybackRotationTests/test_pipeline.py
@@ -496,6 +496,12 @@ jobs:
         timeout-minutes: 5
         run: >-
           python Tools/VideoToolsTests/app_conversion_smoke.py
+          --app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
+
+      - name: Test packaged precise Dolby Vision clipping
+        timeout-minutes: 5
+        run: >-
+          python -B Tools/VideoToolsTests/app_dolby_clip_smoke.py
           --app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
 
       - name: Test real application rapid rotation preview

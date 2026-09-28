@@ -73,6 +73,32 @@ def test_progress_eta_rejects_non_finite_values() -> None:
     )
 
 
+@pytest.mark.parametrize("enabled,status,expected", [
+    (True, "running", 0.4),
+    (False, "running", None),
+    (False, "completed", 0.0),
+    (False, "cancelled", None),
+    (False, "failed", None),
+])
+def test_export_snapshot_can_disable_encoding_eta_during_dolby_verification(
+    monkeypatch, tmp_path: Path, enabled, status, expected,
+) -> None:
+    monkeypatch.setattr(media_module.time, "time", lambda: 100.0)
+    job = ExportJob(
+        id="export-eta",
+        source=VideoSource("source", tmp_path / "source.mp4", {}),
+        start=0,
+        end=1,
+        output_path=tmp_path / "output.mp4",
+        status=status,
+        progress=98.0,
+        created_at=80.0,
+        started_at=80.0,
+        estimate_remaining=enabled,
+    )
+    assert job.snapshot()["estimated_remaining_seconds"] == expected
+
+
 def test_rotation_eta_excludes_hdr_scan_time(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(media_module.time, "time", lambda: 100.0)
     job = RotationJob(
@@ -280,7 +306,7 @@ def test_precise_export_preserves_dimensions_and_uses_lossless_audio(
     assert result["duration"] == pytest.approx(3.4, abs=0.08)
 
 
-def test_precise_export_rejects_dynamic_hdr_metadata(
+def test_precise_export_rejects_unsupported_dynamic_hdr_metadata(
     sample_video: Path,
     tmp_path: Path,
     ffmpeg: str,
@@ -292,7 +318,7 @@ def test_precise_export_rejects_dynamic_hdr_metadata(
     source = VideoSource("dynamic-hdr", sample_video, metadata)
     manager = ExportManager(ffmpeg=ffmpeg, ffprobe=ffprobe)
 
-    with pytest.raises(MediaError, match="Dynamic HDR metadata"):
+    with pytest.raises(MediaError, match="Dynamic HDR clipping currently supports only"):
         manager.create(
             source,
             start=0,

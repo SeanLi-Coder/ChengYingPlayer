@@ -39,6 +39,7 @@ let end = property("endField", as: NSTextField.self)
 let setStart = property("setStartButton", as: NSButton.self)
 let setEnd = property("setEndButton", as: NSButton.self)
 let preview = property("rangePreviewButton", as: NSButton.self)
+let previewStatus = property("previewStatusLabel", as: NSTextField.self)
 let navigation = property("rangeNavigationControl", as: NSSegmentedControl.self)
 let modes = property("modeControl", as: NSSegmentedControl.self)
 let run = property("runButton", as: NSButton.self)
@@ -57,6 +58,40 @@ check(mediaInfo.title == mediaInfoText("action.info", "Info") && mediaInfo.isEna
 let mediaInfoRect = controller.view.convert(mediaInfo.bounds, from: mediaInfo)
 check(mediaInfoRect.minX >= 0 && mediaInfoRect.maxX <= 320 && mediaInfoRect.width < 100,
       "The information entry stays compact inside the narrow native sidebar")
+let toolsScroll = controller.view.subviews.compactMap { $0 as? NSScrollView }.first!
+let taskStatus = property("statusLabel", as: NSTextField.self)
+let originalTaskStatus = taskStatus.stringValue
+let syntheticFailure = Array(repeating: "Export failed: a detailed diagnostic remains fully scrollable.", count: 12).joined(separator: "\n")
+func layoutTools(width: CGFloat = 320, height: CGFloat) {
+  panel.setContentSize(NSSize(width: width, height: height))
+  controller.view.needsLayout = true
+  controller.view.layoutSubtreeIfNeeded()
+  controller.viewDidLayout()
+  controller.view.layoutSubtreeIfNeeded()
+}
+for width: CGFloat in [320, 360] {
+for height: CGFloat in [240, 300, 350, 400, 600] {
+  taskStatus.stringValue = syntheticFailure
+  layoutTools(width: width, height: height)
+  check(toolsScroll.bounds.height > 90, "A long failure leaves a usable scroll viewport at height \(height)")
+  for control in [preview as NSView, previewStatus, run] {
+    let frame = controller.view.convert(control.bounds, from: control)
+    check(frame.minX >= 0 && frame.maxX <= width && frame.minY >= 0 && frame.maxY <= height && frame.height > 0,
+          "Preview, its status, and confirmation remain visible at height \(height)")
+    check(!control.isDescendant(of: toolsScroll), "Essential actions are not hidden inside scrolling content")
+  }
+  check(taskStatus.isDescendant(of: toolsScroll), "A detailed failure scrolls instead of covering the inputs")
+  for control in [start as NSView, end, navigation, playback, taskStatus] {
+    control.scrollToVisible(control.bounds)
+    let frame = toolsScroll.documentView!.convert(control.bounds, from: control)
+    check(frame.intersects(toolsScroll.documentVisibleRect), "Every input and task detail is reachable by scrolling at height \(height)")
+  }
+}
+}
+taskStatus.stringValue = originalTaskStatus
+layoutTools(height: 600)
+toolsScroll.contentView.scroll(to: .zero)
+toolsScroll.reflectScrolledClipView(toolsScroll.contentView)
 
 // Capture the actual AppKit hierarchy in both appearances without changing test behavior.
 if let captureDirectory = ProcessInfo.processInfo.environment["CHENGYING_CAPTURE_DIR"] {
@@ -72,7 +107,7 @@ if let captureDirectory = ProcessInfo.processInfo.environment["CHENGYING_CAPTURE
   }
   for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
     panel.appearance = NSAppearance(named: appearance)
-    for height in [600, 1200] {
+    for height in [350, 400, 600, 1200] {
       panel.setContentSize(NSSize(width: 320, height: height))
       controller.view.layoutSubtreeIfNeeded()
       controller.viewDidLayout()
@@ -92,6 +127,21 @@ if let captureDirectory = ProcessInfo.processInfo.environment["CHENGYING_CAPTURE
         fatalError("Unable to encode native control screenshot")
       }
       try png.write(to: directory.appendingPathComponent("video-tools-\(language)-\(name)-\(height).png"))
+      if height == 350 {
+        action(preview)
+        taskStatus.stringValue = syntheticFailure
+        layoutTools(height: 350)
+        taskStatus.scrollToVisible(taskStatus.bounds)
+        refreshSnapshotDisplay(controller.view)
+        controller.view.cacheDisplay(in: controller.view.bounds, to: bitmap)
+        try bitmap.representation(using: .png, properties: [:])!.write(to:
+          directory.appendingPathComponent("video-tools-\(language)-\(name)-active-failure-350.png"))
+        action(preview)
+        taskStatus.stringValue = originalTaskStatus
+        layoutTools(height: 350)
+        toolsScroll.contentView.scroll(to: .zero)
+        toolsScroll.reflectScrolledClipView(toolsScroll.contentView)
+      }
     }
     panel.setContentSize(NSSize(width: 320, height: 600))
     for (index, operation) in [(1, "frames"), (2, "rotate"), (3, "convert")] {
@@ -211,6 +261,8 @@ RunLoop.main.run(until: Date().addingTimeInterval(0.45))
 check(player.mpv.getString("count") == "inf" && near(player.mpv.getDouble("a"), 11.123456), "Typing valid range automatically previews")
 end.stringValue = "bad"; controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: end))
 check(player.mpv.getString("count") == "0", "Invalid input stops previous range preview")
+check(previewStatus.stringValue == NSLocalizedString("videotools.preview.invalid", comment: ""),
+      "Invalid input explains why automatic preview has stopped")
 let invalidTimes = ["nan", "inf", "-1", "1:60", "1:60:00", "1.1234567", "1e3", "359999999999999999999999999999999999", "1::2"]
 for value in invalidTimes {
   VideoToolsTaskManager.shared.request = nil
@@ -303,7 +355,8 @@ check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4), "Publ
 check(start.stringValue == "00:00.000000" && end.stringValue == "00:04.000000", "Public B writes both exact fields")
 check(near(player.mpv.getDouble("time"), 0) && !player.mpv.getFlag("pause"), "Public B returns to A without changing the playback pause state")
 check(loopStatus.stringValue == String(format: localized("videotools.loop.active"), "00:00.000", "00:04.000"), "Active keyboard loop displays the localized exact range")
-check(clearLoop.isEnabled && preview.title == localized("videotools.loop.clear"), "Both loop controls offer an explicit clear action")
+check(clearLoop.isEnabled && preview.title == localized("videotools.preview_range"),
+      "Clear A/B stays explicit while the separate preview action never silently clears it")
 controller.setLoopMarker(isEnd: true)
 check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4), "An invalid replacement B preserves the existing valid loop")
 player.mpv.values["time"] = -1.0
@@ -314,7 +367,34 @@ controller.setPlaybackControlsVisible(false)
 controller.stopPreview()
 check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4), "Hiding the tools panel does not cancel a keyboard-owned loop")
 action(preview)
-check(player.videoToolsLoopRange == nil && player.mpv.getString("a") == "no", "Range preview button clears a keyboard loop without nesting a preview snapshot")
+check(preview.title == localized("videotools.stop_preview") && player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4),
+      "Preview temporarily owns the current range without clearing the keyboard loop")
+start.stringValue = "10"; end.stringValue = "15"
+controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: end))
+check(previewStatus.stringValue == localized("videotools.preview.pending"), "Typing exposes the pending preview state")
+RunLoop.main.run(until: Date().addingTimeInterval(0.45))
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 10, end: 15), "Editing updates the temporary preview range")
+check(previewStatus.stringValue == String(format: localized("videotools.preview.active"), "00:10.000", "00:15.000"),
+      "Preview status displays the actual current range and player destination")
+action(preview)
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4) && near(player.mpv.getDouble("time"), 1),
+      "Stopping edited preview restores the original keyboard loop and position")
+action(preview)
+controller.stopPreview()
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4),
+      "Closing the panel restores the keyboard loop replaced by temporary preview")
+action(preview)
+let positionBeforePreviewUnload = player.mpv.getDouble("time")
+var previewUnloadCompleted = false
+player.mpv.hooks[0].block { previewUnloadCompleted = true }
+pumpTasks { previewUnloadCompleted }
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4) && near(player.mpv.getDouble("time"), positionBeforePreviewUnload),
+      "Unload restores the saved keyboard options without seeking the outgoing media")
+player.videoToolsClearLoop()
+player.videoToolsMediaGeneration += 1
+controller.refreshCurrentMedia(force: true)
+check(player.videoToolsLoopRange == nil && preview.title == localized("videotools.preview_range"),
+      "Opening another media generation does not revive the old preview or keyboard loop")
 
 // Keyboard markers supersede the panel's pending automatic preview timer.
 modes.selectedSegment = 0; action(modes)
@@ -536,6 +616,25 @@ check(shutdownRequestJSON["target_format"] == nil && shutdownRequestJSON["conver
 modes.selectedSegment = 0; action(modes)
 check(conversionGroup.isHidden && !timeGroup.isHidden && !playbackGroup.isHidden,
       "Switching back to clip restores the range and playback controls")
+
+// Exercise the task notification path at the user's short sidebar height.
+start.stringValue = "10"; end.stringValue = "15"
+layoutTools(height: 350)
+action(run)
+let cancelFrame = controller.view.convert(cancel.bounds, from: cancel)
+check(!cancel.isHidden && cancelFrame.minY >= 0 && cancelFrame.maxY <= 350,
+      "The active export cancel action stays reachable in a short sidebar")
+taskManager.snapshot?.message = syntheticFailure
+taskManager.finishTask(.failed)
+layoutTools(height: 350)
+let errorFrame = toolsScroll.documentView!.convert(status.bounds, from: status)
+check(errorFrame.intersects(toolsScroll.documentVisibleRect), "A failed owned task reveals its complete scrollable diagnostic")
+for control in [preview as NSView, previewStatus, run] {
+  let frame = controller.view.convert(control.bounds, from: control)
+  check(frame.minY >= 0 && frame.maxY <= 350 && frame.height > 0,
+        "Task failure cannot displace the preview and confirmation actions")
+}
+layoutTools(height: 600)
 
 runVideoToolsShortcutTests()
 runVideoToolsLoopTests()

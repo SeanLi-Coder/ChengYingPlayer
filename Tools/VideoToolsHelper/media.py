@@ -418,7 +418,9 @@ def probe_video(
             "bits_per_raw_sample,nb_frames,field_order,color_range,"
             "color_space,color_transfer,color_primaries,chroma_location:"
             "stream_disposition=default,attached_pic:"
-            "stream_side_data=rotation,side_data_type,displaymatrix"
+            "stream_side_data=rotation,side_data_type,displaymatrix,dv_version_major,"
+            "dv_version_minor,dv_profile,dv_level,rpu_present_flag,el_present_flag,"
+            "bl_present_flag,dv_bl_signal_compatibility_id,dv_md_compression"
         ),
         "-of",
         "json",
@@ -645,6 +647,7 @@ def probe_video(
         "video_time_base": str(video_stream.get("time_base") or ""),
         "video_frame_count": _positive_int(video_stream.get("nb_frames")),
         "video_start_time": video_start_time,
+        "format_start_time": _optional_finite_float(media_format.get("start_time")),
         "audio_start_time": audio_start_time,
         "video_codec": str(video_stream.get("codec_name") or "unknown"),
         "audio_codec": (
@@ -672,6 +675,11 @@ def probe_video(
         "chroma_location": str(video_stream.get("chroma_location") or ""),
         "is_hdr": is_hdr,
         "is_dolby_vision": is_dolby_vision,
+        "dovi_configuration": next(
+            (dict(item) for item in side_data if isinstance(item, dict)
+             and item.get("side_data_type") == "DOVI configuration record"),
+            {},
+        ),
         "hdr_metadata_inspected": hdr_metadata_inspected,
         "static_hdr_metadata": static_hdr_metadata,
         "dynamic_hdr_metadata_types": dynamic_hdr_metadata_types,
@@ -936,6 +944,7 @@ class ExportJob:
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
     finished_at: float | None = None
+    estimate_remaining: bool = True
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     process: subprocess.Popen[str] | None = field(default=None, repr=False)
     worker: threading.Thread | None = field(default=None, repr=False)
@@ -959,7 +968,7 @@ class ExportJob:
                     status=self.status,
                     progress=self.progress,
                     elapsed_seconds=elapsed_seconds,
-                ),
+                ) if self.estimate_remaining or self.status == "completed" else None,
             }
 
 
@@ -1019,10 +1028,11 @@ class ExportManager:
             False,
         ):
             raise MediaError("HDR metadata could not be inspected safely")
-        if source.metadata.get("is_dolby_vision") or source.metadata.get(
-            "dynamic_hdr_metadata_types"
-        ):
-            raise MediaError("Dynamic HDR metadata cannot be preserved safely")
+        if source.metadata.get("is_dolby_vision"):
+            from dovi_clip import validate_dovi_clip_source
+            validate_dovi_clip_source(source.metadata)
+        elif source.metadata.get("dynamic_hdr_metadata_types"):
+            raise MediaError("Dynamic HDR clipping currently supports only single-layer Dolby Vision profile 8.1 or 8.4")
         start, end = validate_time_range(
             start,
             end,
@@ -1046,6 +1056,8 @@ class ExportManager:
             if encoder != "copy" and encoder not in self.encoders:
                 raise MediaError(f"Required FFmpeg encoder is not available: {encoder}")
         audio_options = self._audio_encoding_options(source)
+        if source.metadata.get("is_dolby_vision") and self._requires_pcm_audio(source):
+            raise MediaError("Dolby Vision clipping requires MP4-compatible mono or stereo audio up to 24 bits")
         if len(audio_options) >= 2 and audio_options[1] not in self.encoders:
             raise MediaError(f"Required FFmpeg encoder is not available: {audio_options[1]}")
 
@@ -1234,6 +1246,8 @@ class ExportManager:
 
     @classmethod
     def output_suffix(cls, source: VideoSource) -> str:
+        if source.metadata.get("is_dolby_vision"):
+            return ".mp4"
         family = cls._video_family(source)
         if family == "ffv1":
             return ".mkv"
@@ -1467,7 +1481,11 @@ class ExportManager:
         return options
 
     def _video_encoding_options(self, job: ExportJob) -> list[str]:
-        return self._video_encoding_options_for_source(job.source)
+        options = self._video_encoding_options_for_source(job.source)
+        if job.source.metadata.get("is_dolby_vision"):
+            from dovi_clip import dovi_encoding_options
+            options.extend(dovi_encoding_options(job.source.metadata))
+        return options
 
     @classmethod
     def _audio_encoding_options(cls, source: VideoSource) -> list[str]:
@@ -1505,6 +1523,7 @@ class ExportManager:
             "error",
             "-nostdin",
             "-y",
+            *(["-noautorotate"] if job.source.metadata.get("is_dolby_vision") else []),
             "-ss",
             f"{job.start:.6f}",
             "-i",
@@ -1566,6 +1585,13 @@ class ExportManager:
                 job.status = "running"
                 job.message = "Creating a high-fidelity precise clip"
                 job.started_at = time.time()
+            if job.source.metadata.get("is_dolby_vision"):
+                from dovi_clip import inspect_dovi_clip_frames
+                with job.lock:
+                    job.message = "Inspecting Dolby Vision frames in the selected range"
+                inspect_dovi_clip_frames(self, job)
+                with job.lock:
+                    job.message = "Creating a high-fidelity precise clip"
             options: dict[str, Any] = {
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.PIPE,
@@ -1622,6 +1648,12 @@ class ExportManager:
                 raise MediaError(detail)
             with job.lock:
                 job.message = "Verifying and finalizing the clip"
+            if job.source.metadata.get("is_dolby_vision"):
+                from dovi_clip import verify_dovi_clip
+                with job.lock:
+                    job.message = "Verifying Dolby Vision metadata and selected frame timestamps"
+                    job.estimate_remaining = False
+                verify_dovi_clip(self, job, temporary_path)
             result_metadata = probe_video(
                 temporary_path,
                 ffprobe=self.ffprobe,
@@ -1653,7 +1685,7 @@ class ExportManager:
                     "display_transform_filters", ()
                 ):
                     raise MediaError("Output verification detected a display orientation change")
-            elif result_metadata["rotation"] != 0:
+            elif not job.source.metadata.get("is_dolby_vision") and result_metadata["rotation"] != 0:
                 raise MediaError("Output verification detected an unexpected rotation")
             if video_family in {"h264", "hevc"} and (
                 result_metadata["pix_fmt"] != job.source.metadata["pix_fmt"]

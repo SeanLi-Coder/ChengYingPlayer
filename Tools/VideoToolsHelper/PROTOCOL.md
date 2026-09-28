@@ -37,6 +37,35 @@ Create a precise clip:
 {"id":"clip-1","command":"start","operation":"clip","input_path":"/absolute/input.mov","start":"00:00:10.250","end":"00:00:15.750","output_directory":"/absolute/output"}
 ```
 
+Clipping also supports single-layer HEVC Dolby Vision profile 8.1 (HDR10-compatible)
+and 8.4 (HLG-compatible), with 10-bit limited-range BT.2020 4:2:0 pictures, progressive
+scan, and a matching Dolby Vision configuration record. Profile 8.1 additionally
+requires verified static mastering-display metadata; the helper never fabricates it.
+These clips use the existing high-quality CRF 14 video encoder, not lossless video
+stream copy. Audio is decoded to lossless ALAC without changing sample rate or channel
+count; this path currently accepts mono/stereo audio of at most 24 bits or no audio.
+The output is MP4, retaining Dolby Vision container signaling and each selected
+frame's dynamic metadata. Display rotation/mirroring stays in the container matrix:
+pixels are not automatically rotated, so Dolby Vision active-area geometry is not
+silently changed. Arbitrary user start/end times are not moved to keyframes. Only
+whole video frames whose presentation timestamps fall in the selected half-open
+range are encoded, preserving variable frame timing at the source time base.
+
+Before publishing a Dolby Vision clip, the helper verifies the supported container
+profile, decoded-frame/packet correspondence, frame count, and presentation timestamps.
+It normalizes each complete RPU with the bundled FFmpeg `dovi_rpu` bitstream filter
+(compression disabled), isolates HEVC RPU NAL units and compares their SHA-256 values
+in presentation order. This includes extension metadata omitted by FFprobe's readable
+frame report; it is a comparison of complete normalized RPU data, not a claim of
+identical original encoded bytes or identical video pixels. Missing metadata,
+unsupported/hybrid dynamic HDR, ambiguous timestamps, changed RPU data, or unsafe
+signaling fail closed. Profile 5, enhancement-layer profiles such as 7, HDR10+, and
+other dynamic HDR are not silently converted to profile 8, static HDR, or SDR.
+
+Dolby Vision inspection and verification emit progress messages and can be cancelled.
+Verification may scan the source bitstream, so large sources take longer even for
+short selected ranges; the helper does not invent a separate verification ETA.
+
 Extract every frame from a range no longer than five seconds:
 
 ```json
@@ -153,7 +182,7 @@ metadata, audio parameters, duration, and rotation as applicable, and publishes 
 after verification. Cancellation and failure remove owned partial output.
 JPG verification decodes every image, checks real MJPEG encoding, full-range 4:4:4
 pixel format, dimensions, frame count, sequential names, and JPEG boundary markers.
-Dynamic HDR formats whose per-frame metadata cannot be preserved safely are rejected
-before clipping, rotation, or conversion; they are never silently converted to static
-HDR or SDR. Conversion also verifies track count, supported track metadata,
+Dynamic HDR formats outside the verified clipping subset above are rejected; rotation
+and conversion continue to reject dynamic HDR. They are never silently converted to
+static HDR or SDR. Conversion also verifies track count, supported track metadata,
 audio/video timeline, and chapters before publishing.

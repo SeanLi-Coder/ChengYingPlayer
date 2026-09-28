@@ -201,6 +201,69 @@ struct VideoToolsTaskSnapshot {
   var isActive: Bool { phase.isActive }
 }
 
+/// Translate only the helper's known HDR clip diagnostics. Unknown
+/// errors stay intact, and the task snapshot separately retains the raw detail.
+enum VideoToolsFailureMessage {
+  static func localizedDetail(_ detail: String) -> String {
+    let key: String
+    switch detail {
+    case "Dynamic HDR clipping currently supports only single-layer Dolby Vision profile 8.1 or 8.4":
+      key = "videotools.error.dovi.profile"
+    case "Dolby Vision clipping requires progressive video":
+      key = "videotools.error.dovi.progressive"
+    case "Dolby Vision profile 8.1 clipping requires verified static HDR metadata":
+      key = "videotools.error.dovi.static_metadata"
+    case "Variable static HDR metadata cannot be preserved safely":
+      key = "videotools.error.hdr.variable_static_metadata"
+    case "Dolby Vision clipping requires MP4-compatible mono or stereo audio up to 24 bits":
+      key = "videotools.error.dovi.audio"
+    case "Dolby Vision clipping exceeds the supported picture size or frame rate":
+      key = "videotools.error.dovi.dimensions"
+    case "Dolby Vision frames have missing presentation timestamps",
+         "Dolby Vision frames have ambiguous presentation timestamps",
+         "Dolby Vision packets have ambiguous presentation timestamps":
+      key = "videotools.error.dovi.timestamps"
+    case "A selected frame is missing Dolby Vision metadata",
+         "A selected packet is missing Dolby Vision RPU data":
+      key = "videotools.error.dovi.missing_metadata"
+    case "The selected range contains no Dolby Vision video frames":
+      key = "videotools.error.dovi.empty_range"
+    case "Dolby Vision metadata inspection failed; no output was published",
+         "Invalid Dolby Vision metadata fingerprint",
+         "Dolby Vision metadata fingerprints are unavailable":
+      key = "videotools.error.dovi.inspection"
+    case "Output verification detected a changed Dolby Vision profile",
+         "Output verification detected a changed Dolby Vision display matrix",
+         "Output verification detected a changed Dolby Vision frame count",
+         "Output verification detected changed Dolby Vision frame timestamps",
+         "Output verification detected changed Dolby Vision RPU metadata",
+         "Output verification found no Dolby Vision frames",
+         "Output verification detected missing or hidden Dolby Vision frames":
+      key = "videotools.error.dovi.verification"
+    default:
+      return detail
+    }
+    let explanation = NSLocalizedString(key, comment: "HDR clip failure")
+    return "\(explanation)\n\(detail)"
+  }
+}
+
+/// Only these two clip stages have a known user-facing explanation and no ETA.
+enum VideoToolsProgressMessage {
+  static func localizedHDRStage(_ message: String?) -> String? {
+    let key: String
+    switch message {
+    case "Inspecting Dolby Vision frames in the selected range":
+      key = "videotools.status.hdr_inspection"
+    case "Verifying Dolby Vision metadata and selected frame timestamps":
+      key = "videotools.status.hdr_verification"
+    default:
+      return nil
+    }
+    return NSLocalizedString(key, comment: "HDR clip validation stage without a reliable ETA")
+  }
+}
+
 enum VideoToolsClientError: LocalizedError {
   case missingExecutable(String)
   case launchFailed(String)

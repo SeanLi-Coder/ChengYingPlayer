@@ -20,7 +20,7 @@ contains no AI, model download, proxy, Windows, or web-server code.
 
 ## Runtime design
 
-`helper.py`, `media.py`, and `conversion.py` use only the Python standard library. A release build freezes
+`helper.py`, `media.py`, `conversion.py`, and `dovi_clip.py` use only the Python standard library. A release build freezes
 them into a standalone Mach-O executable with PyInstaller, so an installed app does not
 depend on a system Python installation. FFmpeg and FFprobe remain separate executables
 and their absolute paths are always passed explicitly by the app.
@@ -76,7 +76,7 @@ Install the development requirements, then run the media and protocol suites:
 python3 -m pip install -r Tools/VideoToolsHelper/requirements-dev.txt
 cd Tools/VideoToolsHelper
 python3 -m pytest -q
-python3 -m ruff check helper.py media.py conversion.py tests
+python3 -m ruff check helper.py media.py conversion.py dovi_clip.py tests
 ```
 
 The integration tests require FFmpeg and FFprobe on `PATH`. They create synthetic video
@@ -89,3 +89,10 @@ download, codec library, or network request. It maps every supported source trac
 explicitly and does not transcode audio or subtitles implicitly. Unsupported target
 containers, dynamic HDR, or unsafe pixel-format changes fail without publishing an
 incomplete output. Video re-encoding is lossy even at the selected high-quality preset.
+
+Precise clipping additionally supports the strictly checked single-layer Dolby Vision
+8.1/8.4 subset documented in the protocol. It retains selected frame timestamps and
+verifies complete normalized RPU data, including extension blocks, before publication.
+The synthetic regression fixtures include different Level 1/2/5/8 metadata on every
+frame, long GOPs, B frames, variable frame rates, and orientation matrices. Fixture
+generation and provenance are documented in `tests/fixtures/dovi/README.md`.

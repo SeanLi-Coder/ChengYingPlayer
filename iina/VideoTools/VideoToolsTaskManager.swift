@@ -112,13 +112,14 @@ final class VideoToolsTaskManager {
         current.message = NSLocalizedString("videotools.status.running", comment: "Processing")
       }
     case .progress:
+      let hdrStage = VideoToolsProgressMessage.localizedHDRStage(event.message)
       if current.phase != .cancelling {
         current.phase = .running
-        current.message = NSLocalizedString("videotools.status.running", comment: "Processing")
+        current.message = hdrStage ?? NSLocalizedString("videotools.status.running", comment: "Processing")
       }
       current.progress = normalizedProgress(event.progress)
       current.elapsedSeconds = event.elapsedSeconds
-      current.etaSeconds = event.etaSeconds
+      current.etaSeconds = hdrStage == nil ? event.etaSeconds : nil
       current.frameCount = event.frameCount
     case .completed:
       current.phase = .completed
@@ -135,7 +136,7 @@ final class VideoToolsTaskManager {
       if let detail = event.error, !detail.isEmpty {
         current.message = String(
           format: NSLocalizedString("videotools.status.failed_detail", comment: "Failed with detail"),
-          detail
+          VideoToolsFailureMessage.localizedDetail(detail)
         )
       } else {
         current.message = NSLocalizedString("videotools.status.failed", comment: "Failed")

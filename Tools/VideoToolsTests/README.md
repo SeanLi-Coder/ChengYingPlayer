@@ -4,6 +4,25 @@ Run `bash Tools/VideoToolsTests/run.sh` to compile the AppKit controller and
 rotation coordinator tests using playback doubles. These tests do not exercise
 the real mpv renderer or the bundled helper process.
 
+The native checks cover persistent preview/confirmation actions at 320- and
+360-point widths and 240/300/350/400/600-point heights, with long scrollable
+failure details. They also exercise temporary preview over an existing keyboard
+A/B loop, including edited ranges, stop, panel close, unload, and the next media
+generation. Explicitly clearing A/B remains a separate action.
+Task manager checks exercise known Dolby Vision clip diagnostics in all three
+languages while retaining exact technical details and unknown helper errors.
+
+To capture the real AppKit control hierarchy in English, Simplified Chinese,
+and Traditional Chinese (both appearances), use an ignored output directory:
+
+```sh
+CHENGYING_CAPTURE_DIR="$PWD/.build/clip-preview-captures" bash Tools/VideoToolsTests/run.sh
+```
+
+The `active-failure-350` images show a valid preview status next to long failure
+details. These are isolated control fixtures, not evidence of a rendered video
+or a completed export.
+
 ## Real App rotation smoke
 
 Use a signed App bundle on a macOS desktop with no other player instance running:
