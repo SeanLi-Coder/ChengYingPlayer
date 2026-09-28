@@ -212,8 +212,12 @@ Release status: not released / draft / publicly verified
 
 抖音再次报 `cookie_access_unknown` 的读取修复见
 [`2026-09-29 Cookie 一致性与坏记录交接`](handoffs/2026-09-29-cookie-wal-runtime.md)。
-目标 v0.2.46 / build 57，初次提交时尚未发布；WAL 一致性、无关坏 Cookie 隔离、同一 jar 的认证保护和脱敏诊断已通过本地完整回归。
-用户实机的具体根因与真实账号下载仍未验证；以下 v0.2.45 是上一已核实稳定版。
+`v0.2.46` / build `57` 已于北京时间 2026-09-29 05:48:25 正式发布，标签提交 `1fda80df`。
+WAL 一致性、无关坏 Cookie 隔离、同一 jar 的认证保护和脱敏诊断已通过本地完整回归；
+主线 CI `36483510196`、标签 CI `36483516976` 首次全部通过，八资产齐全。
+匿名公开 DMG／补丁、旧公钥验签、公开增量还原全树一致和实际冻结 Cookie/WAL 自检通过，
+公开包四次 Dolby Vision 剪辑复测通过；从 v0.2.45 的补丁约 1.17 MB。首次正常卸载新只读测试卷失败，清理状态单独记录。
+用户实机的具体根因与真实账号下载仍未验证；以下保留 v0.2.45 的历史交付证据。
 
 剪辑预览入口与 Dolby Vision 剪辑修复见
 [`2026-09-29 剪辑修复交接`](handoffs/2026-09-29-clip-preview-dolby-vision.md)。
