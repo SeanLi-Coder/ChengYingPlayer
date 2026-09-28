@@ -18,9 +18,11 @@ from .browser import (
     extract_chrome_cookie_jar,
 )
 from .douyin_signing import (
+    chrome_cookie_read_scope,
     fetch_signed_aweme_detail,
     fetch_signed_profile_awemes,
     new_signed_discovery_budget,
+    raise_cookie_control_signal,
 )
 from .errors import (
     AuthenticationRequiredError,
@@ -1070,10 +1072,14 @@ def _cookie_jar_to_playwright(cookie_jar: CookieJar) -> list[dict[str, Any]]:
 
 
 def _extract_cookies(profile: str | None) -> CookieJar:
-    return extract_chrome_cookie_jar(
-        extract_cookies_from_browser, profile, domain="douyin.com",
-        required_cookie_names=("sessionid", "sessionid_ss"),
-    )
+    try:
+        return extract_chrome_cookie_jar(
+            extract_cookies_from_browser, profile, domain="douyin.com",
+            required_cookie_names=("sessionid", "sessionid_ss"),
+        )
+    except Exception as exc:
+        raise_cookie_control_signal(exc)
+        raise
 
 
 def _raise_if_profile_discovery_cancelled(
@@ -1233,12 +1239,14 @@ def discover_profile(
     if use_browser_cookies:
         _profile_discovery_budget_remaining(progress_budget, should_cancel)
         try:
-            browser_cookies = _cookie_jar_to_playwright(
-                _extract_cookies(cookie_profile)
-            )
+            with chrome_cookie_read_scope(should_cancel):
+                browser_cookies = _cookie_jar_to_playwright(
+                    _extract_cookies(cookie_profile)
+                )
         except DownloadCancelledError:
             raise
         except Exception as exc:
+            raise_cookie_control_signal(exc)
             if not allow_cookie_fallback or isinstance(exc, ChromeCookieAccessError):
                 diagnostic = chrome_cookie_diagnostic(cookie_profile, exc)
                 raise TemporaryAccessError(

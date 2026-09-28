@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -11,6 +12,8 @@ import time
 from http.cookiejar import CookieJar
 from pathlib import Path
 from typing import Callable
+
+from .errors import DownloadCancelledError
 
 
 def chrome_user_agent(
@@ -55,6 +58,9 @@ COOKIE_DIAGNOSTIC_CODES = frozenset(
         "cookie_decryption_failed",
         "cookie_permission_denied",
         "cookie_database_locked",
+        "cookie_database_invalid",
+        "cookie_storage_failed",
+        "cookie_reader_failed",
         "chrome_data_directory_missing",
         "chrome_profile_invalid",
         "chrome_profile_missing",
@@ -66,7 +72,7 @@ COOKIE_DIAGNOSTIC_CODES = frozenset(
 
 def public_cookie_diagnostic_code(value: object) -> str:
     """Accept only known safe codes; never echo an arbitrary exception suffix."""
-    code = str(value or "").strip().lower()
+    code = str.strip(value).lower() if isinstance(value, str) else ""
     return code if code in COOKIE_DIAGNOSTIC_CODES else "cookie_access_unknown"
 
 
@@ -127,7 +133,17 @@ def extract_chrome_cookie_jar(
     required_cookie_names: tuple[str, ...],
 ) -> CookieJar:
     logger = ChromeCookieLogger()
-    jar = extractor("chrome", profile=profile, logger=logger)
+    try:
+        jar = extractor("chrome", profile=profile, logger=logger)
+    except DownloadCancelledError:
+        raise
+    except Exception as exc:
+        # A later reader error must not discard an already diagnosed failure.
+        # Unknown warnings provide no evidence and must not hide the real cause.
+        diagnostic = public_cookie_diagnostic_code(logger.diagnostic_code)
+        if diagnostic != "cookie_access_unknown":
+            raise ChromeCookieAccessError(diagnostic) from exc
+        raise
     if logger.diagnostic_code is None:
         return jar
     now = time.time()
@@ -152,6 +168,67 @@ def extract_chrome_cookie_jar(
     raise ChromeCookieAccessError(logger.diagnostic_code)
 
 
+def _cookie_exception_attribute(error: BaseException, name: str) -> object:
+    try:
+        return getattr(error, name, None)
+    except DownloadCancelledError:
+        raise
+    except Exception:
+        return None
+
+
+def _cookie_exception_chain(error: BaseException | None) -> list[BaseException]:
+    """Bound traversal of causes, contexts and yt-dlp's retained exc_info."""
+    pending = [error] if error is not None else []
+    result: list[BaseException] = []
+    seen: set[int] = set()
+    while pending and len(result) < 16:
+        current = pending.pop(0)
+        if not isinstance(current, BaseException) or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, (DownloadCancelledError, KeyboardInterrupt, SystemExit)):
+            raise current
+        result.append(current)
+        pending.extend((current.__cause__, current.__context__))
+        retained = _cookie_exception_attribute(current, "exc_info")
+        if isinstance(retained, tuple) and len(retained) == 3:
+            pending.append(retained[1])
+    return result
+
+
+def _cookie_system_diagnostic(error: BaseException) -> str | None:
+    """Use numeric system errors before inspecting potentially private text."""
+    if isinstance(error, OSError):
+        if error.errno in {errno.EACCES, errno.EPERM}:
+            return "cookie_permission_denied"
+        if error.errno in {
+            errno.ENOSPC, errno.EDQUOT, errno.EIO, errno.EROFS,
+            errno.EMFILE, errno.ENFILE, errno.ENOMEM,
+        }:
+            return "cookie_storage_failed"
+    if isinstance(error, sqlite3.DatabaseError):
+        number = _cookie_exception_attribute(error, "sqlite_errorcode")
+        if not isinstance(number, int):
+            return None
+        number &= 0xFF  # SQLite extended codes retain the base code in this byte.
+        if number in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+            return "cookie_database_locked"
+        if number in {sqlite3.SQLITE_PERM, sqlite3.SQLITE_AUTH}:
+            return "cookie_permission_denied"
+        if number in {
+            sqlite3.SQLITE_FULL, sqlite3.SQLITE_IOERR, sqlite3.SQLITE_CANTOPEN,
+            sqlite3.SQLITE_READONLY, sqlite3.SQLITE_NOMEM,
+        }:
+            return "cookie_storage_failed"
+        if number in {
+            sqlite3.SQLITE_ERROR, sqlite3.SQLITE_SCHEMA, sqlite3.SQLITE_CORRUPT,
+            sqlite3.SQLITE_NOTADB, sqlite3.SQLITE_FORMAT,
+        }:
+            return "cookie_database_invalid"
+    return None
+
+
 def chrome_cookie_diagnostic(
     profile: str | None, error: BaseException | None = None
 ) -> str:
@@ -163,18 +240,37 @@ def chrome_cookie_diagnostic(
     instead of being reclassified as a site response change. Only ``OSError`` is
     caught, so cancellation and interpreter-exit signals still propagate.
     """
-    messages: list[str] = []
-    current: BaseException | None = error
-    while current is not None and len(messages) < 4:
-        structured = getattr(current, "diagnostic_code", None)
-        if isinstance(structured, str) and structured in COOKIE_DIAGNOSTIC_CODES:
+    chain = _cookie_exception_chain(error)
+    for current in chain:
+        structured = public_cookie_diagnostic_code(
+            _cookie_exception_attribute(current, "diagnostic_code")
+        )
+        if structured != "cookie_access_unknown":
             return structured
-        messages.append(str(current).lower())
-        current = current.__cause__ or current.__context__
+    for current in chain:
+        system_code = _cookie_system_diagnostic(current)
+        if system_code is not None:
+            return system_code
+    messages: list[str] = []
+    for current in chain:
+        try:
+            messages.append(str(current)[:2048].lower())
+        except DownloadCancelledError:
+            raise
+        except Exception:
+            # Exception formatting is not part of the trusted public protocol.
+            continue
     text = " ".join(messages)
     message_code = _cookie_message_diagnostic(text)
     if message_code is not None:
         return message_code
+    for current in chain:
+        if isinstance(current, PermissionError):
+            return "cookie_permission_denied"
+        if isinstance(current, sqlite3.DatabaseError):
+            return "cookie_database_invalid"
+        if isinstance(current, (ImportError, AttributeError, TypeError)):
+            return "cookie_reader_failed"
     try:
         root = chrome_user_data_directory()
         if root is None or not root.is_dir():

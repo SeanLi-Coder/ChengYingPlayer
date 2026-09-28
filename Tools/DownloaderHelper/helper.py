@@ -196,6 +196,9 @@ def main(argv=None):
         ).start()
         validate_paths(args)
         prepare_environment(args)
+        from chrome_cookie_runtime import install_chrome_cookie_runtime
+
+        install_chrome_cookie_runtime(should_cancel=controller.requested.is_set)
         from app.runtime import (
             RUNTIME_STOP_EVENT,
             ProjectLock,

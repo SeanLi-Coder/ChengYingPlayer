@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from yt_dlp.cookies import extract_cookies_from_browser
+from yt_dlp.utils import DownloadCancelled
 
 from .browser import (
     COOKIE_DIAGNOSTIC_CODES,
@@ -34,6 +35,53 @@ from .errors import (
 
 CancelCallback = Callable[[], bool]
 StatusCallback = Callable[[str], None]
+
+
+@contextlib.contextmanager
+def chrome_cookie_read_scope(
+    should_cancel: CancelCallback | None = None, *, domain: str | None = None,
+    required_cookie_names: tuple[str, ...] = (),
+):
+    """Use the native reader boundary while retaining standalone compatibility."""
+    try:
+        from chrome_cookie_runtime import cookie_read_scope
+    except ModuleNotFoundError as exc:
+        if exc.name != "chrome_cookie_runtime":
+            raise
+        yield
+    else:
+        with cookie_read_scope(
+            should_cancel, domain=domain, required_cookie_names=required_cookie_names,
+        ):
+            yield
+
+
+def cookie_exception_chain(error: BaseException) -> list[BaseException]:
+    """Visit a bounded, cycle-safe chain including yt-dlp's retained exc_info."""
+    pending = [error]
+    seen: set[int] = set()
+    result: list[BaseException] = []
+    while pending and len(seen) < 32:
+        current = pending.pop(0)
+        if not isinstance(current, BaseException) or id(current) in seen:
+            continue
+        seen.add(id(current))
+        result.append(current)
+        pending.extend((current.__cause__, current.__context__))
+        retained = vars(current).get("exc_info")
+        if isinstance(retained, tuple) and len(retained) == 3:
+            pending.append(retained[1])
+    return result
+
+
+def raise_cookie_control_signal(error: BaseException) -> None:
+    """Restore cancellation hidden by yt-dlp's cookie-load exception wrappers."""
+    for current in cookie_exception_chain(error):
+        if isinstance(current, DownloadCancelled):
+            raise DownloadCancelledError("Task cancelled") from current
+        if isinstance(current, (DownloadCancelledError, KeyboardInterrupt, SystemExit)):
+            raise current
+
 
 _SIGNING_PAGE_URL = "https://www.douyin.com/__original_media_signing__"
 _DETAIL_API_PATH = "/aweme/v1/web/aweme/detail/"
@@ -650,6 +698,7 @@ def _load_chrome_cookie_jar(cookie_profile: str | None) -> CookieJar:
     except DownloadCancelledError:
         raise
     except Exception as exc:
+        raise_cookie_control_signal(exc)
         reason = public_cookie_diagnostic_code(
             chrome_cookie_diagnostic(cookie_profile, exc)
         )
@@ -2037,10 +2086,12 @@ def _run_with_signing_page(
         budget.remaining_seconds()
         _emit_status(status_callback, "Loading Douyin Chrome cookies")
         try:
-            cookie_jar = _load_chrome_cookie_jar(cookie_profile)
+            with chrome_cookie_read_scope(should_cancel):
+                cookie_jar = _load_chrome_cookie_jar(cookie_profile)
         except (DownloadCancelledError, _SigningFailure):
             raise
         except Exception as exc:
+            raise_cookie_control_signal(exc)
             diagnostic = public_cookie_diagnostic_code(
                 chrome_cookie_diagnostic(cookie_profile, exc)
             )

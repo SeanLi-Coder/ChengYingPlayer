@@ -24,6 +24,7 @@ from typing import Any, Callable, Iterable, Iterator
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlsplit, urlunsplit
 
 from yt_dlp import YoutubeDL
+from yt_dlp.cookies import CookieLoadError
 from yt_dlp.dependencies import requests, urllib3
 from yt_dlp.extractor.tiktok import DouyinIE
 from yt_dlp.networking import Request
@@ -40,13 +41,23 @@ from yt_dlp.networking.exceptions import (
 from yt_dlp.postprocessor.common import PostProcessor
 from yt_dlp.utils import DownloadCancelled, DownloadError, variadic
 
-from .browser import chrome_cookie_diagnostic, public_cookie_diagnostic_code
+from .browser import (
+    ChromeCookieAccessError,
+    chrome_cookie_diagnostic,
+    public_cookie_diagnostic_code,
+)
 from .douyin import discover_profile as discover_douyin_profile
 from .douyin import discover_item_metadata_from_profile
 from .douyin import is_complete_profile_media_metadata
 from .douyin import quality_floor_dimensions
 from .douyin import verified_aweme_metadata
-from .douyin_signing import fetch_signed_aweme_detail, public_signing_diagnostic_code
+from .douyin_signing import (
+    chrome_cookie_read_scope,
+    cookie_exception_chain,
+    fetch_signed_aweme_detail,
+    public_signing_diagnostic_code,
+    raise_cookie_control_signal,
+)
 from .errors import (
     AuthenticationRequiredError,
     DiscoveryError,
@@ -747,7 +758,8 @@ class MediaDownloader:
 
         short_link_fallback = False
         if kind == SourceKind.SHORT_LINK:
-            resolved_url, short_link_fallback = self._resolve_short_url(url)
+            with chrome_cookie_read_scope(should_cancel):
+                resolved_url, short_link_fallback = self._resolve_short_url(url)
             if resolved_url != url:
                 resolved = identify_url(resolved_url)
                 if resolved.platform != platform:
@@ -1082,6 +1094,7 @@ class MediaDownloader:
         (info, video_uri), fallback = self._run_with_cookie_fallback(
             operation,
             url=url,
+            should_cancel=should_cancel,
         )
         author = (
             self._author_from_info(info, fallback="Douyin Author") or "Douyin Author"
@@ -1462,21 +1475,42 @@ class MediaDownloader:
         operation: Callable[[bool], Any],
         *,
         url: str,
+        should_cancel: CancelCallback | None = None,
     ) -> tuple[Any, bool]:
         use_cookies = bool(self.config.cookie_browser)
+        hostname = (urlsplit(url).hostname or "").lower()
+
+        def run(current_use_cookies: bool) -> Any:
+            guard_douyin_session = (
+                current_use_cookies and self.config.cookie_browser == "chrome"
+                and (hostname == "douyin.com" or hostname.endswith(".douyin.com"))
+            )
+            with chrome_cookie_read_scope(
+                should_cancel,
+                domain="douyin.com" if guard_douyin_session else None,
+                required_cookie_names=("sessionid", "sessionid_ss"),
+            ):
+                return operation(current_use_cookies)
+
         try:
-            return operation(use_cookies), False
+            return run(use_cookies), False
         except DownloadCancelled:
             raise DownloadCancelledError("Task cancelled")
         except DownloadError as exc:
+            raise_cookie_control_signal(exc)
             message = str(exc)
-            if use_cookies and _is_cookie_load_error(message):
+            cookie_load_failed = any(
+                isinstance(cause, (CookieLoadError, ChromeCookieAccessError))
+                for cause in cookie_exception_chain(exc)
+            )
+            if use_cookies and (cookie_load_failed or _is_cookie_load_error(message)):
                 if self.config.allow_cookie_fallback:
                     try:
-                        return operation(False), True
+                        return run(False), True
                     except DownloadCancelled as cancelled:
                         raise DownloadCancelledError("Task cancelled") from cancelled
                     except DownloadError as fallback_error:
+                        raise_cookie_control_signal(fallback_error)
                         self._raise_download_error(fallback_error, url)
                 diagnostic = public_cookie_diagnostic_code(
                     chrome_cookie_diagnostic(self.config.cookie_profile, exc)
@@ -1623,7 +1657,7 @@ class MediaDownloader:
             return result, probed_author
 
         (info, probed_author), fallback = self._run_with_cookie_fallback(
-            operation, url=url
+            operation, url=url, should_cancel=should_cancel,
         )
         raw_entries = info.get("entries")
         entries = list(raw_entries) if raw_entries is not None else [info]
@@ -4389,7 +4423,7 @@ class MediaDownloader:
         try:
             try:
                 (info, paths), fallback = self._run_with_cookie_fallback(
-                    operation, url=item.source_url
+                    operation, url=item.source_url, should_cancel=should_cancel,
                 )
                 operation_succeeded = True
             except AuthenticationRequiredError as exc:

@@ -122,6 +122,9 @@ COOKIE_DIAGNOSTIC_CASES = [
     ("chrome_profile_invalid", "Profile 名称不符合"),
     ("chrome_profile_missing", "Profile 目录已不存在"),
     ("cookie_database_missing", "没有找到 Cookie 数据库"),
+    ("cookie_database_invalid", "数据库的结构或内容无法读取"),
+    ("cookie_storage_failed", "本地存储错误"),
+    ("cookie_reader_failed", "读取组件发生依赖"),
     ("cookie_access_unknown", "不足以归类到具体原因"),
 ]
 
@@ -193,6 +196,36 @@ def test_cookie_diagnostic_is_recovered_from_a_persisted_message():
     assert run_ui(f"window.testAPI.cookieDiagnosticCode({json.dumps(job)})") is None
     title = run_ui(f"window.testAPI.issueTitleForJob({json.dumps(job)})")
     assert "被占用" in title
+
+
+def test_backend_cookie_diagnostic_whitelist_has_matching_ui_guidance():
+    from app.browser import COOKIE_DIAGNOSTIC_CODES
+
+    assert {code for code, _ in COOKIE_DIAGNOSTIC_CASES} == COOKIE_DIAGNOSTIC_CODES
+
+
+@pytest.mark.parametrize(("diagnostic", "expected"), COOKIE_DIAGNOSTIC_CASES)
+def test_douyin_cookie_diagnostics_reach_the_actual_issue_card(diagnostic, expected):
+    job = {
+        "platform": "douyin", "status": "failed", "issue_code": "cookie_unavailable",
+        "diagnostic_code": diagnostic,
+        "issue_message": f"Chrome cookies could not be read. Diagnostic code: {diagnostic}.",
+    }
+    message = run_ui(
+        "window.testAPI.composeIssueMessage('cookie_unavailable',"
+        f" {json.dumps(job['issue_message'])}, {json.dumps(job)}, {json.dumps(diagnostic)})"
+    )
+    assert expected in message
+    assert diagnostic in message
+    assert "验证码" not in message or "不是" in message or "不需要" in message
+
+
+def test_unknown_cookie_failure_does_not_assert_chrome_is_still_running():
+    presentation = run_ui(
+        "window.testAPI.issuePresentation('cookie_unavailable', '', 'cookie_access_unknown')"
+    )
+    assert "不能证明 Chrome 未退出" in presentation["solution"]
+    assert "完全退出 Chrome 后重试" not in presentation["solution"]
 
 
 @pytest.mark.parametrize(

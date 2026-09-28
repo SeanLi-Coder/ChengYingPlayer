@@ -189,9 +189,21 @@
       description: "选定的 Chrome Profile 下没有找到 Cookie 数据库，该 Profile 可能从未用浏览器登录过网站。",
       solution: "先在 Chrome 中用该 Profile 登录目标网站再重试，或在下载设置中改选已登录的 Profile，然后从原链接创建新任务。"
     },
+    cookie_database_invalid: {
+      description: "Chrome Cookie 数据库的结构或内容无法读取，可能是数据库损坏或当前读取器不支持其结构；这不是网站验证码。",
+      solution: "先确认 Chrome 本身能正常打开目标网站，然后退出 Chrome 并重试。若仍失败，请反馈此诊断类别、播放器版本和 build ID；不要手动删除 Cookie 数据库、重置浏览器或发送 Cookie 文件。"
+    },
+    cookie_storage_failed: {
+      description: "读取 Cookie 或创建私有临时快照时发生本地存储错误，可能涉及磁盘空间、I/O 或文件资源；不能据此认定账号已退出。",
+      solution: "检查系统磁盘可用空间及是否有磁盘错误，关闭不需要的程序后重试。若持续出现，请反馈诊断类别、版本和 build ID，不要删除浏览器资料。"
+    },
+    cookie_reader_failed: {
+      description: "Cookie 读取组件发生依赖、接口或数据类型处理错误；这不是登录失效的证据，也不代表必须重新授权。",
+      solution: "请反馈此诊断类别、播放器版本和 build ID，供开发者修复读取组件。反复登录或退出 Chrome 不一定能解决；不要发送 Cookie 内容或完整本地路径。"
+    },
     cookie_access_unknown: {
       description: "读取 Chrome Cookie 失败，但现有信息不足以归类到具体原因。",
-      solution: "完全退出 Chrome 后重试；若仍然失败，请在反馈中附上界面显示的诊断类别、版本号和 build ID，不要发送 Cookie 内容或完整本地路径。"
+      solution: "此提示不能证明 Chrome 未退出或钥匙串拒绝授权。若重试仍然失败，请反馈界面显示的诊断类别、版本号和 build ID；不要发送 Cookie 内容、Cookie 文件或完整本地路径。"
     }
   };
 
@@ -203,6 +215,9 @@
     chrome_profile_invalid: "绑定的 Profile 名称无效",
     chrome_profile_missing: "绑定的 Profile 已不存在",
     cookie_database_missing: "该 Profile 没有 Cookie 数据库",
+    cookie_database_invalid: "Cookie 数据库内容或结构异常",
+    cookie_storage_failed: "Cookie 本地存储读取失败",
+    cookie_reader_failed: "Cookie 读取组件异常",
     cookie_access_unknown: "未能归类的 Cookie 读取错误"
   };
 

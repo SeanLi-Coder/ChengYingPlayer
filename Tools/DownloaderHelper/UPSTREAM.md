@@ -49,7 +49,8 @@ Each intentional change is explicitly allowlisted and hashed in the manifest.
 Chrome Cookie failures are diagnosed by an additive patch to `app/browser.py`,
 which classifies a read failure into one fixed, safe category: decryption,
 permission, database lock, missing Chrome data directory, invalid or missing
-profile, missing cookie database, or unknown. The probe never returns a profile
+profile, missing cookie database, invalid database, storage I/O/resource failure,
+reader dependency/interface failure, or unknown. The probe never returns a profile
 path, cookie value, token or raw exception text, and its own filesystem errors
 fall back to the fixed `cookie_access_unknown` category instead of escaping and
 masking the original `cookie_unavailable` business error. Cancellation and
@@ -91,6 +92,36 @@ keychain process. It covers usable cookies, an unrelated corrupt cookie and an
 unavailable key. It never reads a real profile, calls the real keychain, or emits
 fixture values. Additional helper-level tests cover these boundaries and the
 real settings handlers; preserved upstream tests remain intact.
+
+### Native Chrome-cookie consistency and malformed-record handling
+
+`chrome_cookie_runtime.py` installs immutable, process-local adapters for the
+pinned yt-dlp before the native service accepts requests. The database adapter
+uses a bounded SQLite online backup from a read-only source connection rather
+than copying only the main database file. This includes committed WAL records
+and deletions. It does not checkpoint the browser database, change profiles,
+or fall back to an older main-file snapshot. SQLite can create/use its standard
+WAL coordination sidecars; the source main database and existing WAL bytes are
+not rewritten. Each snapshot is private, uniquely named and owner-only, and is
+removed when extraction completes or fails.
+
+The row adapter skips only recognized malformed macOS AES-CBC lengths or invalid
+UTF-8 data, emitting a fixed warning with no cookie bytes. Unexpected dependency,
+programming and control-flow errors are not swallowed. A task-local context
+carries cancellation and the requested site's authentication requirements;
+concurrent tasks cannot inherit another task's guard or profile. Douyin signing,
+browser fallback and generic yt-dlp extraction all check the same returned jar:
+after an extraction warning, a still-valid session covering the requested site
+is required. Non-authentication cookies do not justify silent anonymous access.
+Explicit cookie-off and explicitly enabled anonymous fallback retain their
+existing meaning. Exception chains preserve cancellation even when yt-dlp wraps
+it in a generic download error.
+
+Offline tests use real synthetic SQLite/WAL data and the pinned extractor with a
+fake keychain. Frozen self-tests cover new tables/updates/deletions committed in
+WAL, unrelated malformed rows, unusable target credentials and the actual
+`YoutubeDL.cookiejar` path. Passing these tests is not evidence of a successful
+download with a user's real Chrome account or of the exact cause on another Mac.
 
 `app/kuaishou.py` is an original ChengYing extension, licensed GPL-3.0-or-later,
 not part of the MIT upstream snapshot. It observes the site's normal Chrome

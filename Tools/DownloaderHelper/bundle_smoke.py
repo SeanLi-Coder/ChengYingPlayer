@@ -14,10 +14,13 @@ def _check() -> dict[str, object]:
     import playwright
     import requests
     import yt_dlp
+    from chrome_cookie_runtime import install_chrome_cookie_runtime
     from cookie_smoke import verify_cookie_runtime
     from ejs_smoke import verify_ejs_runtime
     from playwright.sync_api import sync_playwright
     from yt_dlp.extractor import gen_extractor_classes
+
+    install_chrome_cookie_runtime()
 
     root = Path(__file__).resolve().parent
     runtime_root = Path(getattr(sys, "_MEIPASS", root))
@@ -137,6 +140,7 @@ def _check() -> dict[str, object]:
         "native_library_versions": native_versions,
         "ejs_challenges": "n-and-signature-solved-offline",
         "chrome_cookies": cookie_runtime,
+        "chrome_cookie_snapshot": "wal-and-malformed-data-verified-offline",
         "playwright_driver": "ready",
         "browser": "external-google-chrome",
         "minimum_macos": manifest["minimum_macos"],
