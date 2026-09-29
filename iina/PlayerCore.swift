@@ -1242,6 +1242,16 @@ class PlayerCore: NSObject {
     Preference.set(constrainedVolume, for: .softVolume)
   }
 
+  /// Reconcile the volume UI with mpv without changing the saved volume preference.
+  @discardableResult
+  func syncVolumeFromMPV() -> Double {
+    guard info.state.active, mpv.mpv != nil else { return info.volume }
+    let volume = mpv.getDouble(MPVOption.Audio.volume)
+    info.volume = volume
+    syncUI(.volume)
+    return volume
+  }
+
   func setTrack(_ index: Int, forType: MPVTrack.TrackType) {
     let name: String
     switch forType {
@@ -2075,6 +2085,8 @@ class PlayerCore: NSObject {
     log("File loaded")
 
     info.state = .loaded
+    // File-local video options may reset mpv's volume without a UI property event.
+    syncVolumeFromMPV()
     // View transforms belong to one load, even when watch-later data or a
     // previous file retained mpv presentation properties.
     videoToolsResetViewport()
