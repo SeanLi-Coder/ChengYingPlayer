@@ -93,6 +93,27 @@ unavailable key. It never reads a real profile, calls the real keychain, or emit
 fixture values. Additional helper-level tests cover these boundaries and the
 real settings handlers; preserved upstream tests remain intact.
 
+### Native profile inventory and submission preflight
+
+`chrome_profiles.py` enumerates only standard Chrome directory names and checks
+directory/database metadata. It never opens cookie contents, Local State or the
+keychain, and it does not infer an account from a directory name. Scans are
+bounded, reject symlinked entries and distinguish unavailable inventory from a
+confirmed missing profile. The authenticated native profile API exposes names
+and fixed status codes, not paths or account identifiers.
+
+The native host replaces the example-only profile input with actual local choices.
+Explicit invalid or missing profiles require the user to select and save a valid
+choice before creating a task. Saving and submission preflight share the original
+configuration lock, so a concurrent settings update cannot change the checked
+identity. Unchanged legacy settings survive unrelated edits; previous tasks keep
+their original identity when retried. Automatic selection and saved cookie-off
+mode retain upstream semantics. No account is silently substituted.
+
+`profile_smoke.py` runs the shipped inventory and validation code against private
+synthetic directories in frozen self-tests. Browser regressions exercise the real
+UI with loopback fixtures and an isolated Chrome context, never a real profile.
+
 ### Native Chrome-cookie consistency and malformed-record handling
 
 `chrome_cookie_runtime.py` installs immutable, process-local adapters for the

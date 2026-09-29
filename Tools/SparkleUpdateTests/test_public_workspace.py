@@ -123,5 +123,70 @@ class PublicWorkspaceTests(unittest.TestCase):
             opener.assert_not_called()
 
 
+class PublicHelperTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="public-helper-fixture-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        # No application is created or executed: process and signature checks
+        # are isolated fixtures in these report-contract regression tests.
+        self.app = self.root / "new-app-not-created/ChengYing.app"
+        self.output = self.root / "new-helper-self-test.json"
+        self.info = {"CFBundleShortVersionString": "99.0.2", "CFBundleVersion": "101"}
+        self.tree = {"fixture": "authenticated-file-digest"}
+        self.result = {
+            "status": "ok", "chrome_cookies": verifier.COOKIE_SELF_TEST,
+            "chrome_cookie_snapshot": "wal-and-malformed-data-verified-offline",
+            "chrome_profiles": verifier.PROFILE_SELF_TEST,
+            "diagnostic_log": "bounded-redacted-export-verified-offline",
+            "diagnostic_identity": {
+                "player_version": "99.0.2", "player_build": "101",
+                "identity_source": "bundled", "helper_build_id": "a" * 64,
+            },
+        }
+
+    def invoke(self):
+        with (
+            patch.object(verifier, "run", side_effect=[
+                json.dumps(self.result).encode(), b"API fixture passed\n",
+                b"PASS: frozen clips retain complete RPU data\n",
+            ]) as commands,
+            patch.object(verifier, "tree_manifest", return_value=self.tree),
+            patch.object(verifier, "verify_application") as application,
+        ):
+            summary = verifier.verify_public_helper(
+                self.app, self.info, self.tree, self.output, "a" * 64,
+            )
+        return summary, commands, application
+
+    def test_new_public_helper_profile_verification_is_retained_in_summary(self):
+        summary, commands, application = self.invoke()
+        self.assertEqual(summary["chrome_profiles"], verifier.PROFILE_SELF_TEST)
+        self.assertEqual(json.loads(self.output.read_text())["chrome_profiles"], verifier.PROFILE_SELF_TEST)
+        self.assertEqual(commands.call_count, 3)
+        application.assert_called_once_with(self.app, self.info)
+        self.assertFalse(self.app.exists())
+
+    def test_missing_wrong_or_unverified_profile_result_blocks_new_helper_success(self):
+        for value in (None, "unverified", True, {}):
+            with self.subTest(value=value):
+                self.result["chrome_profiles"] = value
+                with patch.object(verifier, "run", return_value=json.dumps(self.result).encode()) as commands:
+                    with self.assertRaisesRegex(ValueError, "Chrome-profile"):
+                        verifier.verify_public_helper(
+                            self.app, self.info, self.tree, self.output, "a" * 64,
+                        )
+                    commands.assert_called_once()
+                self.assertFalse(self.output.exists())
+                self.assertFalse((self.root / "new-helper-self-test-diagnostic-api.log").exists())
+        del self.result["chrome_profiles"]
+        with (
+            patch.object(verifier, "run", return_value=json.dumps(self.result).encode()),
+            self.assertRaisesRegex(ValueError, "Chrome-profile"),
+        ):
+            verifier.verify_public_helper(self.app, self.info, self.tree, self.output, "a" * 64)
+        self.assertFalse(self.output.exists())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

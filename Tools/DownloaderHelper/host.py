@@ -182,6 +182,21 @@ def install_desktop_adapter(
 ):
     application = engine.app
     maintenance = UpdateMaintenance(engine.manager)
+    from chrome_profiles import (
+        PROFILE_DIRECTORY_RE,
+        list_chrome_profiles,
+        validate_chrome_profile,
+    )
+
+    def require_profile(config):
+        if not config.use_chrome_cookies:
+            return
+        code = validate_chrome_profile(config.chrome_profile)
+        if code is not None:
+            raise HTTPException(status_code=422, detail={
+                "code": code,
+                "message": "Select an available Chrome profile in download settings and save before creating a new task.",
+            })
     # The original engine/API/static files remain unmodified. Only its host page
     # receives desktop affordances; its own build handshake still covers its source.
     application.router.routes[:] = [
@@ -192,6 +207,10 @@ def install_desktop_adapter(
         and not (
             getattr(route, "path", None) == "/api/config"
             and "PUT" in getattr(route, "methods", set())
+        )
+        and not (
+            getattr(route, "path", None) == "/api/jobs"
+            and "POST" in getattr(route, "methods", set())
         )
     ]
 
@@ -219,7 +238,41 @@ def install_desktop_adapter(
             raise HTTPException(
                 status_code=422, detail="Invalid download settings."
             ) from None
-        return await run_in_threadpool(engine.update_config, config)
+        def save():
+            # Preserve legacy saved settings when editing unrelated fields;
+            # new tasks still require an available explicit profile.
+            with engine._CONFIG_LOCK:
+                previous = engine.get_config()
+                if (config.chrome_profile != previous.chrome_profile
+                        or config.use_chrome_cookies != previous.use_chrome_cookies):
+                    require_profile(config)
+                return engine.update_config(config)
+
+        return await run_in_threadpool(save)
+
+    @application.post("/api/jobs", status_code=201, include_in_schema=False)
+    async def desktop_create_job(request: Request):
+        raw = bytearray()
+        async for part in request.stream():
+            raw.extend(part)
+            if len(raw) > 16_384:
+                raise HTTPException(status_code=413, detail="Download request is too large.")
+        try:
+            import json
+
+            payload = json.loads(raw)
+            job_request = engine.CreateJobRequest.model_validate(payload)
+        except (TypeError, ValueError, UnicodeError, ValidationError):
+            raise HTTPException(status_code=422, detail="Invalid download request.") from None
+
+        def submit():
+            # The validation and original submission must share one settings
+            # snapshot; a concurrent save cannot change the chosen identity.
+            with engine._CONFIG_LOCK:
+                require_profile(engine.get_config())
+                return engine.create_job(job_request)
+
+        return await run_in_threadpool(submit)
 
     @application.get("/", include_in_schema=False)
     def desktop_index():
@@ -231,6 +284,8 @@ def install_desktop_adapter(
             "</head>",
             '<link rel="stylesheet" href="/native/desktop.css">'
             '<script src="/native/desktop.js" defer></script>'
+            '<link rel="stylesheet" href="/native/chrome_profiles.css">'
+            '<script src="/native/chrome_profiles.js" defer></script>'
             '<link rel="stylesheet" href="/native/diagnostics.css">'
             '<script src="/native/diagnostics.js" defer></script></head>',
             1,
@@ -252,6 +307,28 @@ def install_desktop_adapter(
             Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         )
         return {"chrome_installed": any(path.is_file() for path in chrome_paths)}
+
+    @application.get("/api/native/chrome-profiles", include_in_schema=False)
+    def native_chrome_profiles():
+        config = engine.get_config()
+        result = list_chrome_profiles()
+        selected = config.chrome_profile
+        if selected is None:
+            selected_status = "automatic"
+        elif not isinstance(selected, str) or not PROFILE_DIRECTORY_RE.fullmatch(selected):
+            selected_status = "invalid"
+        elif result["status"] != "ok":
+            selected_status = "unverified"
+        else:
+            selected_status = "missing"
+            for profile in result["profiles"]:
+                if profile["directory"] == selected:
+                    selected_status = "available" if profile["has_cookie_database"] else "cookie_database_missing"
+                    break
+        return {**result, "schema_version": 1,
+                "selected_profile": selected if selected_status not in {"automatic", "invalid"} else None,
+                "selected_status": selected_status,
+                "use_chrome_cookies": config.use_chrome_cookies}
 
     @application.get("/api/native/activity", include_in_schema=False)
     def native_activity():

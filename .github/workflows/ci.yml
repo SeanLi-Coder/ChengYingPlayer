@@ -158,9 +158,10 @@ jobs:
       - name: Test private download-center adapter
         run: |
           node Tools/DownloaderProxyUITests/main.mjs
+          node Tools/DownloaderChromeProfilesUITests/main.mjs
           node Tools/DownloaderDiagnosticsUITests/main.mjs
           python -m ruff check Tools/DownloaderHelper --exclude vendor
-          python -m pytest -q Tools/DownloaderHelper/tests
+          CHENGYING_REQUIRE_CHROME_UI=1 python -m pytest -q -rs Tools/DownloaderHelper/tests
           python Tools/DownloaderHelper/smoke_helper.py \
             --helper Tools/DownloaderHelper/helper.py \
             --ffmpeg "$(command -v ffmpeg)" --ffprobe "$(command -v ffprobe)"

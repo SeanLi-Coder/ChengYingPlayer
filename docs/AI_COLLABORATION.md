@@ -210,6 +210,14 @@ Release status: not released / draft / publicly verified
 
 ## 9. 最新 Codex review 交接
 
+### 本机 Chrome 配置选择（2026-09-29，待发布）
+
+本轮 `chrome_profile_missing` 已确认是保存的目录不存在，用户已明确确认目标配置。
+实际目录下拉、创建前预检、并发身份保护与验证边界见
+[`本机 Chrome Profile 修复交接`](handoffs/2026-09-29-native-chrome-profiles.md)。
+初稿时真实单视频仍在传输，不能把 Cookie 成功等同于完整下载成功；
+新版本、CI 与公开交付状态须以该交接后续证据为准。
+
 ### 发布测试副本清理规则（2026-09-29）
 
 防复发已接入受版本管理的工具，详见

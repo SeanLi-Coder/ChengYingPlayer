@@ -89,7 +89,6 @@ class SignedUpdates(unittest.TestCase):
             [
                 "hdiutil",
                 "create",
-                "-quiet",
                 "-srcfolder",
                 str(cls.app.parent),
                 "-format",

@@ -118,6 +118,17 @@ def run_smoke(command, ffmpeg, ffprobe):
                 assert script_status == 200 and b"kuaishouMessage" in script_body
                 assert request(url + "native/desktop.js", token=token)[0] == 200
                 assert request(url + "native/diagnostics.js", token=token)[0] == 200
+                for resource in ("native/chrome_profiles.js", "native/chrome_profiles.css"):
+                    assert request(url + resource)[0] == 403
+                    status, body, _ = request(url + resource, token=token)
+                    assert status == 200 and body
+                # Reject unauthenticated profile discovery before it can reach
+                # a browser root. The authenticated metadata path is exercised
+                # only with a synthetic root by the frozen bundle self-test.
+                profile_endpoint = url + "api/native/chrome-profiles"
+                assert request(profile_endpoint)[0] == 403
+                assert request(profile_endpoint, token="wrong")[0] == 403
+                assert request(profile_endpoint, token=token, origin="https://example.invalid")[0] == 403
                 diagnostic_endpoint = url + "api/native/diagnostics"
                 assert request(diagnostic_endpoint)[0] == 403
                 status, body, headers = request(diagnostic_endpoint, token=token)

@@ -33,6 +33,7 @@ from verify_appcast import (
 )
 
 COOKIE_SELF_TEST = "macos-v10-aes-and-fixed-diagnostics-verified-offline"
+PROFILE_SELF_TEST = "synthetic-directories-and-explicit-selection-verified-offline"
 
 
 def run(arguments, timeout=300, *, env=None):
@@ -93,6 +94,8 @@ def verify_public_helper(app, info, expected_tree, output, expected_helper_build
             "Public helper did not pass the new offline Chrome-cookie verification.")
     require(result.get("chrome_cookie_snapshot") == "wal-and-malformed-data-verified-offline",
             "Public helper missed the new WAL and malformed-cookie verification.")
+    require(result.get("chrome_profiles") == PROFILE_SELF_TEST,
+            "Public helper missed the offline Chrome-profile selection verification.")
     require(result.get("diagnostic_log") == "bounded-redacted-export-verified-offline",
             "Public helper did not pass the new diagnostic privacy verification.")
     identity = result.get("diagnostic_identity", {})
@@ -117,7 +120,14 @@ def verify_public_helper(app, info, expected_tree, output, expected_helper_build
     require(tree_manifest(app) == expected_tree, "Frozen helper self-test changed the app tree.")
     verify_application(app, info)
     output.write_text(json.dumps(result, indent=2) + "\n")
-    return {"status": result["status"], "chrome_cookies": result["chrome_cookies"], "chrome_cookie_snapshot": result["chrome_cookie_snapshot"], "dolby_clip": "precise-complete-rpu-audio-verified", "diagnostic_log": result["diagnostic_log"], "diagnostic_identity": identity, "diagnostic_api": "authenticated-readonly-private-export-verified"}
+    return {
+        "status": result["status"], "chrome_cookies": result["chrome_cookies"],
+        "chrome_cookie_snapshot": result["chrome_cookie_snapshot"],
+        "chrome_profiles": result["chrome_profiles"],
+        "dolby_clip": "precise-complete-rpu-audio-verified",
+        "diagnostic_log": result["diagnostic_log"], "diagnostic_identity": identity,
+        "diagnostic_api": "authenticated-readonly-private-export-verified",
+    }
 
 
 def verify_at(destination, working, args):

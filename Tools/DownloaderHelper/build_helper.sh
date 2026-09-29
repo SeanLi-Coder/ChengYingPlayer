@@ -44,7 +44,7 @@ for package, version in expected.items():
         raise SystemExit(f"Install the pinned build lock: {package} {version} is required, found {actual}.")
 PY
 
-for required in helper.py host.py proxy_config.py proxy_transport.py js_runtime.py chrome_cookie_runtime.py diagnostic_log.py diagnostic_identity.py static/diagnostics.js static/diagnostics.css cookie_smoke.py bundle_smoke.py runtime-artifacts.json runtime-sources.json vendor/rednote/app/main.py; do
+for required in helper.py host.py chrome_profiles.py static/chrome_profiles.js static/chrome_profiles.css proxy_config.py proxy_transport.py js_runtime.py chrome_cookie_runtime.py diagnostic_log.py diagnostic_identity.py static/diagnostics.js static/diagnostics.css cookie_smoke.py bundle_smoke.py runtime-artifacts.json runtime-sources.json vendor/rednote/app/main.py; do
   if [[ ! -s "$SCRIPT_DIR/$required" ]]; then
     echo "Required helper source is unavailable: $required" >&2
     exit 2

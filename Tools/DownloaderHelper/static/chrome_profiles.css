@@ -1,0 +1,25 @@
+.desktop-chrome-profiles { min-width: 0; width: 100%; }
+.desktop-chrome-profile {
+  width: 100%; min-width: 0; box-sizing: border-box;
+  padding: 11px 12px; border: 1px solid rgba(136, 200, 237, .3);
+  border-radius: 10px; background: #17212e; color: #e2ecf5;
+  font: inherit; font-size: 13px; line-height: 1.5;
+}
+.desktop-chrome-profile-refresh {
+  margin-top: 9px; padding: 7px 11px; min-height: 34px;
+  border: 1px solid rgba(136, 200, 237, .3); border-radius: 8px;
+  background: rgba(136, 200, 237, .09); color: #abd9f4;
+  font: inherit; font-size: 12px; cursor: pointer;
+}
+.desktop-chrome-profile-refresh:hover:not(:disabled) { background: rgba(136, 200, 237, .2); }
+.desktop-chrome-profile:focus-visible, .desktop-chrome-profile-refresh:focus-visible {
+  outline: 2px solid #88c8ed; outline-offset: 3px;
+}
+.desktop-chrome-profile:disabled, .desktop-chrome-profile-refresh:disabled { opacity: .55; cursor: default; }
+.desktop-chrome-profile-status, .desktop-chrome-profile-note {
+  margin: 9px 0 0; font-size: 11px; font-weight: normal; line-height: 1.65;
+  color: #9eaabd; overflow-wrap: anywhere;
+}
+.desktop-chrome-profile-status { color: #b5d9ed; }
+.desktop-chrome-profile-status.is-error { color: #e7b6a2; }
+#chrome-profile[hidden], #chrome-profile-help[hidden] { display: none !important; }
