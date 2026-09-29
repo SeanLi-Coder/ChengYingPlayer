@@ -18,6 +18,8 @@ extend-ignore-re = [
     # Exact x265 content-light-level metadata parameter.
     '\bmax-cll=',
     '"(?:name|package|filename)": "writeable(?:-[^"]+)?"',
+    # Reversed two-letter input in the edit-distance differential fixtures.
+    '@"ba"',
     "\\bBig Sur\\b",
     '(firstItem|secondItem|id|destination|headerView)="[0-9A-Za-z]+-[0-9A-Za-z]+-[0-9A-Za-z]+"',
     'apiKey = "[^"]+"',
