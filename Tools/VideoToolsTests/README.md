@@ -12,6 +12,27 @@ generation. Explicitly clearing A/B remains a separate action.
 Task manager checks exercise known Dolby Vision clip diagnostics in all three
 languages while retaining exact technical details and unknown helper errors.
 
+Automatic-preview cases use a visible native field editor, actual change
+notifications, and a running playback-controls timer. They cover debouncing,
+marker buttons, invalid pending edits, rounded EOF endpoints, and navigation
+outside temporary previews while retaining independently configured A/B loops.
+Use `--language en --preview-case markers` for an isolated case. Add
+`--controller-ref 9f2636a3` to reproduce the previous controller's failure using
+an existing local commit; the runner does not fetch source or replace the rest
+of the playback implementation. Test apps are isolated and retired using
+`TestAppWorkspace`.
+
+For actual decoded frames, run `python3 -B Tools/ClipPreviewLiveTests/run.py`
+after preparing the pinned playback dependencies. This runs the production
+controller and bridge with real libmpv software rendering and extracted
+production playback commands. The default input is synthetic; an explicitly
+authorized local video can be opened read-only with `--media /path/to/video.mp4`.
+No source media is copied or uploaded. The 320-by-180 software framebuffer does
+not establish GPU, HDR, audio-quality or full-application keyboard acceptance.
+The rotation-restoration fixture uses 180 degrees: 90-degree rendering exposed
+a software-renderer crop assertion, so this fixture does not claim that path is
+validated. Normal player rendering uses a different renderer.
+
 To capture the real AppKit control hierarchy in English, Simplified Chinese,
 and Traditional Chinese (both appearances), use an ignored output directory:
 

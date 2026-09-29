@@ -77,6 +77,7 @@ jobs:
       - name: Test native playback controls
         run: |
           ./Tools/VideoToolsTests/run.sh
+          python3 -B Tools/ClipPreviewNavigationTests/run.py
           bash Tools/VideoWindowSizingTests/run.sh
           bash Tools/VideoViewportTests/run.sh
           bash Tools/HDRPreferenceTests/run.sh
@@ -272,6 +273,10 @@ jobs:
 
       - name: Test real playback mode transitions and EOF
         run: PATH="$PWD/deps/executable:$PATH" bash Tools/PlaybackModeLiveTests/run.sh
+
+      - name: Test automatic clip previews with native editing and real rendered video
+        timeout-minutes: 5
+        run: python3 -B Tools/ClipPreviewLiveTests/run.py
 
       - name: Test live filter node safety
         run: bash Tools/PlaybackLifecycleTests/run_live.sh

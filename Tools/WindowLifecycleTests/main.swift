@@ -40,9 +40,13 @@ run("cancel") {
   let controller = ScrollControllerUnderTest()
   controller.scrollWheel(with: event(x: 4, phase: .began))
   check(controller.player.pauses == 1, "Seeking pauses a playing video")
+  check(controller.player.mainWindow.quickSettingView.preparations == 1,
+        "An explicit scroll seek exits a temporary edit preview before navigation")
   controller.scrollWheel(with: event(x: 7, phase: .cancelled))
   check(controller.player.resumes == 1, "Cancelled seeking restores playback")
   check(controller.player.seeks.count == 1, "Cancelled packets cannot move the playhead")
+  check(controller.player.mainWindow.quickSettingView.preparations == 1,
+        "Cancelled packets cannot discard another edit preview")
   controller.scrollWheel(with: event(phase: .ended))
   check(controller.player.resumes == 1, "An extra end packet cannot resume twice")
 
@@ -93,9 +97,13 @@ run("momentum") {
   check(wheel.player.seeks.count == 1, "Physical mouse wheel packets perform a seek")
   wheel.scrollWheel(with: event(precise: false))
   check(wheel.player.seeks.count == 1, "Empty mouse packets never add a phantom seek")
+  check(wheel.player.mainWindow.quickSettingView.preparations == 1,
+        "Empty mouse packets cannot cancel a preview")
   let stationary = ScrollControllerUnderTest()
   stationary.scrollWheel(with: event(precise: false))
   check(stationary.player.volumes.isEmpty, "Empty mouse packets never change volume")
+  check(stationary.player.mainWindow.quickSettingView.preparations == 0,
+        "Stationary scroll events cannot cancel a preview")
 }
 
 run("filtered_end") {
@@ -151,12 +159,16 @@ run("sensitivity") {
     volume.volumeScrollAmount = value
     volume.scrollWheel(with: event(y: 4, phase: .began))
     check(volume.player.volumes.last?.isFinite == true, "Volume sensitivity is safe for persisted value \(value)")
+    check(volume.player.mainWindow.quickSettingView.preparations == 0,
+          "Volume scrolling preserves the temporary edit preview")
 
     let speed = ScrollControllerUnderTest()
     speed.playbackSpeedScrollAmount = value
     speed.verticalScrollAction = .playbackSpeed
     speed.scrollWheel(with: event(y: 4, phase: .began))
     check(speed.player.speeds.last?.isFinite == true, "Speed sensitivity is safe for persisted value \(value)")
+    check(speed.player.mainWindow.quickSettingView.preparations == 0,
+          "Speed scrolling preserves the temporary edit preview")
   }
 }
 

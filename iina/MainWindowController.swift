@@ -3427,6 +3427,7 @@ class MainWindowController: PlayerWindowController {
       player.navigateInPlaylist(nextMedia: !left)
 
     case .seek:
+      quickSettingView.prepareVideoToolsForUserSeek()
       player.seek(relativeSecond: left ? -10 : 10, option: .relative)
 
     }

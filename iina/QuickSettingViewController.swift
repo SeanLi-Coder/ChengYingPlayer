@@ -121,6 +121,10 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
   private var subtitleToolsTabBtn: NSButton?
   private var subtitleToolsViewController: SubtitleToolsViewController?
 
+  func prepareVideoToolsForUserSeek() {
+    videoToolsViewController?.prepareForUserSeek()
+  }
+
   @discardableResult
   func performVideoToolsShortcut(_ action: VideoToolsShortcuts.Action) -> Bool {
     _ = view

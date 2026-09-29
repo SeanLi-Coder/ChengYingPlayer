@@ -389,10 +389,15 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
 
   /// Route normal key-binding commands through the same loop-safe navigation as the UI.
   private func handleGuardedPlaybackCommand(_ tokens: [String]) -> Bool {
-    guard player.videoToolsLoopRange != nil,
-          let command = VideoToolsPlaybackCommand.parse(tokens) else { return false }
+    guard let command = VideoToolsPlaybackCommand.parse(tokens) else { return false }
     switch command {
     case .seek(let amount, let mode):
+      if case .absolute = mode,
+         VideoToolsPlaybackCommand.absoluteSeekTarget(amount, duration: player.info.videoDuration?.second) == nil {
+        return false
+      }
+      player.mainWindow.quickSettingView.prepareVideoToolsForUserSeek()
+      guard player.videoToolsLoopRange != nil else { return false }
       switch mode {
       case .absolute:
         guard let target = VideoToolsPlaybackCommand.absoluteSeekTarget(amount, duration: player.info.videoDuration?.second) else {
@@ -407,9 +412,12 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
         }
       }
     case .frame(let backwards):
+      player.mainWindow.quickSettingView.prepareVideoToolsForUserSeek()
+      guard player.videoToolsLoopRange != nil else { return false }
       player.pause()
       player.frameStep(backwards: backwards)
     case .speed(let amount, let mode):
+      guard player.videoToolsLoopRange != nil else { return false }
       let current = player.mpv.getDouble(MPVOption.PlaybackControl.speed)
       let target: Double
       switch mode {
@@ -587,6 +595,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     case .seek:
       let amounts = isMouse ? AppData.seekAmountMapMouse : AppData.seekAmountMap
       let seekAmount = amounts[relativeSeekAmount.clamped(to: 1...(amounts.count - 1))] * delta
+      player.mainWindow.quickSettingView.prepareVideoToolsForUserSeek()
       player.seek(relativeSecond: seekAmount, option: useExactSeek)
     case .volume:
       // don't use precised delta for mouse
@@ -782,6 +791,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
   @IBAction func playSliderChanges(_ sender: NSSlider) {
     guard player.info.state.active else { return }
     let percentage = 100 * sender.doubleValue / sender.maxValue
+    player.mainWindow.quickSettingView.prepareVideoToolsForUserSeek()
     player.seek(percent: percentage, forceExact: !followGlobalSeekTypeWhenAdjustSlider)
   }
 

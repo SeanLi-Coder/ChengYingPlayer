@@ -2,7 +2,8 @@ import Cocoa
 setbuf(stdout, nil)
 
 let application = NSApplication.shared
-application.setActivationPolicy(.prohibited)
+application.setActivationPolicy(.accessory)
+application.finishLaunching()
 let player = PlayerCore()
 player.info.currentURL = URL(fileURLWithPath: #filePath)
 let mainWindow = MainWindowController()
@@ -46,6 +47,245 @@ let run = property("runButton", as: NSButton.self)
 let frameFormat = property("frameFormatPopup", as: NSPopUpButton.self)
 let frameFormatGroup = property("frameFormatGroup", as: NSStackView.self)
 let frameFormatHint = property("frameFormatHintLabel", as: NSTextField.self)
+
+// Exercise AppKit's real field editor while the production playback refresh runs.
+// These cases never call the controller's text delegate or post change notifications.
+func runAutomaticPreviewRegression(_ scenario: String) {
+  let testPlayer = PlayerCore()
+  testPlayer.info.currentURL = URL(fileURLWithPath: #filePath)
+  let testMainWindow = MainWindowController()
+  let testController = VideoToolsViewController(player: testPlayer, mainWindow: testMainWindow)
+  let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 720),
+                        styleMask: [.titled, .closable], backing: .buffered, defer: false)
+  window.contentViewController = testController
+  window.makeKeyAndOrderFront(nil)
+  application.activate(ignoringOtherApps: true)
+  testController.setPlaybackControlsVisible(true)
+  func field<T>(_ name: String, as: T.Type) -> T {
+    Mirror(reflecting: testController).children.first(where: { $0.label == name })!.value as! T
+  }
+  let first = field("startField", as: NSTextField.self)
+  let last = field("endField", as: NSTextField.self)
+  let firstMarker = field("setStartButton", as: NSButton.self)
+  let lastMarker = field("setEndButton", as: NSButton.self)
+  let mode = field("modeControl", as: NSSegmentedControl.self)
+  let previewState = field("previewStatusLabel", as: NSTextField.self)
+  func text(_ key: String) -> String { NSLocalizedString(key, comment: "Automatic preview regression") }
+  func pump(_ interval: TimeInterval = 0.45) { RunLoop.main.run(until: Date().addingTimeInterval(interval)) }
+  var notifications = 0
+  let observer = NotificationCenter.default.addObserver(forName: NSControl.textDidChangeNotification,
+      object: nil, queue: .main) { note in
+    if let sender = note.object as? NSTextField, sender === first || sender === last { notifications += 1 }
+  }
+  defer {
+    testController.stopPreview()
+    testController.setPlaybackControlsVisible(false)
+    window.makeFirstResponder(nil)
+    window.orderOut(nil)
+    NotificationCenter.default.removeObserver(observer)
+  }
+  @discardableResult
+  func type(_ value: String, into field: NSTextField) -> NSTextView {
+    check(window.makeFirstResponder(field), "The real timestamp field accepts keyboard focus")
+    guard let editor = field.currentEditor() as? NSTextView else { fatalError("Missing native field editor") }
+    let before = notifications
+    editor.insertText(value, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+    check(notifications > before && field.stringValue == value,
+          "Native field-editor insertion publishes the actual NSTextField change notification")
+    return editor
+  }
+  func expectsRange(_ start: Double, _ end: Double, _ message: String) {
+    check(testPlayer.videoToolsLoopRange == VideoToolsLoopRange(start: start, end: end) &&
+          !testPlayer.mpv.getFlag("pause"), message)
+  }
+  first.stringValue = "10"
+  last.stringValue = "20"
+  testPlayer.pause()
+
+  switch scenario {
+  case "input":
+    let editor = type("21.125", into: last)
+    check(previewState.stringValue == text("videotools.preview.pending"), "Real text input schedules automatic preview")
+    let reads = testPlayer.mpv.reads
+    pump(0.22)
+    check(testPlayer.mpv.reads > reads && window.firstResponder === editor && editor.string == "21.125",
+          "The live 200 ms playback refresh preserves field-editor focus and uncommitted input")
+    check(testPlayer.videoToolsLoopRange == nil, "Automatic preview waits for its debounce interval")
+    type("22.5", into: last)
+    pump(0.22)
+    check(testPlayer.videoToolsLoopRange == nil, "Further native typing restarts the automatic preview deadline")
+    pump(0.23)
+    expectsRange(10, 22.5, "The latest uncommitted field-editor range starts automatically")
+    check(window.firstResponder === editor && last.currentEditor() === editor,
+          "Starting preview does not end editing or move keyboard focus")
+    let startEditor = type("11.375", into: first)
+    pump()
+    expectsRange(11.375, 22.5, "A second edit updates an already active automatic preview")
+    check(window.firstResponder === startEditor, "Repeated automatic preview preserves the currently edited field")
+  case "markers":
+    testPlayer.mpv.values["time"] = 11.123456
+    action(firstMarker)
+    check(testPlayer.mpv.getFlag("pause") && testPlayer.videoToolsLoopRange == nil,
+          "The start marker pauses immediately while selecting its precise frame")
+    pump(0.2)
+    check(testPlayer.videoToolsLoopRange == nil, "The start marker uses the same debounce as typing")
+    pump(0.25)
+    expectsRange(11.123456, 20, "The start marker automatically previews after 350 ms")
+    testPlayer.mpv.values["time"] = 17.654321
+    action(lastMarker)
+    check(testPlayer.mpv.getFlag("pause") && testPlayer.videoToolsLoopRange == nil && last.stringValue == "00:17.654321",
+          "An end marker preserves the current frame and replaces the preceding preview")
+    pump()
+    expectsRange(11.123456, 17.654321, "The end marker automatically previews its updated interval")
+    testPlayer.mpv.values["time"] = 12.25
+    action(firstMarker)
+    pump()
+    expectsRange(12.25, 17.654321, "A later start marker updates automatic preview again")
+    testPlayer.mpv.values["time"] = 11
+    action(lastMarker)
+    pump()
+    check(testPlayer.videoToolsLoopRange == nil && previewState.stringValue == text("videotools.preview.invalid"),
+          "An end marker before the start cancels automatic preview and explains the invalid range")
+  case "rounding":
+    for duration in [5.1234567, 119.9999997] {
+      testController.stopPreview()
+      testPlayer.mpv.values["time"] = 0.0
+      testPlayer.info.videoDuration = VideoTime(duration)
+      testController.refreshCurrentMedia(force: true)
+      first.stringValue = "0"
+      let rounded = String(format: "%.6f", duration)
+      type(rounded, into: last)
+      pump()
+      expectsRange(0, duration, "A microsecond-rounded endpoint clamps to the real duration before preview")
+      check(testPlayer.mpv.getDouble("b") == duration,
+            "Automatic preview passes the exact finite duration to the strict player bridge")
+      testController.stopPreview()
+      action(field("runButton", as: NSButton.self))
+      check(VideoToolsTaskManager.shared.request?.end == duration,
+            "Export and automatic preview use the same normalized endpoint")
+      mode.selectedSegment = 1; action(mode)
+      let frameStart = duration < 10 ? 1.0 : 118.0
+      type(String(format: "%.6f", frameStart), into: first)
+      let displayedEnd = duration < 10 ? "00:0" + rounded : "02:00.000000"
+      check(last.stringValue == displayedEnd, "Frame extraction displays its duration-clamped default endpoint")
+      pump()
+      expectsRange(frameStart, duration, "The default five-second extraction range previews at a rounded file end")
+      mode.selectedSegment = 0; action(mode)
+      type(rounded, into: first)
+      type(String(format: "%.6f", duration + 0.0005), into: last)
+      pump()
+      check(testPlayer.videoToolsLoopRange == nil && previewState.stringValue == text("videotools.preview.invalid"),
+            "Clamping cannot turn a nominally positive input range into a zero or negative bridge range")
+    }
+  case "invalid":
+    type("21", into: last)
+    check(previewState.stringValue == text("videotools.preview.pending"), "A valid edit starts a pending preview")
+    type("bad", into: last)
+    check(previewState.stringValue == text("videotools.preview.invalid"),
+          "Invalid text clears the pending timer identity immediately")
+    pump()
+    check(testPlayer.videoToolsLoopRange == nil, "A cancelled pending preview never starts later")
+    type("22", into: last)
+    pump()
+    expectsRange(10, 22, "Valid native input recovers after an invalid pending edit")
+    for invalid in ["10", "9", "120.01", "nan"] {
+      type(invalid, into: last)
+      pump()
+      check(testPlayer.videoToolsLoopRange == nil && previewState.stringValue == text("videotools.preview.invalid"),
+            "Invalid endpoint \(invalid) cannot leave an old preview playing")
+    }
+  case "lifecycle":
+    testPlayer.mpv.values["a"] = 3.0
+    testPlayer.mpv.values["b"] = 7.0
+    testPlayer.mpv.values["count"] = "inf"
+    testPlayer.mpv.values["time"] = 5.0
+    testPlayer.mpv.values["speed"] = 0.5
+    type("16", into: last)
+    pump()
+    expectsRange(10, 16, "Native text temporarily previews over an existing keyboard loop")
+    type("17", into: last)
+    testController.setPlaybackControlsVisible(false)
+    testController.stopPreview()
+    window.makeFirstResponder(nil)
+    window.orderOut(nil)
+    pump()
+    check(testPlayer.videoToolsLoopRange == VideoToolsLoopRange(start: 3, end: 7) &&
+          testPlayer.mpv.getDouble("time") == 5 && testPlayer.mpv.getFlag("pause") && testPlayer.mpv.getDouble("speed") == 0.5,
+          "Hiding the panel cancels pending edits and restores the original loop, position, pause and speed")
+    window.makeKeyAndOrderFront(nil)
+    testController.setPlaybackControlsVisible(true)
+    pump()
+    check(testPlayer.videoToolsLoopRange == VideoToolsLoopRange(start: 3, end: 7),
+          "Showing the panel cannot revive a cancelled automatic preview")
+    type("18", into: last)
+    mode.selectedSegment = 2; action(mode)
+    pump()
+    check(testPlayer.videoToolsLoopRange == VideoToolsLoopRange(start: 3, end: 7),
+          "Switching tabs cancels a pending range preview")
+    mode.selectedSegment = 0; action(mode)
+    type("19", into: last)
+    pump()
+    expectsRange(10, 19, "Returning to the clip tab accepts fresh automatic-preview edits")
+    mode.selectedSegment = 1; action(mode)
+    check(testPlayer.videoToolsLoopRange == VideoToolsLoopRange(start: 3, end: 7),
+          "Switching tabs restores the snapshot of an active automatic preview")
+    type("11.25", into: first)
+    check(last.stringValue == "00:16.250000", "Real frame-mode typing updates the default five-second endpoint")
+    pump()
+    expectsRange(11.25, 16.25, "The default five-second frame range previews automatically")
+  case "navigation":
+    let seekControl = field("playbackControl", as: NSSegmentedControl.self)
+    let frameControl = field("frameStepControl", as: NSSegmentedControl.self)
+    let boundaryControl = field("rangeNavigationControl", as: NSSegmentedControl.self)
+    for control in [seekControl, frameControl, boundaryControl] { control.trackingMode = .selectOne }
+    type("15", into: last)
+    pump()
+    expectsRange(10, 15, "A temporary preview is active before selecting a later endpoint")
+    testPlayer.mpv.values["time"] = 14.0
+    seekControl.selectedSegment = 2; action(seekControl)
+    check(testPlayer.videoToolsLoopRange == nil && near(testPlayer.mpv.getDouble("time"), 19),
+          "Forward navigation leaves the temporary preview and can move beyond its end")
+    action(lastMarker)
+    pump()
+    expectsRange(10, 19, "Marking the later endpoint automatically previews the extended range")
+    testPlayer.mpv.values["time"] = 18.9995
+    frameControl.selectedSegment = 1; action(frameControl)
+    check(testPlayer.videoToolsLoopRange == nil && testPlayer.mpv.getDouble("time") > 19 && testPlayer.mpv.getFlag("pause"),
+          "Frame stepping leaves the temporary range while preserving the newly selected frame")
+    action(lastMarker)
+    pump()
+    expectsRange(10, 19.032833, "A frame-selected endpoint can expand the next automatic preview")
+    type("25", into: last)
+    boundaryControl.selectedSegment = 1; action(boundaryControl)
+    pump()
+    check(testPlayer.videoToolsLoopRange == nil && testPlayer.mpv.getDouble("time") == 25 && testPlayer.mpv.getFlag("pause"),
+          "Explicit boundary navigation cancels the pending preview and reaches the edited endpoint")
+    testPlayer.mpv.values["time"] = 3.0
+    check(testController.setLoopMarker(isEnd: false), "The independent keyboard loop accepts a new A marker")
+    testPlayer.mpv.values["time"] = 7.0
+    check(testController.setLoopMarker(isEnd: true), "The independent keyboard loop accepts a new B marker")
+    first.stringValue = "10"
+    type("15", into: last)
+    pump()
+    expectsRange(10, 15, "Temporary preview can coexist with the saved independent keyboard loop")
+    testPlayer.mpv.values["time"] = 14.0
+    seekControl.selectedSegment = 2; action(seekControl)
+    check(testPlayer.videoToolsLoopRange == VideoToolsLoopRange(start: 3, end: 7) &&
+          testPlayer.mpv.getDouble("time") >= 3 && testPlayer.mpv.getDouble("time") < 7,
+          "Leaving temporary preview restores the independent keyboard loop and retains its seek limits")
+  default: fatalError("Unknown preview regression scenario")
+  }
+}
+
+let previewRegressionCase = ProcessInfo.processInfo.environment["CHENGYING_PREVIEW_REGRESSION_CASE"]
+for scenario in previewRegressionCase.map({ [$0] }) ?? ["input", "markers", "rounding", "invalid", "lifecycle", "navigation"] {
+  runAutomaticPreviewRegression(scenario)
+}
+if previewRegressionCase != nil {
+  print("SUCCESS: \(passes) automatic-preview UI checks passed using playback stubs")
+  exit(0)
+}
+
 check(frameFormat.numberOfItems == 2 && frameFormat.indexOfSelectedItem == 0,
       "A fresh frame extraction panel defaults to JPG and retains a lossless option")
 check(frameFormatGroup.isHidden && frameFormatHint.stringValue == NSLocalizedString("videotools.frames.hint.jpg", comment: ""),
@@ -227,6 +467,10 @@ check(!frameFormatGroup.isHidden && frameFormat.isEnabled,
       "Frame extraction exposes its format selector")
 player.mpv.values["time"] = 118.25; action(setStart)
 check(end.stringValue == "02:00.000000", "Frame range end clamps to duration")
+RunLoop.main.run(until: Date().addingTimeInterval(0.45))
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 118.25, end: 120) && !player.mpv.getFlag("pause"),
+      "The clamped default frame range starts automatic preview after marking")
+controller.stopPreview()
 player.mpv.values["time"] = 10.0; action(setStart)
 action(run)
 check(VideoToolsTaskManager.shared.request?.operation == .frames && VideoToolsTaskManager.shared.request?.start == 10 && VideoToolsTaskManager.shared.request?.end == 15, "Run sends exact frame extraction range")
@@ -279,12 +523,17 @@ check(player.mpv.getString("count") == "0", "Play action cancels pending automat
 action(preview)
 player.mpv.values["time"] = 14.0
 playback.selectedSegment = 2; action(playback)
-check(near(player.mpv.getDouble("time"), 19) && player.mpv.getString("count") == "inf", "Manual seek stays inside active preview")
+check(near(player.mpv.getDouble("time"), 19) && player.mpv.getString("count") == "0", "Manual seek leaves the temporary preview without restoring its old position")
 playback.selectedSegment = 2; action(playback)
-check(player.mpv.getDouble("time") < 20 && player.mpv.getString("count") == "inf", "Forward cannot escape active preview")
+check(near(player.mpv.getDouble("time"), 24) && player.mpv.getString("count") == "0", "Forward navigation can select a later endpoint outside the old preview")
+action(preview)
 player.mpv.values["time"] = 16.123456
 action(setStart)
-check(start.stringValue == "00:16.123456" && near(player.mpv.getDouble("time"), 16.123456) && player.mpv.getFlag("pause") && player.mpv.getString("count") == "0", "Marking during preview preserves selected frame and stops loop")
+check(start.stringValue == "00:16.123456" && near(player.mpv.getDouble("time"), 16.123456) && player.mpv.getFlag("pause") && player.mpv.getString("count") == "0", "Marking during preview immediately pauses at the selected frame before the new debounce")
+RunLoop.main.run(until: Date().addingTimeInterval(0.45))
+check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 16.123456, end: 20) && !player.mpv.getFlag("pause"),
+      "Marking during preview restarts the updated range automatically after the debounce")
+controller.stopPreview()
 let rotation = property("rotationControl", as: NSSegmentedControl.self)
 let rotationPreview = property("rotationPreviewButton", as: NSButton.self)
 modes.selectedSegment = 2; action(modes)

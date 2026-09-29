@@ -598,6 +598,14 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   // MARK: - Actions
 
+  /// Explicit navigation selects new edit points instead of staying in a temporary preview.
+  /// Independent keyboard A/B loops and rotation previews keep their existing behavior.
+  func prepareForUserSeek() {
+    guard selectedOperation == .clip || selectedOperation == .frames,
+          previewSnapshot != nil || previewTimer != nil else { return }
+    stopPreview(updateButton: true, restorePlaybackState: false)
+  }
+
   @objc private func playbackControlClicked(_ sender: NSSegmentedControl) {
     guard (0...2).contains(sender.selectedSegment), let player, player.info.state.loaded else { return }
     if sender.selectedSegment == 1 {
@@ -606,7 +614,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       player.togglePause()
     } else {
       guard let position = player.videoToolsCurrentTime else { return }
-      cancelScheduledPreview()
+      prepareForUserSeek()
       player.videoToolsSeek(to: position + (sender.selectedSegment == 0 ? -5 : 5), pausePlayback: false)
     }
     updatePlaybackControls()
@@ -614,7 +622,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   @objc private func stepFrame(_ sender: NSSegmentedControl) {
     guard (0...1).contains(sender.selectedSegment), let player, player.info.state.loaded else { return }
-    cancelScheduledPreview()
+    prepareForUserSeek()
     player.pause()
     player.frameStep(backwards: sender.selectedSegment == 0)
     updatePlaybackControls()
@@ -643,7 +651,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     guard (0...1).contains(sender.selectedSegment) else { return }
     let field = sender.selectedSegment == 0 ? startField : endField
     guard let target = parseTimestamp(field.stringValue), let player, player.info.state.loaded else { return }
-    cancelScheduledPreview()
+    prepareForUserSeek()
     player.videoToolsSeek(to: target, pausePlayback: true)
     updatePlaybackControls()
   }
@@ -666,6 +674,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     if selectedOperation == .frames || (parseTimestamp(endField.stringValue) ?? 0) <= currentTime {
       setDefaultEnd(after: currentTime)
     }
+    scheduleRangePreview()
     updatePlaybackControls()
   }
 
@@ -676,6 +685,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     stopPreview(updateButton: true, restorePlaybackState: false)
     endField.stringValue = formatTimestamp(currentTime, precision: 6)
     _ = validatedRange(showError: true)
+    scheduleRangePreview()
     updatePlaybackControls()
   }
 
@@ -799,7 +809,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   // MARK: - Preview
 
   private func scheduleRangePreview() {
-    previewTimer?.invalidate()
+    cancelScheduledPreview()
     guard selectedOperation == .clip || selectedOperation == .frames else { return }
     guard validatedRange(showError: false) != nil else {
       if previewSnapshot != nil {
@@ -1004,7 +1014,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   private func validatedRange(showError: Bool) -> (start: Double, end: Double)? {
     guard let start = parseTimestamp(startField.stringValue),
-          let end = parseTimestamp(endField.stringValue) else {
+          var end = parseTimestamp(endField.stringValue) else {
       if showError {
         showValidationError(NSLocalizedString("videotools.error.invalid_time", comment: "Enter a valid time"))
       }
@@ -1016,11 +1026,22 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       }
       return nil
     }
-    if let duration = player?.info.videoDuration?.second, end > duration + 0.001 {
-      if showError {
-        showValidationError(NSLocalizedString("videotools.error.after_duration", comment: "Range exceeds duration"))
+    if let duration = player?.info.videoDuration?.second, duration.isFinite, duration > 0 {
+      guard end <= duration + 0.001 else {
+        if showError {
+          showValidationError(NSLocalizedString("videotools.error.after_duration", comment: "Range exceeds duration"))
+        }
+        return nil
       }
-      return nil
+      // Displayed timestamps may round past EOF. Use the exact duration for both
+      // preview and export so the strict playback loop validator accepts the range.
+      end = min(end, duration)
+      guard end > start else {
+        if showError {
+          showValidationError(NSLocalizedString("videotools.error.invalid_range", comment: "End must be after start"))
+        }
+        return nil
+      }
     }
     if selectedOperation == .frames, end - start > Self.maximumFrameRange + 0.000_001 {
       if showError {

@@ -12,6 +12,7 @@ final class PlaybackInfo {
 }
 
 final class PlayerCore {
+  let mainWindow = PlaybackWindow()
   let info = PlaybackInfo()
   var seeks: [Double] = []
   var volumes: [Double] = []
@@ -27,6 +28,15 @@ final class PlayerCore {
   func seek(relativeSecond: Double, option: Preference.SeekOption) { seeks.append(relativeSecond) }
   func setVolume(_ value: Double) { volumes.append(value); info.volume = value }
   func setSpeed(_ value: Double) { speeds.append(value); info.playSpeed = value }
+}
+
+final class PlaybackWindow {
+  let quickSettingView = PreviewNavigation()
+}
+
+final class PreviewNavigation {
+  var preparations = 0
+  func prepareVideoToolsForUserSeek() { preparations += 1 }
 }
 
 final class VideoLayer { var inLiveResize = true }
