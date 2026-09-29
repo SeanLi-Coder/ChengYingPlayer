@@ -52,6 +52,42 @@ func dismissSheet(_ viewer: ImageViewerWindowController) {
     pump()
   }
 }
+func key(_ viewer: ImageViewerWindowController, code: UInt16, characters: String,
+         modifiers: NSEvent.ModifierFlags = []) {
+  let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
+                             timestamp: ProcessInfo.processInfo.systemUptime,
+                             windowNumber: viewer.window!.windowNumber, context: nil,
+                             characters: characters, charactersIgnoringModifiers: characters,
+                             isARepeat: false, keyCode: code)!
+  viewer.window!.sendEvent(event)
+}
+func viewingMenu(_ viewer: ImageViewerWindowController) -> NSMenu {
+  let event = NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [],
+                               timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: viewer.window!.windowNumber, context: nil,
+                               eventNumber: 0, clickCount: 1, pressure: 1)!
+  return viewer.canvas.menu(for: event)!
+}
+func sendMenuItem(_ item: NSMenuItem) {
+  expect(item.isEnabled && item.action != nil, "Requested canvas menu action is available")
+  NSApp.sendAction(item.action!, to: item.target, from: item)
+}
+func sameRect(_ lhs: NSRect, _ rhs: NSRect) -> Bool {
+  abs(lhs.minX - rhs.minX) < 0.5 && abs(lhs.minY - rhs.minY) < 0.5 &&
+    abs(lhs.width - rhs.width) < 0.5 && abs(lhs.height - rhs.height) < 0.5
+}
+func capturePureViewing(_ viewer: ImageViewerWindowController, _ name: String) throws {
+  guard let directory = ProcessInfo.processInfo.environment["IMAGE_PURE_VIEW_SCREENSHOT_DIR"],
+        let window = viewer.window else { return }
+  let output = URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent(name + ".png")
+  let capture = Process()
+  capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+  capture.arguments = ["-x", "-l", String(window.windowNumber), "-o", output.path]
+  try capture.run()
+  capture.waitUntilExit()
+  expect(capture.terminationStatus == 0, "The synthetic pure-view fixture window can be captured")
+  print("Pure viewing screenshot: \(output.path)")
+}
 
 let application = NSApplication.shared
 application.setActivationPolicy(.regular)
@@ -102,7 +138,139 @@ expect(viewer.canvas.bounds.width > 300 && viewer.canvas.bounds.height > 200, "M
 expect(!viewer.canvas.hasAmbiguousLayout, "Canvas layout is determined")
 expect(viewer.nextButton.visibleRect.width > 20 && viewer.nextButton.visibleRect.height > 10, "Navigation controls are visible")
 expect(viewer.convertButton.visibleRect.width > 20 && viewer.convertButton.visibleRect.height > 10, "Conversion controls are visible")
+let imageWindow = viewer.window!
+let contentView = imageWindow.contentView!
+pump()
+try capturePureViewing(viewer, "normal-minimum")
+let normalCanvasFrame = viewer.canvas.convert(viewer.canvas.bounds, to: contentView)
+let normalStyle = imageWindow.styleMask
+let normalTitleVisibility = imageWindow.titleVisibility
+let normalTitlebarTransparency = imageWindow.titlebarAppearsTransparent
+let windowButtons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton, .documentIconButton]
+let normalButtonVisibility = windowButtons.map { imageWindow.standardWindowButton($0)?.isHidden }
+expect(viewer.pureViewingButton.isEnabled && !viewer.isPureViewing,
+       "A decoded image offers pure viewing without enabling it automatically")
+viewer.pureViewingButton.performClick(nil)
+pump()
+expect(viewer.isPureViewing && viewer.canvas.isPureViewing,
+       "The visible toolbar control enables pure viewing")
+expect(sameRect(viewer.canvas.convert(viewer.canvas.bounds, to: contentView), contentView.bounds),
+       "Pure viewing fills the entire content area without toolbar, sidebar, footer, or margins")
+expect([viewer.pureViewingButton, viewer.sidebarPicker, viewer.nextButton, viewer.statusLabel]
+  .allSatisfy { $0.isHiddenOrHasHiddenAncestor }, "Every image viewing chrome region is hidden")
+expect(imageWindow.styleMask.contains(.titled) && imageWindow.styleMask.contains(.fullSizeContentView) &&
+       imageWindow.styleMask.contains(.fullScreen) == normalStyle.contains(.fullScreen),
+       "Pure viewing preserves a titled key window and does not enter macOS fullscreen")
+expect(imageWindow.titleVisibility == .hidden && imageWindow.titlebarAppearsTransparent &&
+       windowButtons.allSatisfy { imageWindow.standardWindowButton($0).map { $0.isHidden } ?? true },
+       "Pure viewing removes the native title, traffic lights, and document proxy icon")
+try capturePureViewing(viewer, "pure-minimum")
+expect(imageWindow.firstResponder === viewer.canvas && imageWindow.isKeyWindow,
+       "Pure viewing keeps the canvas ready for keyboard navigation")
+expect(viewer.canvas.fitsWindow &&
+       (abs(viewer.canvas.imageRect.width - viewer.canvas.bounds.width) < 0.5 ||
+        abs(viewer.canvas.imageRect.height - viewer.canvas.bounds.height) < 0.5),
+       "Fit mode uses the newly available canvas area without normal viewing padding")
+let pureMenu = viewingMenu(viewer)
+expect(pureMenu.items.first?.title.contains("退出") == true && pureMenu.items[1].title == "全屏",
+       "Right-click exposes pure-view exit separately from macOS fullscreen")
+sendMenuItem(pureMenu.items[0])
+pump()
+expect(!viewer.isPureViewing && !viewer.canvas.isPureViewing &&
+       sameRect(viewer.canvas.convert(viewer.canvas.bounds, to: contentView), normalCanvasFrame),
+       "Right-click exit restores the exact normal canvas layout")
+expect(imageWindow.styleMask == normalStyle && imageWindow.titleVisibility == normalTitleVisibility &&
+       imageWindow.titlebarAppearsTransparent == normalTitlebarTransparency &&
+       windowButtons.map { imageWindow.standardWindowButton($0)?.isHidden } == normalButtonVisibility,
+       "Exit restores the previous native window appearance")
+expect([viewer.pureViewingButton, viewer.sidebarPicker, viewer.nextButton, viewer.statusLabel]
+  .allSatisfy { !$0.isHiddenOrHasHiddenAncestor }, "Exit restores all three chrome regions")
+try capturePureViewing(viewer, "restored-minimum")
+
+viewer.canvas.setZoom(2)
+let dragStart = viewer.canvas.convert(CGPoint(x: viewer.canvas.bounds.midX, y: viewer.canvas.bounds.midY), to: nil)
+for (type, location) in [(NSEvent.EventType.leftMouseDown, dragStart),
+                         (.leftMouseDragged, CGPoint(x: dragStart.x + 37, y: dragStart.y - 21))] {
+  let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                               windowNumber: imageWindow.windowNumber, context: nil,
+                               eventNumber: 0, clickCount: 1, pressure: 1)!
+  if type == .leftMouseDown { viewer.canvas.mouseDown(with: event) }
+  else { viewer.canvas.mouseDragged(with: event) }
+}
+let manualZoom = viewer.canvas.zoom
+let manualOffset = viewer.canvas.imageOffset
+expect(manualOffset != .zero && !viewer.canvas.fitsWindow, "Mouse dragging establishes a manual image position")
+key(viewer, code: 48, characters: "\t")
+pump()
+expect(viewer.isPureViewing && viewer.canvas.zoom == manualZoom && viewer.canvas.imageOffset == manualOffset &&
+       !viewer.canvas.fitsWindow, "Tab enters pure viewing without resetting manual zoom or pan")
+key(viewer, code: 53, characters: "\u{1b}")
+pump()
+expect(!viewer.isPureViewing && viewer.canvas.zoom == manualZoom && viewer.canvas.imageOffset == manualOffset &&
+       imageWindow.firstResponder === viewer.canvas, "Escape restores chrome and retains zoom, pan, and canvas focus")
+sendMenuItem(viewingMenu(viewer).items[0])
+expect(viewer.isPureViewing, "Right-click can also enter pure viewing")
+key(viewer, code: 48, characters: "\t")
+expect(!viewer.isPureViewing, "Tab toggles pure viewing off through normal window event routing")
+let pureUpdateOwner = UUID()
+key(viewer, code: 48, characters: "\t")
+expect(UpdateWorkAdmission.shared.acquire(pureUpdateOwner), "Idle pure viewing permits an update admission barrier")
+key(viewer, code: 53, characters: "\u{1b}")
+expect(!viewer.isPureViewing, "Escape remains usable when a new update barrier prevents entry")
+key(viewer, code: 48, characters: "\t")
+expect(!viewer.isPureViewing && viewingMenu(viewer).items[0].isEnabled == false,
+       "Keyboard and menu entry obey the update admission barrier")
+UpdateWorkAdmission.shared.release(pureUpdateOwner)
+viewer.canvas.fitToWindow()
+if ProcessInfo.processInfo.environment["IMAGE_VIEWER_TEST_FULLSCREEN"] == "1" {
+  var enteredFullscreen = 0
+  var exitedFullscreen = 0
+  let enteredObserver = NotificationCenter.default.addObserver(forName: NSWindow.didEnterFullScreenNotification,
+    object: imageWindow, queue: .main) { _ in enteredFullscreen += 1 }
+  let exitedObserver = NotificationCenter.default.addObserver(forName: NSWindow.didExitFullScreenNotification,
+    object: imageWindow, queue: .main) { _ in exitedFullscreen += 1 }
+  imageWindow.toggleFullScreen(nil)
+  waitFor("Normal baseline enters AppKit fullscreen") { enteredFullscreen == 1 }
+  imageWindow.toggleFullScreen(nil)
+  waitFor("Normal baseline exits AppKit fullscreen") { exitedFullscreen == 1 }
+  let fullscreenButtonVisibility = windowButtons.map { imageWindow.standardWindowButton($0)?.isHidden }
+  key(viewer, code: 48, characters: "\t")
+  imageWindow.toggleFullScreen(nil)
+  waitFor("Pure viewing enters actual AppKit fullscreen") { enteredFullscreen == 2 }
+  pump(0.1)
+  expect(viewer.isPureViewing && imageWindow.styleMask.contains(.fullScreen) &&
+         sameRect(viewer.canvas.convert(viewer.canvas.bounds, to: contentView), contentView.bounds),
+         "Pure viewing remains edge-to-edge after a native fullscreen transition")
+  key(viewer, code: 53, characters: "\u{1b}")
+  expect(!viewer.isPureViewing && imageWindow.styleMask.contains(.fullScreen),
+         "Escape exits pure viewing while preserving actual macOS fullscreen")
+  imageWindow.toggleFullScreen(nil)
+  waitFor("Normal viewing exits actual AppKit fullscreen") { exitedFullscreen == 2 }
+  imageWindow.toggleFullScreen(nil)
+  waitFor("Normal viewing can enter actual AppKit fullscreen first") { enteredFullscreen == 3 }
+  key(viewer, code: 48, characters: "\t")
+  expect(viewer.isPureViewing && imageWindow.styleMask.contains(.fullScreen),
+         "Pure viewing can start inside an existing fullscreen window")
+  imageWindow.toggleFullScreen(nil)
+  waitFor("Pure viewing survives leaving actual AppKit fullscreen") { exitedFullscreen == 3 }
+  expect(viewer.isPureViewing && !imageWindow.styleMask.contains(.fullScreen) &&
+         windowButtons.allSatisfy { imageWindow.standardWindowButton($0).map { $0.isHidden } ?? true },
+         "Leaving macOS fullscreen retains pure viewing and hides native titlebar buttons")
+  key(viewer, code: 53, characters: "\u{1b}")
+  pump()
+  let restoredButtons = windowButtons.map { imageWindow.standardWindowButton($0)?.isHidden }
+  expect(imageWindow.styleMask == normalStyle && imageWindow.titleVisibility == normalTitleVisibility &&
+         imageWindow.titlebarAppearsTransparent == normalTitlebarTransparency &&
+         restoredButtons == fullscreenButtonVisibility,
+         "Both fullscreen transition orders restore the original window appearance")
+  try capturePureViewing(viewer, "restored-after-fullscreen")
+  NotificationCenter.default.removeObserver(enteredObserver)
+  NotificationCenter.default.removeObserver(exitedObserver)
+} else {
+  print("Native fullscreen transition checks skipped: set IMAGE_VIEWER_TEST_FULLSCREEN=1 with a WindowServer session")
+}
 viewer.window?.setFrame(frame, display: true)
+pump()
 
 viewer.editButton.performClick(nil)
 expect(viewer.isEditingImage && viewer.canvas.cropEnabled && !viewer.editingPanel.isHidden,
@@ -132,6 +300,17 @@ expect(panel.heightField.stringValue == "60", "Pixel resize maintains the select
 let editedPlan = try panel.makePlan(crop: viewer.canvas.cropSelection)
 expect(editedPlan.outputWidth == 60 && editedPlan.outputHeight == 60 && editedPlan.sourceWidth == 240,
        "Export plan records output pixels and original source dimensions")
+let pureRejectedCrop = viewer.canvas.cropSelection
+let pureRejectedImage = viewer.canvas.image
+key(viewer, code: 48, characters: "\t")
+viewer.canvas.onTogglePureViewing?()
+expect(!viewer.isPureViewing && !viewer.pureViewingButton.isEnabled &&
+       viewingMenu(viewer).items[0].isEnabled == false,
+       "All pure-view entry paths reject an active image edit")
+expect(viewer.isEditingImage && viewer.canvas.cropSelection == pureRejectedCrop &&
+       viewer.canvas.image === pureRejectedImage && panel.widthField.stringValue == "60" &&
+       panel.heightField.stringValue == "60" && panel.orientationPlan.quarterTurnsClockwise == 1,
+       "Rejected pure viewing preserves the complete unsaved crop, resize, rotation, and preview")
 panel.horizontalButton.performClick(nil)
 waitFor("Flipped preview resets dimensions even if the crop rectangle is unchanged") { !viewer.editPreviewPending }
 expect(panel.widthField.stringValue == "120" && panel.heightField.stringValue == "120",
@@ -217,6 +396,9 @@ viewer.nextFrameButton.performClick(nil)
 waitFor("Next page decoded") { viewer.frameIndex == 1 }
 viewer.convertButton.performClick(nil)
 waitFor("Single-page conversion requires confirmation") { viewer.window?.attachedSheet != nil }
+viewer.canvas.onTogglePureViewing?()
+expect(!viewer.isPureViewing && viewingMenu(viewer).items[0].isEnabled == false,
+       "An attached conversion sheet prevents pure viewing")
 expect(textContent(viewer.window!.attachedSheet!.contentView!).contains("仅导出当前第 2 页"), "Multi-page flattening warning names current page")
 dismissSheet(viewer)
 expect(!viewer.isBusy, "Cancelling confirmation does not start conversion")
@@ -352,8 +534,15 @@ viewer.window?.deminiaturize(nil)
 waitFor("Restoring minimized image starts its deferred animation") { viewer.isAnimating }
 viewer.open(urls: [url, explicit[0]])
 waitFor("Static image replaces restored animation") { viewer.canvas.image != nil && viewer.selectedURL == url }
+viewer.canvas.onTogglePureViewing?()
+expect(viewer.isPureViewing, "Pure viewing is active before direct conversion entry")
 viewer.beginConversion(url: url, format: .png, frameIndex: nil)
 expect(viewer.isBusy, "Conversion exposes busy state")
+expect(!viewer.isPureViewing && !viewer.progressIndicator.isHiddenOrHasHiddenAncestor,
+       "Direct conversion entry restores chrome so progress remains visible")
+viewer.canvas.onTogglePureViewing?()
+expect(!viewer.isPureViewing && !viewer.pureViewingButton.isEnabled &&
+       viewingMenu(viewer).items[0].isEnabled == false, "Active conversion prevents pure viewing")
 waitFor("Conversion finishes") { !viewer.isBusy }
 expect(viewer.statusLabel.stringValue.contains("converted.png"), "Conversion reports output")
 expect(viewer.lastOutputURL != nil && !viewer.viewOutputButton.isHidden, "Completed result can be opened")
@@ -440,6 +629,10 @@ waitFor("A folder containing only subfolders opens the native browser") {
 expect(browserViewer.canvas.image == nil && browserViewer.selectedURL == nil &&
        !browserViewer.folderBrowser.isHidden && !browserViewer.slideshowButton.isEnabled,
        "An empty browser starts without a fake image or slideshow")
+browserViewer.canvas.onTogglePureViewing?()
+expect(!browserViewer.isPureViewing && !browserViewer.pureViewingButton.isEnabled &&
+       viewingMenu(browserViewer).items[0].isEnabled == false,
+       "An empty folder cannot hide its browser in pure viewing")
 expect(browserViewer.folderBrowser.tableView.visibleRect.height > 100,
        "An empty image canvas still gives the folder browser a usable layout")
 func activateBrowserEntry(_ url: URL) {
@@ -461,6 +654,18 @@ waitFor("Double-clicking a nested image opens it") {
 }
 expect(browserViewer.files.map(\.name) == ["1.png", "2.gif"],
        "Nested image navigation excludes folders and video files")
+browserViewer.pureViewingButton.performClick(nil)
+expect(browserViewer.isPureViewing, "A browser image can enter pure viewing")
+browserViewer.open(urls: [], directoryURL: emptyChild)
+waitFor("Opening an empty folder restores the browser from pure viewing") {
+  !browserViewer.folderBrowser.isLoading && !browserViewer.isPureViewing
+}
+expect(!browserViewer.sidebarPicker.isHiddenOrHasHiddenAncestor && browserViewer.canvas.image != nil,
+       "Opening a folder restores browsing controls while preserving the displayed image")
+browserViewer.open(urls: [childImage])
+waitFor("The original image folder reopens after leaving pure viewing") {
+  !browserViewer.folderBrowser.isLoading && browserViewer.files.count == 2 && browserViewer.canvas.image != nil
+}
 try captureBrowser("image-folder-minimum")
 activateBrowserEntry(childVideo)
 expect(PlayerCore.urls.first?.lastPathComponent == childVideo.lastPathComponent &&
@@ -533,9 +738,14 @@ waitFor("An unavailable folder reports its load failure") {
 expect(browserViewer.files.count == 2 && browserViewer.slideshowButton.isEnabled && browserViewer.canvas.image != nil,
        "A failed browser refresh preserves the image sequence without a stuck loading state")
 try FileManager.default.moveItem(at: detachedChild, to: child)
+browserViewer.canvas.onTogglePureViewing?()
+expect(browserViewer.isPureViewing, "Loaded viewer can enter pure mode before closing")
 browserViewer.cancelAndClose()
 expect(!browserViewer.folderBrowser.isLoading && browserViewer.canvas.image == nil,
        "Closing the image viewer cancels browser loads as well as image work")
+expect(!browserViewer.isPureViewing && !browserViewer.canvas.isPureViewing &&
+       browserViewer.window?.styleMask.contains(.fullSizeContentView) == false,
+       "Closing pure viewing restores normal window state for later reuse")
 browserViewer.open(urls: [], directoryURL: container)
 browserViewer.showWindow(nil)
 waitFor("A closed image window can reopen directly into a folder") { !browserViewer.folderBrowser.isLoading }

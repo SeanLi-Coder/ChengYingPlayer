@@ -33,6 +33,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   let formatPicker = NSPopUpButton(frame: .zero, pullsDown: false)
   let convertButton = NSButton(title: "转换并另存", target: nil, action: nil)
   let editButton = NSButton(title: "裁剪与编辑", target: nil, action: nil)
+  let pureViewingButton = NSButton(title: "纯净看图", target: nil, action: nil)
   let editingPanel = ImageEditingPanel(frame: .zero)
   let cancelButton = NSButton(title: "取消转换", target: nil, action: nil)
   let revealButton = NSButton(title: "在 Finder 显示", target: nil, action: nil)
@@ -50,6 +51,17 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private let titleLabel = NSTextField(labelWithString: "图片")
   private let infoLabel = NSTextField(labelWithString: "")
   private var browsingControls: [NSView] = []
+  private var viewingChrome: [NSView] = []
+  private var normalViewingConstraints: [NSLayoutConstraint] = []
+  private var pureViewingConstraints: [NSLayoutConstraint] = []
+  private(set) var isPureViewing = false
+  private struct WindowAppearance {
+    let fullSizeContent: Bool
+    let titleVisibility: NSWindow.TitleVisibility
+    let transparentTitlebar: Bool
+    let buttons: [(NSWindow.ButtonType, Bool)]
+  }
+  private var normalWindowAppearance: WindowAppearance?
   private(set) var files: [PlaylistFileMetadata] = []
   private(set) var selectedURL: URL?
   private(set) var frameIndex = 0
@@ -147,9 +159,15 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     editButton.action = #selector(toggleImageEditing)
     editButton.bezelStyle = .rounded
     editButton.toolTip = "按原始像素裁剪、旋转、翻转和调整尺寸，另存新图片。"
+    pureViewingButton.target = self
+    pureViewingButton.action = #selector(togglePureViewing)
+    pureViewingButton.bezelStyle = .rounded
+    pureViewingButton.toolTip = "隐藏所有工具和文件列表，只看图片。画布中按 Tab 切换；按 Esc 或右键退出。"
+    pureViewingButton.setAccessibilityLabel("纯净看图，Tab 切换，Esc 退出")
     let top = stack([heading, spacer(), button("−", #selector(zoomOut)),
                      zoomLabel, button("+", #selector(zoomIn)),
-                     button("适应窗口", #selector(fit)), button("100%", #selector(actualSize)), editButton, mediaInfoButton])
+                     button("适应窗口", #selector(fit)), button("100%", #selector(actualSize)), editButton, mediaInfoButton,
+                     pureViewingButton])
     content.addSubview(top)
 
     sortPicker.addItems(withTitles: ["名称", "文件大小", "修改日期", "创建日期"])
@@ -192,6 +210,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     scroll.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
     canvas.translatesAutoresizingMaskIntoConstraints = false
     let body = stack([canvas, sidebar], spacing: 14)
+    body.detachesHiddenViews = true
     body.alignment = .top
     content.addSubview(body)
     canvas.heightAnchor.constraint(equalTo: body.heightAnchor).isActive = true
@@ -280,15 +299,25 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     statusLabel.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
     note.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
     editingPanel.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
+    viewingChrome = [top, sidebar, footer]
+    normalViewingConstraints = [
+      body.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 12),
+      body.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+      body.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
+      body.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -12),
+    ]
+    pureViewingConstraints = [
+      body.topAnchor.constraint(equalTo: content.topAnchor),
+      body.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+      body.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+      body.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+    ]
+    NSLayoutConstraint.activate(normalViewingConstraints)
     NSLayoutConstraint.activate([
       top.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
       top.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
       top.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
       top.heightAnchor.constraint(equalToConstant: 48),
-      body.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 12),
-      body.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
-      body.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
-      body.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -12),
       footer.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
       footer.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
       footer.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
@@ -299,6 +328,13 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     canvas.onNavigate = { [weak self] offset in self?.navigate(offset) }
     canvas.onToggleAnimation = { [weak self] in self?.toggleAnimation() }
     canvas.onToggleSlideshow = { [weak self] in self?.toggleSlideshow() }
+    canvas.onTogglePureViewing = { [weak self] in self?.togglePureViewing() }
+    canvas.onExitPureViewing = { [weak self] in
+      guard let self, self.isPureViewing else { return false }
+      self.setPureViewing(false)
+      return true
+    }
+    canvas.contextMenuProvider = { [weak self] in self?.viewingMenu() ?? NSMenu() }
     canvas.onDropURLs = { urls in _ = PlayerCore.openURLs(urls) }
     canvas.onCropSelectionChanged = { [weak self] selection in
       guard let self, self.isEditingImage else { return }
@@ -343,6 +379,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     }
     guard let first = accepted.first else {
       guard let requestedDirectory, !isEditingImage, !isBusy, window?.attachedSheet == nil else { return }
+      setPureViewing(false)
       if closed {
         selectedURL = nil
         files = []
@@ -502,6 +539,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     if !isBusy { statusLabel.stringValue = "正在后台解码…" }
     window?.representedURL = url
     window?.title = "\(url.lastPathComponent) — 澄影视界"
+    applyPureWindowAppearance()
     selectCurrentRow()
     updateControls()
     decodeQueue.async { [weak self] in
@@ -529,7 +567,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
           self.canvas.display(image, resetZoom: true)
           if Preference.bool(for: .recordRecentFiles) { AppDelegate.shared.noteNewRecentDocumentURL(url) }
           self.infoLabel.stringValue = "\(info.width) × \(info.height) · \(info.formatName) · \(info.bitDepth)-bit\(info.hasAlpha ? " · 透明通道" : "")"
-          if !self.isBusy { self.statusLabel.stringValue = "滚轮 / 双指缩放 · 拖动平移 · ← → 切换 · 0 适应 · 1 原始像素" }
+          if !self.isBusy { self.statusLabel.stringValue = "滚轮 / 双指缩放 · 拖动平移 · ← → 切换 · 0 适应 · 1 原始像素 · Tab 纯净看图 · Esc 退出" }
           self.updateControls()
           if info.isAnimated { self.startAnimation() }
           if self.slideshow.isRunning {
@@ -545,6 +583,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
           self.statusLabel.stringValue = error.localizedDescription
           self.updateControls()
           self.handleSlideshowFailure(url: url)
+          if !self.slideshow.isRunning { self.setPureViewing(false) }
         }
       }
     }
@@ -598,6 +637,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
           self.framePending = false
           self.stopAnimation()
           self.statusLabel.stringValue = "帧读取失败：\(error.localizedDescription)"
+          self.setPureViewing(false)
           self.updateControls()
         }
       }
@@ -613,6 +653,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
           !UpdateWorkAdmission.shared.isBlocked, window?.attachedSheet == nil else { return }
     if isEditingImage { stopImageEditing(); return }
     guard let image = canvas.image, let details else { return }
+    setPureViewing(false)
     stopSlideshow()
     stopAnimation()
     wasAnimatingBeforeMiniaturize = false
@@ -753,6 +794,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     convertButton.title = isEditingImage ? "编辑并另存" : "转换并另存"
     editButton.isEnabled = details != nil && !isBusy && !framePending && !editPreviewPending
     editButton.title = isEditingImage ? "退出编辑" : "裁剪与编辑"
+    pureViewingButton.isEnabled = isPureViewing || canEnterPureViewing
     editingPanel.setControlsEnabled(!isBusy && !editPreviewPending)
     canvas.cropInteractionEnabled = !isBusy && !editPreviewPending
     formatPicker.isEnabled = !isBusy && !formats.isEmpty
@@ -770,7 +812,11 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   // Slideshow deadlines are independent of an animated image's per-frame timer.
   @objc private func toggleSlideshow() {
     guard !UpdateWorkAdmission.shared.isBlocked, !isEditingImage else { return }
-    if slideshow.isRunning || wasSlideshowRunningBeforeMiniaturize { stopSlideshow(); return }
+    if slideshow.isRunning || wasSlideshowRunningBeforeMiniaturize {
+      stopSlideshow()
+      if canvas.image == nil && !framePending { setPureViewing(false) }
+      return
+    }
     guard !closed, !isBusy, !isListing, files.count > 1, window?.attachedSheet == nil,
           window?.isMiniaturized != true else { return }
     slideshow.start(now: CACurrentMediaTime(), imageIsReady: details != nil && canvas.image != nil)
@@ -813,6 +859,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
                                                     loops: loopSlideshowButton.state == .on) else {
       stopSlideshow()
       statusLabel.stringValue = "幻灯片已播放到列表末尾。"
+      if canvas.image == nil { setPureViewing(false) }
       return
     }
     load(files[next].url)
@@ -867,6 +914,83 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     defaults.set(loopSlideshowButton.state == .on, forKey: Self.loopPreference)
   }
   @objc private func toggleImageFullscreen() { window?.toggleFullScreen(nil) }
+
+  private var canEnterPureViewing: Bool {
+    !closed && !isEditingImage && !isBusy && !editPreviewPending && canvas.image != nil &&
+      window?.attachedSheet == nil && !UpdateWorkAdmission.shared.isBlocked
+  }
+
+  @objc private func togglePureViewing() { setPureViewing(!isPureViewing) }
+
+  private func setPureViewing(_ enabled: Bool) {
+    guard enabled != isPureViewing, let window, !enabled || canEnterPureViewing else { return }
+    // Do not replace the entire style mask: AppKit owns the current fullscreen state.
+    if enabled {
+      let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton, .documentIconButton]
+      normalWindowAppearance = WindowAppearance(
+        fullSizeContent: window.styleMask.contains(.fullSizeContentView),
+        titleVisibility: window.titleVisibility, transparentTitlebar: window.titlebarAppearsTransparent,
+        buttons: types.map { ($0, window.standardWindowButton($0)?.isHidden ?? false) })
+    }
+    isPureViewing = enabled
+    NSLayoutConstraint.deactivate(enabled ? normalViewingConstraints : pureViewingConstraints)
+    viewingChrome.forEach { $0.isHidden = enabled }
+    NSLayoutConstraint.activate(enabled ? pureViewingConstraints : normalViewingConstraints)
+    canvas.isPureViewing = enabled
+    if enabled {
+      applyPureWindowAppearance()
+    } else if let appearance = normalWindowAppearance {
+      if !appearance.fullSizeContent { window.styleMask.remove(.fullSizeContentView) }
+      window.titleVisibility = appearance.titleVisibility
+      window.titlebarAppearsTransparent = appearance.transparentTitlebar
+      // AppKit can discard a hidden document proxy while rebuilding the fullscreen titlebar.
+      if let url = window.representedURL, window.standardWindowButton(.documentIconButton) == nil {
+        window.representedURL = nil
+        window.representedURL = url
+      }
+      for (type, hidden) in appearance.buttons { window.standardWindowButton(type)?.isHidden = hidden }
+      normalWindowAppearance = nil
+    }
+    window.contentView?.layoutSubtreeIfNeeded()
+    window.makeFirstResponder(canvas)
+    updateControls()
+  }
+
+  private func applyPureWindowAppearance() {
+    guard isPureViewing, let window else { return }
+    window.styleMask.insert(.fullSizeContentView)
+    window.titleVisibility = .hidden
+    window.titlebarAppearsTransparent = true
+    for type: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton, .documentIconButton] {
+      window.standardWindowButton(type)?.isHidden = true
+    }
+  }
+
+  private func viewingMenu() -> NSMenu {
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+    func add(_ title: String, _ action: Selector, enabled: Bool = true) {
+      let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+      item.target = self
+      item.isEnabled = enabled
+      menu.addItem(item)
+    }
+    add(isPureViewing ? "退出纯净看图（Esc / Tab）" : "纯净看图（Tab）", #selector(togglePureViewing),
+        enabled: isPureViewing || canEnterPureViewing)
+    add(window?.styleMask.contains(.fullScreen) == true ? "退出全屏" : "全屏", #selector(toggleImageFullscreen))
+    menu.addItem(.separator())
+    add("适应窗口（0）", #selector(fit), enabled: canvas.image != nil)
+    add("原始像素（1）", #selector(actualSize), enabled: canvas.image != nil)
+    add("上一张（←）", #selector(previousImage), enabled: previousButton.isEnabled)
+    add("下一张（→）", #selector(nextImage), enabled: nextButton.isEnabled)
+    if details?.isAnimated == true {
+      add(isAnimating ? "暂停动图（空格）" : "播放动图（空格）", #selector(toggleAnimation),
+          enabled: animationButton.isEnabled)
+    }
+    add(slideshow.isRunning ? "暂停幻灯片（S）" : "播放幻灯片（S）", #selector(toggleSlideshow),
+        enabled: slideshowButton.isEnabled)
+    return menu
+  }
 
   private func loadFormats() {
     conversionQueue.async { [weak self] in
@@ -1039,6 +1163,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
           let url = selectedURL, let details, formats.indices.contains(formatPicker.indexOfSelectedItem),
           let window, window.attachedSheet == nil else { return }
     guard window.makeFirstResponder(canvas) else { return }
+    setPureViewing(false)
     let editPlan: ImageEditPlan?
     do {
       editPlan = isEditingImage ? try editingPanel.makePlan(crop: canvas.cropSelection) : nil
@@ -1091,6 +1216,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     guard !UpdateWorkAdmission.shared.isBlocked else { return }
     guard !isBusy, !closed else { return }
     guard let updateActivity = UpdateWorkAdmission.shared.beginActivity(reason: "busy.images") else { return }
+    setPureViewing(false)
     stopSlideshow()
     let token = ImageCancellationToken()
     conversionToken = token
@@ -1145,6 +1271,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     window?.close()
   }
   private func tearDown() {
+    setPureViewing(false)
     guard !closed else { return }
     closed = true
     stopImageEditing(restoreImage: false)
@@ -1193,7 +1320,13 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       updateControls()
     }
   }
-  func windowDidEnterFullScreen(_ notification: Notification) { fullscreenButton.title = "退出全屏" }
-  func windowDidExitFullScreen(_ notification: Notification) { fullscreenButton.title = "全屏" }
+  func windowDidEnterFullScreen(_ notification: Notification) {
+    fullscreenButton.title = "退出全屏"
+    applyPureWindowAppearance()
+  }
+  func windowDidExitFullScreen(_ notification: Notification) {
+    fullscreenButton.title = "全屏"
+    applyPureWindowAppearance()
+  }
   func windowDidBecomeKey(_ notification: Notification) { refreshList() }
 }

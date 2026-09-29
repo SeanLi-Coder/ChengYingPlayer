@@ -24,6 +24,14 @@ struct RealImageViewerSmoke {
     while !condition() && Date() < deadline { pump() }
     expect(condition(), message)
   }
+  static func key(_ viewer: ImageViewerWindowController, code: UInt16, characters: String) {
+    let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                               timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: viewer.window!.windowNumber, context: nil,
+                               characters: characters, charactersIgnoringModifiers: characters,
+                               isARepeat: false, keyCode: code)!
+    viewer.window!.sendEvent(event)
+  }
   static func image(_ color: CGColor) -> CGImage {
     let context = CGContext(data: nil, width: 32, height: 24, bitsPerComponent: 8,
                             bytesPerRow: 128, space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -74,6 +82,32 @@ struct RealImageViewerSmoke {
     waitFor("Real PNG displays at full resolution") { viewer.canvas.image?.width == 32 && viewer.convertButton.isEnabled }
     expect(viewer.canvas.image?.height == 24, "Real PNG height is retained")
     expect(viewer.window?.firstResponder === viewer.canvas, "Real image window is keyboard-ready without a mouse click")
+    key(viewer, code: 48, characters: "\t")
+    expect(viewer.isPureViewing && viewer.canvas.isPureViewing,
+           "A real decoded image enters pure viewing through the Tab shortcut")
+    key(viewer, code: 124, characters: "\u{f703}")
+    waitFor("Pure viewing navigates to a real animated GIF") {
+      viewer.selectedURL == gif && viewer.canvas.image != nil && viewer.isAnimating
+    }
+    expect(viewer.isPureViewing && viewer.window?.standardWindowButton(.documentIconButton)?.isHidden != false,
+           "Real file navigation preserves pure viewing and hides the updated document icon")
+    key(viewer, code: 49, characters: " ")
+    let purePausedIndex = viewer.frameIndex
+    pump(0.12)
+    expect(!viewer.isAnimating && viewer.frameIndex == purePausedIndex && viewer.canvas.image != nil,
+           "Space pauses a real animated image while pure-view controls are hidden")
+    let animationMenu = viewer.canvas.contextMenuProvider!()
+    let resumeAnimation = animationMenu.items.first { $0.action == viewer.animationButton.action }
+    expect(resumeAnimation?.isEnabled == true, "Pure-view context menu exposes the real animation playback control")
+    NSApp.sendAction(resumeAnimation!.action!, to: resumeAnimation!.target, from: resumeAnimation)
+    waitFor("The context menu resumes and completes the real animation in pure viewing") {
+      !viewer.isAnimating && viewer.frameIndex == 2
+    }
+    key(viewer, code: 123, characters: "\u{f702}")
+    waitFor("Pure viewing navigates back to the real PNG") { viewer.selectedURL == still && viewer.canvas.image != nil }
+    key(viewer, code: 53, characters: "\u{1b}")
+    expect(!viewer.isPureViewing && viewer.window?.firstResponder === viewer.canvas,
+           "Escape restores normal viewing after real image navigation")
     viewer.canvas.actualSize()
     expect(abs(viewer.canvas.imageRect.width * viewer.canvas.backingScale - 32) < 0.001,
            "Real pixels use physical 100 percent scale")
@@ -179,16 +213,31 @@ struct RealImageViewerSmoke {
     }
     viewer.setSlideshowInterval(0.5)
     viewer.loopSlideshowButton.state = .off
-    NSApp.sendAction(viewer.slideshowButton.action!, to: viewer.slideshowButton.target, from: viewer.slideshowButton)
-    expect(viewer.isSlideshowRunning, "Real slideshow starts")
+    key(viewer, code: 48, characters: "\t")
+    key(viewer, code: 1, characters: "s")
+    expect(viewer.isSlideshowRunning && viewer.isPureViewing, "Real slideshow starts with the S shortcut in pure viewing")
     waitFor("Real slideshow reaches the animated GIF") { viewer.selectedURL == gif && viewer.isAnimating }
     waitFor("GIF frames do not defer the real slideshow indefinitely") {
       viewer.selectedURL == pages && viewer.canvas.image != nil
     }
     waitFor("Real nonlooping slideshow stops at the last image") { !viewer.isSlideshowRunning }
     expect(viewer.selectedURL == pages && viewer.frameIndex == 0, "Slideshow advances files, not TIFF pages")
+    expect(viewer.isPureViewing && viewer.canvas.isPureViewing,
+           "A successful slideshow keeps pure viewing enabled on its final image")
     let afterSlideshow = try Data(contentsOf: gif)
     expect(afterSlideshow == originalBytes, "Slideshow does not modify the original animated file")
+
+    let invalid = root.appendingPathComponent("broken.png")
+    try Data([0, 1, 2, 3]).write(to: invalid)
+    viewer.open(urls: [still, invalid])
+    waitFor("Failure fixture starts on a decoded real image") { viewer.selectedURL == still && viewer.canvas.image != nil }
+    expect(viewer.isPureViewing, "Opening another image selection preserves an active pure-view session")
+    key(viewer, code: 124, characters: "\u{f703}")
+    waitFor("A terminal real image decode failure restores normal chrome") {
+      viewer.selectedURL == invalid && viewer.canvas.image == nil && !viewer.isPureViewing
+    }
+    expect(!viewer.statusLabel.isHiddenOrHasHiddenAncestor && !viewer.sidebarPicker.isHiddenOrHasHiddenAncestor &&
+           !viewer.pureViewingButton.isEnabled, "The real decode error stays visible with working browser controls")
     viewer.cancelAndClose()
     expect(viewer.window?.isVisible == false && viewer.canvas.image == nil, "Real viewer closes cleanly")
     print("Real image viewer smoke checks passed: \(checks)")

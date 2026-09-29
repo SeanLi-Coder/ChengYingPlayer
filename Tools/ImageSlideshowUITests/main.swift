@@ -256,11 +256,19 @@ let afterSlow = try fixture("3.png", directory: "slow")
 let beforeSlow = try fixture("1.png", directory: "slow")
 viewer.open(urls: [beforeSlow, slow, afterSlow])
 waitFor("Slow image sequence is ready") { loaded(viewer, beforeSlow) && viewer.slideshowButton.isEnabled }
+send(viewer.pureViewingButton)
+expect(viewer.isPureViewing, "A slideshow can begin with its controls hidden in pure viewing")
 send(viewer.slideshowButton)
 waitFor("Slideshow begins slow image decoding") { viewer.selectedURL == slow && viewer.canvas.image == nil }
 pump(0.65)
 expect(viewer.selectedURL == slow && viewer.canvas.image == nil && viewer.isSlideshowRunning,
        "Slow decode is not cancelled when a slide interval elapses")
+expect(viewer.isPureViewing, "Pure viewing remains active while the next slideshow image decodes")
+expect(viewer.canvas.onExitPureViewing?() == true && !viewer.isPureViewing,
+       "Pure viewing can exit while navigation has no decoded image")
+viewer.canvas.onTogglePureViewing?()
+expect(!viewer.isPureViewing && !viewer.pureViewingButton.isEnabled,
+       "A pending image decode cannot reenter pure viewing")
 waitFor("Slow image finally becomes visible") { loaded(viewer, slow) }
 pump(0.3)
 expect(viewer.selectedURL == slow, "Decoded slow image receives its full display interval")
@@ -360,6 +368,33 @@ waitFor("All-broken slideshow terminates instead of looping forever") { !viewer.
 let failuresBeforeWait = ImageDocument.starts.count
 pump(1)
 expect(ImageDocument.starts.count == failuresBeforeWait, "All-broken termination cancels future timers")
+
+viewer.open(urls: [first, bad])
+waitFor("A pausable pure-view failure sequence starts on a readable image") {
+  loaded(viewer, first) && viewer.slideshowButton.isEnabled
+}
+send(viewer.pureViewingButton)
+send(viewer.slideshowButton)
+waitFor("A pure-view slideshow reports the failed image before skipping") {
+  viewer.selectedURL == bad && viewer.canvas.image == nil && viewer.statusLabel.stringValue.contains("即将跳过")
+}
+viewer.canvas.onToggleSlideshow?()
+expect(!viewer.isSlideshowRunning && !viewer.isPureViewing && !viewer.statusLabel.isHiddenOrHasHiddenAncestor,
+       "Pausing a failed slide restores the error instead of leaving a pure-view blank canvas")
+viewer.open(urls: [first, bad])
+waitFor("Pure-view failure sequence begins with a readable image") {
+  loaded(viewer, first) && viewer.slideshowButton.isEnabled
+}
+viewer.loopSlideshowButton.state = .off
+send(viewer.loopSlideshowButton)
+send(viewer.pureViewingButton)
+send(viewer.slideshowButton)
+waitFor("Pure-view slideshow reaches its unreadable final image") { viewer.selectedURL == bad && viewer.canvas.image == nil }
+waitFor("A terminal slideshow decode failure exits pure viewing") { !viewer.isSlideshowRunning && !viewer.isPureViewing }
+expect(!viewer.statusLabel.isHiddenOrHasHiddenAncestor && !viewer.sidebarPicker.isHiddenOrHasHiddenAncestor,
+       "A stopped failed slideshow restores its error message and browser controls")
+viewer.loopSlideshowButton.state = .on
+send(viewer.loopSlideshowButton)
 
 let alone = try fixture("only.png", directory: "alone")
 viewer.open(urls: [alone])

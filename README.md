@@ -87,6 +87,7 @@ HDR 播放输出默认开启：新安装以及从未手动保存 HDR 偏好的�
 通过「打开文件」、Finder 双击、拖放、欢迎页打开按钮或下载中心的「查看」打开图片。图片进入独立的原生窗口，不经过视频播放引擎；打开单张图片会列出同目录图片，显式多选保持选定顺序。混合文件夹的图片与视频分别进入各自窗口，GIF 不再混入视频播放列表。
 
 - 缩放：工具栏放大 / 缩小、适应窗口、100%；触控板捏合、鼠标滚轮缩放、拖动画面、双击切换适应 / 原尺寸。100% 是一张图片像素对应一颗显示器物理像素，兼容 Retina。
+- 纯净看图：点击顶部「纯净看图」或在画布上按 `Tab`，隐藏标题栏、工具栏、文件列表和底部设置，图片在黑色背景中铺满可用区域并保持原比例。按 `Esc` / `Tab` 或右键菜单退出；窗口模式和全屏均可使用。仍支持缩放平移、`←` / `→` 切图、空格暂停 / 播放动图、`S` 切换幻灯片；不会重置手动缩放或平移。编辑、导出和弹窗期间不能进入，打开文件夹或遇到无法继续浏览的读取错误时恢复控件，以便操作和查看提示。
 - 图片编辑：点击顶部「裁剪与编辑」，在图上拖动拉框、移动选区或调整八个边角；可选自由、原图比例、1:1、4:3、16:9、9:16。`Shift` 拖动重新拉框，`Option` 拖动平移，滚轮 / 双指继续缩放。支持左右旋转 90°、水平 / 垂直翻转、按像素调整宽高及保持比例；旋转或翻转会重置选区，「还原全部」可重来。默认选择 PNG（动图 APNG、多页 TIFF），按下「编辑并另存」后生成同级 `原名_edited.ext`，重名递增，绝不覆盖原图。编辑中暂停动图与幻灯片，并延后自动更新；退出编辑、关闭窗口或打开其他文件会丢弃未导出的修改。导出失败保留预览，可调整后重试。
 - 编辑使用原始分辨率，预览缩放不影响成品；裁剪、90° 旋转与翻转不重采样，调整像素尺寸才重采样。动图整段导出会对每帧应用同一编辑并保留时长与循环；页面 / 帧尺寸不一致时停止并提示。转静态格式仍需确认仅保存当前帧。格式编码造成的质量变化见下方说明，PDF / SVG 依然是栅格化编辑，不是图层或矢量编辑器。
 - 浏览：打开单张图片后，右侧默认展示同目录的文件夹及媒体文件；双击子目录继续浏览、双击图片切换到对应目录的图片序列。「图片列表」保留前后张和幻灯片的纯图片序列，不把目录当成图片解码。每行显示文件名、Finder 颜色标签 / 自定义标签、大小和日期；支持排序、颜色筛选与刷新。
@@ -360,6 +361,8 @@ Dolby Vision 基础层色彩回退另有固定源码回归 `bash Tools/HDRSource
 播放稳定性专项检查：`bash Tools/ThumbnailLifecycleTests/run.sh` 验证真实请求生命周期；`bash Tools/ThumbnailCacheTests/run.sh` 验证损坏缓存与清理；`bash Tools/RenderLifecycleTests/run.sh` 验证 CGL 引用与退出锁顺序。准备好播放动态库和媒体工具后，`bash Tools/ThumbnailDecoderTests/run.sh` 验证实际 FFmpeg 缩略图解码，执行 `PLAYBACK_SOAK_SECONDS=600 bash Tools/PlaybackSoakTests/run.sh` 可做 10 分钟真实 4K 硬件解码与 OpenGL 渲染检查；明确设置 `PLAYBACK_SOAK_MODE=software` 才使用软件解码，测试结果会分别标示，不把软件回退当作硬件验证成功。详细范围见各测试目录的 README。
 
 图片专项检查：`bash Tools/ImageViewerTests/run.sh`、`bash Tools/ImageEditingTests/run.sh`、`bash Tools/ImageCropTests/run.sh`、`bash Tools/ImageViewerUITests/run.sh`、`bash Tools/ImageRoutingTests/run.sh`、`bash Tools/ImageSlideshowTests/run.sh`、`bash Tools/ImageSlideshowUITests/run.sh`。裁剪编辑覆盖真实像素方向、位深 / ICC / 透明度、动画时序、Retina 坐标、鼠标选区、原图不覆盖及旧异步预览失效；幻灯片覆盖实际 AppKit 控件、Finder 多色标签、排序、慢图 / 坏图 / 动图、动态间隔、最小化恢复与转换隔离，并使用临时偏好域。先运行 `bash other/build_image_codec.sh` 再运行 `bash Tools/ImageCodecHelper/run.sh`，可测试真实 WebP 像素、动画时序、透明度、ICC、安全限制与取消。测试只生成临时素材，不读取个人相册。完整 App 由 CI 构建、签名验证及 DMG 打包检查。
+
+纯净看图回归包含真实窗口布局、Tab / Esc / 右键退出、缩放平移保留、编辑与导出保护、图片导航、动图和坏图恢复。在可交互的 macOS 桌面额外运行 `IMAGE_VIEWER_TEST_FULLSCREEN=1 bash Tools/ImageViewerUITests/run.sh`，可验证原生全屏与纯净模式两种切换顺序、标题栏文件图标恢复；未设置该选项时会明确报告跳过原生全屏切换，不把模拟状态当作实测。
 
 欢迎提交中文界面、播放兼容性、剪辑准确性、逐帧导出、旋转处理、可访问性和稳定性方面的改进。提交前请确认：
 

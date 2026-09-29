@@ -10,6 +10,16 @@ final class ImageCanvasView: NSView {
   var onNavigate: ((Int) -> Void)?
   var onToggleAnimation: (() -> Void)?
   var onToggleSlideshow: (() -> Void)?
+  var onTogglePureViewing: (() -> Void)?
+  var onExitPureViewing: (() -> Bool)?
+  var contextMenuProvider: (() -> NSMenu)?
+  var isPureViewing = false {
+    didSet {
+      needsLayout = true
+      needsDisplay = true
+      setAccessibilityHelp(isPureViewing ? "Tab 或 Esc 退出纯净看图；右键显示操作菜单。" : nil)
+    }
+  }
   var onDropURLs: (([URL]) -> Void)?
   var onCropSelectionChanged: ((ImagePixelRect?) -> Void)?
   var cropEnabled = false {
@@ -131,8 +141,9 @@ final class ImageCanvasView: NSView {
     fitsWindow = true
     imageOffset = .zero
     if let image, bounds.width > 0, bounds.height > 0 {
-      zoom = min((max(bounds.width - 32, 1) * backingScale) / CGFloat(image.width),
-                 (max(bounds.height - 32, 1) * backingScale) / CGFloat(image.height))
+      let padding: CGFloat = isPureViewing ? 0 : 32
+      zoom = min((max(bounds.width - padding, 1) * backingScale) / CGFloat(image.width),
+                 (max(bounds.height - padding, 1) * backingScale) / CGFloat(image.height))
       zoom = max(min(zoom, 64), 0.0001)
     }
     needsDisplay = true
@@ -183,7 +194,7 @@ final class ImageCanvasView: NSView {
   }
 
   override func draw(_ dirtyRect: NSRect) {
-    NSColor.windowBackgroundColor.setFill()
+    (isPureViewing ? NSColor.black : NSColor.windowBackgroundColor).setFill()
     bounds.fill()
     guard let image, let context = NSGraphicsContext.current?.cgContext else { return }
     let rect = imageRect
@@ -413,6 +424,10 @@ final class ImageCanvasView: NSView {
       return
     }
     switch event.keyCode {
+    case 48 where !event.modifierFlags.contains(.shift) && onTogglePureViewing != nil:
+      onTogglePureViewing?()
+    case 53 where onExitPureViewing?() == true:
+      break
     case 123: onNavigate?(-1)
     case 124: onNavigate?(1)
     case 49: onToggleAnimation?()
@@ -426,6 +441,10 @@ final class ImageCanvasView: NSView {
       default: super.keyDown(with: event)
       }
     }
+  }
+
+  override func menu(for event: NSEvent) -> NSMenu? {
+    contextMenuProvider?() ?? super.menu(for: event)
   }
 
   static func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
