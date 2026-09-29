@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import select
 import subprocess
 import sys
 import threading
 import time
+import weakref
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -15,12 +17,20 @@ import pytest
 import helper as helper_module
 
 HELPER_PATH = Path(__file__).resolve().parents[1] / "helper.py"
+_EVENT_BUFFERS: weakref.WeakKeyDictionary[subprocess.Popen[str], bytearray] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def _read_event(process: subprocess.Popen[str], *, timeout: float = 30.0) -> dict:
     assert process.stdout is not None
+    buffered = _EVENT_BUFFERS.setdefault(process, bytearray())
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if b"\n" in buffered:
+            line, _, remainder = buffered.partition(b"\n")
+            buffered[:] = remainder
+            return json.loads(line)
         readable, _, _ = select.select(
             [process.stdout],
             [],
@@ -31,10 +41,16 @@ def _read_event(process: subprocess.Popen[str], *, timeout: float = 30.0) -> dic
             if process.poll() is not None:
                 break
             continue
-        line = process.stdout.readline()
-        if line:
-            return json.loads(line)
-        if process.poll() is not None:
+        # Read only the descriptor selected above: TextIOWrapper.readline() can
+        # prefetch the next event and hide it from later select() calls.
+        chunk = os.read(process.stdout.fileno(), 65536)
+        if chunk:
+            buffered.extend(chunk)
+        else:
+            if buffered:
+                line = bytes(buffered)
+                buffered.clear()
+                return json.loads(line)
             break
     stderr = ""
     if process.poll() is not None and process.stderr is not None:
@@ -42,6 +58,54 @@ def _read_event(process: subprocess.Popen[str], *, timeout: float = 30.0) -> dic
     raise AssertionError(
         f"Timed out waiting for helper event; exit={process.poll()} stderr={stderr!r}"
     )
+
+
+def test_event_reader_preserves_multiple_events_from_one_pipe_write() -> None:
+    events = [{"type": "accepted"}, {"type": "failed", "error": "invalid request"}]
+    payload = "".join(json.dumps(event) + "\n" for event in events)
+    process = subprocess.Popen(
+        [sys.executable, "-c", (
+            "import os, sys; os.write(1, sys.argv[1].encode()); "
+            "os.write(2, b'written\\n'); sys.stdin.read(1)"
+        ), payload],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, bufsize=1,
+    )
+    try:
+        assert process.stderr is not None
+        assert process.stderr.readline() == "written\n"
+        assert _read_event(process, timeout=1) == events[0]
+        assert _read_event(process, timeout=1) == events[1]
+        assert process.poll() is None
+    finally:
+        process.terminate()
+        process.communicate(timeout=5)
+
+
+def test_event_reader_preserves_partial_utf8_across_timeout() -> None:
+    event = {"type": "failed", "error": "\u65e0\u6548"}
+    payload = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
+    split = payload.index("\u65e0".encode("utf-8")) + 1
+    process = subprocess.Popen(
+        [sys.executable, "-c", (
+            "import os, sys; data=bytes.fromhex(sys.argv[1]); split=int(sys.argv[2]); "
+            "os.write(1, data[:split]); os.write(2, b'partial\\n'); "
+            "sys.stdin.readline(); os.write(1, data[split:]); sys.stdin.read(1)"
+        ), payload.hex(), str(split)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, bufsize=1,
+    )
+    try:
+        assert process.stderr is not None
+        assert process.stderr.readline() == "partial\n"
+        with pytest.raises(AssertionError, match="Timed out waiting for helper event"):
+            _read_event(process, timeout=0.05)
+        _send(process, {"continue": True})
+        assert _read_event(process, timeout=1) == event
+        assert process.poll() is None
+    finally:
+        process.terminate()
+        process.communicate(timeout=5)
 
 
 def _send(process: subprocess.Popen[str], request: dict) -> None:
@@ -328,8 +392,7 @@ def test_multiple_requests_in_one_pipe_write_are_not_buffered(
     helper_process.stdin.flush()
 
     first = _read_event(helper_process)
-    assert helper_process.stdout is not None
-    second = json.loads(helper_process.stdout.readline())
+    second = _read_event(helper_process)
 
     assert [first["id"], second["id"]] == ["batch-ping-one", "batch-ping-two"]
     assert first["type"] == second["type"] == "pong"
