@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Isolated stdio/loopback fixture; never imports app state or browser cookies."""
+import fcntl
 import hashlib
 import json
 import os
@@ -9,6 +10,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from socketserver import TCPServer
 from urllib.parse import parse_qs, urlsplit
+
+# Hold a shared lock until this process exits, including failure/timeout modes.
+# The runner can await only its own fixtures without querying or signaling PIDs.
+PROCESS_GUARD = open(os.environ["CHENGYING_WK_PROCESS_GUARD"], encoding="ascii")  # noqa: SIM115 -- Hold the lock until process exit.
+fcntl.flock(PROCESS_GUARD, fcntl.LOCK_SH)
+if PROCESS_GUARD.read(16) != "open\n":
+    raise SystemExit("Native fixture workspace has closed.")
 
 TOKEN = "native-test-session-" + "a" * 40
 MODE = os.environ.get("CHENGYING_TEST_MODE", "ready")
@@ -21,7 +29,11 @@ UPDATE_LEASE = None
 PROXY_LOCK = threading.RLock()
 PROXY = {"enabled": False, "url": "", "read_error": "", "busy": False,
          "reads": 0, "writes": 0, "tests": 0, "config_writes": 0}
-CONFIG = {"download_dir": "/tmp/fixture/downloads", "use_chrome_cookies": False, "chrome_profile": None}
+CONFIG = {"download_dir": "/tmp/fixture/downloads", "use_chrome_cookies": True, "chrome_profile": "Default"}
+PROFILE_STATE = {"reads": 0, "jobs": [], "status": "ok"}
+PROFILE_OPTIONS = [{"directory": "Profile 1", "has_cookie_database": True},
+                   {"directory": "Profile 2", "has_cookie_database": True},
+                   {"directory": "Profile 4", "has_cookie_database": False}]
 DIAGNOSTICS = {"reads": 0, "mutations": 0, "error": "", "revision": 1}
 FRONTEND_SAFETY_PROBES = """<script>
 window.fixtureErrors = [];
@@ -95,6 +107,27 @@ def proxy_snapshot():
             "config_writes": PROXY["config_writes"], "download_dir": CONFIG["download_dir"]}
 
 
+def profile_inventory():
+    selected = CONFIG["chrome_profile"]
+    choice = next((entry for entry in PROFILE_OPTIONS if entry["directory"] == selected), None)
+    if selected is None:
+        state = "automatic"
+    elif PROFILE_STATE["status"] != "ok":
+        state = "unverified"
+    elif choice is None:
+        state = "missing"
+    else:
+        state = "available" if choice["has_cookie_database"] else "cookie_database_missing"
+    return {"schema_version": 1, "status": PROFILE_STATE["status"], "profiles": PROFILE_OPTIONS,
+            "selected_profile": selected, "selected_status": state,
+            "use_chrome_cookies": CONFIG["use_chrome_cookies"]}
+
+
+def profile_snapshot():
+    return {**profile_inventory(), "reads": PROFILE_STATE["reads"], "jobs": PROFILE_STATE["jobs"],
+            "config_writes": PROXY["config_writes"]}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
@@ -155,13 +188,22 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Invalid fixture payload length")
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
-                raise ValueError("Invalid fixture payload")
-        except (ValueError, json.JSONDecodeError):
+                raise TypeError("Invalid fixture payload")
+        except (ValueError, TypeError):
             self.json_response({}, 400)
             return
         path = urlsplit(self.path).path
         with PROXY_LOCK:
-            if path == "/api/fixture/diagnostics-mode" and self.command == "POST":
+            if path == "/api/fixture/profile-mode" and self.command == "POST":
+                if payload.get("status") in {"ok", "cookie_permission_denied"}:
+                    PROFILE_STATE["status"] = payload["status"]
+                self.json_response(profile_snapshot())
+            elif path == "/api/jobs" and self.command == "POST":
+                # Record the synthetic saved identity only; never resolve or download the URL.
+                PROFILE_STATE["jobs"].append({"chrome_profile": CONFIG["chrome_profile"],
+                                              "use_chrome_cookies": CONFIG["use_chrome_cookies"]})
+                self.json_response(fixture_job())
+            elif path == "/api/fixture/diagnostics-mode" and self.command == "POST":
                 if payload.get("error") in {"", "unavailable", "schema", "oversized"}:
                     DIAGNOSTICS["error"] = payload["error"]
                 if payload.get("refresh") is True:
@@ -230,7 +272,16 @@ class Handler(BaseHTTPRequestHandler):
             mime = "application/json"
         elif MODE == "frontend":
             path = urlsplit(self.path).path
-            if path == "/api/native/diagnostics":
+            if path == "/api/native/chrome-profiles":
+                with PROXY_LOCK:
+                    PROFILE_STATE["reads"] += 1
+                    self.json_response(profile_inventory())
+                return
+            elif path == "/api/fixture/profile-mode":
+                with PROXY_LOCK:
+                    self.json_response(profile_snapshot())
+                return
+            elif path == "/api/native/diagnostics":
                 with PROXY_LOCK:
                     DIAGNOSTICS["reads"] += 1
                     state = dict(DIAGNOSTICS)
@@ -277,9 +328,10 @@ class Handler(BaseHTTPRequestHandler):
                 page = page.replace("<head>", "<head>" + FRONTEND_SAFETY_PROBES)
                 page = page.replace("</head>", "<script>new MutationObserver((records,observer)=>{const control=document.querySelector('#desktop-proxy-save');if(control){window.fixtureProxyInitiallyDisabled=control.disabled&&document.querySelector('#desktop-proxy-test').disabled&&document.querySelector('#desktop-proxy-url').disabled;observer.disconnect();}}).observe(document.documentElement,{childList:true,subtree:true});</script></head>")
                 page = page.replace("</head>", '<link rel="stylesheet" href="/native/desktop.css"><script src="/native/desktop.js" defer></script></head>')
+                page = page.replace("</head>", '<link rel="stylesheet" href="/native/chrome_profiles.css"><script src="/native/chrome_profiles.js" defer></script></head>')
                 page = page.replace("</head>", '<link rel="stylesheet" href="/native/diagnostics.css"><script src="/native/diagnostics.js" defer></script></head>')
                 content, mime = page.encode(), "text/html"
-            elif path in {"/static/app.js", "/static/styles.css", "/static/favicon.svg", "/native/desktop.js", "/native/desktop.css", "/native/diagnostics.js", "/native/diagnostics.css"}:
+            elif path in {"/static/app.js", "/static/styles.css", "/static/favicon.svg", "/native/desktop.js", "/native/desktop.css", "/native/chrome_profiles.js", "/native/chrome_profiles.css", "/native/diagnostics.js", "/native/diagnostics.css"}:
                 asset = (DESKTOP_ASSETS if path.startswith("/native/") else VENDORED_ASSETS) / path.rsplit("/", 1)[1]
                 content = asset.read_bytes()
                 mime = "application/javascript" if path.endswith(".js") else "text/css" if path.endswith(".css") else "image/svg+xml"

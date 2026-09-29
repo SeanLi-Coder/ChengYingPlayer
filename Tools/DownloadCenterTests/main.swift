@@ -765,6 +765,143 @@ if DownloadCenterService.supportsRuntime {
   proxyFixture()
   check(fullPageValue("window.fixtureProxySnapshot.writes === 7 && !window.fixtureProxySnapshot.configured && !window.fixtureProxySnapshot.has_credentials") as? Bool == true,
         "Confirmed reset removes the endpoint and credentials in exactly one explicit write")
+  func profileFixture(_ payload: String? = nil) {
+    let options = payload.map { "{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(\($0))}" } ?? "{cache:'no-store'}"
+    _ = fullPageValue("""
+      window.fixtureProfileDone = false;
+      fetch('/api/fixture/profile-mode', \(options)).then(response => {
+        if (!response.ok) throw new Error('Fixture request failed');
+        return response.json();
+      }).then(data => { window.fixtureProfileSnapshot = data; window.fixtureProfileDone = true; });
+      undefined
+      """)
+    waitForPage("The authenticated synthetic profile fixture request completes", "window.fixtureProfileDone === true")
+  }
+  func submitProfileJob() {
+    _ = fullPageValue("""
+      document.querySelector('#url-input').value = 'https://www.douyin.com/video/1234567890123456789';
+      document.querySelector('#download-button').click(); undefined
+      """)
+  }
+  waitForPage("Real WebKit renders actual synthetic profile choices and preserves missing Default", """
+    (() => {
+      const select = document.querySelector('#desktop-chrome-profile');
+      return select && !select.disabled && select.value === 'Default'
+        && [...select.options].some(option => option.value === 'Default' && option.disabled)
+        && [...select.options].some(option => option.value === 'Profile 1' && !option.disabled)
+        && [...select.options].some(option => option.value === 'Profile 4' && option.textContent.includes('尚无'))
+        && document.querySelector('#chrome-profile').hidden
+        && document.querySelector('#chrome-cookies').type === 'hidden'
+        && document.querySelector('#desktop-chrome-cookies').checked;
+    })()
+    """)
+  profileFixture()
+  check(fullPageValue("window.fixtureProfileSnapshot.config_writes === 1 && window.fixtureProfileSnapshot.jobs.length === 0 && window.fixtureProfileSnapshot.selected_profile === 'Default'") as? Bool == true,
+        "Loading and refreshing the real profile UI never repairs or switches the saved identity implicitly")
+  submitProfileJob()
+  check(fullPageValue("document.querySelector('#form-error').textContent.includes('已不存在')") as? Bool == true,
+        "Missing Default blocks the original download button before any request is sent")
+  profileFixture()
+  check(fullPageValue("window.fixtureProfileSnapshot.jobs.length === 0") as? Bool == true,
+        "The missing-profile capture guard prevents the vendor job handler from reaching the API")
+  _ = fullPageValue("""
+    document.querySelector('#desktop-chrome-profile').value = 'Profile 1';
+    document.querySelector('#desktop-chrome-profile').dispatchEvent(new Event('change', {bubbles:true})); undefined
+    """)
+  submitProfileJob()
+  check(fullPageValue("document.querySelector('#form-error').textContent.includes('请先保存')") as? Bool == true,
+        "An explicit but unsaved profile choice is blocked in actual WebKit")
+  profileFixture()
+  check(fullPageValue("window.fixtureProfileSnapshot.selected_profile === 'Default' && window.fixtureProfileSnapshot.config_writes === 1 && window.fixtureProfileSnapshot.jobs.length === 0") as? Bool == true,
+        "Choosing a dropdown item alone changes neither persisted identity nor task state")
+  _ = fullPageValue("document.querySelector('#save-settings-button').click(); undefined")
+  waitForPage("The original save handler persists Profile 1 and the native refresh confirms it", """
+    !document.querySelector('#desktop-chrome-profile').disabled
+      && !document.querySelector('#save-settings-button').disabled
+      && document.querySelector('#desktop-chrome-profile-status').textContent.includes('已保存 Profile 1')
+    """)
+  profileFixture()
+  check(fullPageValue("window.fixtureProfileSnapshot.config_writes === 2 && window.fixtureProfileSnapshot.selected_profile === 'Profile 1' && window.fixtureProfileSnapshot.use_chrome_cookies && window.fixtureProfileSnapshot.jobs.length === 0") as? Bool == true,
+        "Explicit profile save reaches the authenticated API once without creating a job")
+  submitProfileJob()
+  waitForPage("The saved valid profile can create a synthetic task through the original handler", """
+    !document.querySelector('#download-button').disabled && document.querySelector('#url-input').value === ''
+    """)
+  profileFixture()
+  check(fullPageValue("window.fixtureProfileSnapshot.jobs.length === 1 && window.fixtureProfileSnapshot.jobs[0].chrome_profile === 'Profile 1' && window.fixtureProfileSnapshot.jobs[0].use_chrome_cookies") as? Bool == true,
+        "The created synthetic task uses the explicitly saved Profile 1 identity")
+  _ = fullPageValue("document.querySelector('label[for=\"desktop-chrome-cookies\"]').click(); undefined")
+  check(fullPageValue("!document.querySelector('#desktop-chrome-cookies').checked && !document.querySelector('#chrome-cookies').checked && document.querySelector('#desktop-chrome-profile-status').textContent.includes('尚未保存')") as? Bool == true,
+        "Clicking the actual Cookie label toggles the visible switch and hidden bridge in WebKit")
+  submitProfileJob()
+  profileFixture()
+  check(fullPageValue("window.fixtureProfileSnapshot.jobs.length === 1 && window.fixtureProfileSnapshot.use_chrome_cookies && document.querySelector('#form-error').textContent.includes('请先保存')") as? Bool == true,
+        "An unsaved Cookie-off draft cannot silently change the next task identity")
+  _ = fullPageValue("document.querySelector('#save-settings-button').click(); undefined")
+  waitForPage("Explicitly saved Cookie-off mode is confirmed without discarding the profile", """
+    !document.querySelector('#desktop-chrome-profile').disabled
+      && document.querySelector('#desktop-chrome-profile-status').textContent.includes('已保存关闭 Cookie')
+      && document.querySelector('#desktop-chrome-profile').value === 'Profile 1'
+    """)
+  submitProfileJob()
+  waitForPage("Saved Cookie-off mode permits the original task submission", """
+    !document.querySelector('#download-button').disabled && document.querySelector('#url-input').value === ''
+    """)
+  profileFixture()
+  check(fullPageValue("window.fixtureProfileSnapshot.jobs.length === 2 && window.fixtureProfileSnapshot.jobs[1].chrome_profile === 'Profile 1' && !window.fixtureProfileSnapshot.jobs[1].use_chrome_cookies && window.fixtureProfileSnapshot.jobs[0].use_chrome_cookies") as? Bool == true,
+        "Cookie-off is recorded independently while the earlier task keeps Cookie-on")
+  _ = fullPageValue("""
+    document.querySelector('#desktop-chrome-profile').value = 'Profile 2';
+    document.querySelector('#desktop-chrome-profile').dispatchEvent(new Event('change', {bubbles:true}));
+    document.querySelector('#desktop-chrome-profile-refresh').click(); undefined
+    """)
+  waitForPage("Refreshing actual WK profile metadata preserves an unsaved explicit draft", """
+    !document.querySelector('#desktop-chrome-profile').disabled
+      && document.querySelector('#desktop-chrome-profile').value === 'Profile 2'
+    """)
+  profileFixture("{status:'cookie_permission_denied'}")
+  _ = fullPageValue("document.querySelector('#desktop-chrome-profile-refresh').click(); undefined")
+  waitForPage("Inventory failure is unverified, not a false missing-profile diagnosis", """
+    document.querySelector('#desktop-chrome-profile').disabled
+      && !document.querySelector('#desktop-chrome-profile-refresh').disabled
+      && document.querySelector('#desktop-chrome-profile-status').textContent.includes('macOS')
+      && !document.querySelector('#desktop-chrome-profile-status').textContent.includes('已不存在')
+      && document.querySelector('#desktop-chrome-profile').value === 'Profile 2'
+    """)
+  profileFixture("{status:'ok'}")
+  _ = fullPageValue("document.querySelector('#desktop-chrome-profile-refresh').click(); undefined")
+  waitForPage("A successful WK refresh restores the unchanged draft choices", """
+    !document.querySelector('#desktop-chrome-profile').disabled
+      && document.querySelector('#desktop-chrome-profile').value === 'Profile 2'
+    """)
+  _ = fullPageValue("""
+    document.querySelector('#desktop-chrome-profile').value = '';
+    document.querySelector('#desktop-chrome-profile').dispatchEvent(new Event('change', {bubbles:true}));
+    document.querySelector('label[for="desktop-chrome-cookies"]').click();
+    document.querySelector('#save-settings-button').click(); undefined
+    """)
+  waitForPage("Explicit automatic mode remains an automatic choice rather than guessing an account", """
+    !document.querySelector('#desktop-chrome-profile').disabled
+      && document.querySelector('#desktop-chrome-profile').value === ''
+      && document.querySelector('#desktop-chrome-cookies').checked
+      && document.querySelector('#desktop-chrome-profile-status').textContent.includes('保留自动选择')
+    """)
+  profileFixture()
+  check(fullPageValue("window.fixtureProfileSnapshot.selected_profile === null && window.fixtureProfileSnapshot.use_chrome_cookies && window.fixtureProfileSnapshot.config_writes === 4") as? Bool == true,
+        "The real save form persists automatic selection as null only after an explicit save")
+  _ = fullPageValue("window.fixtureProfileReloadMarker = true; undefined")
+  fullController.webView.reload()
+  waitForPage("A new WK document restores the explicit automatic mode and saved Cookie switch", """
+    !window.fixtureProfileReloadMarker && document.querySelector('#desktop-chrome-profile')
+      && !document.querySelector('#desktop-chrome-profile').disabled
+      && document.querySelector('#desktop-chrome-profile').value === ''
+      && document.querySelector('#desktop-chrome-cookies').checked
+      && document.querySelector('#download-dir').value === '/tmp/Fixture proxy settings'
+    """)
+  profileFixture()
+  check(fullPageValue("window.fixtureProfileSnapshot.config_writes === 4 && window.fixtureProfileSnapshot.jobs.length === 2 && window.fixtureRequests.every(request => !request.external) && window.fixtureErrors.length === 0") as? Bool == true,
+        "WK reload performs no implicit save, task creation, external fetch, or page error")
+  proxyFixture()
   _ = fullPageValue("document.querySelector('#desktop-diagnostics-open').click(); undefined")
   waitForPage("The current diagnostic preview is ready before the live version gate changes", """
     document.querySelector('#desktop-diagnostics-text').value.includes('fixture_revision=2')
@@ -781,6 +918,10 @@ if DownloadCenterService.supportsRuntime {
   _ = fullPageValue("window.fixtureWritesBeforeBlock = window.fixtureProxySnapshot.writes; window.fixtureTestsBeforeBlock = window.fixtureProxySnapshot.tests; document.body.classList.add('version-blocked'); undefined")
   waitForPage("A live version mismatch disables every proxy control in real WebKit", """
     [...document.querySelector('#desktop-proxy-form').querySelectorAll('button,input')].every(control => control.disabled)
+    """)
+  waitForPage("A live version mismatch disables profile selection and inventory refresh in WebKit", """
+    document.querySelector('#desktop-chrome-profile').disabled
+      && document.querySelector('#desktop-chrome-profile-refresh').disabled
     """)
   waitForPage("A live version mismatch clears diagnostics and disables entry, refresh, and copy", """
     document.querySelector('#desktop-diagnostics-open').disabled
@@ -814,6 +955,9 @@ if DownloadCenterService.supportsRuntime {
         "All real proxy interactions finish without page errors or unhandled promise rejections")
   fullController.close()
   fullService.shutdown()
+  wait("The final native fixture process exits before its owned app workspace is retired", timeout: 8) {
+    !UpdateWorkAdmission.shared.hasDrainingProcesses
+  }
 } else {
   let unsupported = DownloadCenterService(locations: { locations })
   unsupported.start()
