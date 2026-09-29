@@ -125,17 +125,26 @@ browser.sortControls.keyPopup.selectItem(at: 3)
 send(browser.sortControls.keyPopup)
 expect(browser.mediaFiles.allSatisfy { $0.creationDate != nil }, "Creation dates are read for sorting")
 
+let revisionBeforeFilter = browser.mediaFilesRevision
+let orderBeforeFilter = browser.mediaFiles
 browser.tagFilterControls.filterPopup.selectItem(at: 1)
 send(browser.tagFilterControls.filterPopup)
 expect(browser.visibleEntries.count == 3 && browser.visibleEntries.last?.url == file2,
        "Red tag filter retains every directory and only matching files")
 expect(callbacks.last?.1.map(\.url) == [file2], "Callback exposes visible matching media")
 expect(browser.mediaFiles.count == 3, "Unfiltered playback snapshot survives the visual tag filter")
+expect(browser.mediaFilesRevision == revisionBeforeFilter && browser.mediaFiles == orderBeforeFilter,
+       "Visual filtering preserves the complete sorted snapshot and its revision")
 expect(browser.tableView.selectedRow == -1, "Filtered-out selected file is not replaced by another file")
 try capture(browser, name: "tag-filter")
 browser.tagFilterControls.filterPopup.selectItem(at: 0)
 send(browser.tagFilterControls.filterPopup)
 expect(browser.visibleEntries[browser.tableView.selectedRow].url == file10, "Clearing filter restores selected file")
+expect(browser.mediaFiles == orderBeforeFilter, "Clearing a filter restores the existing sort order exactly")
+browser.refresh()
+waitFor("An unchanged directory refresh finishes") { !browser.isLoading }
+expect(browser.mediaFilesRevision != revisionBeforeFilter && browser.mediaFiles == orderBeforeFilter,
+       "Even unchanged refreshes publish a new revision for host identity revalidation")
 try setTags(["Review\n4"], at: file2)
 browser.refresh()
 waitFor("Refresh finishes") { !browser.isLoading }
@@ -188,4 +197,36 @@ expect(browser.loadError == nil && browser.visibleEntries.isEmpty && !browser.st
        "An empty directory displays an explicit empty state")
 expect(callbacks.last?.0 == folder10 && callbacks.last?.1.isEmpty == true, "Successful empty folder publishes an empty snapshot")
 window.orderOut(nil)
+if ProcessInfo.processInfo.environment["CHENGYING_PERFORMANCE_BENCHMARK"] == "1" {
+  let performanceDirectory = try folder("Performance")
+  for index in 0..<10_000 {
+    _ = try file("Performance/Image \((index * 7919) % 10_000).png")
+  }
+  let performanceBrowser = MediaFolderBrowserView(extensions: ["png"])
+  performanceBrowser.showDirectory(performanceDirectory)
+  waitFor("Synthetic performance directory loads") { !performanceBrowser.isLoading }
+  expect(performanceBrowser.mediaFiles.count == 10_000, "Performance fixture contains every generated file")
+  let input = (0..<10_000).map {
+    MediaFolderBrowserView.Entry(metadata: performanceBrowser.mediaFiles[($0 * 7919) % 10_000], isDirectory: false)
+  }
+  let revision = performanceBrowser.mediaFilesRevision
+  var referenceTimes: [Double] = []
+  var currentTimes: [Double] = []
+  for filter in [PlaylistTagFilter.all, .untagged, .color(6), .all, .untagged] {
+    let referenceStart = CACurrentMediaTime()
+    // The previous presentation path sorted the complete snapshot for every filter.
+    let files = input.filter { !$0.isDirectory }
+    let sorted = PlaylistFileMetadata.sortedIndices(for: files.map(\.metadata)).map { files[$0] }
+    let expected = sorted.filter { filter.includes($0.metadata) }
+    referenceTimes.append((CACurrentMediaTime() - referenceStart) * 1000)
+    let currentStart = CACurrentMediaTime()
+    performanceBrowser.tagFilterControls.onFilterChange?(filter)
+    currentTimes.append((CACurrentMediaTime() - currentStart) * 1000)
+    expect(performanceBrowser.visibleEntries == expected,
+           "Cached production filtering preserves the reference presentation for \(filter)")
+    expect(performanceBrowser.mediaFilesRevision == revision, "Repeated filters never invalidate complete media order")
+  }
+  print(String(format: "PERF folder-filter count=10000 reference_median_ms=%.3f current_median_ms=%.3f",
+               referenceTimes.sorted()[2], currentTimes.sorted()[2]))
+}
 print("Media folder browser checks passed: \(checks)")

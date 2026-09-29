@@ -26,3 +26,8 @@ xcrun swiftc -o "$test_dir/AutoFileMatchingTests" \
   -import-objc-header "$test_dir/EditDistance.h" "${sources[@]}" \
   "$project_root/Tools/AutoFileMatchingTests/main.swift" "$test_dir/EditDistance.o"
 "$test_dir/AutoFileMatchingTests"
+
+xcrun clang -O2 -fobjc-arc -framework Foundation -I "$test_dir" \
+  "$test_dir/EditDistance.m" "$project_root/Tools/AutoFileMatchingTests/EditDistanceChecks.m" \
+  -o "$test_dir/EditDistanceChecks"
+"$test_dir/EditDistanceChecks"

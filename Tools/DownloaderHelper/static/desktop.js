@@ -3,8 +3,8 @@
 (() => {
   const bridge = window.webkit?.messageHandlers?.downloadCenter;
   if (!bridge) return;
-  const jobs = new Map();
   const outputs = new Map();
+  const outputIndex = createOutputIndex(outputs);
   const expandedFiles = new Set();
   const restoredFileLists = new WeakSet();
   let scheduled = false;
@@ -406,21 +406,76 @@
 
   document.addEventListener("toggle", rememberFileDisclosure, true);
 
-  function acceptJob(job) {
-    if (!job || typeof job.id !== "string" || !Array.isArray(job.items)) return;
-    const previous = jobs.get(job.id);
-    if (previous && Number(previous.revision) > Number(job.revision)) return;
-    jobs.set(job.id, job);
-    outputs.clear();
-    for (const current of jobs.values()) {
-      for (const item of current.items) {
-        if (item.status !== "completed" || !Array.isArray(item.output_paths)) continue;
-        item.output_paths.forEach((path, index) => {
-          if (typeof path === "string") outputs.set(path, { jobID: current.id, itemID: item.id, index });
-        });
+  function createOutputIndex(outputs) {
+    const jobs = new Map();
+    const owners = new Map();
+
+    function updateOwner(path, jobID, order, record) {
+      let bucket = owners.get(path);
+      if (!bucket) {
+        if (!record) return;
+        bucket = { records: new Map(), winner: null };
+        owners.set(path, bucket);
+      }
+      if (record) {
+        const owner = { order, record };
+        bucket.records.set(jobID, owner);
+        if (!bucket.winner || order >= bucket.winner.order) bucket.winner = owner;
+      } else {
+        bucket.records.delete(jobID);
+        if (bucket.winner?.record.jobID === jobID) {
+          bucket.winner = null;
+          for (const owner of bucket.records.values()) {
+            if (!bucket.winner || owner.order > bucket.winner.order) bucket.winner = owner;
+          }
+        }
+      }
+      if (bucket.winner) outputs.set(path, bucket.winner.record);
+      else {
+        outputs.delete(path);
+        owners.delete(path);
       }
     }
-    scheduleDecoration();
+
+    return {
+      accept(job) {
+        if (!job || typeof job.id !== "string" || !Array.isArray(job.items)) return false;
+        const previous = jobs.get(job.id);
+        const revision = typeof job.revision === "number" ? job.revision : NaN;
+        if (previous && Number.isFinite(previous.revision) && Number.isFinite(revision)
+            && previous.revision >= revision) return false;
+        // A job keeps its original Map position. The last first-seen owner wins
+        // collisions, even when an older job is updated or regains a path later.
+        const order = previous ? previous.order : jobs.size;
+        const paths = new Map();
+        for (const item of job.items) {
+          if (item.status !== "completed" || !Array.isArray(item.output_paths)) continue;
+          item.output_paths.forEach((path, index) => {
+            if (typeof path === "string") paths.set(path, { jobID: job.id, itemID: item.id, index });
+          });
+        }
+        if (previous) {
+          for (const path of previous.paths) {
+            if (!paths.has(path)) updateOwner(path, job.id, order, null);
+          }
+        }
+        for (const [path, record] of paths) updateOwner(path, job.id, order, record);
+        // Retain only revision/order and output paths, not a second copy of the
+        // full job history. Owner entries are replaced or removed, never deferred.
+        jobs.set(job.id, { revision, order, paths: new Set(paths.keys()) });
+        return true;
+      }
+    };
+  }
+
+  function acceptJob(job) {
+    if (outputIndex.accept(job)) scheduleDecoration();
+  }
+
+  function acceptJobs(jobs) {
+    let changed = false;
+    for (const job of jobs) changed = outputIndex.accept(job) || changed;
+    if (changed) scheduleDecoration();
   }
 
   async function refreshOutputs() {
@@ -428,7 +483,7 @@
       const response = await fetch("/api/jobs", { cache: "no-store" });
       if (!response.ok || closed) return;
       const data = await response.json();
-      if (Array.isArray(data)) data.forEach(acceptJob);
+      if (Array.isArray(data)) acceptJobs(data);
     } catch { /* The original UI already reports connection failures. */ }
   }
 

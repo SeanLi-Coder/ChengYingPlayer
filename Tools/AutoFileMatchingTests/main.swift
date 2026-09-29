@@ -12,10 +12,10 @@ try fm.createDirectory(at: root, withIntermediateDirectories: true)
 defer { try? fm.removeItem(at: root) }
 
 func match(videos: [String], subtitles: [String], action: Preference.IINAAutoLoadAction = .iina,
-           autoAdd: Bool = true) throws -> [String: [String]] {
+           autoAdd: Bool = true, extras: [String] = []) throws -> [String: [String]] {
   let folder = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
   try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-  for name in videos + subtitles {
+  for name in videos + subtitles + extras {
     try Data().write(to: folder.appendingPathComponent(name))
   }
   Preference.action = action
@@ -25,6 +25,11 @@ func match(videos: [String], subtitles: [String], action: Preference.IINAAutoLoa
   player.info.currentURL = folder.appendingPathComponent(videos[0])
   try AutoFileMatcher(player: player, ticket: 1).startMatching()
   check(!player.info.isMatchingSubtitles, "The production matcher completes its lifecycle")
+  if action != .disabled {
+    let expected = videos.map { folder.appendingPathComponent($0) }.sorted(by: PlaylistPlaybackPolicy.naturalNameOrder)
+    check(player.info.currentVideosInfo.map(\.url) == expected,
+          "Media grouping preserves the original natural order and excludes unrelated files")
+  }
   check(Logger.messages.contains(where: { $0.hasPrefix("Force matching unmatched videos,") }) == autoAdd,
         "The real final unmatched-file stage runs when automatic folder loading is enabled")
   var result: [String: [String]] = [:]
@@ -93,5 +98,11 @@ check(fuzzy[episodeNames[0]] == [] && fuzzy[episodeNames[1]] == ["Episode 10.srt
 
 let disabled = try match(videos: episodeNames, subtitles: ["Episode 1.srt", "Episode 10.srt"], action: .disabled)
 check(disabled.values.allSatisfy(\.isEmpty), "Disabling subtitle autoload remains effective")
+
+let mixed = try match(videos: ["Title 10.MP4", "Title 2.mp4", "Title 1.mkv"],
+                      subtitles: ["Title 2.zh.srt"],
+                      extras: ["Title 0.jpg", "Title 0.png", "Title 0.txt", "Title 0.mp3", ".hidden.mp4"])
+check(mixed["Title 2.mp4"] == ["Title 2.zh.srt"],
+      "Mixed folders retain uppercase videos and subtitle matching without sorting unrelated formats")
 
 print("PASS: \(checks) automatic subtitle matching checks")

@@ -110,6 +110,7 @@ jobs:
           bash Tools/RenderLifecycleTests/run.sh
           bash Tools/WindowLifecycleTests/run.sh
           bash Tools/AutoFileMatchingTests/run.sh
+          bash Tools/PlaybackUIPerformanceTests/run.sh
 
       - name: Test simplified player features
         run: |
@@ -160,6 +161,7 @@ jobs:
           node Tools/DownloaderProxyUITests/main.mjs
           node Tools/DownloaderChromeProfilesUITests/main.mjs
           node Tools/DownloaderDiagnosticsUITests/main.mjs
+          node Tools/DownloaderOutputIndexTests/main.mjs
           python -m ruff check Tools/DownloaderHelper --exclude vendor
           CHENGYING_REQUIRE_CHROME_UI=1 python -m pytest -q -rs Tools/DownloaderHelper/tests
           python Tools/DownloaderHelper/smoke_helper.py \

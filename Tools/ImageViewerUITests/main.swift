@@ -102,6 +102,35 @@ let preferenceDomain = "io.chengying.tests.image-ui.\(UUID().uuidString)"
 let defaults = UserDefaults(suiteName: preferenceDomain)!
 defer { defaults.removePersistentDomain(forName: preferenceDomain) }
 let viewer = ImageViewerWindowController(urls: [url], defaults: defaults)
+let reusableCell = ImageFileListCell()
+let taggedMetadata = PlaylistFileMetadata(url: url, fileSize: 1234,
+  modificationDate: Date(timeIntervalSince1970: 123456), creationDate: Date(timeIntervalSince1970: 654321),
+  tags: [PlaylistFileTag(name: "FixtureTag", colorIndex: 6)])
+reusableCell.configure(taggedMetadata, showCreated: false)
+let originalCellViews = reusableCell.subviews
+let originalCellConstraints = reusableCell.constraints
+expect(textContent(reusableCell).contains("FixtureTag") && reusableCell.toolTip?.contains("修改：") == true,
+       "Reusable image cells show Finder tags and both dates")
+let replacementMetadata = PlaylistFileMetadata(url: root.appendingPathComponent("Replacement.png"))
+reusableCell.configure(replacementMetadata, showCreated: true)
+expect(reusableCell.subviews == originalCellViews && reusableCell.constraints == originalCellConstraints,
+       "Row configuration reuses its view and constraint identities")
+expect(reusableCell.textField?.stringValue == "Replacement.png" &&
+       textContent(reusableCell).contains("创建 未知") && textContent(reusableCell).contains("无 Finder 标签") &&
+       !textContent(reusableCell).contains("FixtureTag") && reusableCell.toolTip?.contains("FixtureTag") == false,
+       "Reused rows replace names, tags, unknown dates and tooltips without stale content")
+if ProcessInfo.processInfo.environment["CHENGYING_PERFORMANCE_BENCHMARK"] == "1" {
+  let iterations = 1000
+  let freshStart = CACurrentMediaTime()
+  for _ in 0..<iterations {
+    autoreleasepool { ImageFileListCell().configure(taggedMetadata, showCreated: false) }
+  }
+  let freshTime = (CACurrentMediaTime() - freshStart) * 1000
+  let reuseStart = CACurrentMediaTime()
+  for _ in 0..<iterations { autoreleasepool { reusableCell.configure(taggedMetadata, showCreated: false) } }
+  print(String(format: "PERF image-list-cell count=%d fresh_ms=%.3f reused_ms=%.3f",
+               iterations, freshTime, (CACurrentMediaTime() - reuseStart) * 1000))
+}
 viewer.showWindow(nil)
 viewer.window?.makeKeyAndOrderFront(nil)
 NSApp.activate(ignoringOtherApps: true)
@@ -490,12 +519,21 @@ viewer.open(urls: [wrapURL, url])
 waitFor("Loop wrap waits for its asynchronous frame") { wrapGate.isBlocked }
 expect(viewer.frameIndex == 2 && wrapLoopStarts == 1,
        "The pending wrap has not displayed a new loop")
+expect(!viewer.convertButton.isEnabled && !viewer.editButton.isEnabled &&
+       !viewer.previousFrameButton.isEnabled && !viewer.nextFrameButton.isEnabled &&
+       viewer.animationButton.isEnabled && viewer.animationButton.title == "暂停动图" &&
+       !viewer.previousButton.isEnabled && viewer.nextButton.isEnabled && viewer.pureViewingButton.isEnabled,
+       "Pending frame controls prevent editing and navigation while allowing animation pause")
 NSApp.sendAction(viewer.animationButton.action!, to: viewer.animationButton.target, from: viewer.animationButton)
 expect(!viewer.isAnimating, "Pause cancels a pending loop wrap")
 wrapGate.resume()
 pump(0.1)
 expect(!viewer.isAnimating && viewer.frameIndex == 2 && wrapLoopStarts == 1,
        "A cancelled wrap callback cannot change the paused frame")
+expect(viewer.convertButton.isEnabled && viewer.editButton.isEnabled && viewer.previousFrameButton.isEnabled &&
+       !viewer.nextFrameButton.isEnabled && viewer.animationButton.title == "播放动图" &&
+       !viewer.previousButton.isEnabled && viewer.nextButton.isEnabled && viewer.pureViewingButton.isEnabled,
+       "Cancelling a pending frame restores editing and the exact displayed-frame controls")
 expect(!wrapGate.didTimeOut, "The controlled decode gate was explicitly released")
 NSApp.sendAction(viewer.animationButton.action!, to: viewer.animationButton.target, from: viewer.animationButton)
 waitFor("Animation resumes after cancelling a pending wrap") { !viewer.isAnimating && viewer.frameIndex == 2 }

@@ -45,8 +45,10 @@ class AutoFileMatcher {
   }
 
   private func getAllMediaFiles() throws {
-    // get all files in current directory
-    let files = PlaylistPlaybackPolicy.regularFiles(in: currentFolder)
+    // Ignore unrelated files before natural sorting and allocating filename character arrays.
+    // regularFiles already returns natural order, which each media-type subsequence preserves.
+    let extensions = Set(Utility.supportedFileExt.values.flatMap { $0 })
+    let files = PlaylistPlaybackPolicy.regularFiles(in: currentFolder, extensions: extensions)
 
     log("Getting all media files...")
     // group by extension
@@ -60,9 +62,6 @@ class AutoFileMatcher {
 
     log("Got all media files, video=\(filesGroupedByMediaType[.video]!.count), audio=\(filesGroupedByMediaType[.audio]!.count)")
 
-    // natural sort
-    filesGroupedByMediaType[.video]!.sort { PlaylistPlaybackPolicy.naturalNameOrder($0.url, $1.url) }
-    filesGroupedByMediaType[.audio]!.sort { PlaylistPlaybackPolicy.naturalNameOrder($0.url, $1.url) }
   }
 
   private func getAllPossibleSubs() throws -> [FileInfo] {
@@ -105,7 +104,7 @@ class AutoFileMatcher {
     var subtitles = filesGroupedByMediaType[.sub]!
     for subDir in subDirs {
       try checkTicket()
-      if let contents = try? fm.contentsOfDirectory(at: subDir, includingPropertiesForKeys: nil, options: searchOptions) {
+      if let contents = try? fm.contentsOfDirectory(at: subDir, includingPropertiesForKeys: [.isRegularFileKey], options: searchOptions) {
         subtitles.append(contentsOf: contents.compactMap {
           guard subExts.contains($0.pathExtension.lowercased()),
                 (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return nil }
@@ -339,8 +338,9 @@ class AutoFileMatcher {
         for video in unmatchedVideos {
           try checkTicket()
           let threshold = UInt(Double(video.filename.count + sub.filename.count) * 0.6)
-          let rawDist = ObjcUtils.levDistance(video.prefix, and: sub.prefix) + ObjcUtils.levDistance(video.suffix, and: sub.suffix)
-          let dist: UInt = rawDist < threshold ? rawDist : UInt.max
+          let (rawDist, overflow) = ObjcUtils.levDistance(video.prefix, and: sub.prefix)
+            .addingReportingOverflow(ObjcUtils.levDistance(video.suffix, and: sub.suffix))
+          let dist: UInt = !overflow && rawDist < threshold ? rawDist : UInt.max
           sub.dist[video] = dist
           video.dist[sub] = dist
           if dist < minDistToVideo { minDistToVideo = dist }

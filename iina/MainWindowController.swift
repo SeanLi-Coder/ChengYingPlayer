@@ -116,6 +116,11 @@ class MainWindowController: PlayerWindowController {
   var hideControlTimer: Timer?
   var hideOSDTimer: Timer?
 
+  private var lastAdditionalInfoRefresh = -TimeInterval.infinity
+  private weak var cachedThumbnailPreviewSource: NSImage?
+  private var cachedThumbnailPreviewRotation = 0
+  private var cachedThumbnailPreviewImage: NSImage?
+
   /** For blacking out other screens. */
   var screens: [NSScreen] = []
   var cachedScreenCount = 0
@@ -1628,7 +1633,7 @@ class MainWindowController: PlayerWindowController {
       exitPIP()
     }
     
-    updateAdditionalInfo()
+    updateAdditionalInfo(force: true)
     refreshChromeAfterWindowTransition()
     player.events.emit(.windowFullscreenChanged, data: true)
   }
@@ -1829,7 +1834,7 @@ class MainWindowController: PlayerWindowController {
     if Preference.bool(for: .displayTimeAndBatteryInFullScreen) {
       fadeableViews.append(additionalInfoView)
     }
-    updateAdditionalInfo()
+    updateAdditionalInfo(force: true)
 
     videoView.needsLayout = true
     videoView.layoutSubtreeIfNeeded()
@@ -2467,9 +2472,14 @@ class MainWindowController: PlayerWindowController {
     player.refreshSyncUITimer()
   }
 
-  func updateAdditionalInfo() {
-    additionalInfoLabel.stringValue = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
+  func updateAdditionalInfo(force: Bool = false) {
     additionalInfoTitle.stringValue = window?.representedURL?.lastPathComponent ?? window?.title ?? ""
+    // Playback position is sampled at 10/25 Hz; wall-clock minutes and battery capacity are not.
+    // Reuse that timer without adding wakeups while playback is paused or chrome is hidden.
+    let now = CACurrentMediaTime()
+    guard force || now - lastAdditionalInfoRefresh >= 1 else { return }
+    lastAdditionalInfoRefresh = now
+    additionalInfoLabel.stringValue = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
     if let capacity = PowerSource.getList().filter({ $0.type == "InternalBattery" }).first?.currentCapacity {
       additionalInfoBattery.stringValue = "\(capacity)%"
       additionalInfoStackView.setVisibilityPriority(.mustHold, for: additionalInfoBatteryView)
@@ -2804,6 +2814,29 @@ class MainWindowController: PlayerWindowController {
     return topOfThumbnail <= windowContentHeight
   }
 
+  private func resetThumbnailPreviewCache() {
+    cachedThumbnailPreviewSource = nil
+    cachedThumbnailPreviewImage = nil
+  }
+
+  private func thumbnailPreviewImage(for image: NSImage, rotation: Int) -> NSImage {
+    let normalizedRotation = ((rotation % 360) + 360) % 360
+    guard normalizedRotation != 0 && normalizedRotation % 90 == 0 else {
+      resetThumbnailPreviewCache()
+      return image
+    }
+    if cachedThumbnailPreviewSource === image,
+       cachedThumbnailPreviewRotation == normalizedRotation,
+       let cachedImage = cachedThumbnailPreviewImage {
+      return cachedImage
+    }
+    let preview = image.rotate(normalizedRotation)
+    cachedThumbnailPreviewSource = image
+    cachedThumbnailPreviewRotation = normalizedRotation
+    cachedThumbnailPreviewImage = preview
+    return preview
+  }
+
   /** Display time label when mouse over slider */
   private func updateTimeLabel(_ posInWindow: NSPoint) {
     let mouseXPos = playSlider.convert(posInWindow, from: nil).x
@@ -2825,7 +2858,7 @@ class MainWindowController: PlayerWindowController {
       timePreviewWhenSeek.stringValue = previewTime.stringRepresentation
 
       if player.info.thumbnailsReady, let image = player.info.getThumbnail(forSecond: previewTime.second)?.image {
-        thumbnailPeekView.imageView.image = image.rotate(rotation)
+        thumbnailPeekView.imageView.image = thumbnailPreviewImage(for: image, rotation: rotation)
         thumbnailPeekView.isHidden = false
 
         // In some formats (like most of Japanese TV video formats), display aspect ratios (DAR) are different from the
@@ -2841,6 +2874,7 @@ class MainWindowController: PlayerWindowController {
         thumbnailPeekView.frame.size = NSSize(width: 120, height: height)
         thumbnailPeekView.frame.origin = NSPoint(x: round(posInWindow.x - thumbnailPeekView.frame.width / 2), y: yPos)
       } else {
+        resetThumbnailPreviewCache()
         thumbnailPeekView.isHidden = true
       }
     }

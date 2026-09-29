@@ -23,6 +23,9 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
   /// All accepted media files in the current sort order, before the visual tag filter.
   /// Image hosts can use this snapshot to preserve their slideshow while filtering.
   private(set) var mediaFiles: [PlaylistFileMetadata] = []
+  /// Advances for every successful load or sort, including an unchanged refresh.
+  /// A visual tag filter leaves this revision and the complete media order intact.
+  private(set) var mediaFilesRevision: UInt64 = 0
   private(set) var isLoading = false
   private(set) var loadError: Error?
   private(set) var sortKey: PlaylistFileSortKey = .name
@@ -39,6 +42,8 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
   private let supportedExtensions: Set<String>
   private let scrollView = NSScrollView()
   private var entries: [Entry] = []
+  private var sortedDirectories: [Entry] = []
+  private var sortedFiles: [Entry] = []
   private var selectedURL: URL?
   private var hasLoadedDirectory = false
   private var loadGeneration: UInt64 = 0
@@ -74,6 +79,8 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
     directoryURL = directory
     self.selectedURL = selectedURL?.standardizedFileURL
     entries = []
+    sortedDirectories = []
+    sortedFiles = []
     visibleEntries = []
     mediaFiles = []
     hasLoadedDirectory = false
@@ -238,21 +245,23 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
     tagFilterControls.onFilterChange = { [weak self] filter in
       guard let self else { return }
       self.tagFilter = filter
-      self.applyPresentation()
+      self.applyPresentation(resort: false)
     }
   }
 
-  private func applyPresentation() {
-    let directories = entries.filter(\.isDirectory)
-    let files = entries.filter { !$0.isDirectory }
-    func sorted(_ entries: [Entry]) -> [Entry] {
-      PlaylistFileMetadata.sortedIndices(for: entries.map(\.metadata), by: sortKey,
-                                         ascending: sortAscending).map { entries[$0] }
+  private func applyPresentation(resort: Bool = true) {
+    if resort {
+      func sorted(_ entries: [Entry]) -> [Entry] {
+        PlaylistFileMetadata.sortedIndices(for: entries.map(\.metadata), by: sortKey,
+                                           ascending: sortAscending).map { entries[$0] }
+      }
+      sortedDirectories = sorted(entries.filter(\.isDirectory))
+      sortedFiles = sorted(entries.filter { !$0.isDirectory })
+      mediaFiles = sortedFiles.map(\.metadata)
+      mediaFilesRevision &+= 1
     }
-    let sortedFiles = sorted(files)
-    mediaFiles = sortedFiles.map(\.metadata)
     // Folders remain reachable even if their own tags do not match the filter.
-    visibleEntries = sorted(directories) + sortedFiles.filter { tagFilter.includes($0.metadata) }
+    visibleEntries = sortedDirectories + sortedFiles.filter { tagFilter.includes($0.metadata) }
     restoringSelection = true
     tableView.reloadData()
     restoringSelection = false
@@ -282,9 +291,8 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
     parentButton.isEnabled = directoryURL.map { $0.path != $0.deletingLastPathComponent().path } ?? false
     sortControls.update(key: sortKey, ascending: sortAscending, manual: false, busy: isLoading)
     sortControls.refreshButton.isEnabled = directoryURL != nil && !isLoading
-    let files = entries.filter { !$0.isDirectory }
-    let visibleFiles = visibleEntries.filter { !$0.isDirectory }
-    tagFilterControls.update(filter: tagFilter, matchingCount: visibleFiles.count, totalCount: files.count,
+    let visibleFileCount = visibleEntries.count - sortedDirectories.count
+    tagFilterControls.update(filter: tagFilter, matchingCount: visibleFileCount, totalCount: mediaFiles.count,
                              busy: isLoading)
     let filterHelp = playlistBrowserString("folder.filter.scope")
     tagFilterControls.toolTip = filterHelp

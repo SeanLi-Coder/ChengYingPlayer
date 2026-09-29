@@ -10,13 +10,13 @@
 #import "iina-Bridging-Header.h"
 #import "ObjcUtils.h"
 
-#import <wchar.h>
+#import <stdint.h>
 
 #define INDEL_WEIGHT 1
 #define SUBSTITUTION_WEIGHT 4
 
-static inline int min(int a, int b, int c) {
-  int m = a;
+static inline NSUInteger min(NSUInteger a, NSUInteger b, NSUInteger c) {
+  NSUInteger m = a;
   if (b < m) m = b;
   if (c < m) m = c;
   return m;
@@ -46,44 +46,57 @@ static inline int min(int a, int b, int c) {
 }
 
 + (NSUInteger)levDistance:(NSString *)str0 and:(NSString *)str1 {
-  int i, j;
-  
-  // Prepend a blank space and add a null terminator. The leading space is required so the strings
-  // can be accessed using the one based indexes in the last loop below. The string must be null
-  // terminated to be able to use the wcslen method and because the loop expects to be able to
-  // access a null at the end of the string.
-  str0 = [@" " stringByAppendingFormat:@"%@\0", str0];
-  str1 = [@" " stringByAppendingFormat:@"%@\0", str1];
+  // Match Unicode scalars, as before, rather than UTF-16 code units or graphemes.
+  // Explicit byte lengths avoid depending on an NSData buffer's null termination.
+  NSData *data0 = [str0 dataUsingEncoding:NSUTF32LittleEndianStringEncoding];
+  NSData *data1 = [str1 dataUsingEncoding:NSUTF32LittleEndianStringEncoding];
+  if (!data0 || !data1) return NSUIntegerMax;
+  const uint32_t *cstr0 = data0.bytes;
+  const uint32_t *cstr1 = data1.bytes;
+  NSUInteger len0 = data0.length / sizeof(uint32_t);
+  NSUInteger len1 = data1.length / sizeof(uint32_t);
 
-  // Convert from variable length character encoding to fixed length UTF-32 to make it easy to
-  // access individual characters.
-  const NSData *str0AsUTF32 = [str0 dataUsingEncoding:NSUTF32LittleEndianStringEncoding];
-  const NSData *str1AsUTF32 = [str1 dataUsingEncoding:NSUTF32LittleEndianStringEncoding];
+  // Shared release/series names contribute no distance. Trim only exact scalars;
+  // canonical-equivalence and weighted substitution behavior remain unchanged.
+  while (len0 && len1 && *cstr0 == *cstr1) {
+    ++cstr0;
+    ++cstr1;
+    --len0;
+    --len1;
+  }
+  while (len0 && len1 && cstr0[len0 - 1] == cstr1[len1 - 1]) {
+    --len0;
+    --len1;
+  }
+  if (!len0) return len1 * INDEL_WEIGHT;
+  if (!len1) return len0 * INDEL_WEIGHT;
 
-  const wchar_t *cstr0 = (const wchar_t *)[str0AsUTF32 bytes];
-  const wchar_t *cstr1 = (const wchar_t *)[str1AsUTF32 bytes];;
-  const size_t len0 = wcslen(cstr0);
-  const size_t len1 = wcslen(cstr1);
-
-  int *_dist = malloc(sizeof(int) * (len0 + 1) * (len1 + 1));
-  int (*dist)[len0 + 1][len1 + 1] = (int (*)[len0 + 1][len1 + 1])_dist;
-  for (i = 0; i <= len0; ++i)
-    for (j = 0; j <= len1; ++j)
-      (*dist)[i][j] = 0;
-  
-  for (i = 1; i <= len0; ++i)
-    (*dist)[i][0] = (*dist)[i - 1][0] + INDEL_WEIGHT;
-  for (j = 1; j <= len1; ++j)
-    (*dist)[0][j] = (*dist)[0][j - 1] + INDEL_WEIGHT;
-  
-  for (j = 1; j <= len1; ++j)
-    for (i = 1; i <= len0; ++i)
-      (*dist)[i][j] = min((*dist)[i - 1][j] + INDEL_WEIGHT,
-                          (*dist)[i][j - 1] + INDEL_WEIGHT,
-                          (*dist)[i - 1][j - 1] + (cstr0[i] == cstr1[j] ? 0 : SUBSTITUTION_WEIGHT));
-  
-  int result = (*dist)[len0][len1];
-  free(_dist);
+  // Keep a single row for the shorter name. The previous implementation used a
+  // quadratic matrix and traversed it column-first, defeating cache locality.
+  if (len0 > len1) {
+    const uint32_t *temporary = cstr0;
+    cstr0 = cstr1;
+    cstr1 = temporary;
+    NSUInteger length = len0;
+    len0 = len1;
+    len1 = length;
+  }
+  if (len0 >= NSUIntegerMax / sizeof(NSUInteger)) return NSUIntegerMax;
+  NSUInteger *row = malloc(sizeof(NSUInteger) * (len0 + 1));
+  if (!row) return NSUIntegerMax;
+  for (NSUInteger i = 0; i <= len0; ++i) row[i] = i * INDEL_WEIGHT;
+  for (NSUInteger j = 1; j <= len1; ++j) {
+    NSUInteger diagonal = row[0];
+    row[0] = j * INDEL_WEIGHT;
+    for (NSUInteger i = 1; i <= len0; ++i) {
+      NSUInteger above = row[i];
+      row[i] = min(row[i - 1] + INDEL_WEIGHT, above + INDEL_WEIGHT,
+                   diagonal + (cstr0[i - 1] == cstr1[j - 1] ? 0 : SUBSTITUTION_WEIGHT));
+      diagonal = above;
+    }
+  }
+  NSUInteger result = row[len0];
+  free(row);
   return result;
 }
 

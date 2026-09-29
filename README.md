@@ -34,6 +34,17 @@ HDR 播放输出默认开启：新安装以及从未手动保存 HDR 偏好的�
 避免把 HLG 错当 PQ 而出现过曝、偏黄。换片与 HDR/SDR 切换会重新同步显示色彩状态；
 这不代表支持所有 Dolby Vision 动态处理，尤其不承诺无兼容基础层的 Profile 5 完整还原。
 
+### 性能与资源使用
+
+播放、图片浏览与下载中心会复用已经完成的界面工作：旋转后的时间轴缩略图只缓存最近一张；
+全屏时钟和电池状态最多每秒查询一次，切入全屏立即刷新；动图逐帧更新不再反复扫描整个图片列表。
+目录颜色筛选复用当前排序结果，实际刷新或修改排序仍会重新读取／排序；图片列表复用单元格和日期格式器。
+下载中心按发生变化的任务更新文件操作索引，重复版本事件不再重扫全部历史。
+字幕自动匹配使用线性空间的精确距离算法，并去掉混合目录中的无关文件排序和重复排序。
+
+这些优化不降低视频／图片分辨率、位深、画质、音质或动图帧数，也不缩短认证、权限、签名和媒体完整性验证。
+性能回归使用合成素材与隔离目录；局部基准不是整个播放器的加速倍数，也不代表已经测过所有视频或 M4 Max 场景。
+
 ## 下载与安装
 
 安装版在 [GitHub Releases](https://github.com/SeanLi-Coder/ChengYingPlayer/releases) 提供 `ChengYingPlayer-v<版本>-Apple-Silicon.dmg`，原生支持 Apple Silicon Mac，包括 **M4 Max MacBook Pro**。早期标有 Source Only 的版本仅有源码，不是安装包。
@@ -357,6 +368,21 @@ Dolby Vision 基础层色彩回退另有固定源码回归 `bash Tools/HDRSource
 每个安装版 Release 的源码归档包含同一提交的项目、Swift 包、播放栈、媒体工具、helper 对应依赖源码与播放构建记录。具体版本、校验值与许可证见 [`other/third_party_sources.sh`](other/third_party_sources.sh)、[`other/playback_sources.sh`](other/playback_sources.sh)、[`Tools/DownloaderHelper/runtime-sources.json`](Tools/DownloaderHelper/runtime-sources.json)、[`NOTICE.md`](NOTICE.md) 和 [`Legal/THIRD_PARTY_NOTICES.md`](Legal/THIRD_PARTY_NOTICES.md)。依赖或选项变化时，必须同步更新源码、通知、校验和回归测试。
 
 ## 参与开发
+
+性能专项回归与可重复基准（仅合成数据，不读取个人媒体或浏览器资料）：
+
+```sh
+bash Tools/PlaybackUIPerformanceTests/run.sh
+bash Tools/AutoFileMatchingTests/run.sh
+node Tools/DownloaderOutputIndexTests/main.mjs --benchmark
+python3 Tools/ImageViewerUITests/performance.py --baseline-ref ce576ab861c3b4cfeeb2cf98b7db0c8e06dee39b
+CHENGYING_PERFORMANCE_BENCHMARK=1 bash Tools/MediaFolderBrowserTests/run.sh
+```
+
+图片前后对比要求本地已经有指定的旧提交，不会联网获取源码；基准以 `swiftc -O` 编译真实生产方法，
+测量五次中位数，排除编译、素材创建和图片解码，包含界面呈现与合成路径规范化。
+下载索引同时报告实际遍历次数和耗时，并与冻结的旧算法对照；字幕匹配使用独立旧矩阵算法做 4,372 组双向差分。
+测试只对输出语义与工作量设置断言，不把依赖机器负载的耗时倍数硬编码成通关条件。
 
 播放稳定性专项检查：`bash Tools/ThumbnailLifecycleTests/run.sh` 验证真实请求生命周期；`bash Tools/ThumbnailCacheTests/run.sh` 验证损坏缓存与清理；`bash Tools/RenderLifecycleTests/run.sh` 验证 CGL 引用与退出锁顺序。准备好播放动态库和媒体工具后，`bash Tools/ThumbnailDecoderTests/run.sh` 验证实际 FFmpeg 缩略图解码，执行 `PLAYBACK_SOAK_SECONDS=600 bash Tools/PlaybackSoakTests/run.sh` 可做 10 分钟真实 4K 硬件解码与 OpenGL 渲染检查；明确设置 `PLAYBACK_SOAK_MODE=software` 才使用软件解码，测试结果会分别标示，不把软件回退当作硬件验证成功。详细范围见各测试目录的 README。
 

@@ -21,6 +21,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private var imageListView: NSView?
   private var browserFiles: [PlaylistFileMetadata] = []
   private var browserLoadedDirectory: URL?
+  private var browserMediaFilesRevision: UInt64?
   let statusLabel = NSTextField(labelWithString: "打开图片，开始浏览")
   let frameLabel = NSTextField(labelWithString: "")
   let zoomLabel = NSTextField(labelWithString: "适应窗口")
@@ -423,6 +424,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     load(first)
     browserFiles = []
     browserLoadedDirectory = nil
+    browserMediaFilesRevision = nil
     folderBrowser.showDirectory(directoryURL ?? first.deletingLastPathComponent(), selectedURL: first, force: true)
     // The shared browser owns folder enumeration; explicit selections keep their own ordered list.
     if directoryURL != nil { return }
@@ -473,17 +475,29 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
 
   private func folderDidLoad(_ directory: URL) {
     guard !closed else { return }
+    let images = folderBrowser.mediaFiles.filter { ImageFileSupport.isImageURL($0.url) }
+    // Only repeated presentation of the same load may be skipped. A refresh must
+    // still recheck identities even when all size/date/tag values are unchanged.
+    if browserLoadedDirectory == directory,
+       browserMediaFilesRevision == folderBrowser.mediaFilesRevision, browserFiles == images { return }
     browserLoadedDirectory = directory
-    browserFiles = folderBrowser.mediaFiles.filter { ImageFileSupport.isImageURL($0.url) }
+    browserMediaFilesRevision = folderBrowser.mediaFilesRevision
+    browserFiles = images
     // Exploring another folder must not replace an active slideshow or explicit selection.
     guard sameLocation(directory, directoryURL) else { return }
+    let selectedIdentity = selectedURL?.standardizedFileURL.resolvingSymlinksInPath()
+    var foundSelected = false
     files = browserFiles.map { file in
-      guard let selectedURL, sameLocation(file.url, selectedURL) else { return file }
+      guard let selectedURL,
+            file.url == selectedURL || file.url.standardizedFileURL.resolvingSymlinksInPath() == selectedIdentity else {
+        return file
+      }
+      foundSelected = true
       return PlaylistFileMetadata(url: selectedURL, name: file.name, fileSize: file.fileSize,
                                   modificationDate: file.modificationDate, creationDate: file.creationDate,
                                   tags: file.tags)
     }
-    if let selectedURL, !files.contains(where: { sameLocation($0.url, selectedURL) }) {
+    if let selectedURL, !foundSelected {
       files.append(PlaylistFileMetadata(url: selectedURL))
     }
     isListing = false
@@ -610,7 +624,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     frameToken.cancel()
     frameToken = ImageCancellationToken()
     let token = frameToken
-    updateControls()
+    updateFrameControls()
     decodeQueue.async { [weak self] in
       guard !token.isCancelled, !documentToken.isCancelled,
             let self, self.queueDocumentGeneration == generation, let document = self.queueDocument else { return }
@@ -628,7 +642,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
           self.frameIndex = index
           self.frameDuration = self.validDuration(duration)
           self.canvas.display(image, resetZoom: false)
-          self.updateControls()
+          self.updateFrameControls()
           if self.isAnimating { self.scheduleFrame() }
         }
       } catch {
@@ -785,16 +799,9 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     browsingControls.forEach { $0.isHidden = isEditingImage }
     previousButton.isEnabled = !isEditingImage && !isBusy && (index.map { $0 > 0 } ?? false)
     nextButton.isEnabled = !isEditingImage && !isBusy && (index.map { $0 + 1 < files.count } ?? false)
-    previousFrameButton.isEnabled = !isEditingImage && details != nil && frameIndex > 0 && !framePending
-    nextFrameButton.isEnabled = !isEditingImage && details.map { frameIndex + 1 < $0.frameCount } == true && !framePending
-    animationButton.isEnabled = !isEditingImage && details?.isAnimated == true
-    animationButton.title = isAnimating ? "暂停动图" : "播放动图"
-    frameLabel.stringValue = details.map { "\(frameIndex + 1) / \($0.frameCount) \($0.isAnimated ? "帧" : "页")" } ?? ""
-    convertButton.isEnabled = details != nil && !isBusy && !formats.isEmpty && !framePending && !editPreviewPending
+    updateFrameControls()
     convertButton.title = isEditingImage ? "编辑并另存" : "转换并另存"
-    editButton.isEnabled = details != nil && !isBusy && !framePending && !editPreviewPending
     editButton.title = isEditingImage ? "退出编辑" : "裁剪与编辑"
-    pureViewingButton.isEnabled = isPureViewing || canEnterPureViewing
     editingPanel.setControlsEnabled(!isBusy && !editPreviewPending)
     canvas.cropInteractionEnabled = !isBusy && !editPreviewPending
     formatPicker.isEnabled = !isBusy && !formats.isEmpty
@@ -807,6 +814,18 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     let folder = directoryURL?.lastPathComponent
     folderLabel.stringValue = "\(folder.map { "当前文件夹：\($0)" } ?? "已选图片") · \(isListing ? "读取中…" : "\(files.count) 张")"
     folderLabel.toolTip = directoryURL?.path ?? "仅浏览显式选择的图片；打开单张图片会自动列出同目录图片。"
+  }
+
+  /// Frame delivery must not scan the file list or rebuild unrelated controls.
+  private func updateFrameControls() {
+    previousFrameButton.isEnabled = !isEditingImage && details != nil && frameIndex > 0 && !framePending
+    nextFrameButton.isEnabled = !isEditingImage && details.map { frameIndex + 1 < $0.frameCount } == true && !framePending
+    animationButton.isEnabled = !isEditingImage && details?.isAnimated == true
+    animationButton.title = isAnimating ? "暂停动图" : "播放动图"
+    frameLabel.stringValue = details.map { "\(frameIndex + 1) / \($0.frameCount) \($0.isAnimated ? "帧" : "页")" } ?? ""
+    convertButton.isEnabled = details != nil && !isBusy && !formats.isEmpty && !framePending && !editPreviewPending
+    editButton.isEnabled = details != nil && !isBusy && !framePending && !editPreviewPending
+    pureViewingButton.isEnabled = isPureViewing || canEnterPureViewing
   }
 
   // Slideshow deadlines are independent of an animated image's per-frame timer.
@@ -1115,46 +1134,11 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
   func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
     guard files.indices.contains(row) else { return nil }
-    let file = files[row]
-    let cell = NSTableCellView()
-    let name = NSTextField(labelWithString: file.name)
-    name.lineBreakMode = .byTruncatingMiddle
-    name.font = .systemFont(ofSize: 12, weight: .medium)
-    let tags = NSTextField(labelWithString: "")
-    tags.font = .systemFont(ofSize: 10)
-    tags.lineBreakMode = .byTruncatingTail
-    let value = NSMutableAttributedString(string: "")
-    let colors: [NSColor] = [.secondaryLabelColor, .systemGray, .systemGreen, .systemPurple,
-                             .systemBlue, .systemYellow, .systemRed, .systemOrange]
-    for tag in file.tags {
-      value.append(NSAttributedString(string: "● ", attributes: [.foregroundColor: colors[tag.colorIndex]]))
-      value.append(NSAttributedString(string: "\(tag.name)  ", attributes: [.foregroundColor: NSColor.secondaryLabelColor]))
-    }
-    if file.tags.isEmpty {
-      value.append(NSAttributedString(string: "无 Finder 标签", attributes: [.foregroundColor: NSColor.tertiaryLabelColor]))
-    }
-    tags.attributedStringValue = value
-    let size = file.fileSize.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "大小未知"
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd HH:mm"
-    let modified = file.modificationDate.map(formatter.string) ?? "未知"
-    let created = file.creationDate.map(formatter.string) ?? "未知"
-    let showCreated = sortPicker.indexOfSelectedItem == 3
-    let metadata = NSTextField(labelWithString: "\(size) · \(showCreated ? "创建" : "修改") \(showCreated ? created : modified)")
-    metadata.font = .systemFont(ofSize: 10)
-    metadata.textColor = .secondaryLabelColor
-    metadata.lineBreakMode = .byTruncatingTail
-    let column = stack([name, tags, metadata], vertical: true, spacing: 3)
-    cell.addSubview(column)
-    cell.textField = name
-    cell.toolTip = ([file.name, size, "修改：\(modified)", "创建：\(created)"] + file.tags.map(\.name)).joined(separator: "\n")
-    NSLayoutConstraint.activate([
-      column.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 6),
-      column.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
-      column.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-      name.widthAnchor.constraint(equalTo: column.widthAnchor), tags.widthAnchor.constraint(equalTo: column.widthAnchor),
-      metadata.widthAnchor.constraint(equalTo: column.widthAnchor),
-    ])
+    let identifier = NSUserInterfaceItemIdentifier("image.file-list.cell")
+    let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? ImageFileListCell
+      ?? ImageFileListCell()
+    cell.identifier = identifier
+    cell.configure(files[row], showCreated: sortPicker.indexOfSelectedItem == 3)
     return cell
   }
 
@@ -1329,4 +1313,79 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     applyPureWindowAppearance()
   }
   func windowDidBecomeKey(_ notification: Notification) { refreshList() }
+}
+
+/// Reuse the sidebar's controls and constraints while replacing every row value.
+final class ImageFileListCell: NSTableCellView {
+  private let nameLabel = NSTextField(labelWithString: "")
+  private let tagsLabel = NSTextField(labelWithString: "")
+  private let metadataLabel = NSTextField(labelWithString: "")
+  private static var formatterLocale = Locale.current
+  private static var formatterTimeZone = TimeZone.current
+  private static var formatterCalendar = Calendar.current
+  private static var dateFormatter = makeDateFormatter()
+
+  private static func makeDateFormatter() -> DateFormatter {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd HH:mm"
+    return formatter
+  }
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    nameLabel.lineBreakMode = .byTruncatingMiddle
+    nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
+    tagsLabel.font = .systemFont(ofSize: 10)
+    tagsLabel.lineBreakMode = .byTruncatingTail
+    metadataLabel.font = .systemFont(ofSize: 10)
+    metadataLabel.textColor = .secondaryLabelColor
+    metadataLabel.lineBreakMode = .byTruncatingTail
+    let column = NSStackView(views: [nameLabel, tagsLabel, metadataLabel])
+    column.orientation = .vertical
+    column.alignment = .leading
+    column.spacing = 3
+    column.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(column)
+    textField = nameLabel
+    NSLayoutConstraint.activate([
+      column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+      column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+      column.centerYAnchor.constraint(equalTo: centerYAnchor),
+      nameLabel.widthAnchor.constraint(equalTo: column.widthAnchor),
+      tagsLabel.widthAnchor.constraint(equalTo: column.widthAnchor),
+      metadataLabel.widthAnchor.constraint(equalTo: column.widthAnchor),
+    ])
+  }
+
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  func configure(_ file: PlaylistFileMetadata, showCreated: Bool) {
+    nameLabel.stringValue = file.name
+    let value = NSMutableAttributedString(string: "")
+    let colors: [NSColor] = [.secondaryLabelColor, .systemGray, .systemGreen, .systemPurple,
+                             .systemBlue, .systemYellow, .systemRed, .systemOrange]
+    for tag in file.tags {
+      value.append(NSAttributedString(string: "● ", attributes: [.foregroundColor: colors[tag.colorIndex]]))
+      value.append(NSAttributedString(string: "\(tag.name)  ", attributes: [.foregroundColor: NSColor.secondaryLabelColor]))
+    }
+    if file.tags.isEmpty {
+      value.append(NSAttributedString(string: "无 Finder 标签", attributes: [.foregroundColor: NSColor.tertiaryLabelColor]))
+    }
+    tagsLabel.attributedStringValue = value
+    let size = file.fileSize.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "大小未知"
+    // Match fresh formatter defaults after the user's locale, calendar, or zone changes.
+    let locale = Locale.current
+    let timeZone = TimeZone.current
+    let calendar = Calendar.current
+    if locale != Self.formatterLocale || timeZone != Self.formatterTimeZone || calendar != Self.formatterCalendar {
+      Self.formatterLocale = locale
+      Self.formatterTimeZone = timeZone
+      Self.formatterCalendar = calendar
+      Self.dateFormatter = Self.makeDateFormatter()
+    }
+    let modified = file.modificationDate.map(Self.dateFormatter.string) ?? "未知"
+    let created = file.creationDate.map(Self.dateFormatter.string) ?? "未知"
+    metadataLabel.stringValue = "\(size) · \(showCreated ? "创建" : "修改") \(showCreated ? created : modified)"
+    toolTip = ([file.name, size, "修改：\(modified)", "创建：\(created)"] + file.tags.map(\.name)).joined(separator: "\n")
+  }
 }
