@@ -9,7 +9,6 @@ import plistlib
 import re
 import subprocess
 import sys
-import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -20,12 +19,14 @@ sys.path.insert(0, str(ROOT / "other"))
 import generate_update_feed as producer
 import validate_release_progress as progress
 import verify_appcast as policy
+from test_app_workspace import TestAppWorkspace
 
 
 class SignedUpdates(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temporary = tempfile.TemporaryDirectory(prefix="chengying-update-tests-")
+        cls.temporary = TestAppWorkspace(prefix="chengying-update-tests-")
+        cls.addClassCleanup(cls.temporary.cleanup)
         cls.directory = Path(cls.temporary.name)
         cls.sparkle = Path(os.environ["SPARKLE_TEST_ROOT"])
         producer.validate_sparkle(cls.sparkle)
@@ -448,10 +449,16 @@ class SignedUpdates(unittest.TestCase):
         failure = subprocess.CompletedProcess(
             [], 1, b"sensitive tool output", b"sensitive tool error"
         )
+        original_run = subprocess.run
+
+        def fail_signing_only(arguments, **kwargs):
+            if "--ed-key-file" in arguments:
+                return failure
+            return original_run(arguments, **kwargs)
+
         with (
             patch.dict(os.environ, {"SPARKLE_ED25519_PRIVATE_KEY": self.key.decode()}),
-            patch.object(subprocess, "check_output", return_value="arm64\n"),
-            patch.object(subprocess, "run", return_value=failure),
+            patch.object(subprocess, "run", side_effect=fail_signing_only),
             self.assertRaises(ValueError) as caught,
         ):
             producer.generate(

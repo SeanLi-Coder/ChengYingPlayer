@@ -11,8 +11,9 @@ import signal
 import struct
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
+
+from test_app_workspace import TestAppWorkspace, unregister_test_apps
 
 BUNDLE_ID = "io.github.SeanLi-Coder.ChengYingPlayer"
 ARM64 = 0x0100000C
@@ -322,6 +323,21 @@ def snapshot(root):
     return result
 
 
+def detach_verification_volume(mount):
+    """Unregister owned bundles and still try normal detach if that fails."""
+    errors = []
+    try:
+        unregister_test_apps(mount)
+    except BaseException as error:
+        errors.append(error)
+    try:
+        subprocess.run(["hdiutil", "detach", str(mount)], check=True, timeout=120)
+    except BaseException as error:
+        errors.append(error)
+    if errors:
+        raise BaseExceptionGroup("DMG verification volume cleanup failed.", errors)
+
+
 def package(application, output):
     application = application.resolve(strict=True)
     output_parent = output.parent.resolve(strict=True)
@@ -342,7 +358,8 @@ def package(application, output):
         )
     info = validate_application(application)
     original = snapshot(application)
-    work = Path(tempfile.mkdtemp(prefix=".chengying-dmg-", dir=output_parent))
+    workspace = TestAppWorkspace(prefix=".chengying-dmg-", dir=output_parent)
+    work = Path(workspace.name)
     mount = work / "mounted"
     attach_attempted = False
     try:
@@ -439,7 +456,7 @@ def package(application, output):
                 str(mounted_app),
             ]
         )
-        run(["hdiutil", "detach", str(mount)])
+        detach_verification_volume(mount)
         attach_attempted = False
         require(
             snapshot(application) == original,
@@ -463,17 +480,21 @@ def package(application, output):
             raise
         print(f"Created {output}\nSHA-256: {checksum}", flush=True)
     finally:
-        if attach_attempted:
-            result = subprocess.run(["hdiutil", "detach", str(mount)], check=False)
-            if result.returncode != 0 and os.path.ismount(mount):
-                print(
-                    f"Could not detach private DMG mount; preserving temporary directory: {work}",
-                    file=sys.stderr,
-                )
-            else:
-                shutil.rmtree(work)
-        else:
-            shutil.rmtree(work)
+        primary_error = sys.exception()
+        errors = []
+        if attach_attempted and os.path.ismount(mount):
+            try:
+                detach_verification_volume(mount)
+            except BaseException as error:
+                errors.append(error)
+        try:
+            workspace.cleanup()
+        except BaseException as error:
+            errors.append(error)
+        if errors:
+            if primary_error is not None:
+                errors.insert(0, primary_error)
+            raise BaseExceptionGroup("DMG packaging cleanup failed.", errors)
 
 
 def main():

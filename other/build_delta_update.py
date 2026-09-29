@@ -7,10 +7,12 @@ import os
 import plistlib
 import stat
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from download_previous_release import digest, verify_downloads
+from test_app_workspace import unregister_test_apps
 from verify_appcast import (
     SPARKLE,
     require,
@@ -60,6 +62,25 @@ def verify_application(app, info):
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
 
 
+def detach_verification_volume(mount, primary_error=None):
+    """Unregister owned bundles and detach normally without hiding any failure."""
+    errors = []
+    try:
+        unregister_test_apps(mount)
+    except BaseException as error:
+        errors.append(error)
+    try:
+        subprocess.run(
+            ["hdiutil", "detach", "-quiet", str(mount)], check=True, timeout=120
+        )
+    except BaseException as error:
+        errors.append(error)
+    if errors:
+        if primary_error is not None:
+            errors.insert(0, primary_error)
+        raise BaseExceptionGroup("Release verification volume cleanup failed.", errors)
+
+
 def verify_archive_application(archive, app, info, staging):
     """Ensure full and delta updates install the identical signed application."""
     mount = staging / "current-volume"
@@ -93,10 +114,8 @@ def verify_archive_application(archive, app, info, staging):
             "Full archive and delta target application differ.",
         )
     finally:
-        if mounted:
-            subprocess.run(
-                ["hdiutil", "detach", "-quiet", str(mount)], check=True, timeout=120
-            )
+        if mounted or os.path.ismount(mount):
+            detach_verification_volume(mount, sys.exception())
 
 
 def authenticated_previous_app(directory, current_info, current_tag, staging):
@@ -176,10 +195,8 @@ def authenticated_previous_app(directory, current_info, current_tag, staging):
             "Previous application changed while copying from its verified archive.",
         )
     finally:
-        if mounted:
-            subprocess.run(
-                ["hdiutil", "detach", "-quiet", str(mount)], check=True, timeout=120
-            )
+        if mounted or os.path.ismount(mount):
+            detach_verification_volume(mount, sys.exception())
     return destination, info
 
 

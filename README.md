@@ -344,6 +344,15 @@ Dolby Vision 基础层色彩回退另有固定源码回归 `bash Tools/HDRSource
 
 完整 App 通过验证后，用 `bash other/package_dmg.sh /绝对路径/ChengYing.app /已有输出目录/ChengYingPlayer-v<版本>-Apple-Silicon.dmg` 打包。脚本不会修改输入 App，不覆盖已有输出，并验证签名、arm64、内部动态依赖、只读挂载和拷贝完整性。正式 Developer ID 签名与公证需要自己的 Apple 开发者凭据；不得使用上游身份或在仓库中提交私钥。
 
+发布验证统一使用 `other/verify_public_release.py --help` 所列入口，传入上一版已验证的
+报告目录、固定 Sparkle 工具和本版 helper 身份。下载的安装包、校验和、独立可信
+`trusted-app-info.plist` 与报告保留；展开的 App、测试挂载点及 Sparkle 缓存放入
+唯一的 `.noindex` 临时目录，成功、失败或正常取消退出时自动精确注销并清理，
+避免应用搜索积累同名测试副本。清理失败不会写总成功报告，也不会强制卸载或停止安全软件。
+不要再复制旧的 `build/verify-v*-public.py` 生成新的持久测试 App。
+手动 Xcode 开发时也请把 DerivedData 设在独立 `.noindex` 目录，退出开发 App 后再清理；
+自动工具只拥有自己创建的临时目录，不会删除手动构建的 App 或正式安装。
+
 每个安装版 Release 的源码归档包含同一提交的项目、Swift 包、播放栈、媒体工具、helper 对应依赖源码与播放构建记录。具体版本、校验值与许可证见 [`other/third_party_sources.sh`](other/third_party_sources.sh)、[`other/playback_sources.sh`](other/playback_sources.sh)、[`Tools/DownloaderHelper/runtime-sources.json`](Tools/DownloaderHelper/runtime-sources.json)、[`NOTICE.md`](NOTICE.md) 和 [`Legal/THIRD_PARTY_NOTICES.md`](Legal/THIRD_PARTY_NOTICES.md)。依赖或选项变化时，必须同步更新源码、通知、校验和回归测试。
 
 ## 参与开发

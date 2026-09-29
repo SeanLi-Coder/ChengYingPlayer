@@ -8,11 +8,14 @@ import os
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT / "other"))
+from test_app_workspace import TestAppWorkspace, unregister_test_apps
 SPEC = importlib.util.spec_from_file_location(
     "package_dmg", PROJECT_ROOT / "other/package_dmg.py"
 )
@@ -29,7 +32,8 @@ def command(*arguments, capture=False):
 class PackagingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temporary = tempfile.TemporaryDirectory(prefix="chengying packaging tests ")
+        cls.temporary = TestAppWorkspace(prefix="chengying packaging tests ")
+        cls.addClassCleanup(cls.temporary.cleanup)
         cls.root = Path(cls.temporary.name).resolve()
         cls.native = cls.root / "fixture"
         cls.intel = cls.root / "intel-fixture"
@@ -134,7 +138,10 @@ class PackagingTests(unittest.TestCase):
             )
             self.assertEqual(PACKAGER.snapshot(mount / "ChengYing.app"), original)
         finally:
-            command("hdiutil", "detach", str(mount))
+            try:
+                unregister_test_apps(mount)
+            finally:
+                command("hdiutil", "detach", str(mount))
         with self.assertRaisesRegex(ValueError, "overwrite"):
             PACKAGER.package(self.application, output)
 

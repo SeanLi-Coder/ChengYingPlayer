@@ -26,14 +26,27 @@
 
 # Local release verification hygiene
 
+- Use the tracked `other/verify_public_release.py` for public install validation,
+  with the previous verified report directory and its independent trusted plist.
+  Do not create new one-off persistent-app verifiers in ignored `build/` scripts.
+- New app-producing verification code must use `TestAppWorkspace` from
+  `other/test_app_workspace.py`. It creates a unique owned `.noindex` tree and
+  automatically checks processes/mounts, unregisters exact bundle paths, verifies
+  absence in LaunchServices, then removes only its own disposable directory.
+  Keep release archives, reports and trusted metadata outside that directory.
+  Cleanup failure blocks overall success and preserves evidence; never ignore
+  its failure marker or stop a system/security process to make cleanup pass.
+- Keep Sparkle's generator cache inside the same owned workspace, including its
+  verified app copy. Do not let release helpers expand apps into global caches.
 - Put new expanded test apps and temporary DMG mountpoints in unique directories
   under `build/ReleaseVerification.noindex/`, not directly under `build/`.
 - Preserve verified `Info.plist` bytes as a separate `trusted-app-info.plist`
   alongside archives and reports before retiring test apps. The next release must
   not depend on a retained test `.app` for its previous trusted update identity.
 - In cleanup, unregister only the exact test bundle paths owned by that run, then
-  detach its read-only volumes normally. Recycle verified disposable test apps
-  after checking none is running. Record incomplete cleanup instead of forcing it.
+  detach its read-only volumes normally. Automatically retire managed disposable
+  trees; use recoverable cleanup for older manually retained copies only after
+  checking none is running. Record incomplete cleanup instead of forcing it.
   `.noindex` alone does not remove LaunchServices entries for an executed app.
 - Never reset global Spotlight or LaunchServices databases, alter a test bundle's
   signed identity, force-unmount busy volumes, or delete the installed app, user

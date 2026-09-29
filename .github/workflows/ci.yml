@@ -47,6 +47,9 @@ jobs:
           python3 -B Tools/SparkleUpdateTests/test_release_policy.py
           python3 -B Tools/SparkleUpdateTests/test_release_delivery.py
           python3 -B Tools/SparkleUpdateTests/test_delta_assets.py
+          python3 -B Tools/SparkleUpdateTests/test_app_workspace.py
+          CHENGYING_RUN_LAUNCHSERVICES_TESTS=1 python3 -B Tools/SparkleUpdateTests/test_app_workspace.py LaunchServicesIntegrationTests
+          python3 -B Tools/SparkleUpdateTests/test_public_workspace.py
 
       - name: Test pinned playback source downloads
         run: python3 -B Tools/PlaybackBuildTests/test_sources.py

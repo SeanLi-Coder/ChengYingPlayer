@@ -7,12 +7,13 @@ import hashlib
 import os
 import plistlib
 import shutil
+import signal
 import subprocess
-import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from build_delta_update import build_delta, verify_archive_application
+from build_delta_update import build_delta, tree_manifest, verify_archive_application
+from test_app_workspace import TestAppWorkspace
 from verify_appcast import (
     RELEASES,
     SPARKLE,
@@ -65,6 +66,61 @@ def sign_file(tool, path, secret, *, print_signature=False):
     return result.stdout.decode("ascii").strip() if print_signature else None
 
 
+def prepare_signing_cache(tool, app, archive_digest, staging):
+    """Keep Sparkle 2.10's extracted archive cache inside this owned workspace."""
+    require(
+        len(archive_digest) == 64
+        and all(character in "0123456789abcdef" for character in archive_digest),
+        "The appcast cache requires a canonical archive SHA-256 digest.",
+    )
+    signing_home = staging / "sparkle-home"
+    signing_home.mkdir()
+    environment = dict(os.environ, CFFIXED_USER_HOME=str(signing_home))
+    environment.pop("SPARKLE_ED25519_PRIVATE_KEY", None)
+    help_result = subprocess.run(
+        [str(tool), "--help"], env=environment, capture_output=True, timeout=30
+    )
+    help_text = " ".join(help_result.stdout.decode("utf-8", errors="replace").split())
+    require(
+        help_result.returncode == 0
+        and "Extracted archives that are needed are cached in "
+        "~/Library/Caches/Sparkle_generate_appcast " in help_text,
+        "The pinned appcast generator's cache layout could not be verified.",
+    )
+    # Help abbreviates the path with '~'. Check Foundation's actual cache path
+    # in a separate child with the same environment before passing any key.
+    probe = subprocess.run(
+        [
+            "/usr/bin/osascript", "-l", "JavaScript", "-e",
+            'ObjC.import("Foundation"); '
+            '$.NSFileManager.defaultManager.URLsForDirectoryInDomains(13, 1).firstObject.path.js',
+        ],
+        env=environment, capture_output=True, timeout=30,
+    )
+    caches = signing_home / "Library/Caches"
+    require(
+        probe.returncode == 0
+        and probe.stdout.decode("utf-8", errors="replace").strip() == str(caches),
+        "The appcast generator's cache could not be isolated to its workspace.",
+    )
+    cache = caches / "Sparkle_generate_appcast"
+    destination = cache / archive_digest
+    destination.mkdir(parents=True)
+    require(
+        destination.resolve(strict=True) == destination
+        and staging in destination.parents,
+        "The appcast cache escaped its owned workspace.",
+    )
+    original = tree_manifest(app)
+    cached_app = destination / app.name
+    shutil.copytree(app, cached_app, symlinks=True)
+    require(
+        tree_manifest(cached_app) == original == tree_manifest(app),
+        "The verified application changed while preparing the appcast cache.",
+    )
+    return environment, cache, cached_app, original
+
+
 def generate(
     app, archive, destination, tag, sparkle_root, *, previous_release_directory=None
 ):
@@ -95,7 +151,7 @@ def generate(
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
     tool = validate_sparkle(sparkle_root)
     before = digest(archive)
-    with tempfile.TemporaryDirectory(prefix="chengying-feed-sign-") as directory:
+    with TestAppWorkspace(prefix="chengying-feed-sign-") as directory:
         staging = Path(directory)
         verify_archive_application(archive, app, info, staging)
         delta = None
@@ -115,6 +171,9 @@ def generate(
         signing.mkdir()
         staged_archive = signing / archive.name
         shutil.copyfile(archive, staged_archive)
+        environment, cache, cached_app, cached_tree = prepare_signing_cache(
+            tool, app, before, staging
+        )
         result = subprocess.run(
             [
                 str(tool),
@@ -122,6 +181,7 @@ def generate(
                 "-",
                 "--maximum-deltas",
                 "0",
+                "--verbose",
                 "--download-url-prefix",
                 f"{RELEASES}/download/{tag}/",
                 "--link",
@@ -129,6 +189,7 @@ def generate(
                 str(signing),
             ],
             input=secret.encode(),
+            env=environment,
             capture_output=True,
             check=False,
             timeout=600,
@@ -137,6 +198,12 @@ def generate(
         require(
             result.returncode == 0,
             "Sparkle could not sign the release; check the signing configuration.",
+        )
+        require(
+            f"Unarchiving to temp directory {cache}".encode() in result.stdout
+            and tree_manifest(cached_app) == cached_tree
+            and not os.path.lexists(cache / f"{before}.tmp"),
+            "The appcast generator did not preserve its verified local cache.",
         )
         require(
             digest(staged_archive) == before and digest(archive) == before,
@@ -224,4 +291,9 @@ def main():
 
 
 if __name__ == "__main__":
+    def interrupted(_number, _frame):
+        raise KeyboardInterrupt
+
+    for termination_signal in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(termination_signal, interrupted)
     main()

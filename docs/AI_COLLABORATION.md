@@ -212,12 +212,21 @@ Release status: not released / draft / publicly verified
 
 ### 发布测试副本清理规则（2026-09-29）
 
+防复发已接入受版本管理的工具，详见
+[`发布验证工作区防重复交接`](handoffs/2026-09-29-test-app-isolation.md)。
+以后使用 `other/verify_public_release.py`；不要再复制 ignored `build/verify-v*-public.py`。
+`TestAppWorkspace` 自动隔离、检查占用、精确注销并复核注册记录，随后仅删除本次独占生成的
+临时树；打包、增量签名和 Sparkle 内部展开缓存也已接入。归档、报告与可信 plist 保留在树外。
+正常失败及取消会执行退出清理；被系统占用或状态有疑问时，保留隔离目录、记录失败并阻止
+总成功报告，不杀进程、不强制卸载、不重置索引。强制断电／SIGKILL 无法运行退出代码，
+不能承诺这种情况自动清理成功；仍须按精确目录核实，不能自动删除未知残留。
+
 应用搜索中多个同名 ChengYing 曾来自本机公开增量验证后留下的还原 `.app`，
 不是已证实的自动更新重复安装。今后的展开副本与测试挂载点统一放在
 `build/ReleaseVerification.noindex/` 下的独立任务目录。
 `.noindex` 不能代替 LaunchServices 清理：执行过的测试 App 仍可能被注册。
 测试结束（包括失败退出）须按本轮精确路径注销测试副本、正常卸载测试卷；
-确认副本未运行后将其移入废纸篓，不能全局重建系统索引或强制卸载忙碌卷。
+受管临时树由工具自动收尾，历史手工副本确认未运行后采用可恢复清理；不能全局重建系统索引或强制卸载忙碌卷。
 
 保留 DMG、delta、签名 feed、校验和、源码归档和验证报告；另将已验证 App 的
 原始 `Info.plist` 保存为同目录的 `trusted-app-info.plist`，供下一次验证旧版身份及

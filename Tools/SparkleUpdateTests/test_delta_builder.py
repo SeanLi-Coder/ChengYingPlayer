@@ -9,7 +9,6 @@ import plistlib
 import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -20,12 +19,14 @@ import build_delta_update as builder
 import download_previous_release as previous
 import generate_update_feed as producer
 import verify_appcast as policy
+from test_app_workspace import TestAppWorkspace
 
 
 class DeltaBuilder(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temporary = tempfile.TemporaryDirectory(prefix="chengying-delta-builder-")
+        cls.temporary = TestAppWorkspace(prefix="chengying-delta-builder-")
+        cls.addClassCleanup(cls.temporary.cleanup)
         cls.directory = Path(cls.temporary.name)
         cls.sparkle = Path(os.environ["SPARKLE_TEST_ROOT"]).resolve()
         producer.validate_sparkle(cls.sparkle)
@@ -184,7 +185,6 @@ class DeltaBuilder(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.key = ""
-        cls.temporary.cleanup()
 
     def test_real_delta_is_small_and_signed_alongside_full_fallback(self):
         policy.verify(self.feed, self.archive, self.new_info, self.tag)
@@ -216,6 +216,51 @@ class DeltaBuilder(unittest.TestCase):
             builder.tree_manifest(destination), builder.tree_manifest(self.new_app)
         )
         builder.verify_application(destination, self.new_info)
+
+    def test_appcast_cache_is_owned_and_removed_after_signing(self):
+        prepared = []
+        prepare = producer.prepare_signing_cache
+
+        def observe_cache(tool, app, archive_digest, staging):
+            result = prepare(tool, app, archive_digest, staging)
+            environment, cache, cached_app, original = result
+            self.assertEqual(environment["CFFIXED_USER_HOME"], str(staging / "sparkle-home"))
+            self.assertNotIn("SPARKLE_ED25519_PRIVATE_KEY", environment)
+            self.assertTrue(staging.name.endswith(".noindex"))
+            self.assertIn(staging, cache.parents)
+            self.assertEqual(cached_app.parent.name, previous.digest(self.archive))
+            self.assertEqual(builder.tree_manifest(cached_app), original)
+            prepared.append(staging)
+            return result
+
+        output = self.directory / "cache-isolation/appcast.xml"
+        with (
+            patch.dict(os.environ, {"SPARKLE_ED25519_PRIVATE_KEY": self.key}),
+            patch.object(producer, "prepare_signing_cache", side_effect=observe_cache),
+        ):
+            producer.generate(self.new_app, self.archive, output, self.tag, self.sparkle)
+        self.assertEqual(len(prepared), 1)
+        self.assertFalse(prepared[0].exists())
+        policy.verify(output, self.archive, self.new_info, self.tag)
+
+    def test_unrecognized_appcast_cache_fails_before_any_key_is_passed(self):
+        with TestAppWorkspace(prefix="chengying-cache-preflight-") as directory:
+            with (
+                patch.object(
+                    producer.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 0, b"Unexpected cache layout", b""),
+                ) as runner,
+                self.assertRaisesRegex(ValueError, "cache layout"),
+            ):
+                producer.prepare_signing_cache(
+                    self.sparkle / "bin/generate_appcast", self.new_app,
+                    previous.digest(self.archive), Path(directory),
+                )
+            self.assertEqual(runner.call_count, 1)
+            self.assertNotIn("input", runner.call_args.kwargs)
+            self.assertNotIn(
+                "SPARKLE_ED25519_PRIVATE_KEY", runner.call_args.kwargs["env"]
+            )
 
     def test_same_length_delta_tampering_fails_signature(self):
         temporary = self.directory / "tampered"
