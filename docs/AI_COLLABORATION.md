@@ -210,6 +210,25 @@ Release status: not released / draft / publicly verified
 
 ## 9. 最新 Codex review 交接
 
+### 发布测试副本清理规则（2026-09-29）
+
+应用搜索中多个同名 ChengYing 曾来自本机公开增量验证后留下的还原 `.app`，
+不是已证实的自动更新重复安装。今后的展开副本与测试挂载点统一放在
+`build/ReleaseVerification.noindex/` 下的独立任务目录。
+`.noindex` 不能代替 LaunchServices 清理：执行过的测试 App 仍可能被注册。
+测试结束（包括失败退出）须按本轮精确路径注销测试副本、正常卸载测试卷；
+确认副本未运行后将其移入废纸篓，不能全局重建系统索引或强制卸载忙碌卷。
+
+保留 DMG、delta、签名 feed、校验和、源码归档和验证报告；另将已验证 App 的
+原始 `Info.plist` 保存为同目录的 `trusted-app-info.plist`，供下一次验证旧版身份及
+更新公钥，不再依赖展开 `.app` 长期留存。不能改 Bundle ID 来隐藏副本，也不触碰
+`/Applications` 正式版、用户媒体、模型、设置或下载历史。这类开发机清理不需要发布新 App。
+
+本轮已将 9 个确认的测试副本移入废纸篓并注销原路径／废纸篓路径；Spotlight 与
+LaunchServices 均只返回正式安装的 App。保留 8 个版本的独立可信 plist 和全部发行证据，
+未清空废纸篓、未升级或修改正式安装。需要测试副本时可从保留的 DMG 重新提取，
+不应依赖废纸篓长期留存。此结果仅针对开发机，不代表远端机器也做了清理。
+
 下载中心的可复制脱敏诊断日志见
 [`2026-09-29 下载诊断交接`](handoffs/2026-09-29-download-diagnostics.md)。
 `v0.2.47` / build `58` 已于北京时间 2026-09-29 07:25:21 正式发布，标签提交 `5198f11f`。

@@ -24,6 +24,21 @@
 - Documentation-only handoffs do not require a new player version or release tag.
   Player releases must still satisfy every requirement below.
 
+# Local release verification hygiene
+
+- Put new expanded test apps and temporary DMG mountpoints in unique directories
+  under `build/ReleaseVerification.noindex/`, not directly under `build/`.
+- Preserve verified `Info.plist` bytes as a separate `trusted-app-info.plist`
+  alongside archives and reports before retiring test apps. The next release must
+  not depend on a retained test `.app` for its previous trusted update identity.
+- In cleanup, unregister only the exact test bundle paths owned by that run, then
+  detach its read-only volumes normally. Recycle verified disposable test apps
+  after checking none is running. Record incomplete cleanup instead of forcing it.
+  `.noindex` alone does not remove LaunchServices entries for an executed app.
+- Never reset global Spotlight or LaunchServices databases, alter a test bundle's
+  signed identity, force-unmount busy volumes, or delete the installed app, user
+  data, models, release archives, checksums or verification reports for cleanup.
+
 # Player release requirements
 
 - Every future stable player release must preserve working automatic updates. This
