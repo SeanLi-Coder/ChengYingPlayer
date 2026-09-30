@@ -4,7 +4,7 @@
 "reload" = "刷新 / 重试";
 "directory" = "选择下载目录…";
 "directory.choose" = "选择文件夹";
-"directory.message" = "选择后请在下载页面点击“保存设置”，新任务才会使用这个目录。";
+"directory.message" = "新任务会直接在所选目录下创建作者名文件夹，不再套一层应用名或平台名目录。选择后请在下载页面点击“保存设置”；已有任务保留原位置。";
 "web.accessibility" = "小红书、抖音、Bilibili 和 YouTube 下载中心";
 "status.starting" = "正在启动下载中心…";
 "status.starting.detail" = "正在准备应用内置的下载服务。下载文件和设置均保存在这台 Mac 上。";

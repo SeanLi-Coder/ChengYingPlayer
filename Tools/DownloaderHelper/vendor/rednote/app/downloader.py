@@ -12,6 +12,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -69,7 +70,14 @@ from .errors import (
     classify_site_issue,
     is_explicit_rate_limit_message,
 )
-from .models import DownloadItem, MediaType, Platform, SourceKind, TransferProgress
+from .models import (
+    DownloadItem,
+    MediaType,
+    OutputLayout,
+    Platform,
+    SourceKind,
+    TransferProgress,
+)
 from .kuaishou import discover as discover_kuaishou
 from .kuaishou import is_media_url as is_kuaishou_media_url
 from .kuaishou import source_identity as kuaishou_source_identity
@@ -350,17 +358,30 @@ def safe_component(
 
 
 def platform_output_directory(
-    platform: Platform, output_root: str | Path, author: str | None
+    platform: Platform,
+    output_root: str | Path,
+    author: str | None,
+    *,
+    output_layout: OutputLayout = OutputLayout.PLATFORM_AUTHOR,
 ) -> Path:
-    """Compute the real per-platform, per-author output directory.
+    """Compute the task's persisted author-folder layout.
 
-    Kuaishou work is stored in its own ``Kuaishou`` folder so it never mixes with
-    another platform's output; every other platform keeps its original layout. The
-    author segment is sanitized so a crafted author name cannot escape the folder.
+    The independent engine and legacy tasks retain their Kuaishou parent folder.
+    New native tasks opt into one direct author child of the selected root.
+    Sanitization applies equally to both policies.
     """
+    output_layout = OutputLayout(output_layout)
     root = Path(output_root).expanduser()
-    author_folder = safe_component(author, fallback=f"{platform.value}-author")
-    base = root / KUAISHOU_OUTPUT_FOLDER if platform == Platform.KUAISHOU else root
+    fallback = (
+        "Unknown Author" if output_layout == OutputLayout.AUTHOR
+        else f"{platform.value}-author"
+    )
+    author_folder = safe_component(author, fallback=fallback)
+    base = (
+        root / KUAISHOU_OUTPUT_FOLDER
+        if platform == Platform.KUAISHOU and output_layout == OutputLayout.PLATFORM_AUTHOR
+        else root
+    )
     return base / author_folder
 
 
@@ -559,6 +580,7 @@ class DownloaderConfig:
     fragment_retries: int = 10
     concurrent_fragments: int = 4
     filename_limit: int = 180
+    preserve_existing_files: bool = False
 
 
 @dataclass(slots=True)
@@ -1369,7 +1391,12 @@ class MediaDownloader:
         should_cancel: CancelCallback | None = None,
     ) -> DownloadOutcome:
         should_cancel = should_cancel or (lambda: False)
-        output_path = Path(output_dir).expanduser().resolve()
+        selected_path = Path(output_dir).expanduser()
+        if self.config.preserve_existing_files and selected_path.is_symlink():
+            raise MediaDownloadError(
+                "The author download folder cannot be a symbolic link"
+            )
+        output_path = selected_path.resolve()
         output_path.mkdir(parents=True, exist_ok=True)
         if platform == Platform.KUAISHOU:
             return self._download_kuaishou_item(
@@ -4249,6 +4276,16 @@ class MediaDownloader:
         def operation(use_cookies: bool) -> tuple[dict[str, Any], list[str]]:
             final_paths.clear()
             self._prepare_ytdlp_parts_dir(parts_dir, output_dir)
+            isolated_output = (
+                self.config.preserve_existing_files and not expected_douyin_id
+            )
+            download_home = parts_dir / "verified-output" if isolated_output else output_dir
+            if isolated_output:
+                if download_home.is_symlink():
+                    raise MediaDownloadError(
+                        "The private download output folder cannot be a symbolic link"
+                    )
+                download_home.mkdir(exist_ok=True)
             logger = _YdlLogger(callback)
             options = {
                 **(
@@ -4258,7 +4295,7 @@ class MediaDownloader:
                 ),
                 **self._download_format_options(platform),
                 "paths": {
-                    "home": str(output_dir),
+                    "home": str(download_home),
                     "temp": str(parts_dir),
                 },
                 "outtmpl": {"default": OUTPUT_TEMPLATE},
@@ -4427,6 +4464,27 @@ class MediaDownloader:
                         expected_douyin_profile_id,
                     )
             paths = [*final_paths, *candidates]
+            if isolated_output:
+                if any(Path(path).is_symlink() for path in paths):
+                    raise MediaDownloadError(
+                        "The private download output cannot be a symbolic link"
+                    )
+                completed_paths = self._existing_unique_paths(paths)
+                if not completed_paths:
+                    raise MediaDownloadError(
+                        "yt-dlp finished but no private output file was found"
+                    )
+                paths = []
+                for completed_path in completed_paths:
+                    source = Path(completed_path)
+                    if source.parent != download_home or source.is_symlink():
+                        raise MediaDownloadError(
+                            "The private download output escaped its task directory"
+                        )
+                    destination = self._publish_download(
+                        source, output_dir / source.name, should_cancel=should_cancel
+                    )
+                    paths.append(str(destination))
             return result, paths
 
         operation_succeeded = False
@@ -6237,7 +6295,7 @@ class MediaDownloader:
             )
             if should_cancel():
                 raise DownloadCancelledError("Task cancelled")
-            os.replace(probe_path, path)
+            path = self._publish_download(probe_path, path, should_cancel=should_cancel)
         except BaseException:
             probe_path.unlink(missing_ok=True)
             raise
@@ -6718,7 +6776,9 @@ class MediaDownloader:
                         if is_kuaishou_source and media_type == MediaType.IMAGE:
                             self._decode_local_image(temporary, should_cancel=should_cancel)
                             chosen.size = downloaded
-                        os.replace(temporary, path)
+                        path = self._publish_download(
+                            temporary, path, should_cancel=should_cancel
+                        )
                     except BaseException:
                         if temporary_fd >= 0:
                             with contextlib.suppress(OSError):
@@ -7179,6 +7239,58 @@ class MediaDownloader:
             if dimensions
             else None
         )
+
+    def _publish_download(
+        self, temporary: Path, target: Path, *, should_cancel: CancelCallback
+    ) -> Path:
+        """Commit new native output without replacing an unrelated existing file."""
+        if not self.config.preserve_existing_files:
+            os.replace(temporary, target)
+            return target
+        if temporary.is_symlink() or not temporary.is_file():
+            raise MediaDownloadError(
+                "The completed download is not a regular private file"
+            )
+        if target.parent.is_symlink():
+            raise MediaDownloadError("The author download folder cannot be a symbolic link")
+        candidate = target
+        for index in range(1, 10_001):
+            if should_cancel():
+                raise DownloadCancelledError("Task cancelled")
+            if index > 1:
+                suffix = f" [{index}]"
+                limit = MAX_FILENAME_COMPONENT_BYTES - len(
+                    (suffix + target.suffix).encode("utf-8")
+                )
+                stem = safe_component(target.stem, fallback="download", limit=max(1, limit))
+                candidate = target.with_name(f"{stem}{suffix}{target.suffix}")
+            try:
+                if sys.platform == "darwin":
+                    # RENAME_EXCL avoids requiring hard-link support. Unsupported
+                    # volumes fail closed. It never follows or replaces an
+                    # occupied destination, including a dangling symlink.
+                    import ctypes
+
+                    library = ctypes.CDLL(None, use_errno=True)
+                    rename = library.renamex_np
+                    rename.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+                    rename.restype = ctypes.c_int
+                    if rename(
+                        os.fsencode(temporary), os.fsencode(candidate), 0x00000004
+                    ):
+                        error = ctypes.get_errno()
+                        raise OSError(error, os.strerror(error))
+                else:
+                    os.link(temporary, candidate, follow_symlinks=False)
+                    temporary.unlink()
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                raise MediaDownloadError(
+                    "The completed download could not be saved without replacing existing files"
+                ) from exc
+            return candidate
+        raise MediaDownloadError("Too many existing files share this download name")
 
     def _xhs_output_path(
         self,

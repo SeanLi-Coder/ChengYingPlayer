@@ -9,10 +9,10 @@
   ],
   "allowed_patches": {
     "app/main.py": "Optional user-owned writable-path environment hooks; redact Kuaishou share query values from public responses.",
-    "app/models.py": "Add the Kuaishou platform enum without changing existing values; add a whitelisted local diagnostic category field to the job and item records.",
+    "app/models.py": "Add the Kuaishou platform enum without changing existing values; add a whitelisted local diagnostic category field to the job and item records; persist an opt-in author-only output layout with a legacy-compatible default.",
     "app/platforms.py": "Recognize strictly validated Kuaishou video, profile and share URLs.",
-    "app/downloader.py": "Connect Kuaishou discovery to verified transfer, proxy, progress and cancellation; validate album bytes, source/local SHA-256 receipts, non-first codec candidates and bounded hashing; share per-platform output paths; preserve fixed Cookie diagnostics and wrapped cancellation, apply the native same-jar Douyin session guard, and retain explicit anonymous fallback; deliver FFprobe prefix input without losing pipe bytes across cancellable polling timeouts.",
-    "app/task_manager.py": "Bind resolved Kuaishou share identities and preserve incomplete-profile retry semantics; persist whitelisted asset receipts with SHA-256 evidence, merging incremental updates without losing later saved members; keep unmatched Kuaishou profile items queued while discovery is incomplete; reuse the shared output directory calculation; and carry the whitelisted Cookie diagnostic category into task state.",
+    "app/downloader.py": "Connect Kuaishou discovery to verified transfer, proxy, progress and cancellation; validate album bytes, source/local SHA-256 receipts, non-first codec candidates and bounded hashing; share per-platform output paths; preserve fixed Cookie diagnostics and wrapped cancellation, apply the native same-jar Douyin session guard, and retain explicit anonymous fallback; deliver FFprobe prefix input without losing pipe bytes across cancellable polling timeouts; support opt-in direct author folders and atomically publish new native files without overwriting same-name output, staging generic transfers privately.",
+    "app/task_manager.py": "Bind resolved Kuaishou share identities and preserve incomplete-profile retry semantics; persist whitelisted asset receipts with SHA-256 evidence, merging incremental updates without losing later saved members; keep unmatched Kuaishou profile items queued while discovery is incomplete; reuse the shared output directory calculation; carry the whitelisted Cookie diagnostic category into task state; snapshot new native author-only layout while preserving existing task directories and legacy defaults, rejecting unsafe author folders and enabling exclusive publication for new native jobs.",
     "app/static/app.js": "Add Kuaishou labels, localized progress and error guidance; recognize resolved share profile jobs; localize each whitelisted Chrome Cookie diagnostic category; expose explicit Chrome profile saving without rebinding old tasks, preserve legacy values, and block creation during settings saves; localize bounded retry and skipped-work summaries.",
     "app/static/index.html": "Advertise Kuaishou inputs and expose Chrome profile directory-name settings with explicit new-task and independent-configuration guidance.",
     "tests/test_stop.py": "Isolate the no-server test from real localhost services and cover a disappearing legacy listener; production stop.py is unchanged.",
@@ -65,7 +65,7 @@
     {
       "path": "app/downloader.py",
       "upstream_sha256": "0401b8290cd9cda5b71a61a6d8086a3d59e7ad6f36d395bac9ec988f3e182573",
-      "vendored_sha256": "c7b8db093aa1b5729eab721766e9e0a2033e119b49310e18ad033fcfd1483508"
+      "vendored_sha256": "5d8a5a1a41941849aff50eb7f0ec5b0b9f43142a9758902451b47251a022845f"
     },
     {
       "path": "app/errors.py",
@@ -90,7 +90,7 @@
     {
       "path": "app/models.py",
       "upstream_sha256": "57f289db1d85bfb67de360cb7e2fbf1d7351b8c9541d83293efb6dfcc407e0ad",
-      "vendored_sha256": "42af1327680041ad19310042fb3b79ead424bafe3c36f4a65933363a461f4772"
+      "vendored_sha256": "3c1889f303bec354015af8f8cfb7d05720b4aa1786faf047452d8c37d74560ae"
     },
     {
       "path": "app/platforms.py",
@@ -135,7 +135,7 @@
     {
       "path": "app/task_manager.py",
       "upstream_sha256": "2264717a9ed202fc1db757d54140dea575c14799ec49bef48815fb679a862236",
-      "vendored_sha256": "3c2672949bb7eb96957b754df489de574398ec826d8b217d5232afe33e22b98c"
+      "vendored_sha256": "c1c0bb4f88c0ccb21243fbd8f488826d019c819b21a8cca5a81d99c1dcb9644d"
     },
     {
       "path": "app/xiaohongshu.py",

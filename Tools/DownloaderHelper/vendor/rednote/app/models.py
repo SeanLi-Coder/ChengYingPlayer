@@ -29,6 +29,11 @@ class SourceKind(str, Enum):
     SHORT_LINK = "short_link"
 
 
+class OutputLayout(str, Enum):
+    PLATFORM_AUTHOR = "platform_author"
+    AUTHOR = "author"
+
+
 class JobStatus(str, Enum):
     QUEUED = "queued"
     DISCOVERING = "discovering"
@@ -122,6 +127,8 @@ class DownloadJob(BaseModel):
     platform: Platform
     source_kind: SourceKind
     output_root: str
+    # Missing fields in older records retain their original path policy.
+    output_layout: OutputLayout = OutputLayout.PLATFORM_AUTHOR
     resolved_source_kind: SourceKind | None = None
     resolved_source_id: str | None = None
     status: JobStatus = JobStatus.QUEUED

@@ -53,6 +53,7 @@ from .models import (
     JobStatus,
     ManagerEvent,
     MediaType,
+    OutputLayout,
     Platform,
     SourceKind,
     TransferProgress,
@@ -292,7 +293,9 @@ class DownloadManager:
         default_output_root: str | Path = "downloads",
         max_workers: int = 2,
         downloader_config: DownloaderConfig | None = None,
+        new_job_output_layout: OutputLayout = OutputLayout.PLATFORM_AUTHOR,
     ) -> None:
+        self.new_job_output_layout = OutputLayout(new_job_output_layout)
         self.store = JsonJobStore(state_dir)
         self.default_output_root = Path(default_output_root).expanduser().resolve()
         self.default_output_root.mkdir(parents=True, exist_ok=True)
@@ -773,6 +776,7 @@ class DownloadManager:
             platform=url_info.platform,
             source_kind=url_info.kind,
             output_root=str(root),
+            output_layout=self.new_job_output_layout,
             cookie_browser=cookie_browser,
             cookie_profile=cookie_profile,
             cookie_profile_auto_selected=cookie_profile_auto_selected,
@@ -1059,6 +1063,43 @@ class DownloadManager:
         )
         self._futures[job.id] = future
 
+    def _prepare_output_directory(self, job: DownloadJob, author: str | None) -> Path:
+        preserve_existing = (
+            self.new_job_output_layout == OutputLayout.AUTHOR
+            or job.output_layout == OutputLayout.AUTHOR
+        )
+        if preserve_existing and job.output_dir:
+            # A retry must not relocate receipts or partially downloaded assets,
+            # even when the author has changed their display name.
+            output_dir = Path(job.output_dir)
+        else:
+            output_dir = platform_output_directory(
+                job.platform, job.output_root, author, output_layout=job.output_layout
+            )
+        if job.output_layout == OutputLayout.AUTHOR:
+            root = Path(job.output_root).expanduser().resolve()
+            # The root is user-selected and resolved when the task is created.
+            # Never follow a same-named author symlink into an unrelated tree.
+            if output_dir.parent != root or output_dir.is_symlink():
+                raise MediaDownloadError(
+                    "The author download folder is not a safe direct child of the selected directory"
+                )
+            if output_dir.exists() and not output_dir.is_dir():
+                raise MediaDownloadError(
+                    "The author download folder conflicts with an existing file"
+                )
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise MediaDownloadError(
+                "The author download folder could not be prepared"
+            ) from exc
+        if job.output_layout == OutputLayout.AUTHOR and (
+            output_dir.is_symlink() or output_dir.resolve().parent != root
+        ):
+            raise MediaDownloadError("The author download folder changed during preparation")
+        return output_dir
+
     def _run_job(
         self,
         job_id: str,
@@ -1116,11 +1157,8 @@ class DownloadManager:
                     job = self._require_job(job_id)
                     job.author = result.author
                     job.output_dir = str(
-                        platform_output_directory(
-                            job.platform, job.output_root, result.author
-                        )
+                        self._prepare_output_directory(job, result.author)
                     )
-                    Path(job.output_dir).mkdir(parents=True, exist_ok=True)
                     previous_items = job.items
                     if job.platform == Platform.KUAISHOU and result.items:
                         source_kinds = {item.metadata.get("kuaishou_source_kind") for item in result.items}
@@ -1241,16 +1279,11 @@ class DownloadManager:
                 self._notify(self.get_job(job_id), "discovered")
 
             job_snapshot = self.get_job(job_id)
-            if not job_snapshot.output_dir:
-                output_dir = platform_output_directory(
-                    job_snapshot.platform,
-                    job_snapshot.output_root,
-                    job_snapshot.author,
-                )
+            if (not job_snapshot.output_dir
+                    or job_snapshot.output_layout == OutputLayout.AUTHOR):
                 with self._lock:
                     job = self._require_job(job_id)
-                    job.output_dir = str(output_dir)
-                    Path(job.output_dir).mkdir(parents=True, exist_ok=True)
+                    job.output_dir = str(self._prepare_output_directory(job, job.author))
                     self._commit_locked(job)
 
             targets = set(item_ids or [])
@@ -2283,6 +2316,7 @@ class DownloadManager:
             self.downloader_config,
             cookie_browser=job.cookie_browser,
             cookie_profile=job.cookie_profile,
+            preserve_existing_files=job.output_layout == OutputLayout.AUTHOR,
         )
         return MediaDownloader(config)
 

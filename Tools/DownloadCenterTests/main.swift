@@ -86,6 +86,14 @@ check(bundledLocations.helper.deletingLastPathComponent() != bundledLocations.ff
 check(!bundledLocations.data.path.hasPrefix(applicationBundle.path + "/")
       && !bundledLocations.downloads.path.hasPrefix(applicationBundle.path + "/"),
       "Writable defaults remain outside the signed application bundle")
+check(bundledLocations.downloads == FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Downloads", isDirectory: true),
+      "Fresh native downloads default to Downloads without an application or platform subfolder")
+let applicationSupport = try FileManager.default.url(for: .applicationSupportDirectory,
+                                                     in: .userDomainMask, appropriateFor: nil, create: false)
+check(bundledLocations.data == applicationSupport.appendingPathComponent(
+        "io.github.SeanLi-Coder.ChengYingPlayer/DownloadCenter", isDirectory: true),
+      "Changing the media destination does not relocate saved settings or download history")
 let media = root.appendingPathComponent("fixture.mp4")
 let image = root.appendingPathComponent("fixture.webp")
 let executable = root.appendingPathComponent("fixture.command")
@@ -471,6 +479,8 @@ if DownloadCenterService.supportsRuntime {
   _ = fullPageValue("window.chengyingDownloadCenter.setDirectory('/tmp/Fixture folder'); undefined")
   check(fullPageValue("document.querySelector('#download-dir').value") as? String == "/tmp/Fixture folder",
         "The real native directory setter updates the original settings input without auto-saving")
+  check(fullPageValue("document.querySelector('#desktop-directory-note')?.textContent.includes('所选目录/ABC') === true") as? Bool == true,
+        "The directory hint explains direct author folders for new tasks")
   waitForPage("The preserved saved-file disclosure controls expose both native output actions", """
     (() => {
       const files = [...document.querySelectorAll('.item-files')];

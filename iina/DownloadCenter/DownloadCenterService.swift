@@ -24,7 +24,7 @@ final class DownloadCenterService {
       return Locations(helper: directory.deletingLastPathComponent().appendingPathComponent("Helpers/DownloadCenter.app/Contents/MacOS/chengying-download-center-helper"),
                        ffmpeg: directory.appendingPathComponent("ffmpeg"), ffprobe: directory.appendingPathComponent("ffprobe"),
                        data: support.appendingPathComponent("io.github.SeanLi-Coder.ChengYingPlayer/DownloadCenter", isDirectory: true),
-                       downloads: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/ChengYing", isDirectory: true))
+                       downloads: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true))
     }
   }
   enum State {

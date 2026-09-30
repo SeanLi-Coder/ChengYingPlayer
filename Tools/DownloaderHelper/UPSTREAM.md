@@ -302,6 +302,38 @@ without visiting public sites or loading user profiles. The isolated frontend
 suite is `node Tools/DownloaderProxyUITests/main.mjs`; native WebKit coverage is
 included in `bash Tools/DownloadCenterTests/run.sh`.
 
+### Native author-only download layout
+
+The native helper opts new tasks into `OutputLayout.AUTHOR` before accepting API
+requests. A selected root such as `~/app/data` produces `~/app/data/ABC` for author
+`ABC`, without an application or platform parent. Fresh native installations use
+`~/Downloads` as their initial root. Explicit saved roots are not rewritten, even
+if their final component is named `ChengYing` or `Kuaishou`.
+
+The task persists its layout alongside its root. Missing layout fields retain
+the legacy `PLATFORM_AUTHOR` policy; the independent engine keeps that default.
+Native retries, rediscovery and recovery keep an existing task's output directory,
+including when an author changes their display name. No old media is moved and
+no historical receipt is rebound to a newly computed directory. Author names
+remain sanitized direct children; an unknown native author uses `Unknown Author`.
+Existing author symlinks and conflicting regular files are rejected.
+
+Because different platforms can now share an author directory, new native tasks
+also opt into no-overwrite publication. Direct transfers and verified probe files
+are committed without replacing an existing target. Generic yt-dlp transfers
+finish in their existing task-private staging directory before publication.
+Collisions receive numbered filename suffixes within the UTF-8 component limit.
+On macOS, `renamex_np(RENAME_EXCL)` provides atomic exclusive publication; if a
+volume cannot support the operation, publication fails rather than overwriting.
+The non-macOS test/engine path uses exclusive hard-link publication. This does
+not transcode media or relax source identity, quality, receipt, proxy or login
+checks. Legacy tasks retain their original transfer policy.
+
+Regression coverage is in `tests/test_author_output_layout.py`,
+`tests/test_author_output_collisions.py`, `tests/test_native_config.py`, and the
+native `Tools/DownloadCenterTests` fixture. Fixtures use temporary directories,
+synthetic media and local/mocked transport, not real accounts or private media.
+
 ### Original engine guarantees
 
 The original engine retains Xiaohongshu, Douyin, Bilibili, and YouTube discovery/downloads;

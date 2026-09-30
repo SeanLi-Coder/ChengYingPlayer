@@ -41,7 +41,8 @@
     if (!chooser.isConnected) directory.parentElement.after(chooser);
     const hint = document.createElement("p");
     hint.className = "desktop-note";
-    hint.textContent = "更改后请点击保存设置。关闭下载中心窗口不会停止下载；退出播放器会停止任务，已下载文件保留。";
+    hint.id = "desktop-directory-note";
+    hint.textContent = "新任务直接保存到所选目录下的作者文件夹，例如：所选目录/ABC，不再添加 ChengYing 或平台名这一层。更改后请点击保存设置；旧任务继续使用原位置，已有文件不会移动。关闭窗口会继续下载，退出播放器才会停止。";
     chooser.after(hint);
   }
 

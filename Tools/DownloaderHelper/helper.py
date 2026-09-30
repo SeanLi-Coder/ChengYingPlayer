@@ -97,6 +97,14 @@ def prepare_environment(args):
     specification.loader.exec_module(package)
 
 
+def configure_download_layout(engine):
+    from app.models import OutputLayout
+
+    # New native jobs use the selected root directly. Persisted jobs retain
+    # their own layout and output directory; no existing files are migrated.
+    engine.manager.new_job_output_layout = OutputLayout.AUTHOR
+
+
 class ShutdownController:
     def __init__(self, *, emit, own_process_group: bool, grace=SHUTDOWN_GRACE_SECONDS):
         self.emit = emit
@@ -208,6 +216,7 @@ def main(argv=None):
         lock = ProjectLock(args.data_dir / "desktop.lock")
         lock.acquire()
         engine = importlib.import_module("app.main")
+        configure_download_layout(engine)
         from diagnostic_log import install_diagnostic_log
         from js_runtime import install_js_runtime
         from proxy_config import ProxySettings

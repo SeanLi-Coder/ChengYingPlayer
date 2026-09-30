@@ -105,6 +105,20 @@ class NativeConfigurationTests(unittest.TestCase):
         self.assertEqual(self.request()[1], configuration)
         self.assertEqual(json.loads((self.data / "config.json").read_text()), configuration)
 
+    def test_native_default_and_selected_directory_are_not_wrapped_or_stripped(self):
+        status, configuration = self.request()
+        self.assertEqual(status, 200)
+        self.assertEqual(configuration["download_dir"], str(self.downloads))
+        self.assertEqual(list(self.downloads.iterdir()), [])
+        for relative in ("app/data", "Selected Videos/ChengYing", "Selected Videos/kuaishou"):
+            selected = self.root / relative
+            with self.subTest(directory=relative):
+                status, configuration = self.request({"download_dir": str(selected)})
+                self.assertEqual(status, 200)
+                self.assertEqual(configuration["download_dir"], str(selected))
+                self.assertEqual(list(selected.iterdir()), [])
+                self.assertEqual(self.request()[1]["download_dir"], str(selected))
+
     @unittest.skipIf(os.geteuid() == 0, "Root can write directories without owner write permission")
     def test_failed_atomic_save_preserves_previous_in_memory_and_disk_settings(self):
         original = {"download_dir": str(self.downloads), "use_chrome_cookies": False}

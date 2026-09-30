@@ -4,7 +4,7 @@
 "reload" = "Reload / Retry";
 "directory" = "Choose download folder…";
 "directory.choose" = "Choose Folder";
-"directory.message" = "After choosing a folder, save the settings in the download page to apply it to new tasks.";
+"directory.message" = "New tasks create author folders directly inside this folder, without an extra app or platform folder. Save the settings in the download page after choosing; existing tasks keep their original location.";
 "web.accessibility" = "Download center for Xiaohongshu, Douyin, Bilibili, and YouTube";
 "status.starting" = "Starting download center…";
 "status.starting.detail" = "Preparing the bundled download service. Existing downloads and local settings stay on this Mac.";
