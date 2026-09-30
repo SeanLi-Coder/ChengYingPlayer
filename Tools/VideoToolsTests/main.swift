@@ -55,9 +55,17 @@ func runAutomaticPreviewRegression(_ scenario: String) {
   testPlayer.info.currentURL = URL(fileURLWithPath: #filePath)
   let testMainWindow = MainWindowController()
   let testController = VideoToolsViewController(player: testPlayer, mainWindow: testMainWindow)
-  let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 720),
+  let environment = ProcessInfo.processInfo.environment
+  let requestedHeight = Double(environment["CHENGYING_PREVIEW_WINDOW_HEIGHT"] ?? "720") ?? 720
+  let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1024, height: 674)
+  let contentHeight = min(requestedHeight, visibleFrame.height - 60)
+  let window = NSWindow(contentRect: NSRect(x: visibleFrame.minX + 20, y: visibleFrame.minY + 20,
+                                           width: 360, height: contentHeight),
                         styleMask: [.titled, .closable], backing: .buffered, defer: false)
   window.contentViewController = testController
+  testController.view.frame = NSRect(x: 0, y: 0, width: 360, height: contentHeight)
+  testController.view.layoutSubtreeIfNeeded()
+  testController.viewDidLayout()
   window.makeKeyAndOrderFront(nil)
   application.activate(ignoringOtherApps: true)
   testController.setPlaybackControlsVisible(true)
@@ -71,7 +79,28 @@ func runAutomaticPreviewRegression(_ scenario: String) {
   let mode = field("modeControl", as: NSSegmentedControl.self)
   let previewState = field("previewStatusLabel", as: NSTextField.self)
   func text(_ key: String) -> String { NSLocalizedString(key, comment: "Automatic preview regression") }
-  func pump(_ interval: TimeInterval = 0.45) { RunLoop.main.run(until: Date().addingTimeInterval(interval)) }
+  func pump(_ interval: TimeInterval = 0.45) {
+    let deadline = Date().addingTimeInterval(interval)
+    repeat {
+      while let event = application.nextEvent(matching: .any, until: .distantPast,
+                                              inMode: .default, dequeue: true) {
+        application.sendEvent(event)
+      }
+      RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.005)))
+    } while Date() < deadline
+  }
+  func waitUntil(_ message: String, _ condition: () -> Bool) {
+    let deadline = Date().addingTimeInterval(3)
+    while !condition(), Date() < deadline { pump(0.005) }
+    if !condition() { diagnose("readiness-timeout") }
+    check(condition(), message)
+  }
+  func diagnose(_ stage: String, editor: NSTextView? = nil, reads: Int? = nil, since: Date? = nil) {
+    let elapsed = since.map { String(format: "%.6f", Date().timeIntervalSince($0)) } ?? "n/a"
+    let readDelta = reads.map { String(testPlayer.mpv.reads - $0) } ?? "n/a"
+    let responder = window.firstResponder.map { String(describing: Swift.type(of: $0)) } ?? "nil"
+    print("DIAGNOSTIC: \(scenario)/\(stage) elapsed=\(elapsed) reads=\(readDelta) active=\(application.isActive) key=\(window.isKeyWindow) responder=\(responder) editorCurrent=\(editor != nil && last.currentEditor() === editor) editorText=\(editor?.string.debugDescription ?? "nil") fieldText=\(last.stringValue.debugDescription)")
+  }
   var notifications = 0
   let observer = NotificationCenter.default.addObserver(forName: NSControl.textDidChangeNotification,
       object: nil, queue: .main) { note in
@@ -84,6 +113,12 @@ func runAutomaticPreviewRegression(_ scenario: String) {
     window.orderOut(nil)
     NotificationCenter.default.removeObserver(observer)
   }
+  waitUntil("The native test window finishes activation and becomes key") {
+    application.isActive && window.isKeyWindow && window.isVisible
+  }
+  pump(0.1)
+  diagnose("window-ready")
+  check(application.isActive && window.isKeyWindow, "The native test window remains active after layout settles")
   @discardableResult
   func type(_ value: String, into field: NSTextField) -> NSTextView {
     check(window.makeFirstResponder(field), "The real timestamp field accepts keyboard focus")
@@ -95,8 +130,46 @@ func runAutomaticPreviewRegression(_ scenario: String) {
     return editor
   }
   func expectsRange(_ start: Double, _ end: Double, _ message: String) {
-    check(testPlayer.videoToolsLoopRange == VideoToolsLoopRange(start: start, end: end) &&
-          !testPlayer.mpv.getFlag("pause"), message)
+    waitUntil(message) {
+      testPlayer.videoToolsLoopRange == VideoToolsLoopRange(start: start, end: end) &&
+        !testPlayer.mpv.getFlag("pause")
+    }
+  }
+  func scheduledPreview(between start: Date, and end: Date) -> Timer {
+    guard let timer = field("previewTimer", as: Timer?.self) else {
+      fatalError("FAIL: Native input did not create a preview timer")
+    }
+    check(timer.isValid, "Native input schedules a live production debounce timer")
+    print("DIAGNOSTIC: \(scenario)/preview-scheduled minimumDelay=\(timer.fireDate.timeIntervalSince(end)) maximumDelay=\(timer.fireDate.timeIntervalSince(start))")
+    check(timer.fireDate >= start.addingTimeInterval(0.35) && timer.fireDate <= end.addingTimeInterval(0.35),
+          "The preview deadline is 350 ms after the actual native input notification")
+    return timer
+  }
+  func awaitPreview(_ timer: Timer, _ message: String) {
+    let deadline = timer.fireDate
+    let timeout = Date().addingTimeInterval(3)
+    var earlySamples = 0
+    check(testPlayer.videoToolsLoopRange == nil,
+          "Automatic preview remains inactive before its timer receives run-loop delivery")
+    if let stall = Double(environment["CHENGYING_PREVIEW_RUN_LOOP_STALL"] ?? ""), stall > 0 {
+      print("DIAGNOSTIC: blocking the fixture main thread for \(stall) seconds before the first deadline sample")
+      Thread.sleep(forTimeInterval: stall)
+    }
+    // Inspect state before dispatch, not after an assumed wall-clock pump duration.
+    // A busy main thread may legally deliver a due timer much later than requested.
+    while true {
+      let sampledAt = Date()
+      let range = testPlayer.videoToolsLoopRange
+      if sampledAt < deadline {
+        guard range == nil else { fatalError("FAIL: Automatic preview started before its debounce deadline") }
+        earlySamples += 1
+      }
+      if range != nil { break }
+      guard sampledAt < timeout else { fatalError("FAIL: Automatic preview did not start before the bounded deadline") }
+      pump(0.005)
+    }
+    print("DIAGNOSTIC: \(scenario)/preview-delivery earlySamples=\(earlySamples) overdue=\(Date().timeIntervalSince(deadline))")
+    check(!timer.isValid && Date() >= deadline, message)
   }
   first.stringValue = "10"
   last.stringValue = "20"
@@ -104,42 +177,58 @@ func runAutomaticPreviewRegression(_ scenario: String) {
 
   switch scenario {
   case "input":
-    let editor = type("21.125", into: last)
-    check(previewState.stringValue == text("videotools.preview.pending"), "Real text input schedules automatic preview")
+    check(window.makeFirstResponder(last), "The target field accepts focus before native typing begins")
+    guard let editor = last.currentEditor() as? NSTextView else { fatalError("Missing settled native field editor") }
+    pump(0.1)
+    check(window.firstResponder === editor && last.currentEditor() === editor,
+          "Field-editor focus settles before measuring playback refresh or debounce")
+    type("9.125", into: last)
+    check(previewState.stringValue == text("videotools.preview.invalid") && field("previewTimer", as: Timer?.self) == nil,
+          "Invalid native input isolates playback refresh from the automatic-preview timer")
     let reads = testPlayer.mpv.reads
-    pump(0.22)
-    check(testPlayer.mpv.reads > reads && window.firstResponder === editor && editor.string == "21.125",
-          "The live 200 ms playback refresh preserves field-editor focus and uncommitted input")
-    check(testPlayer.videoToolsLoopRange == nil, "Automatic preview waits for its debounce interval")
+    let refreshWaitStarted = Date()
+    // This predicate must not read mpv itself: the increment proves the real repeating timer ran.
+    let refreshTimeout = Date().addingTimeInterval(3)
+    while testPlayer.mpv.reads == reads, Date() < refreshTimeout { pump(0.005) }
+    diagnose("playback-refresh", editor: editor, reads: reads, since: refreshWaitStarted)
+    check(testPlayer.mpv.reads > reads, "The real 200 ms playback timer runs while timestamp input is uncommitted")
+    check(window.firstResponder === editor, "The live playback refresh preserves field-editor focus")
+    check(last.currentEditor() === editor, "The live playback refresh retains the same native field editor")
+    check(editor.string == "9.125", "The live playback refresh preserves uncommitted input")
+    check(last.stringValue == "9.125", "The live playback refresh observes the current field value")
+    let firstInput = Date()
+    type("21.125", into: last)
+    let firstTimer = scheduledPreview(between: firstInput, and: Date())
+    check(previewState.stringValue == text("videotools.preview.pending"), "Real text input schedules automatic preview")
+    check(testPlayer.videoToolsLoopRange == nil, "Native input does not bypass the debounce timer")
+    let nextInput = Date()
     type("22.5", into: last)
-    pump(0.22)
-    check(testPlayer.videoToolsLoopRange == nil, "Further native typing restarts the automatic preview deadline")
-    pump(0.23)
+    let nextTimer = scheduledPreview(between: nextInput, and: Date())
+    check(!firstTimer.isValid && nextTimer !== firstTimer && nextTimer.fireDate > firstTimer.fireDate,
+          "Further native typing invalidates the preceding timer and restarts the full debounce deadline")
+    awaitPreview(nextTimer, "The real preview callback runs only after the new 350 ms deadline")
     expectsRange(10, 22.5, "The latest uncommitted field-editor range starts automatically")
     check(window.firstResponder === editor && last.currentEditor() === editor,
           "Starting preview does not end editing or move keyboard focus")
     let startEditor = type("11.375", into: first)
-    pump()
     expectsRange(11.375, 22.5, "A second edit updates an already active automatic preview")
     check(window.firstResponder === startEditor, "Repeated automatic preview preserves the currently edited field")
   case "markers":
     testPlayer.mpv.values["time"] = 11.123456
+    let markerInput = Date()
     action(firstMarker)
+    let markerTimer = scheduledPreview(between: markerInput, and: Date())
     check(testPlayer.mpv.getFlag("pause") && testPlayer.videoToolsLoopRange == nil,
           "The start marker pauses immediately while selecting its precise frame")
-    pump(0.2)
-    check(testPlayer.videoToolsLoopRange == nil, "The start marker uses the same debounce as typing")
-    pump(0.25)
+    awaitPreview(markerTimer, "The start marker uses the same 350 ms debounce as typing")
     expectsRange(11.123456, 20, "The start marker automatically previews after 350 ms")
     testPlayer.mpv.values["time"] = 17.654321
     action(lastMarker)
     check(testPlayer.mpv.getFlag("pause") && testPlayer.videoToolsLoopRange == nil && last.stringValue == "00:17.654321",
           "An end marker preserves the current frame and replaces the preceding preview")
-    pump()
     expectsRange(11.123456, 17.654321, "The end marker automatically previews its updated interval")
     testPlayer.mpv.values["time"] = 12.25
     action(firstMarker)
-    pump()
     expectsRange(12.25, 17.654321, "A later start marker updates automatic preview again")
     testPlayer.mpv.values["time"] = 11
     action(lastMarker)
@@ -155,7 +244,6 @@ func runAutomaticPreviewRegression(_ scenario: String) {
       first.stringValue = "0"
       let rounded = String(format: "%.6f", duration)
       type(rounded, into: last)
-      pump()
       expectsRange(0, duration, "A microsecond-rounded endpoint clamps to the real duration before preview")
       check(testPlayer.mpv.getDouble("b") == duration,
             "Automatic preview passes the exact finite duration to the strict player bridge")
@@ -168,7 +256,6 @@ func runAutomaticPreviewRegression(_ scenario: String) {
       type(String(format: "%.6f", frameStart), into: first)
       let displayedEnd = duration < 10 ? "00:0" + rounded : "02:00.000000"
       check(last.stringValue == displayedEnd, "Frame extraction displays its duration-clamped default endpoint")
-      pump()
       expectsRange(frameStart, duration, "The default five-second extraction range previews at a rounded file end")
       mode.selectedSegment = 0; action(mode)
       type(rounded, into: first)
@@ -186,7 +273,6 @@ func runAutomaticPreviewRegression(_ scenario: String) {
     pump()
     check(testPlayer.videoToolsLoopRange == nil, "A cancelled pending preview never starts later")
     type("22", into: last)
-    pump()
     expectsRange(10, 22, "Valid native input recovers after an invalid pending edit")
     for invalid in ["10", "9", "120.01", "nan"] {
       type(invalid, into: last)
@@ -201,7 +287,6 @@ func runAutomaticPreviewRegression(_ scenario: String) {
     testPlayer.mpv.values["time"] = 5.0
     testPlayer.mpv.values["speed"] = 0.5
     type("16", into: last)
-    pump()
     expectsRange(10, 16, "Native text temporarily previews over an existing keyboard loop")
     type("17", into: last)
     testController.setPlaybackControlsVisible(false)
@@ -224,14 +309,12 @@ func runAutomaticPreviewRegression(_ scenario: String) {
           "Switching tabs cancels a pending range preview")
     mode.selectedSegment = 0; action(mode)
     type("19", into: last)
-    pump()
     expectsRange(10, 19, "Returning to the clip tab accepts fresh automatic-preview edits")
     mode.selectedSegment = 1; action(mode)
     check(testPlayer.videoToolsLoopRange == VideoToolsLoopRange(start: 3, end: 7),
           "Switching tabs restores the snapshot of an active automatic preview")
     type("11.25", into: first)
     check(last.stringValue == "00:16.250000", "Real frame-mode typing updates the default five-second endpoint")
-    pump()
     expectsRange(11.25, 16.25, "The default five-second frame range previews automatically")
   case "navigation":
     let seekControl = field("playbackControl", as: NSSegmentedControl.self)
@@ -239,21 +322,18 @@ func runAutomaticPreviewRegression(_ scenario: String) {
     let boundaryControl = field("rangeNavigationControl", as: NSSegmentedControl.self)
     for control in [seekControl, frameControl, boundaryControl] { control.trackingMode = .selectOne }
     type("15", into: last)
-    pump()
     expectsRange(10, 15, "A temporary preview is active before selecting a later endpoint")
     testPlayer.mpv.values["time"] = 14.0
     seekControl.selectedSegment = 2; action(seekControl)
     check(testPlayer.videoToolsLoopRange == nil && near(testPlayer.mpv.getDouble("time"), 19),
           "Forward navigation leaves the temporary preview and can move beyond its end")
     action(lastMarker)
-    pump()
     expectsRange(10, 19, "Marking the later endpoint automatically previews the extended range")
     testPlayer.mpv.values["time"] = 18.9995
     frameControl.selectedSegment = 1; action(frameControl)
     check(testPlayer.videoToolsLoopRange == nil && testPlayer.mpv.getDouble("time") > 19 && testPlayer.mpv.getFlag("pause"),
           "Frame stepping leaves the temporary range while preserving the newly selected frame")
     action(lastMarker)
-    pump()
     expectsRange(10, 19.032833, "A frame-selected endpoint can expand the next automatic preview")
     type("25", into: last)
     boundaryControl.selectedSegment = 1; action(boundaryControl)
@@ -266,7 +346,6 @@ func runAutomaticPreviewRegression(_ scenario: String) {
     check(testController.setLoopMarker(isEnd: true), "The independent keyboard loop accepts a new B marker")
     first.stringValue = "10"
     type("15", into: last)
-    pump()
     expectsRange(10, 15, "Temporary preview can coexist with the saved independent keyboard loop")
     testPlayer.mpv.values["time"] = 14.0
     seekControl.selectedSegment = 2; action(seekControl)

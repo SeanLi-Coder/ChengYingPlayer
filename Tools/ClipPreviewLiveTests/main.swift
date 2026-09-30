@@ -20,6 +20,10 @@ var failures = 0
 
 func run() throws {
   guard let path = argument("--media") else { throw TestFailure(message: "A local test media argument is required") }
+  guard let runLoopStall = Double(ProcessInfo.processInfo.environment["CHENGYING_PREVIEW_RUN_LOOP_STALL"] ?? "0"),
+        runLoopStall.isFinite, (0...1).contains(runLoopStall) else {
+    throw TestFailure(message: "CHENGYING_PREVIEW_RUN_LOOP_STALL must be between 0 and 1 second")
+  }
   let player = PlayerCore()
   let mpv = player.mpv
   let media = URL(fileURLWithPath: path)
@@ -27,7 +31,7 @@ func run() throws {
   mpv.rawCommand(["loadfile", media.path, "replace"])
 
   func pump(_ seconds: Double) {
-    let deadline = Date().addingTimeInterval(seconds)
+    let deadline = LiveClock.now + seconds
     repeat {
       player.processEvents()
       while let event = application.nextEvent(matching: .any, until: Date(), inMode: .default, dequeue: true) {
@@ -35,11 +39,11 @@ func run() throws {
       }
       application.updateWindows()
       RunLoop.main.run(until: Date().addingTimeInterval(0.003))
-    } while Date() < deadline && mpv.error == nil
+    } while LiveClock.now < deadline && mpv.error == nil
   }
   func until(_ message: String, timeout: Double = 3, _ condition: () -> Bool) throws {
-    let deadline = Date().addingTimeInterval(timeout)
-    while !condition(), Date() < deadline, mpv.error == nil { pump(0.015) }
+    let deadline = LiveClock.now + timeout
+    while !condition(), LiveClock.now < deadline, mpv.error == nil { pump(0.015) }
     try check(mpv.error == nil, mpv.error ?? "The real playback boundary remains healthy")
     try check(condition(), message)
   }
@@ -61,7 +65,6 @@ func run() throws {
   application.activate(ignoringOtherApps: true)
   controller.setPlaybackControlsVisible(true)
   controller.view.layoutSubtreeIfNeeded()
-  pump(0.1)
   defer {
     controller.stopPreview()
     controller.setPlaybackControlsVisible(false)
@@ -85,7 +88,15 @@ func run() throws {
   let setEnd = property("setEndButton", NSButton.self)
   let preview = property("rangePreviewButton", NSButton.self)
 
-  func edit(_ field: NSTextField, _ value: String) throws {
+  try until("The production tools window is active, key, attached, and laid out") {
+    controller.view.layoutSubtreeIfNeeded()
+    return application.isActive && panel.isVisible && panel.isKeyWindow &&
+      controller.view.window === panel && start.window === panel && end.window === panel &&
+      start.bounds.width > 0 && end.bounds.width > 0
+  }
+
+  @discardableResult
+  func edit(_ field: NSTextField, _ value: String) throws -> TimeInterval {
     field.scrollToVisible(field.bounds)
     panel.makeKeyAndOrderFront(nil)
     field.selectText(nil)
@@ -93,23 +104,30 @@ func run() throws {
       throw TestFailure(message: "AppKit supplies the actual NSTextView field editor")
     }
     editor.setSelectedRange(NSRange(location: 0, length: (editor.string as NSString).length))
+    let changedAt = LiveClock.now
     editor.insertText(value, replacementRange: editor.selectedRange())
     try check(editor.string == value && field.stringValue == value, "Native field-editor insertion updates the production text field")
     // Do not synthesize delegate notifications or end editing: this is the real input path.
+    return changedAt
   }
   func action(_ control: NSControl) throws {
     try check(control.isEnabled, "The native action is enabled")
     guard let selector = control.action else { throw TestFailure(message: "Missing native action") }
     try check(control.sendAction(selector, to: control.target), "Native sendAction reaches the production target")
   }
-  func reset(position: Double = 0.25) {
+  func reset(position: Double = 0.25) throws {
     panel.makeFirstResponder(nil)
     controller.stopPreview()
     controller.setPlaybackControlsVisible(true)
     player.videoToolsClearLoop()
     player.pause()
+    let restarts = mpv.restartEvents
     player.seek(absoluteSecond: position)
-    pump(0.18)
+    try until("The real decoder finishes the paused setup seek") {
+      mpv.restartEvents > restarts && !mpv.getFlag("seeking") &&
+        mpv.getFlag(MPVOption.PlaybackControl.pause) &&
+        abs(mpv.getDouble(MPVProperty.timePos) - position) < 0.12
+    }
   }
   func setupFields(_ a: Double, _ b: Double) throws {
     try edit(start, String(format: "%.6f", a))
@@ -119,26 +137,37 @@ func run() throws {
   func waitForRange(_ a: Double, _ b: Double) throws {
     try until("Debounced preview installs the requested real A-B range and unpauses") {
       guard let range = player.videoToolsLoopRange else { return false }
-      return abs(range.start - a) < 0.002 && abs(range.end - b) < 0.002 && !mpv.getFlag(MPVOption.PlaybackControl.pause)
+      return abs(range.start - a) < 0.002 && abs(range.end - b) < 0.002 &&
+        !mpv.getFlag(MPVOption.PlaybackControl.pause) && !mpv.getFlag("seeking") &&
+        range.contains(mpv.getDouble(MPVProperty.timePos))
     }
   }
-  func proveMotion(_ seconds: Double = 0.3) throws {
-    var positions: [Double] = []
-    var hashes = Set<UInt64>()
+  func proveMotion(timeout: Double = 3) throws {
+    try until("Motion sampling starts after the real decoder seek has settled") {
+      !mpv.getFlag("seeking") && !mpv.getFlag(MPVOption.PlaybackControl.pause)
+    }
+    var minimum = mpv.getDouble(MPVProperty.timePos)
+    var maximum = minimum
+    var hashes: Set<UInt64> = [clip_renderer_hash()]
     let frames = clip_renderer_frames()
-    let deadline = Date().addingTimeInterval(seconds)
+    let deadline = LiveClock.now + timeout
+    let requiresPixelChange = CommandLine.arguments.contains("--synthetic")
     repeat {
       pump(0.025)
-      positions.append(mpv.getDouble(MPVProperty.timePos))
+      let position = mpv.getDouble(MPVProperty.timePos)
+      minimum = min(minimum, position)
+      maximum = max(maximum, position)
       hashes.insert(clip_renderer_hash())
-    } while Date() < deadline
-    let spread = (positions.max() ?? 0) - (positions.min() ?? 0)
+      if maximum - minimum > 0.06 && clip_renderer_frames() > frames + 1 &&
+          (!requiresPixelChange || hashes.count > 1) { break }
+    } while LiveClock.now < deadline && mpv.error == nil
+    let spread = maximum - minimum
     if spread <= 0.06 {
-      print("DIAGNOSTIC: position spread=\(spread); last=\(positions.last ?? -1); paused=\(mpv.getFlag(MPVOption.PlaybackControl.pause)); seeking=\(mpv.getFlag("seeking")); recovery=\(player.videoToolsLoopRecovery); frames=\(clip_renderer_frames() - frames)")
+      print("DIAGNOSTIC: position spread=\(spread); current=\(mpv.getDouble(MPVProperty.timePos)); paused=\(mpv.getFlag(MPVOption.PlaybackControl.pause)); seeking=\(mpv.getFlag("seeking")); recovery=\(player.videoToolsLoopRecovery); frames=\(clip_renderer_frames() - frames)")
     }
     try check(spread > 0.06, "Real decoder playback time advances after preview")
     try check(clip_renderer_frames() > frames + 1, "Real libmpv delivers multiple rendered video frames")
-    if CommandLine.arguments.contains("--synthetic") {
+    if requiresPixelChange {
       try check(hashes.count > 1, "Rendered RGB pixels change for the moving synthetic source")
     } else {
       print("EVIDENCE: external rendered pixel variants=\(hashes.count); static source frames are permitted")
@@ -147,23 +176,42 @@ func run() throws {
 
   let cases: [(String, () throws -> Void)] = [
     ("editing", {
-      reset()
-      let commands = mpv.seekCommands
+      try reset()
       try edit(start, "0.800000")
-      try edit(end, "1.500000")
-      let changed = Date()
-      pump(0.16)
-      try check(mpv.seekCommands == commands && mpv.getFlag(MPVOption.PlaybackControl.pause),
-                "Typing does not seek or unpause before the 350 ms debounce")
+      controller.stopPreview()
+      try until("Debounce measurement begins with no previous preview or seek in flight") {
+        !hasPendingTimer() && player.videoToolsLoopRange == nil && !mpv.getFlag("seeking") &&
+          mpv.getFlag(MPVOption.PlaybackControl.pause)
+      }
+      var commands: [LivePlaybackCommand] = []
+      mpv.playbackCommandObserver = { commands.append($0) }
+      defer { mpv.playbackCommandObserver = nil }
+      let lastChange = try edit(end, "1.500000")
+      if runLoopStall > 0 {
+        print("DIAGNOSTIC: blocking the fixture main thread for \(runLoopStall) seconds before timer delivery")
+        Thread.sleep(forTimeInterval: runLoopStall)
+      }
       try waitForRange(0.8, 1.5)
-      try check(Date().timeIntervalSince(changed) >= 0.30, "Automatic preview respects the debounce interval")
+      mpv.playbackCommandObserver = nil
+      // Inspect actual submission times, not the time a busy run loop returns
+      // from a nominally short pump. A previous preview is explicitly stopped
+      // above so its legitimate loop recovery cannot pollute this measurement.
+      try check(commands.allSatisfy { command in
+        command.submittedAt - lastChange >= 0.35
+      }, "No actual seek or unpause is submitted before the full 350 ms debounce")
+      try check(commands.contains { $0.kind == .seek && $0.submittedAt >= lastChange + 0.35 } &&
+                commands.contains { $0.kind == .unpause && $0.submittedAt >= lastChange + 0.35 },
+                "The final native edit submits both seek and unpause after its full debounce")
+      print(String(format: "DEBOUNCE: first seek %.6f s; first unpause %.6f s",
+                   commands.first(where: { $0.kind == .seek })!.submittedAt - lastChange,
+                   commands.first(where: { $0.kind == .unpause })!.submittedAt - lastChange))
       try check(panel.firstResponder === start.currentEditor() || panel.firstResponder === end.currentEditor(),
                 "Preview starts while the native field editor still owns focus")
       try proveMotion()
       var wraps = 0
       var last = mpv.getDouble(MPVProperty.timePos)
-      let deadline = Date().addingTimeInterval(1.65)
-      while Date() < deadline {
+      let deadline = LiveClock.now + 3
+      while wraps == 0 && LiveClock.now < deadline {
         pump(0.018)
         let now = mpv.getDouble(MPVProperty.timePos)
         if now < last - 0.2 { wraps += 1 }
@@ -175,12 +223,13 @@ func run() throws {
       try waitForRange(1.7, 2.4)
       try proveMotion()
       try action(preview)
-      pump(0.18)
-      try check(mpv.getFlag(MPVOption.PlaybackControl.pause) && abs(mpv.getDouble(MPVProperty.timePos) - 0.25) < 0.12,
-                "Stopping preview restores the original paused playback position")
+      try until("Stopping preview restores the original paused playback position") {
+        !mpv.getFlag("seeking") && mpv.getFlag(MPVOption.PlaybackControl.pause) &&
+          abs(mpv.getDouble(MPVProperty.timePos) - 0.25) < 0.12
+      }
     }),
     ("marker-start", {
-      reset(position: 1)
+      try reset(position: 1)
       try setupFields(0.5, 3)
       let marker = player.videoToolsCurrentTime ?? 0
       try action(setStart)
@@ -188,7 +237,7 @@ func run() throws {
       try proveMotion()
     }),
     ("marker-end", {
-      reset(position: 1.8)
+      try reset(position: 1.8)
       try setupFields(0.5, 4)
       let marker = player.videoToolsCurrentTime ?? 0
       try action(setEnd)
@@ -196,7 +245,7 @@ func run() throws {
       try proveMotion()
     }),
     ("navigation", {
-      reset()
+      try reset()
       try edit(start, "0.600000")
       try edit(end, "1.300000")
       try waitForRange(0.6, 1.3)
@@ -209,7 +258,9 @@ func run() throws {
       navigation.selectedSegment = 2
       try check(navigation.selectedSegment == 2, "The forward segment is selected before native dispatch")
       try action(navigation)
-      pump(0.2)
+      try until("Native forward navigation settles beyond the temporary preview endpoint") {
+        !mpv.getFlag("seeking") && (player.videoToolsCurrentTime ?? 0) > 4
+      }
       player.pause()
       let newEnd = player.videoToolsCurrentTime ?? 0
       if newEnd <= 4 {
@@ -221,7 +272,7 @@ func run() throws {
       try proveMotion()
     }),
     ("boundary", {
-      reset()
+      try reset()
       mpv.rawCommand(["seek", String(duration + 1), "absolute+exact"])
       mpv.setFlag(MPVOption.PlaybackControl.pause, false)
       try until("The real player reaches EOF before editing") { mpv.getFlag(MPVProperty.eofReached) }
@@ -237,7 +288,7 @@ func run() throws {
       // varied to exercise sub-microsecond EOF values without private fixtures.
       defer { player.info.videoDuration = VideoTime(duration) }
       for fractionalDuration in [5.1234567, 119.9999997] {
-        reset()
+        try reset()
         player.info.videoDuration = VideoTime(fractionalDuration)
         try edit(start, "1.000000")
         try edit(end, String(format: "%.6f", fractionalDuration))
@@ -260,11 +311,12 @@ func run() throws {
       }
     }),
     ("invalid", {
-      reset()
+      try reset()
       let commands = mpv.seekCommands
       try edit(start, "0.800000")
       try edit(end, "1.600000")
-      pump(0.08)
+      // Cancel in the same native input turn. Yielding for an assumed short
+      // interval could actually let the timer fire first on a loaded CI host.
       try edit(end, "invalid")
       pump(0.5)
       try check(mpv.seekCommands == commands && mpv.getFlag(MPVOption.PlaybackControl.pause),
@@ -273,12 +325,12 @@ func run() throws {
       try edit(end, "1.600000")
       try waitForRange(0.8, 1.6)
       try edit(end, "0.100000")
-      pump(0.4)
-      try check(player.videoToolsLoopRange == nil && mpv.getFlag(MPVOption.PlaybackControl.pause),
-                "An invalid active range restores the paused pre-preview state")
+      try until("An invalid active range restores the paused pre-preview state") {
+        player.videoToolsLoopRange == nil && mpv.getFlag(MPVOption.PlaybackControl.pause)
+      }
     }),
     ("restore", {
-      reset(position: 0.4)
+      try reset(position: 0.4)
       mpv.setString(MPVOption.PlaybackControl.abLoopA, "no")
       mpv.setString(MPVOption.PlaybackControl.abLoopB, "no")
       mpv.setString(MPVOption.PlaybackControl.abLoopCount, "0")
@@ -290,9 +342,10 @@ func run() throws {
       controller.setPlaybackControlsVisible(false)
       controller.stopPreview()
       panel.orderOut(nil)
-      pump(0.25)
-      try check(mpv.getFlag(MPVOption.PlaybackControl.pause) && abs(mpv.getDouble(MPVProperty.timePos) - 0.4) < 0.12,
-                "Hiding tools restores the original paused position")
+      try until("Hiding tools restores the original paused position") {
+        !mpv.getFlag("seeking") && mpv.getFlag(MPVOption.PlaybackControl.pause) &&
+          abs(mpv.getDouble(MPVProperty.timePos) - 0.4) < 0.12
+      }
       try check(mpv.getString(MPVOption.PlaybackControl.abLoopA) == "no" &&
                 mpv.getString(MPVOption.PlaybackControl.abLoopB) == "no" &&
                 mpv.getString(MPVOption.PlaybackControl.abLoopCount) == "0" &&
@@ -300,6 +353,7 @@ func run() throws {
                 "Hiding tools restores unset A-B markers, loop count, and rotation")
       panel.makeKeyAndOrderFront(nil)
       controller.setPlaybackControlsVisible(true)
+      try until("The tools window becomes key again before resumed native editing") { panel.isKeyWindow && panel.isVisible }
       try edit(start, "1.100000")
       try waitForRange(1.1, 1.8)
       try proveMotion()
@@ -310,16 +364,18 @@ func run() throws {
       mpv.setDouble(MPVOption.PlaybackControl.abLoopB, 4)
       mpv.setString(MPVOption.PlaybackControl.abLoopCount, "inf")
       player.resume()
-      pump(0.12)
+      try until("Original A-B playback is running before replacement preview") {
+        !mpv.getFlag("seeking") && !mpv.getFlag(MPVOption.PlaybackControl.pause)
+      }
       try edit(start, "1.100000")
       try edit(end, "1.900000")
       try waitForRange(1.1, 1.9)
       controller.setPlaybackControlsVisible(false)
       controller.stopPreview()
-      pump(0.12)
-      try check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4) &&
-                !mpv.getFlag(MPVOption.PlaybackControl.pause),
-                "An existing zero-start A-B loop and originally playing state survive preview restoration")
+      try until("An existing zero-start A-B loop and originally playing state survive preview restoration") {
+        !mpv.getFlag("seeking") && player.videoToolsLoopRange == VideoToolsLoopRange(start: 0, end: 4) &&
+          !mpv.getFlag(MPVOption.PlaybackControl.pause)
+      }
       try proveMotion()
     }),
   ]

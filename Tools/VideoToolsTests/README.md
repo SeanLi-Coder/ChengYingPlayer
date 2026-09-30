@@ -22,6 +22,17 @@ an existing local commit; the runner does not fetch source or replace the rest
 of the playback implementation. Test apps are isolated and retired using
 `TestAppWorkspace`.
 
+The input fixture waits for a key, laid-out window and observes an actual
+playback refresh with invalid input before measuring debounce separately.
+It checks the production timer's 350 ms deadline, cancellation on new input,
+and every observable pre-deadline state without assuming timely run-loop
+delivery. To exercise delayed dispatch and a smaller content viewport, run:
+
+```sh
+python3 -B Tools/VideoToolsTests/run.py --preview-case input --preview-case markers \
+  --preview-repeat 3 --preview-window-height 600 --preview-run-loop-stall 0.42
+```
+
 For actual decoded frames, run `python3 -B Tools/ClipPreviewLiveTests/run.py`
 after preparing the pinned playback dependencies. This runs the production
 controller and bridge with real libmpv software rendering and extracted
@@ -32,6 +43,10 @@ not establish GPU, HDR, audio-quality or full-application keyboard acceptance.
 The rotation-restoration fixture uses 180 degrees: 90-degree rendering exposed
 a software-renderer crop assertion, so this fixture does not claim that path is
 validated. Normal player rendering uses a different renderer.
+The live debounce check timestamps actual mpv seek and unpause submissions;
+`CHENGYING_PREVIEW_RUN_LOOP_STALL=0.42` exercises delayed timer delivery there
+as well. Readiness and playback transitions use bounded condition waits rather
+than treating a short sleep as proof that decoding or window activation ended.
 
 To capture the real AppKit control hierarchy in English, Simplified Chinese,
 and Traditional Chinese (both appearances), use an ignored output directory:

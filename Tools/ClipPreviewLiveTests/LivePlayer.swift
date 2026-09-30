@@ -31,6 +31,16 @@ final class MPVHookValue {
   init(withBlock block: @escaping (@escaping () -> Void) -> Void) { self.block = block }
 }
 
+enum LiveClock {
+  static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
+}
+
+struct LivePlaybackCommand {
+  enum Kind { case seek, unpause }
+  let kind: Kind
+  let submittedAt: TimeInterval
+}
+
 final class MPVController {
   private let handle: OpaquePointer
   private var serial: UInt64 = 100
@@ -44,6 +54,7 @@ final class MPVController {
   private(set) var error: String?
   var needsEnforcement = false
   var restarted = false
+  var playbackCommandObserver: ((LivePlaybackCommand) -> Void)?
 
   init() {
     guard let created = mpv_create() else { fatalError("Unable to create libmpv") }
@@ -160,6 +171,9 @@ final class MPVController {
     let id = nextRequest()
     value.withCString { value in
       var pointer: UnsafePointer<CChar>? = value
+      if name == MPVOption.PlaybackControl.pause && String(cString: value) == "no" {
+        playbackCommandObserver?(LivePlaybackCommand(kind: .unpause, submittedAt: LiveClock.now))
+      }
       require(mpv_set_property_async(handle, id, name, MPV_FORMAT_STRING, &pointer), "Set playback property")
     }
     _ = awaitReply(id)
@@ -181,6 +195,9 @@ final class MPVController {
     let strings = arguments.map { strdup($0) }
     defer { strings.forEach { free($0) } }
     var pointers = strings.map { $0.map { UnsafePointer<CChar>($0) } } + [nil]
+    if arguments.first == MPVCommand.seek.rawValue {
+      playbackCommandObserver?(LivePlaybackCommand(kind: .seek, submittedAt: LiveClock.now))
+    }
     require(mpv_command_async(handle, id, &pointers), "Send playback command")
     _ = awaitReply(id)
   }

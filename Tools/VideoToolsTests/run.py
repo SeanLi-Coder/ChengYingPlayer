@@ -23,7 +23,19 @@ def main():
     parser.add_argument("--preview-case", action="append",
                         choices=("input", "markers", "rounding", "invalid", "lifecycle", "navigation"),
                         help="Run an isolated automatic-preview case; repeat to select multiple cases")
+    parser.add_argument("--preview-repeat", type=int, default=1,
+                        help="Repeat isolated preview cases in fresh processes without recompiling")
+    parser.add_argument("--preview-window-height", type=float, default=720,
+                        help="Maximum native preview fixture content height, also capped to the visible screen")
+    parser.add_argument("--preview-run-loop-stall", type=float, default=0,
+                        help="Block preview fixture timer delivery for this many seconds to test late dispatch")
     arguments = parser.parse_args()
+    if not 1 <= arguments.preview_repeat <= 100 or (arguments.preview_repeat != 1 and not arguments.preview_case):
+        parser.error("--preview-repeat requires --preview-case and must be between 1 and 100")
+    if not 240 <= arguments.preview_window_height <= 2000:
+        parser.error("--preview-window-height must be between 240 and 2000")
+    if not 0 <= arguments.preview_run_loop_stall <= 1:
+        parser.error("--preview-run-loop-stall must be between 0 and 1 second")
     languages = (arguments.language,) if arguments.language else ("en", "zh-Hans", "zh-Hant")
     controller_path = "iina/VideoTools/VideoToolsViewController.swift"
     baseline = None
@@ -75,8 +87,10 @@ def main():
             "Tools/VideoToolsTests/main.swift"])
         environment = os.environ.copy()
         environment.pop("CHENGYING_PREVIEW_REGRESSION_CASE", None)
+        environment["CHENGYING_PREVIEW_WINDOW_HEIGHT"] = str(arguments.preview_window_height)
+        environment["CHENGYING_PREVIEW_RUN_LOOP_STALL"] = str(arguments.preview_run_loop_stall)
         failures = []
-        for scenario in arguments.preview_case or [None]:
+        for scenario in (arguments.preview_case or [None]) * arguments.preview_repeat:
             if scenario:
                 environment["CHENGYING_PREVIEW_REGRESSION_CASE"] = scenario
             for language in languages:
