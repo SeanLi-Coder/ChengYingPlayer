@@ -246,7 +246,7 @@ jobs:
           python3 -B other/verify_media_distribution.py "$PWD/deps"
           python3 -B Tools/HDR10PlusCodecTests/test_codec.py
           python3 -B Tools/HDR10PlusCodecTests/test_distribution.py
-          PATH="$PWD/deps/executable:$PATH" "$RUNNER_TEMP/media-test-python/bin/python" -B -m pytest -q Tools/VideoToolsHelper/tests/test_hdr10plus_clips.py
+          PYTHONPATH="$PWD/Tools/VideoToolsHelper" PATH="$PWD/deps/executable:$PATH" "$RUNNER_TEMP/media-test-python/bin/python" -B -m pytest -q Tools/VideoToolsHelper/tests/test_hdr10plus_clips.py
           bash other/build_image_codec.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/VideoToolsHelper/build_helper.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/SubtitleToolsHelper/build_helper.sh
