@@ -30,6 +30,12 @@ let controller = try LayoutController(fixture: fixture)
 let window = controller.window!
 window.orderFront(nil)
 let content = window.contentView!
+func heightGeometry(_ controller: LayoutController, stage: String) {
+  let contentBounds = controller.window?.contentView?.bounds ?? .zero
+  print("HEIGHT LAYOUT \(stage): content=\(contentBounds) sidebar=\(controller.sideBarView.frame) " +
+        "maximum=\(controller.maximumPlaylistHeight) preferred=\(controller.preferredPlaylistHeight) " +
+        "physicalScreen=\(controller.window?.screen?.visibleFrame ?? .zero)")
+}
 let originals = [controller.fragSliderView!, controller.fragControlView!, controller.fragToolbarView!, controller.fragVolumeView!]
 let playlistFixture = try ChromeFixture(xib: URL(fileURLWithPath: CommandLine.arguments[2]))
 let playlist = try PlaylistLayoutController(fixture: playlistFixture)
@@ -44,9 +50,12 @@ NSLayoutConstraint.activate([
 ])
 if restartProbe {
   let expected = CGFloat(Double(CommandLine.arguments[7])!)
+  (window as! ChromeLayoutWindow).allowsOffscreenLayout = true
   window.setContentSize(NSSize(width: 900, height: 900))
   controller.setupOnScreenController(withPosition: .bottom)
   content.layoutSubtreeIfNeeded()
+  heightGeometry(controller, stage: "process-restart")
+  check(near(content.bounds.height, 900), "The process-restart fixture provides the full 900-point layout surface")
   check(near(controller.preferredPlaylistHeight, expected), "A fresh process reads the saved playlist height through the production preference getter")
   check(near(controller.sideBarView.frame.height, expected), "A fresh native controller lays out the remembered height after process restart")
   check(controller.sidebarResizeHandle?.isHidden == false, "A restarted playlist retains its native resize handle")
@@ -210,6 +219,7 @@ func prepareResizablePlaylist(size: NSSize = NSSize(width: 900, height: 900)) {
   controller.sideBarStatus = .playlist
   controller.fsState.isFullscreen = false
   controller.setupOnScreenController(withPosition: .floating)
+  (window as! ChromeLayoutWindow).allowsOffscreenLayout = true
   window.setContentSize(size)
   controller.setupOnScreenController(withPosition: .bottom)
   controller.sideBarView.isHidden = false
@@ -228,6 +238,9 @@ func beginHandleDrag() -> (PlayerSidebarResizeHandle, NSPoint) {
 
 prepareResizablePlaylist()
 let defaultHeight = controller.preferredPlaylistHeight
+heightGeometry(controller, stage: "default")
+check(near(content.bounds.width, 900) && near(content.bounds.height, 900),
+      "The height-memory fixture supplies an actual 900-point surface independent of the physical CI screen")
 check(near(defaultHeight, 600) && near(controller.sideBarView.frame.height, defaultHeight),
       "A fresh playlist uses the longer production default in a sufficiently large window")
 check(Preference.defaults.persistentDomain(forName: preferenceSuite)?[Preference.Key.playlistHeight.rawValue] == nil,
@@ -246,6 +259,7 @@ check(controller.controlInteractionDepth == 1 && controller.controlInteractionBe
 let draggedPoint = NSPoint(x: initialPoint.x, y: initialPoint.y - 90)
 resizeHandle.mouseDragged(with: mouseEvent(.leftMouseDragged, point: draggedPoint))
 content.layoutSubtreeIfNeeded()
+heightGeometry(controller, stage: "dragged")
 check(near(controller.sideBarView.frame.height, defaultHeight + 90) && near(controller.sideBarView.frame.maxY, topBeforeDrag),
       "Dragging the native lower edge downward extends the sidebar while its top stays anchored")
 check(content.bounds.size == contentSizeBeforeDrag && near(controller.sideBarWidthConstraint.constant, widthBeforeDrag),
@@ -276,6 +290,7 @@ window.setContentSize(NSSize(width: 320, height: controller.minSize.height))
 controller.updateEdgeControlsLayout()
 content.layoutSubtreeIfNeeded()
 let clampedHeight = controller.sideBarView.frame.height
+heightGeometry(controller, stage: "small-window-clamp")
 check(clampedHeight < CGFloat(savedHeight) && controller.sideBarView.frame.minY >= controller.edgeControls!.frame.maxY + 5.4,
       "A smaller video window clamps the remembered sidebar above the playback footer")
 check(Preference.double(for: .playlistHeight) == savedHeight,
@@ -283,11 +298,13 @@ check(Preference.double(for: .playlistHeight) == savedHeight,
 window.setContentSize(NSSize(width: 900, height: 900))
 controller.updateEdgeControlsLayout()
 content.layoutSubtreeIfNeeded()
+heightGeometry(controller, stage: "large-window-restored")
 check(near(controller.sideBarView.frame.height, CGFloat(savedHeight)),
       "Growing the window restores the preferred height instead of remembering the temporary clamp")
 controller.fsState.isFullscreen = true
 controller.updateEdgeControlsLayout()
 content.layoutSubtreeIfNeeded()
+heightGeometry(controller, stage: "fullscreen-layout")
 check(near(controller.sideBarView.frame.height, CGFloat(savedHeight)) &&
       controller.sideBarView.frame.maxY <= controller.cornerControls!.frame.minY - 5.4,
       "Fullscreen geometry applies the remembered height below its shifted corner toolbar")
@@ -330,9 +347,13 @@ prepareResizablePlaylist()
 
 let restoredController = try LayoutController(fixture: ChromeFixture(xib: URL(fileURLWithPath: CommandLine.arguments[1])))
 restoredController.playlistView = try PlaylistLayoutController(fixture: ChromeFixture(xib: URL(fileURLWithPath: CommandLine.arguments[2])))
+(restoredController.window as! ChromeLayoutWindow).allowsOffscreenLayout = true
 restoredController.window!.setContentSize(NSSize(width: 900, height: 900))
 restoredController.setupOnScreenController(withPosition: .bottom)
 restoredController.window!.contentView!.layoutSubtreeIfNeeded()
+heightGeometry(restoredController, stage: "new-window")
+check(near(restoredController.window!.contentView!.bounds.height, 900),
+      "A new-window restoration fixture also supplies a full 900-point layout surface")
 check(near(restoredController.sideBarView.frame.height, CGFloat(savedHeight)),
       "Opening another native player window restores the same global saved playlist height")
 restoredController.window!.close()
@@ -353,7 +374,7 @@ check(!process.isRunning, "The isolated process-restart probe exits within its d
 process.waitUntilExit()
 let restartText = String(data: restartOutput.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
 print(restartText)
-check(process.terminationStatus == 0 && restartText.contains("RESTART RESULT: 3 checks, 0 failures"),
+check(process.terminationStatus == 0 && restartText.contains("RESTART RESULT: 4 checks, 0 failures"),
       "Saved sidebar height survives a fresh process, native controller, and AppKit layout")
 
 let (closingHandle, closingPoint) = beginHandleDrag()

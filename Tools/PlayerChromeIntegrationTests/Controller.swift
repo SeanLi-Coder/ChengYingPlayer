@@ -61,6 +61,16 @@ final class FloatingFixtureView: NSVisualEffectView {
                                             toItem: nil, attribute: .notAnAttribute, multiplier: 1, constant: 0)
 }
 
+final class ChromeLayoutWindow: NSWindow {
+  // The height-memory fixture supplies its own large layout surface. All normal
+  // layout-matrix cases retain AppKit's physical-screen constraint unchanged.
+  var allowsOffscreenLayout = false
+
+  override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+    allowsOffscreenLayout ? frameRect : super.constrainFrameRect(frameRect, to: screen)
+  }
+}
+
 final class LayoutController: NSWindowController {
   struct FullscreenState { var isFullscreen = false }
   struct SidebarShift { var downShift: CGFloat = 0 }
@@ -123,7 +133,7 @@ final class LayoutController: NSWindowController {
   var playSlider: NSSlider!
 
   init(fixture: ChromeFixture) throws {
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
+    let window = ChromeLayoutWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
                           styleMask: [.titled, .resizable], backing: .buffered, defer: false)
     super.init(window: window)
     window.isReleasedWhenClosed = false

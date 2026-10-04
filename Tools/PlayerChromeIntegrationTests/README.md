@@ -37,6 +37,14 @@ The native AppKit window may be constrained by the CI screen. Tests compare
 content geometry to actual bounds and separately assert that small requested
 windows expand only to the documented compact-mode minimum.
 
+The isolated height-memory cases override only the test window's
+`constrainFrameRect` to keep a full 900-point layout surface even on short CI
+screens. They assert its actual content bounds before testing exact 600-to-690
+heights. The ordinary layout matrix retains AppKit's physical-screen constraint.
+All production content constraints, grip tracking, viewport checks, and explicit
+small-window clamping still execute unchanged. Each height phase reports actual
+content, sidebar, maximum height, preference, and physical-screen geometry.
+
 Height cases route a real native lower-edge hit test through production handle
 `mouseDown`, `mouseDragged`, and `mouseUp` events. They verify a 600-to-690-point
 downward drag with an anchored top, unchanged video/window geometry, balanced
