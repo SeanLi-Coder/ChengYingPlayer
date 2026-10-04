@@ -21,8 +21,10 @@ def main():
     parser.add_argument("--controller-ref", help="Use controller source from this local Git commit without fetching")
     parser.add_argument("--language", choices=("en", "zh-Hans", "zh-Hant"), help="Run one language instead of all three")
     parser.add_argument("--preview-case", action="append",
-                        choices=("opening", "input", "markers", "rounding", "invalid", "lifecycle", "navigation"),
+                        choices=("opening", "input", "markers", "rounding", "invalid", "lifecycle", "navigation", "waiting"),
                         help="Run an isolated automatic-preview case; repeat to select multiple cases")
+    parser.add_argument("--preview-wait-mode", choices=("observed", "fixed"), default="observed",
+                        help="Compare observed-state waiting with the legacy fixed wait in the waiting case")
     parser.add_argument("--preview-repeat", type=int, default=1,
                         help="Repeat isolated preview cases in fresh processes without recompiling")
     parser.add_argument("--preview-window-height", type=float, default=720,
@@ -30,6 +32,8 @@ def main():
     parser.add_argument("--preview-run-loop-stall", type=float, default=0,
                         help="Block preview fixture timer delivery for this many seconds to test late dispatch")
     arguments = parser.parse_args()
+    if arguments.preview_wait_mode == "fixed" and arguments.preview_case != ["waiting"]:
+        parser.error("--preview-wait-mode fixed requires only --preview-case waiting")
     if not 1 <= arguments.preview_repeat <= 100 or (arguments.preview_repeat != 1 and not arguments.preview_case):
         parser.error("--preview-repeat requires --preview-case and must be between 1 and 100")
     if not 240 <= arguments.preview_window_height <= 2000:
@@ -87,6 +91,7 @@ def main():
             "Tools/VideoToolsTests/main.swift"])
         environment = os.environ.copy()
         environment.pop("CHENGYING_PREVIEW_REGRESSION_CASE", None)
+        environment["CHENGYING_PREVIEW_WAIT_MODE"] = arguments.preview_wait_mode
         environment["CHENGYING_PREVIEW_WINDOW_HEIGHT"] = str(arguments.preview_window_height)
         environment["CHENGYING_PREVIEW_RUN_LOOP_STALL"] = str(arguments.preview_run_loop_stall)
         failures = []

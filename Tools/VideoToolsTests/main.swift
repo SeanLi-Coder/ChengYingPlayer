@@ -32,6 +32,41 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) {
   print("PASS: \(message)")
 }
 func near(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 0.000_001 }
+
+func pumpUI(for interval: TimeInterval) {
+  let deadline = ProcessInfo.processInfo.systemUptime + interval
+  repeat {
+    while ProcessInfo.processInfo.systemUptime < deadline,
+          let event = application.nextEvent(matching: .any, until: .distantPast,
+                                            inMode: .default, dequeue: true) {
+      application.sendEvent(event)
+    }
+    let remaining = deadline - ProcessInfo.processInfo.systemUptime
+    if remaining > 0 {
+      RunLoop.main.run(until: Date().addingTimeInterval(min(remaining, 0.005)))
+    }
+  } while ProcessInfo.processInfo.systemUptime < deadline
+}
+
+func waitForObservedState(_ message: String, timeout: TimeInterval = 3, _ predicate: () -> Bool) {
+  let started = ProcessInfo.processInfo.systemUptime
+  let deadline = started + timeout
+  while !predicate(), ProcessInfo.processInfo.systemUptime < deadline { pumpUI(for: 0.005) }
+  if !predicate() {
+    print("DIAGNOSTIC: observed-state timeout after \(ProcessInfo.processInfo.systemUptime - started)s: \(message)")
+  }
+  check(predicate(), message)
+}
+
+func assertStateRemains(_ message: String, for interval: TimeInterval = 0.5, _ predicate: () -> Bool) {
+  let deadline = ProcessInfo.processInfo.systemUptime + interval
+  repeat {
+    guard predicate() else { fatalError("FAIL: \(message)") }
+    pumpUI(for: 0.005)
+  } while ProcessInfo.processInfo.systemUptime < deadline
+  check(predicate(), message)
+}
+
 let playback = property("playbackControl", as: NSSegmentedControl.self)
 let frames = property("frameStepControl", as: NSSegmentedControl.self)
 let speeds = property("speedPopup", as: NSPopUpButton.self)
@@ -100,6 +135,14 @@ func runAutomaticPreviewRegression(_ scenario: String) {
     let readDelta = reads.map { String(testPlayer.mpv.reads - $0) } ?? "n/a"
     let responder = window.firstResponder.map { String(describing: Swift.type(of: $0)) } ?? "nil"
     print("DIAGNOSTIC: \(scenario)/\(stage) elapsed=\(elapsed) reads=\(readDelta) active=\(application.isActive) key=\(window.isKeyWindow) responder=\(responder) editorCurrent=\(editor != nil && last.currentEditor() === editor) editorText=\(editor?.string.debugDescription ?? "nil") fieldText=\(last.stringValue.debugDescription)")
+    let pendingTimer = field("previewTimer", as: Timer?.self)
+    func optionalFlag(_ name: String) -> String {
+      guard let value = Mirror(reflecting: testController).children.first(where: { $0.label == name })?.value as? Bool else {
+        return "unavailable"
+      }
+      return String(value)
+    }
+    print("DIAGNOSTIC: \(scenario)/\(stage) a=\(String(describing: testPlayer.mpv.values["a"])) b=\(String(describing: testPlayer.mpv.values["b"])) loopCount=\(String(describing: testPlayer.mpv.values["count"])) paused=\(String(describing: testPlayer.mpv.values["pause"])) snapshot=\(field("previewSnapshot", as: VideoToolsPlayerSnapshot?.self) != nil) timerValid=\(pendingTimer?.isValid == true) timerDelay=\(pendingTimer?.fireDate.timeIntervalSinceNow ?? 0) automaticPending=\(optionalFlag("automaticPreviewPending")) visible=\(optionalFlag("playbackControlsVisible")) loaded=\(testPlayer.info.state.loaded) updateBlocked=\(UpdateWorkAdmission.shared.isBlocked)")
   }
   var notifications = 0
   let observer = NotificationCenter.default.addObserver(forName: NSControl.textDidChangeNotification,
@@ -184,6 +227,34 @@ func runAutomaticPreviewRegression(_ scenario: String) {
   }
 
   switch scenario {
+  case "waiting":
+    let inputStarted = Date()
+    type("23.5", into: last)
+    let timer = scheduledPreview(between: inputStarted, and: Date())
+    var blocked = false
+    let blocker = DispatchWorkItem {
+      blocked = true
+      Thread.sleep(forTimeInterval: 0.4)
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: blocker)
+    defer { blocker.cancel() }
+    let expected = VideoToolsLoopRange(start: 10, end: 23.5)
+    let ready = {
+      testPlayer.videoToolsLoopRange == expected && !testPlayer.mpv.getFlag("pause") &&
+        field("previewSnapshot", as: VideoToolsPlayerSnapshot?.self) != nil &&
+        field("previewTimer", as: Timer?.self) == nil
+    }
+    check(testPlayer.videoToolsLoopRange == nil && timer.isValid,
+          "The controlled wait fixture starts with a pending real production timer")
+    if environment["CHENGYING_PREVIEW_WAIT_MODE"] == "fixed" {
+      RunLoop.main.run(until: Date().addingTimeInterval(0.45))
+      print("DIAGNOSTIC: fixed-wait blocked=\(blocked) timerValid=\(timer.isValid) overdue=\(Date().timeIntervalSince(timer.fireDate)) ready=\(ready())")
+      check(ready(), "The legacy fixed wait observes the actual preview callback under a deadline-adjacent stall")
+    } else {
+      waitForObservedState("The bounded observed-state wait receives the real callback after a deadline-adjacent stall", ready)
+      check(blocked && !timer.isValid && Date() >= timer.fireDate,
+            "The wait regression actually delayed delivery of the production debounce timer")
+    }
   case "opening":
     expectsRange(10, 15, "Explicitly opening tools starts its initial range without typing or clicking preview")
     testController.stopPreview()
@@ -459,7 +530,7 @@ func runAutomaticPreviewRegression(_ scenario: String) {
 }
 
 let previewRegressionCase = ProcessInfo.processInfo.environment["CHENGYING_PREVIEW_REGRESSION_CASE"]
-for scenario in previewRegressionCase.map({ [$0] }) ?? ["opening", "input", "markers", "rounding", "invalid", "lifecycle", "navigation"] {
+for scenario in previewRegressionCase.map({ [$0] }) ?? ["opening", "input", "markers", "rounding", "invalid", "lifecycle", "navigation", "waiting"] {
   runAutomaticPreviewRegression(scenario)
 }
 if previewRegressionCase != nil {
@@ -648,9 +719,10 @@ check(!frameFormatGroup.isHidden && frameFormat.isEnabled,
       "Frame extraction exposes its format selector")
 player.mpv.values["time"] = 118.25; action(setStart)
 check(end.stringValue == "02:00.000000", "Frame range end clamps to duration")
-RunLoop.main.run(until: Date().addingTimeInterval(0.45))
-check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 118.25, end: 120) && !player.mpv.getFlag("pause"),
-      "The clamped default frame range starts automatic preview after marking")
+waitForObservedState("The clamped default frame range starts automatic preview after marking") {
+  player.videoToolsLoopRange == VideoToolsLoopRange(start: 118.25, end: 120) && !player.mpv.getFlag("pause") &&
+    property("previewSnapshot", as: VideoToolsPlayerSnapshot?.self) != nil && property("previewTimer", as: Timer?.self) == nil
+}
 controller.stopPreview()
 player.mpv.values["time"] = 10.0; action(setStart)
 action(run)
@@ -682,8 +754,11 @@ do {
 frameFormat.selectItem(at: 0); action(frameFormat)
 start.stringValue = "11.123456"; controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: start))
 check(end.stringValue == "00:16.123456", "Typing start updates frame end")
-RunLoop.main.run(until: Date().addingTimeInterval(0.45))
-check(player.mpv.getString("count") == "inf" && near(player.mpv.getDouble("a"), 11.123456), "Typing valid range automatically previews")
+waitForObservedState("Typing valid range automatically previews") {
+  player.mpv.getString("count") == "inf" && near(player.mpv.getDouble("a"), 11.123456) &&
+    !player.mpv.getFlag("pause") && property("previewSnapshot", as: VideoToolsPlayerSnapshot?.self) != nil &&
+    property("previewTimer", as: Timer?.self) == nil
+}
 end.stringValue = "bad"; controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: end))
 check(player.mpv.getString("count") == "0", "Invalid input stops previous range preview")
 check(previewStatus.stringValue == NSLocalizedString("videotools.preview.invalid", comment: ""),
@@ -699,8 +774,9 @@ start.stringValue = "10"; end.stringValue = "20"
 player.pause()
 controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: end))
 playback.selectedSegment = 1; action(playback)
-RunLoop.main.run(until: Date().addingTimeInterval(0.45))
-check(player.mpv.getString("count") == "0", "Play action cancels pending automatic preview")
+assertStateRemains("Play action cancels pending automatic preview") {
+  player.mpv.getString("count") == "0" && property("previewTimer", as: Timer?.self) == nil
+}
 action(preview)
 player.mpv.values["time"] = 14.0
 playback.selectedSegment = 2; action(playback)
@@ -711,9 +787,10 @@ action(preview)
 player.mpv.values["time"] = 16.123456
 action(setStart)
 check(start.stringValue == "00:16.123456" && near(player.mpv.getDouble("time"), 16.123456) && player.mpv.getFlag("pause") && player.mpv.getString("count") == "0", "Marking during preview immediately pauses at the selected frame before the new debounce")
-RunLoop.main.run(until: Date().addingTimeInterval(0.45))
-check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 16.123456, end: 20) && !player.mpv.getFlag("pause"),
-      "Marking during preview restarts the updated range automatically after the debounce")
+waitForObservedState("Marking during preview restarts the updated range automatically after the debounce") {
+  player.videoToolsLoopRange == VideoToolsLoopRange(start: 16.123456, end: 20) && !player.mpv.getFlag("pause") &&
+    property("previewSnapshot", as: VideoToolsPlayerSnapshot?.self) != nil && property("previewTimer", as: Timer?.self) == nil
+}
 controller.stopPreview()
 let rotation = property("rotationControl", as: NSSegmentedControl.self)
 let rotationPreview = property("rotationPreviewButton", as: NSButton.self)
@@ -739,12 +816,10 @@ player.videoToolsRestorePreviewBeforeUnload(captured)
 check(player.mpv.getInt("rotation") == captured.rotation && player.mpv.getDouble("time") == 80, "Unload restores preview options without seeking")
 controller.setPlaybackControlsVisible(true)
 let readsBefore = player.mpv.reads
-RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-check(player.mpv.reads > readsBefore, "Visible controls refresh on timer")
+waitForObservedState("Visible controls refresh on timer") { player.mpv.reads > readsBefore }
 controller.setPlaybackControlsVisible(false)
 let hiddenReadsBefore = player.mpv.reads
-RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-check(player.mpv.reads == hiddenReadsBefore, "Hidden controls stop timer")
+assertStateRemains("Hidden controls stop timer") { player.mpv.reads == hiddenReadsBefore }
 print("Control frames at 320-point width:")
 for (name, control) in [("playback", playback as NSView), ("frames", frames), ("speed", speeds), ("start", start), ("end", end), ("startButton", setStart), ("endButton", setEnd)] {
   let rect = controller.view.convert(control.bounds, from: control)
@@ -802,8 +877,10 @@ check(preview.title == localized("videotools.stop_preview") && player.videoTools
 start.stringValue = "10"; end.stringValue = "15"
 controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: end))
 check(previewStatus.stringValue == localized("videotools.preview.pending"), "Typing exposes the pending preview state")
-RunLoop.main.run(until: Date().addingTimeInterval(0.45))
-check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 10, end: 15), "Editing updates the temporary preview range")
+waitForObservedState("Editing updates the temporary preview range") {
+  player.videoToolsLoopRange == VideoToolsLoopRange(start: 10, end: 15) && !player.mpv.getFlag("pause") &&
+    property("previewSnapshot", as: VideoToolsPlayerSnapshot?.self) != nil && property("previewTimer", as: Timer?.self) == nil
+}
 check(previewStatus.stringValue == String(format: localized("videotools.preview.active"), "00:10.000", "00:15.000"),
       "Preview status displays the actual current range and player destination")
 action(preview)
@@ -834,8 +911,10 @@ player.mpv.values["time"] = 30.0
 controller.setLoopMarker(isEnd: false)
 player.mpv.values["time"] = 35.0
 controller.setLoopMarker(isEnd: true)
-RunLoop.main.run(until: Date().addingTimeInterval(0.45))
-check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 30, end: 35), "An old automatic-preview timer cannot replace keyboard markers")
+assertStateRemains("An old automatic-preview timer cannot replace keyboard markers") {
+  player.videoToolsLoopRange == VideoToolsLoopRange(start: 30, end: 35) &&
+    property("previewTimer", as: Timer?.self) == nil
+}
 player.mpv.values["time"] = 29.0
 controller.setLoopMarker(isEnd: true)
 check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 30, end: 35), "B strictly before a nonzero A preserves the active interval")

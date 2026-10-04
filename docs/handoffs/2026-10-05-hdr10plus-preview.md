@@ -2,7 +2,7 @@
 
 ## 范围与原因
 
-基于 `7cecfbd2`，目标版本 `v0.2.62` / build `73`。发布状态以本页最后的记录为准，
+基于 `7cecfbd2`，目标版本 `v0.2.63` / build `74`。发布状态以本页最后的记录为准，
 本地源码或测试通过不代表已公开发布。
 
 用户授权的约 10.12 秒附件是 HEVC Main10、3600×2338、10 位 limited-range
@@ -44,6 +44,8 @@ HDR10+；简单移除限制会丢动态信息，因为原版 FFmpeg 9.0.1 的 li
 python3 -B Tools/ClipPreviewLiveTests/run.py --media /absolute/authorized/video.mp4
 python3 -B Tools/ClipPreviewLiveTests/run.py --controller-ref 7cecfbd2 --case opening
 python3 -B Tools/VideoToolsTests/run.py
+python3 -B Tools/VideoToolsTests/run.py --language en --preview-case waiting --preview-wait-mode observed
+python3 -B Tools/VideoToolsTests/run.py --language en --preview-case waiting --preview-wait-mode fixed
 python3 -B Tools/HDR10PlusCodecTests/test_codec.py
 python3 -B Tools/HDR10PlusCodecTests/test_distribution.py
 python3 -B other/verify_media_distribution.py deps
@@ -54,7 +56,14 @@ python3 -m ruff check helper.py media.py conversion.py dovi_clip.py hdr10plus_cl
 
 真实媒体只在用户授权后通过参数传入，不能提交到测试资源。生成的 App 使用
 `TestAppWorkspace` 隔离、精确注销并正常清理。Ruff 从 helper 目录运行，以保留既有
-first-party import 识别。打包后另运行：
+first-party import 识别。
+
+`--preview-wait-mode fixed` 是预期失败的旧等待方式负对照：在真实 350 ms debounce
+回调之前插入可控主线程工作，单次固定 0.45 秒等待会在回调尚未交付时结束。
+正常模式以单调时钟设 3 秒上限并观察真实循环、暂停、快照和定时器状态；负向场景
+持续监测整个窗口，保留首发时间、停止、隐藏、导航及更新屏障约束。此修订不改生产逻辑。
+
+打包后另运行：
 
 ```bash
 python3 -B Tools/VideoToolsTests/app_hdr10plus_clip_smoke.py --app /absolute/isolated/ChengYing.app
@@ -79,9 +88,17 @@ B 帧、静态元数据、音频和重复导出的防覆盖；公开安装验证
   临时路径去掉重复斜线后、尚未解析符号链接的拼写；只补精确等价路径替换，保留检查。
   该标签另遇上游 x264 返回 7439 字节错误响应，SHA 检查正确拒绝；同固定 URL 复查
   返回 1040327 字节并匹配原锁，不修改来源哈希或使用异常文件。
+- `v0.2.62` / build `73` 未发布。主线旧原生测试在固定 0.45 秒等待后的自动预览断言失败；
+  同一检查此前本机与 v0.2.61 两条功能 job 均通过。停止发布后专项验证异步调度边界，
+  保留真实预览状态、取消、防抢播与最小 debounce 的断言，不用重试碰运气绕过检查。
+  受控主线程阻塞已重现旧等待结束而回调未执行的误判；新等待同条件独立运行三次通过，
+  完整三语言套件及当前 opening 三次通过。旧控制器在窗口 active/key、媒体 loaded
+  均成立时仍因确实没有自动预览失败，诊断缺失字段安全显示 unavailable。
+  另有一次本机 opening 超时在增加细化诊断前发生，未能确定原因，之后未再现；
+  不将其无证据归因为窗口焦点，不删除断言或宣称消除所有环境与硬件时序问题。
 
 - 实际附件自动预览 195 项检查、188 张实际渲染帧通过；旧版首开负对照按预期失败。
-  三语言原生工具各 927 项及任务管理各 132 项通过；生产导航入口 310 项通过。
+  三语言原生工具与任务管理回归通过（任务管理每种 132 项）；生产导航入口 310 项通过。
 - 完整 helper 366 通过、1 项既有 AV1 fixture 编码器缺失跳过。补上后段动态信息防护后，
   HDR10+ 与基础 media 定向组 146 项通过，其中 HDR10+ 专项 70 项。
 - 实际附件 1.417–3.863 秒选出 61 帧；8.417–10.116667 秒选出 56 帧。
