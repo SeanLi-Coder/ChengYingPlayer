@@ -23,6 +23,7 @@ static mpv_handle *player;
 static mpv_render_context *renderer;
 static void *gl_library;
 static GLuint texture, framebuffer;
+static GLuint delayed_texture, delayed_framebuffer;
 static atomic_bool render_pending;
 static bool failed, loaded;
 static bool graphics_unavailable;
@@ -31,6 +32,9 @@ static uint64_t next_request = 1, awaited_request;
 static bool received_reply;
 static double reply_value;
 static char reply_string[128];
+static double test_readback_delay, readback_not_before, snapshot_deadline;
+static unsigned delayed_frame_count;
+static bool test_invert_pan_y;
 
 static double now(void) {
   struct timespec value;
@@ -130,6 +134,7 @@ static void pump(void) {
 
 static bool await_reply(void) {
   double deadline = now() + 8;
+  if (snapshot_deadline > 0 && snapshot_deadline < deadline) deadline = snapshot_deadline;
   while (!failed && !received_reply && now() < deadline) pump();
   return require(received_reply, "The player request exceeded its deadline") && !failed;
 }
@@ -158,6 +163,18 @@ bool viewport_live_wait(double seconds) {
 
 bool viewport_live_open(const char *path, bool hardware) {
   graphics_unavailable = false;
+  const char *delay = getenv("CHENGYING_VIEWPORT_TEST_READBACK_DELAY");
+  if (delay) {
+    char *end = NULL;
+    test_readback_delay = strtod(delay, &end);
+    if (!require(end != delay && !*end && isfinite(test_readback_delay) &&
+                 test_readback_delay > 0 && test_readback_delay <= 30,
+                 "The test readback delay must be in (0, 30] seconds")) return false;
+  }
+  const char *invert = getenv("CHENGYING_VIEWPORT_TEST_INVERT_PAN_Y");
+  if (!require(!invert || strcmp(invert, "1") == 0,
+               "The test pan direction fault accepts only 1 when set")) return false;
+  test_invert_pan_y = invert != NULL;
   const char *software_gl = getenv("CHENGYING_TEST_SOFTWARE_GL");
   if (!require(!software_gl || strcmp(software_gl, "1") == 0,
                "CHENGYING_TEST_SOFTWARE_GL accepts only 1 when set") ||
@@ -243,6 +260,20 @@ bool viewport_live_open(const char *path, bool hardware) {
   if (!require(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE,
                "The real viewport framebuffer is complete")) return false;
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  if (test_readback_delay > 0) {
+    glGenTextures(1, &delayed_texture);
+    glBindTexture(GL_TEXTURE_2D, delayed_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, WIDTH, HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glGenFramebuffers(1, &delayed_framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, delayed_framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, delayed_texture, 0);
+    if (!require(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE,
+                 "The delayed real-pixel framebuffer is complete")) return false;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
   const char *load[] = {"loadfile", path, "replace", NULL};
   if (!check(mpv_command_async(player, request(), load), "Load generated 4K media") || !await_reply()) return false;
   double deadline = now() + 15;
@@ -272,6 +303,23 @@ bool viewport_live_get_double(const char *name, double *value) {
 }
 
 bool viewport_live_set_double(const char *name, double value) {
+  if (strcmp(name, "video-zoom") == 0 || strcmp(name, "video-pan-x") == 0 ||
+      strcmp(name, "video-pan-y") == 0) {
+    if (test_readback_delay > 0) {
+      // Preserve an actual previously rendered GPU image while the live renderer
+      // keeps receiving callbacks. No synthetic pixels or mpv timeouts are used.
+      if (now() >= readback_not_before) {
+        [view.openGLContext makeCurrentContext];
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, delayed_framebuffer);
+        glBlitFramebuffer(0, 0, WIDTH, HEIGHT, 0, 0, WIDTH, HEIGHT, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        delayed_frame_count = frame_count;
+      }
+      readback_not_before = now() + test_readback_delay;
+    }
+    if (test_invert_pan_y && strcmp(name, "video-pan-y") == 0) value = -value;
+  }
   return set_double(name, value);
 }
 
@@ -293,8 +341,7 @@ bool viewport_live_seek(double position) {
          await_reply() && viewport_live_wait(0.20);
 }
 
-bool viewport_live_snapshot(ViewportLiveSnapshot *snapshot) {
-  if (!snapshot || !player || failed) return false;
+static bool take_snapshot(ViewportLiveSnapshot *snapshot) {
   memset(snapshot, 0, sizeof(*snapshot));
   double paused = 0;
   if (!read_value("time-pos", MPV_FORMAT_DOUBLE, &snapshot->position) ||
@@ -308,11 +355,12 @@ bool viewport_live_snapshot(ViewportLiveSnapshot *snapshot) {
       !read_value("pause", MPV_FORMAT_FLAG, &paused)) return false;
   snapshot->paused = (int)paused;
   snapshot->window_unchanged = NSEqualRects(window.frame, original_frame);
-  snapshot->frames = frame_count;
+  bool delayed = now() < readback_not_before;
+  snapshot->frames = delayed ? delayed_frame_count : frame_count;
   unsigned char *pixels = malloc(WIDTH * HEIGHT * 4);
   if (!require(pixels != NULL, "Pixel sample allocation succeeds")) return false;
   [view.openGLContext makeCurrentContext];
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, delayed ? delayed_framebuffer : framebuffer);
   glReadBuffer(GL_COLOR_ATTACHMENT0);
   glReadPixels(0, 0, WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
   glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -338,6 +386,15 @@ bool viewport_live_snapshot(ViewportLiveSnapshot *snapshot) {
   return require(glGetError() == GL_NO_ERROR, "Viewport rendering and pixel reads report no OpenGL error");
 }
 
+bool viewport_live_snapshot(ViewportLiveSnapshot *snapshot, double timeout) {
+  if (!snapshot || !player || failed || timeout <= 0 || !isfinite(timeout)) return false;
+  snapshot_deadline = now() + timeout;
+  bool result = take_snapshot(snapshot);
+  bool timely = now() <= snapshot_deadline;
+  snapshot_deadline = 0;
+  return result && require(timely, "The viewport sample exceeded its observation deadline");
+}
+
 void viewport_live_close(void) {
   if (player && renderer && !failed) {
     const char *stop[] = {"stop", NULL};
@@ -353,6 +410,8 @@ void viewport_live_close(void) {
   if (player) { mpv_terminate_destroy(player); player = NULL; }
   if (framebuffer) glDeleteFramebuffers(1, &framebuffer);
   if (texture) glDeleteTextures(1, &texture);
+  if (delayed_framebuffer) glDeleteFramebuffers(1, &delayed_framebuffer);
+  if (delayed_texture) glDeleteTextures(1, &delayed_texture);
   glFinish();
   [NSOpenGLContext clearCurrentContext];
   [window close];

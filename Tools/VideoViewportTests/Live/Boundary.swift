@@ -14,6 +14,7 @@ final class PlayerCore {
 
 final class LiveMPV {
   private(set) var writes: [String] = []
+  private(set) var requestedValues: [String: Double] = [:]
 
   func getDouble(_ name: String) -> Double {
     var result = 0.0
@@ -25,6 +26,7 @@ final class LiveMPV {
 
   func setDouble(_ name: String, _ value: Double) {
     writes.append(name)
+    requestedValues[name] = value
     guard viewport_live_set_double(name, value) else {
       fatalError("The live player could not set a viewport property")
     }

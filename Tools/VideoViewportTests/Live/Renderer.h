@@ -29,7 +29,7 @@ bool viewport_live_set_speed(double speed);
 bool viewport_live_set_paused(bool paused);
 bool viewport_live_seek(double position);
 bool viewport_live_wait(double seconds);
-bool viewport_live_snapshot(ViewportLiveSnapshot *snapshot);
+bool viewport_live_snapshot(ViewportLiveSnapshot *snapshot, double timeout);
 void viewport_live_close(void);
 
 #endif

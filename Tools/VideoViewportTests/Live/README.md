@@ -45,6 +45,39 @@ of allowing an accelerated context, add `CHENGYING_TEST_SOFTWARE_GL=1` in softwa
 mode. This test-only option is rejected in hardware mode; it does not mock the
 renderer or relax the watchdog or pixel expectations.
 
+Viewport snapshots observe both the requested mpv properties and the actual
+GPU marker until they agree with the existing two-pixel fixture expectations.
+Each observation has an eight-second deadline shared by all property queries
+and the pixel readback; a late matching sample still fails. The whole-process
+ninety-second watchdog remains unchanged. No-op/clamped pan operations need not
+produce a new frame. Active-playback snapshots also observe the original time
+progress conditions because a viewport-only redraw can reuse the current frame.
+The final direction, dimensions, playback-state, and
+window assertions are retained, and samples include their context, measured
+coordinates, viewport properties, and rendered-frame count for diagnosis.
+
+The test-only fault controls support isolated timing regressions. A delayed
+readback copies the previous real GPU image to a separate framebuffer while
+mpv's normal callbacks and live rendering continue; it does not fabricate
+pixels or hold mpv's rendering loop until its own frame timeout expires.
+
+```sh
+# Positive: wait for the real updated image after a 350 ms readback delay.
+CHENGYING_VIEWPORT_TEST_READBACK_DELAY=0.35 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
+# Negative control: the former fixed 100 ms sampler can still read old pixels.
+CHENGYING_VIEWPORT_TEST_LEGACY_SAMPLING=1 CHENGYING_VIEWPORT_TEST_READBACK_DELAY=0.35 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
+# Negative: blocked delivery and reversed vertical pan must each fail, not skip.
+CHENGYING_VIEWPORT_TEST_READBACK_DELAY=30 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
+CHENGYING_VIEWPORT_TEST_INVERT_PAN_Y=1 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
+```
+
+The legacy negative control retains all independent final pixel assertions and
+requires an explicit delay; it is not used by the normal test or CI command.
+On a renderer taking longer than the configured delay, the legacy sampler may
+already see the new pixels, so absence of that failure does not prove the old
+fixed wait safe. These controlled tests establish a sampling race, not the
+unique cause of a historical CI failure whose log lacks coordinates.
+
 This is a bounded live renderer/bridge test, not a full application UI automation.
 It does not instantiate the complete application's `CAOpenGLLayer`, its actual
 window-controller event dispatch, fullscreen transitions, user keyboard layouts,
