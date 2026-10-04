@@ -1082,22 +1082,28 @@ class DownloadManager:
             # Never follow a same-named author symlink into an unrelated tree.
             if output_dir.parent != root or output_dir.is_symlink():
                 raise MediaDownloadError(
-                    "The author download folder is not a safe direct child of the selected directory"
+                    "The author download folder is not a safe direct child of the selected directory",
+                    issue_code=SiteIssueCode.LOCAL_CONFIGURATION,
                 )
             if output_dir.exists() and not output_dir.is_dir():
                 raise MediaDownloadError(
-                    "The author download folder conflicts with an existing file"
+                    "The author download folder conflicts with an existing file",
+                    issue_code=SiteIssueCode.LOCAL_CONFIGURATION,
                 )
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             raise MediaDownloadError(
-                "The author download folder could not be prepared"
+                "The author download folder could not be prepared",
+                issue_code=SiteIssueCode.LOCAL_CONFIGURATION,
             ) from exc
         if job.output_layout == OutputLayout.AUTHOR and (
             output_dir.is_symlink() or output_dir.resolve().parent != root
         ):
-            raise MediaDownloadError("The author download folder changed during preparation")
+            raise MediaDownloadError(
+                "The author download folder changed during preparation",
+                issue_code=SiteIssueCode.LOCAL_CONFIGURATION,
+            )
         return output_dir
 
     def _run_job(

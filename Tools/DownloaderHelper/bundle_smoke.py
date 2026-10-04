@@ -19,6 +19,7 @@ def _check() -> dict[str, object]:
     from diagnostic_identity import runtime_identity
     from diagnostic_log import verify_diagnostic_log
     from ejs_smoke import verify_ejs_runtime
+    from filename_smoke import verify_filename_runtime
     from playwright.sync_api import sync_playwright
     from profile_smoke import verify_profile_runtime
     from yt_dlp.extractor import gen_extractor_classes
@@ -108,6 +109,7 @@ def _check() -> dict[str, object]:
     node_version = verify_ejs_runtime()
     cookie_runtime = verify_cookie_runtime()
     profile_runtime = verify_profile_runtime()
+    filename_runtime = verify_filename_runtime()
     diagnostics = verify_diagnostic_log()
     identity = runtime_identity()
     if getattr(sys, "frozen", False) and identity.get("identity_source") != "bundled":
@@ -155,6 +157,7 @@ def _check() -> dict[str, object]:
         "ejs_challenges": "n-and-signature-solved-offline",
         "chrome_cookies": cookie_runtime,
         "chrome_profiles": profile_runtime,
+        "filenames": filename_runtime,
         "chrome_cookie_snapshot": "wal-and-malformed-data-verified-offline",
         "diagnostic_log": "bounded-redacted-export-verified-offline",
         "diagnostic_identity": identity,

@@ -425,6 +425,18 @@ def install_diagnostic_log(manager):
                         log.capture_failures += 1
 
         manager._run_job, manager._notify = run, notify
+        original_issue = getattr(manager, "_record_issue_locked", None)
+        if callable(original_issue):
+            @functools.wraps(original_issue)
+            def issue(job, message, *args, **kwargs):
+                # The manager handles most exceptions inside _run_job. Capture
+                # only their safe type/code chain before that evidence is lost.
+                cause = kwargs.get("cause")
+                if isinstance(cause, BaseException):
+                    record_cookie_event("task_exception", error=cause)
+                return original_issue(job, message, *args, **kwargs)
+
+            manager._record_issue_locked = issue
         setattr(manager, _ATTRIBUTE, log)
         add_listener = getattr(manager, "add_listener", None)
         if callable(add_listener):

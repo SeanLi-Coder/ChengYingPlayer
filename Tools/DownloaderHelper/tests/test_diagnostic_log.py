@@ -157,6 +157,62 @@ def test_unbound_capture_is_noop_and_does_not_inspect_exception():
     assert diagnostics._context.get() is None
 
 
+def test_handled_directory_exception_keeps_safe_errno_without_private_text():
+    from app.errors import MediaDownloadError, SiteIssueCode
+
+    calls = []
+
+    class HandledManager(Manager):
+        def _record_issue_locked(self, job, message, *, cause=None):
+            calls.append((job, message, cause))
+            return "issue-result"
+
+    def worker(manager, job_id):
+        try:
+            try:
+                raise OSError(errno.EILSEQ, SECRET, "/private/" + SECRET)
+            except OSError as cause:
+                raise MediaDownloadError(
+                    "The author download folder could not be prepared",
+                    issue_code=SiteIssueCode.LOCAL_CONFIGURATION,
+                ) from cause
+        except MediaDownloadError as error:
+            assert manager._record_issue_locked(manager.get_job(job_id), SECRET, cause=error) == "issue-result"
+            return "handled-result"
+
+    manager = HandledManager(worker=worker)
+    other = HandledManager()
+    original_other = other._record_issue_locked
+    diagnostics.install_diagnostic_log(manager)
+    installed = manager._record_issue_locked
+    diagnostics.install_diagnostic_log(manager)
+    assert manager._record_issue_locked is installed
+    assert other._record_issue_locked == original_other
+    assert manager._run_job(SECRET) == "handled-result"
+    assert len(calls) == 1 and calls[0][1] == SECRET
+    events = report(manager)["tasks"][0]["events"]
+    errors = [event for event in events if event["stage"] == "task_exception"]
+    assert len(errors) == 1
+    assert [entry["type"] for entry in errors[0]["exceptions"]] == ["MediaDownloadError", "OSError"]
+    assert errors[0]["exceptions"][1]["errno"] == errno.EILSEQ
+    assert diagnostics._context.get() is None
+
+
+def test_issue_adapter_preserves_underlying_exception_and_does_not_log_outside_worker():
+    error = RuntimeError(SECRET)
+
+    class HandledManager(Manager):
+        def _record_issue_locked(self, *args, **kwargs):
+            raise error
+
+    manager = HandledManager()
+    diagnostics.install_diagnostic_log(manager)
+    with pytest.raises(RuntimeError) as caught:
+        manager._record_issue_locked(manager.jobs[0], SECRET, cause=PermissionError(errno.EACCES, SECRET))
+    assert caught.value is error
+    assert report(manager)["tasks"][0]["events"] == []
+
+
 def test_old_tasks_only_export_allowlisted_counts_and_unknown_original_version():
     class State(str, Enum):
         FAILED = "failed"

@@ -391,6 +391,9 @@
   }
 
   function issueTitleForJob(job) {
+    if (/^The author download folder\b/.test(primaryJobIssueMessage(job))) {
+      return "作者保存目录准备失败";
+    }
     const diagnostic = primaryJobDiagnosticCode(job);
     if (primaryJobIssueCode(job) === "cookie_unavailable" && diagnostic) {
       return `Chrome Cookie 读取失败：${cookieDiagnosticLabels[diagnostic]}`;
@@ -403,6 +406,11 @@
     let description = issueDescriptions[normalized] || issueDescriptions.unknown;
     let solution = issueSolutions[normalized] || issueSolutions.unknown;
     const rawText = asText(raw);
+    if (/^The author download folder\b/.test(rawText)) {
+      description = "程序无法安全创建或恢复这个作者的本地保存目录，本轮尚未开始下载。这不是网站限制或 Chrome Cookie 错误。";
+      solution = "检查保存目录是否可写、磁盘是否有空间，及作者目录是否与普通文件或链接冲突；不要删除已有文件。修复原保存位置后可重试。若改了下载目录，请从原链接新建任务，旧任务仍使用原位置。若持续失败，请复制脱敏诊断日志反馈。";
+      return { description, solution, diagnostic: null };
+    }
     if (
       normalized === "cookie_unavailable"
       && /cookie is disabled for this task|cookie (?:was|is) disabled when this task was created|automatic item refresh was skipped because chrome cookie is disabled/i.test(rawText)

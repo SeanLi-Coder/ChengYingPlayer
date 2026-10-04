@@ -353,6 +353,31 @@ Chrome profiles or cookie exports.
 
 ## Verification
 
+### Unicode filename and local-directory compatibility
+
+`app/downloader.py::safe_component` additionally replaces unassigned,
+noncharacter and surrogate code points before UTF-8 encoding. It bounds runs of
+nonzero canonical combining classes to 31 in NFD, then recomposes NFC. Existing
+NFKC compatibility normalization, illegal-character replacement, byte limits and
+reserved-name handling remain. Ordinary Chinese text, accents, private-use text,
+emoji joiners and zero-combining-class marks retain their existing meaning.
+The same sanitizer protects author folders and media filename components.
+
+`app/task_manager.py` classifies directory-preparation failures as local
+configuration errors, preserving the underlying exception cause without exposing
+its path. Existing saved task directories are not renamed or migrated, and the
+native no-overwrite publication policy still handles sanitized-name collisions.
+`app/static/app.js` gives these failures dedicated local-folder guidance, including
+legacy stored messages, instead of advising Chrome login or component reinstall.
+
+The instance-only native diagnostic adapter captures handled exceptions through
+`_record_issue_locked`. It records only the existing bounded type/code/frame
+allowlists, including numeric filesystem errno, never raw messages, author names,
+paths, cookies or URLs. `filename_smoke.py` verifies synthetic Unicode directory
+and media names in the actual frozen self-test. Offline regressions cover native
+and legacy layouts, normalization boundaries, error causes and private reporting;
+real-site downloads are a separate explicitly authorized verification.
+
 Run the following with the managed helper Python or a Python environment with
 the upstream dependencies installed:
 

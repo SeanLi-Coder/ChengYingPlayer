@@ -346,6 +346,25 @@ def safe_component(
     value: str | None, fallback: str = "Unknown Author", limit: int = 120
 ) -> str:
     value = unicodedata.normalize("NFKC", value or "")
+    # macOS rejects unassigned/noncharacter code points and overly long
+    # decomposed combining sequences, even far below the byte-length limit.
+    # Keep private-use characters, emoji joiners and ordinary accents intact.
+    characters: list[str] = []
+    mark_run = 0
+    for character in unicodedata.normalize("NFD", value):
+        category = unicodedata.category(character)
+        if category in {"Cn", "Cs"}:
+            character = "_"
+            mark_run = 0
+        elif unicodedata.combining(character):
+            mark_run += 1
+            if mark_run > 31:
+                character = "_"
+                mark_run = 0
+        else:
+            mark_run = 0
+        characters.append(character)
+    value = unicodedata.normalize("NFC", "".join(characters))
     value = _INVALID_FILENAME.sub("_", value)
     value = re.sub(r"\s+", " ", value).strip(" ._")
     encoded = value.encode("utf-8")
