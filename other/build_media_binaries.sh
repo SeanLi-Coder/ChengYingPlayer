@@ -58,7 +58,7 @@ export MACOSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET"
 TARGET_CFLAGS="-arch $ARCHITECTURE -mmacosx-version-min=$DEPLOYMENT_TARGET"
 TARGET_LDFLAGS="-arch $ARCHITECTURE -mmacosx-version-min=$DEPLOYMENT_TARGET"
 
-for command_name in clang cmake curl libtool make otool patch perl pkg-config shasum tar; do
+for command_name in clang cmake curl libtool make otool patch pkg-config shasum tar; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "Required build command is unavailable: $command_name" >&2
     exit 2
@@ -193,10 +193,8 @@ cd "$FFMPEG_SOURCE_DIR"
 make -j"$(sysctl -n hw.logicalcpu)" ffmpeg ffprobe
 
 cp config.h ffbuild/config.mak "$RECORD_DIR/"
-for record in "$RECORD_DIR/config.h" "$RECORD_DIR/config.mak"; do
-  perl -0pi -e 'BEGIN { $build_root = shift @ARGV; $canonical_root = shift @ARGV; } s/\Q$build_root\E/<BUILD_ROOT>/g; s/\Q$canonical_root\E/<BUILD_ROOT>/g' \
-    "$WORK_DIR" "$(cd "$WORK_DIR" && pwd -P)" "$record"
-done
+"${HELPER_PYTHON:-python3}" "$SCRIPT_DIR/verify_media_distribution.py" \
+  --normalize-record "$RECORD_DIR" --build-root "$WORK_DIR"
 third_party_source_records | awk -F '\t' '$1 ~ /^(ffmpeg|x264|x265|freetype|harfbuzz|fribidi|libunibreak|libass)$/' > "$RECORD_DIR/sources.tsv"
 {
   printf 'Architecture: %s\nDeployment target: %s\n' "$ARCHITECTURE" "$DEPLOYMENT_TARGET"
