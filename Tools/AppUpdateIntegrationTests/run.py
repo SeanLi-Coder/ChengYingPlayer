@@ -162,6 +162,7 @@ def main():
         original_support = snapshot(support)
         preferences = {
             "volume": 13,
+            "playlistHeight": 690.0,
             "enableHdrSupport": False,
             "autoRepeat": True,
             "defaultRepeatMode": 1,

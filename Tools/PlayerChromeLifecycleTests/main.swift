@@ -395,6 +395,39 @@ withFixture { controller in
 }
 
 withFixture { controller in
+  Preference.set(Double(690), for: .playlistHeight)
+  controller.showPlaylistSidebar()
+  ChromeAnimations.drain()
+  controller.window!.contentView!.layoutSubtreeIfNeeded()
+  let handle = controller.sidebarResizeHandle!
+  let point = handle.convert(NSPoint(x: handle.bounds.midX, y: handle.bounds.midY), to: nil)
+  func resizeEvent(_ type: NSEvent.EventType, y: CGFloat) -> NSEvent {
+    NSEvent.mouseEvent(with: type, location: NSPoint(x: point.x, y: y), modifierFlags: [], timestamp: 0,
+                      windowNumber: controller.window!.windowNumber, context: nil,
+                      eventNumber: 220, clickCount: 1, pressure: 0)!
+  }
+  controller.createTimer()
+  let oldTimer = controller.hideControlTimer!
+  handle.mouseDown(with: resizeEvent(.leftMouseDown, y: point.y))
+  check(controller.controlInteractionDepth == 1 && controller.sidebarHeightDragOrigin != nil &&
+        controller.hideControlTimer == nil && !oldTimer.isValid,
+        "The production lower-edge mouse press suspends the actual auto-hide timer")
+  check(!controller.hideUI(), "Active lower-edge tracking prevents the actual idle-hide policy from hiding controls")
+  handle.mouseDragged(with: resizeEvent(.leftMouseDragged, y: point.y - 30))
+  controller.windowWillClose(Notification(name: NSWindow.willCloseNotification))
+  check(controller.sidebarResizeHandle == nil && controller.sidebarHeightDragOrigin == nil &&
+        controller.sidebarHeightDragValue == nil && controller.controlInteractionDepth == 0,
+        "The production window-close path clears the active height drag and interaction owner")
+  check(controller.hideControlTimer == nil && Preference.double(for: .playlistHeight) == 690,
+        "Height-drag cancellation during close cannot recreate an auto-hide timer or save partial preferences")
+  handle.mouseUp(with: resizeEvent(.leftMouseUp, y: point.y - 30))
+  ChromeAnimations.drain()
+  check(controller.hideControlTimer == nil && controller.controlInteractionDepth == 0 &&
+        Preference.double(for: .playlistHeight) == 690,
+        "A late grip release after close remains inert after pending animations complete")
+}
+
+withFixture { controller in
   Preference.timeout = .nan
   controller.createTimer()
   let fallback = controller.hideControlTimer!

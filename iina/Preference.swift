@@ -145,6 +145,7 @@ struct Preference {
     static let disableVolumeSliderScrolling = Key("disableVolumeSliderScrolling")
 
     static let playlistWidth = Key("playlistWidth")
+    static let playlistHeight = Key("playlistHeight")
     static let prefetchPlaylistVideoDuration = Key("prefetchPlaylistVideoDuration")
 
     static let enableThumbnailPreview = Key("enableThumbnailPreview")
@@ -850,6 +851,7 @@ struct Preference {
     .disablePlaySliderScrolling: false,
     .disableVolumeSliderScrolling: false,
     .playlistWidth: 270,
+    .playlistHeight: Double(600),
     .prefetchPlaylistVideoDuration: true,
     .themeMaterial: Theme.dark.rawValue,
     .enableOSD: true,

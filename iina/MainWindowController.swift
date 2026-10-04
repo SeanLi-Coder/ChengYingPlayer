@@ -68,7 +68,7 @@ class MainWindowController: PlayerWindowController {
   // MARK: - Constants
 
   /** Minimum window size. */
-  var minSize: NSSize { isUsingEdgeControls ? NSMakeSize(320, 380) : NSMakeSize(285, 120) }
+  var minSize: NSSize { isUsingEdgeControls ? NSMakeSize(320, 392) : NSMakeSize(285, 120) }
 
   /** For Force Touch. */
   let minimumPressDuration: TimeInterval = 0.5
@@ -187,12 +187,88 @@ class MainWindowController: PlayerWindowController {
   private var cornerTopConstraint: NSLayoutConstraint?
   private var originalSidebarVerticalConstraints: [NSLayoutConstraint] = []
   private var edgeSidebarConstraints: [NSLayoutConstraint] = []
+  private var sidebarHeightConstraint: NSLayoutConstraint?
+  private var sidebarMaximumHeightConstraint: NSLayoutConstraint?
+  private var sidebarContentBottomConstraint: NSLayoutConstraint?
+  private var sidebarResizeHandle: PlayerSidebarResizeHandle?
+  private var sidebarHeightDragOrigin: CGFloat?
+  private var sidebarHeightDragValue: CGFloat?
   private var chromeAnimationGeneration: UInt64 = 0
   private var sidebarAnimationGeneration: UInt64 = 0
   private var sidebarAutoHidden = false
   private var controlInteractionDepth = 0
 
   private var isUsingEdgeControls: Bool { oscPosition == .bottom }
+
+  private var preferredPlaylistHeight: CGFloat {
+    let height = Preference.double(for: .playlistHeight)
+    return height.isFinite && (252...16384).contains(height) ? CGFloat(height) : 600
+  }
+
+  private var maximumPlaylistHeight: CGFloat {
+    guard let content = window?.contentView, let corner = cornerControls, let footer = edgeControls else {
+      return 252
+    }
+    let top = content.convert(corner.bounds, from: corner).minY - 6
+    let bottom = content.convert(footer.bounds, from: footer).maxY + 6
+    return max(252, top - bottom)
+  }
+
+  private func beginSidebarHeightResize() {
+    guard isUsingEdgeControls, sideBarStatus == .playlist, isSidebarVisible,
+          sidebarHeightDragOrigin == nil else { return }
+    window?.contentView?.layoutSubtreeIfNeeded()
+    sidebarHeightDragOrigin = sideBarView.frame.height
+    sidebarHeightDragValue = nil
+    beginControlInteraction()
+  }
+
+  private func resizeSidebarHeight(by delta: CGFloat) {
+    guard let origin = sidebarHeightDragOrigin, delta.isFinite else { return }
+    let height = min(maximumPlaylistHeight, max(252, origin + delta))
+    sidebarHeightDragValue = height
+    sidebarHeightConstraint?.constant = height
+    window?.contentView?.layoutSubtreeIfNeeded()
+  }
+
+  private func endSidebarHeightResize(save: Bool) {
+    guard let origin = sidebarHeightDragOrigin else { return }
+    if save, let height = sidebarHeightDragValue, abs(height - origin) > 0.5 {
+      Preference.set(Double(height), for: .playlistHeight)
+    }
+    sidebarHeightDragOrigin = nil
+    sidebarHeightDragValue = nil
+    sidebarHeightConstraint?.constant = sideBarStatus == .playlist ? preferredPlaylistHeight : 400
+    window?.contentView?.layoutSubtreeIfNeeded()
+    endControlInteraction()
+  }
+
+  private func updateSidebarResizeHandle() {
+    sidebarResizeHandle?.cancelResize()
+    sidebarResizeHandle?.removeFromSuperview()
+    sidebarResizeHandle = nil
+    let resizable = isUsingEdgeControls && sideBarStatus == .playlist
+    sidebarContentBottomConstraint?.constant = resizable ? -12 : 0
+    sidebarHeightConstraint?.constant = resizable ? preferredPlaylistHeight : 400
+    sidebarMaximumHeightConstraint?.constant = resizable ? 16384 : 400
+    guard resizable, !sideBarView.subviews.isEmpty else { return }
+    let handle = PlayerSidebarResizeHandle(frame: .zero)
+    handle.translatesAutoresizingMaskIntoConstraints = false
+    handle.toolTip = NSLocalizedString("playlist.resize_height", comment: "")
+    handle.setAccessibilityLabel(handle.toolTip)
+    handle.onResizeStarted = { [weak self] in self?.beginSidebarHeightResize() }
+    handle.onResize = { [weak self] delta in self?.resizeSidebarHeight(by: delta) }
+    handle.onResizeEnded = { [weak self] save in self?.endSidebarHeightResize(save: save) }
+    sideBarView.addSubview(handle)
+    NSLayoutConstraint.activate([
+      handle.leadingAnchor.constraint(equalTo: sideBarView.leadingAnchor),
+      handle.trailingAnchor.constraint(equalTo: sideBarView.trailingAnchor),
+      handle.bottomAnchor.constraint(equalTo: sideBarView.bottomAnchor),
+      handle.heightAnchor.constraint(equalToConstant: 12),
+    ])
+    sidebarResizeHandle = handle
+    window?.invalidateCursorRects(for: handle)
+  }
 
   private var visibleChromeViews: [NSView] {
     fadeableViews + (isUsingEdgeControls && sideBarStatus != .hidden ? [sideBarView] : [])
@@ -232,6 +308,7 @@ class MainWindowController: PlayerWindowController {
   }
 
   private func invalidateChromeOnClose() {
+    sidebarResizeHandle?.cancelResize()
     destroyTimer()
     chromeAnimationGeneration &+= 1
     sidebarAnimationGeneration &+= 1
@@ -240,6 +317,8 @@ class MainWindowController: PlayerWindowController {
     sidebarAnimationState = .hidden
     sideBarStatus = .hidden
     sideBarView.subviews.forEach { $0.removeFromSuperview() }
+    sidebarResizeHandle = nil
+    sidebarContentBottomConstraint = nil
     sideBarView.isHidden = true
     sideBarView.alphaValue = 1
     sideBarRightConstraint.constant = -sideBarWidthConstraint.constant
@@ -860,8 +939,11 @@ class MainWindowController: PlayerWindowController {
       fadeableViews = fadeableViews.filter { $0 != cb }
     }
     if let cornerControls { fadeableViews.removeAll { $0 === cornerControls } }
+    sidebarResizeHandle?.cancelResize()
     NSLayoutConstraint.deactivate(edgeSidebarConstraints)
     edgeSidebarConstraints.removeAll()
+    sidebarHeightConstraint = nil
+    sidebarMaximumHeightConstraint = nil
 
     // reset
     ([controlBarFloating, controlBarBottom, oscTopMainView] as [NSView]).forEach { $0.isHidden = true }
@@ -1025,16 +1107,20 @@ class MainWindowController: PlayerWindowController {
     }
     if isUsingEdgeControls, let corner = cornerControls, let footer = edgeControls {
       NSLayoutConstraint.deactivate(originalSidebarVerticalConstraints)
-      let preferredHeight = sideBarView.heightAnchor.constraint(equalToConstant: 400)
+      let preferredHeight = sideBarView.heightAnchor.constraint(equalToConstant:
+        sideBarStatus == .playlist ? preferredPlaylistHeight : 400)
       preferredHeight.priority = .defaultLow
+      sidebarHeightConstraint = preferredHeight
+      let maximumHeight = sideBarView.heightAnchor.constraint(lessThanOrEqualToConstant:
+        sideBarStatus == .playlist ? 16384 : 400)
+      sidebarMaximumHeightConstraint = maximumHeight
       let belowToolbar = sideBarView.topAnchor.constraint(equalTo: corner.bottomAnchor, constant: 6)
       belowToolbar.priority = .init(999)
       edgeSidebarConstraints = [
-        belowToolbar, preferredHeight,
+        belowToolbar, preferredHeight, maximumHeight,
         sideBarView.topAnchor.constraint(greaterThanOrEqualTo: content.topAnchor, constant: 8),
         sideBarView.bottomAnchor.constraint(lessThanOrEqualTo: footer.topAnchor, constant: -6),
-        sideBarView.heightAnchor.constraint(lessThanOrEqualToConstant: 400),
-        sideBarView.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
+        sideBarView.heightAnchor.constraint(greaterThanOrEqualToConstant: 252),
       ]
       NSLayoutConstraint.activate(edgeSidebarConstraints)
       sideBarView.roundCorners(withRadius: 10)
@@ -1061,11 +1147,14 @@ class MainWindowController: PlayerWindowController {
       }
     }
     sidebarAutoHidden = false
+    updateSidebarResizeHandle()
   }
 
   private func updateEdgeControlsLayout() {
     guard isUsingEdgeControls else { return }
     cornerTopConstraint?.constant = fsState.isFullscreen ? 10 : 28
+    sidebarHeightConstraint?.constant = sideBarStatus == .playlist ?
+      (sidebarHeightDragValue ?? preferredPlaylistHeight) : 400
     if sideBarStatus != .hidden {
       sideBarWidthConstraint.constant = min(sideBarWidthConstraint.constant, sidebarMaxWidth)
     }
@@ -2532,9 +2621,12 @@ class MainWindowController: PlayerWindowController {
     sideBarView.subviews.forEach { $0.removeFromSuperview() }
     sideBarView.addSubview(view)
     let constraintsH = NSLayoutConstraint.constraints(withVisualFormat: "H:|[v]|", options: [], metrics: nil, views: ["v": view])
-    let constraintsV = NSLayoutConstraint.constraints(withVisualFormat: "V:|[v]|", options: [], metrics: nil, views: ["v": view])
+    let bottom = view.bottomAnchor.constraint(equalTo: sideBarView.bottomAnchor)
+    sidebarContentBottomConstraint = bottom
+    let constraintsV = [view.topAnchor.constraint(equalTo: sideBarView.topAnchor), bottom]
     NSLayoutConstraint.activate(constraintsH)
     NSLayoutConstraint.activate(constraintsV)
+    updateSidebarResizeHandle()
     var viewController = viewController
     viewController.downShift = isUsingEdgeControls ? 0 : titleBarHeightConstraint.constant
     if type == .playlist { playlistView.useCompactTabHeight = isUsingEdgeControls }
@@ -2556,6 +2648,7 @@ class MainWindowController: PlayerWindowController {
   }
 
   func hideSideBar(animate: Bool = true, after: @escaping () -> Void = { }) {
+    sidebarResizeHandle?.cancelResize()
     sidebarAnimationGeneration &+= 1
     let generation = sidebarAnimationGeneration
     chromeAnimationGeneration &+= 1
@@ -2581,6 +2674,8 @@ class MainWindowController: PlayerWindowController {
       if self.sidebarAnimationGeneration == generation && self.sidebarAnimationState == .willHide {
         self.sideBarStatus = .hidden
         self.sideBarView.subviews.forEach { $0.removeFromSuperview() }
+        self.sidebarResizeHandle = nil
+        self.sidebarContentBottomConstraint = nil
         self.sideBarView.isHidden = true
         // When in full screen mode with both the additional info view and the sidebar displayed the
         // info view will be positioned to avoid overlapping the sidebar. While hidden the sidebar

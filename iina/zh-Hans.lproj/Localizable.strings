@@ -593,6 +593,7 @@
 "videotools.viewport.status" = "画面 %.0f%% · 水平 %+.0f%% / 垂直 %+.0f%% · ⇧⌘0 复位";
 /* Global playback mode */
 "playback_mode.label" = "播放模式";
+"playlist.resize_height" = "上下拖动调整文件列表高度，松开后自动记忆。";
 "playback_mode.accessibility" = "播放模式";
 "playback_mode.off" = "顺序播放（不循环）";
 "playback_mode.file" = "单文件循环";

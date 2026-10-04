@@ -1,5 +1,85 @@
 import Cocoa
 
+/// A dedicated grip keeps sidebar resizing out of table tracking and window dragging.
+final class PlayerSidebarResizeHandle: NSView {
+  var onResizeStarted: (() -> Void)?
+  var onResize: ((CGFloat) -> Void)?
+  var onResizeEnded: ((Bool) -> Void)?
+
+  private var dragOriginY: CGFloat?
+  private weak var dragWindow: NSWindow?
+  private var closeObserver: NSObjectProtocol?
+  private var ownsCursor = false
+
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+  override func resetCursorRects() {
+    addCursorRect(bounds, cursor: .resizeUpDown)
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    NSColor.secondaryLabelColor.withAlphaComponent(0.65).setFill()
+    NSBezierPath(roundedRect: NSRect(x: (bounds.width - 28) / 2, y: (bounds.height - 3) / 2,
+                                   width: 28, height: 3), xRadius: 1.5, yRadius: 1.5).fill()
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    guard dragOriginY == nil, !isHiddenOrHasHiddenAncestor, (superview?.alphaValue ?? 1) > 0.01, let window,
+          event.window === window else { return }
+    dragOriginY = event.locationInWindow.y
+    dragWindow = window
+    window.disableCursorRects()
+    NSCursor.resizeUpDown.push()
+    ownsCursor = true
+    closeObserver = NotificationCenter.default.addObserver(
+      forName: NSWindow.willCloseNotification, object: window, queue: .main
+    ) { [weak self] _ in self?.cancelResize() }
+    onResizeStarted?()
+  }
+
+  override func mouseDragged(with event: NSEvent) {
+    guard let origin = dragOriginY, event.window === dragWindow else { return }
+    onResize?(origin - event.locationInWindow.y)
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    finishResize(save: event.window === dragWindow)
+  }
+
+  func cancelResize() { finishResize(save: false) }
+
+  private func finishResize(save: Bool) {
+    guard dragOriginY != nil else { return }
+    dragOriginY = nil
+    if let closeObserver {
+      NotificationCenter.default.removeObserver(closeObserver)
+      self.closeObserver = nil
+    }
+    if ownsCursor {
+      ownsCursor = false
+      NSCursor.pop()
+      dragWindow?.enableCursorRects()
+      dragWindow?.resetCursorRects()
+    }
+    dragWindow = nil
+    onResizeEnded?(save)
+  }
+
+  override func viewWillMove(toSuperview newSuperview: NSView?) {
+    if newSuperview !== superview { cancelResize() }
+    super.viewWillMove(toSuperview: newSuperview)
+  }
+
+  override func viewWillMove(toWindow newWindow: NSWindow?) {
+    if newWindow !== window { cancelResize() }
+    super.viewWillMove(toWindow: newWindow)
+  }
+
+  deinit {
+    if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+  }
+}
+
 /// Video controls remain dark independently of the appearance of the surrounding app.
 struct PlayerControlsAccessibility {
   let reduceTransparency: Bool

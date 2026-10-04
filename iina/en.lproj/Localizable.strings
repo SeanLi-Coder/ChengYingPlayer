@@ -594,6 +594,7 @@
 
 /* Global playback mode */
 "playback_mode.label" = "Mode";
+"playlist.resize_height" = "Drag up or down to resize the file list. The height is remembered.";
 "playback_mode.accessibility" = "Playback mode";
 "playback_mode.off" = "In order (no repeat)";
 "playback_mode.file" = "Repeat one file";

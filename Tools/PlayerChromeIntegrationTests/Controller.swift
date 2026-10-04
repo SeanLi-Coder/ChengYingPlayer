@@ -22,10 +22,27 @@ extension Utility {
 
 enum Preference {
   enum OSCPosition { case floating, top, bottom }
-  enum Key { case controlBarPositionHorizontal, controlBarPositionVertical, controlBarToolbarButtons }
+  enum Key: String {
+    case controlBarPositionHorizontal, controlBarPositionVertical, controlBarToolbarButtons
+    case playlistHeight = "PRODUCTION_PLAYLIST_HEIGHT_KEY"
+  }
   static var toolbarButtons = [2, 0, 1]
+  static var suiteName = ""
+  static var defaults: UserDefaults!
+  static func configureSuite(_ name: String) {
+    let prefix = "org.chengying.tests.PlaylistHeight."
+    guard name.hasPrefix(prefix), UUID(uuidString: String(name.dropFirst(prefix.count))) != nil,
+          let suite = UserDefaults(suiteName: name) else {
+      fatalError("Only an isolated UUID test preference suite is permitted")
+    }
+    suiteName = name
+    defaults = suite
+    defaults.register(defaults: [Key.playlistHeight.rawValue: PRODUCTION_PLAYLIST_HEIGHT_DEFAULT])
+  }
   static func array(for key: Key) -> [Any]? { toolbarButtons }
   static func float(for key: Key) -> Float { 0.5 }
+  static func double(for key: Key) -> Double { defaults.double(forKey: key.rawValue) }
+  static func set(_ value: Any, for key: Key) { defaults.set(value, forKey: key.rawValue) }
 }
 
 extension NSView {
@@ -64,10 +81,23 @@ final class LayoutController: NSWindowController {
   var cornerTopConstraint: NSLayoutConstraint?
   var originalSidebarVerticalConstraints: [NSLayoutConstraint] = []
   var edgeSidebarConstraints: [NSLayoutConstraint] = []
+  var sidebarHeightConstraint: NSLayoutConstraint?
+  var sidebarMaximumHeightConstraint: NSLayoutConstraint?
+  var sidebarContentBottomConstraint: NSLayoutConstraint?
+  var sidebarResizeHandle: PlayerSidebarResizeHandle?
+  var sidebarHeightDragOrigin: CGFloat?
+  var sidebarHeightDragValue: CGFloat?
+  // PRODUCTION_PREFERRED_PLAYLIST_HEIGHT
   var oscFloatingLeadingTrailingConstraint: [NSLayoutConstraint]?
   var fadeableViews: [NSView] = []
   var shown = 0
   var timerUpdates = 0
+  var controlInteractionDepth = 0
+  var controlInteractionBegins = 0
+  var controlInteractionEnds = 0
+  var isSidebarVisible: Bool {
+    sideBarStatus != .hidden && !sideBarView.isHiddenOrHasHiddenAncestor && sideBarView.alphaValue > 0.01
+  }
   var titleBarHeightConstraint: NSLayoutConstraint!
   var oscTopMainViewTopConstraint: NSLayoutConstraint!
   var sideBarRightConstraint: NSLayoutConstraint!
@@ -163,6 +193,8 @@ final class LayoutController: NSWindowController {
   required init?(coder: NSCoder) { fatalError("Use init(fixture:)") }
   func showUI(force: Bool) { shown += 1; currentControlBar?.isHidden = false }
   func updateTimer() { timerUpdates += 1 }
+  func beginControlInteraction() { controlInteractionDepth += 1; controlInteractionBegins += 1 }
+  func endControlInteraction() { controlInteractionDepth = max(0, controlInteractionDepth - 1); controlInteractionEnds += 1 }
   func addBackTitlebarViewToFadeableViews() { fadeableViews.append(titleBarView) }
   func removeTitlebarViewFromFadeableViews() { fadeableViews.removeAll { $0 === titleBarView } }
   @objc func toolBarButtonAction(_ sender: NSButton) {}

@@ -21,9 +21,11 @@ def block(text, marker):
 
 methods = [block(source, "private func " + name) for name in (
     "setupOSCToolbarButtons(", "setupOnScreenController(", "setupSidebarPanelLayout(", "updateEdgeControlsLayout(",
+    "beginSidebarHeightResize(", "resizeSidebarHeight(", "endSidebarHeightResize(", "updateSidebarResizeHandle(",
 )]
 methods = [method.replace("private func ", "func ", 1) for method in methods]
 methods.append(block(source, "var minSize:") if "var minSize:" in source else block(source, "var minSize "))
+methods.append(block(source, "private var maximumPlaylistHeight:").replace("private ", "", 1))
 constants = source[source.index("fileprivate let isMacOS11"):source.index("// The minimum distance")]
 constants = constants.replace("fileprivate ", "")
 style = block((root / "iina/OSCToolbarButton.swift").read_text(), "static func setStyle(")
@@ -34,6 +36,17 @@ toolbar = block(preference, "enum ToolBarButton:")
 image = block(toolbar, "func image()")
 toolbar = toolbar.replace(image, 'func image() -> NSImage { NSImage(systemSymbolName: "circle", accessibilityDescription: nil)! }')
 prefix = (root / "Tools/PlayerChromeIntegrationTests/Controller.swift").read_text()
+height_key = re.findall(r'^\s*static let playlistHeight\s*=\s*Key\("([^"]+)"\)', preference, re.MULTILINE)
+height_default = re.findall(r'^\s*\.playlistHeight\s*:\s*(?:Double\()?([0-9.]+)\)?\s*,', preference, re.MULTILINE)
+if len(height_key) != 1 or len(height_default) != 1:
+    raise SystemExit("Cannot uniquely extract the production playlist-height preference key and default")
+prefix = prefix.replace("PRODUCTION_PLAYLIST_HEIGHT_KEY", height_key[0])
+prefix = prefix.replace("PRODUCTION_PLAYLIST_HEIGHT_DEFAULT", height_default[0])
+height_property = re.search(r'(?:private\s+)?(?:lazy\s+)?var preferredPlaylistHeight\b', source)
+if not height_property:
+    raise SystemExit("The production preferred-playlist-height declaration was not found")
+prefix = prefix.replace("// PRODUCTION_PREFERRED_PLAYLIST_HEIGHT",
+                        block(source, height_property.group()).replace("private ", "", 1))
 playlist_source = (root / "iina/PlaylistViewController.swift").read_text()
 playlist_methods = [block(playlist_source, marker) for marker in (
     "private func installSortControls(", "private func installFolderBrowser(",

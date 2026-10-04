@@ -27,7 +27,7 @@ enum ChromeDefaults {
   static let value = UserDefaults(suiteName: suite)!
 }
 enum Preference {
-  enum Key { case enableControlBarAutoHide, controlBarAutoHideTimeout, disableAnimations, playlistWidth }
+  enum Key: String { case enableControlBarAutoHide, controlBarAutoHideTimeout, disableAnimations, playlistWidth, playlistHeight }
   enum OSCPosition { case floating, top, bottom }
   static var autoHide = true
   static var timeout: Float = 2.5
@@ -41,6 +41,8 @@ enum Preference {
   }
   static func float(for key: Key) -> Float { timeout }
   static func integer(for key: Key) -> Int { 320 }
+  static func double(for key: Key) -> Double { ChromeDefaults.value.object(forKey: key.rawValue) as? Double ?? 600 }
+  static func set(_ value: Any, for key: Key) { ChromeDefaults.value.set(value, forKey: key.rawValue) }
 }
 typealias PK = Preference.Key
 enum Logger {
@@ -156,6 +158,7 @@ class ChromeFixture: NSResponder {
   let sideBarView = NSView(frame: NSRect(x: 420, y: 210, width: 220, height: 220))
   let subPopoverView = NSView(frame: .zero)
   var cornerControls: PlayerCornerControlsView? = PlayerCornerControlsView(frame: NSRect(x: 540, y: 420, width: 110, height: 25))
+  var edgeControls: NSView? = NSView(frame: NSRect(x: 0, y: 0, width: 650, height: 62))
   let controlBarFloating = FloatingControls()
   let playSlider = NSSlider()
   let timePreviewWhenSeek = NSView()

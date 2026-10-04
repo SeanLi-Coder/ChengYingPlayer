@@ -158,6 +158,7 @@ let retainedPreferences: [String: Any] = [
   "enableControlBarAutoHide": false,
   "showRemainingTime": false,
   "softVolume": 27,
+  "playlistHeight": Double(690),
   "userInputConfigs": ["Personal": "/fixture/input.conf"],
   "ChengYingTestsBookmark": Data([0, 1, 2, 255]),
   "ChengYingTestsProxy": "http://127.0.0.1:7897",

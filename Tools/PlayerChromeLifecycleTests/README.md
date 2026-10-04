@@ -8,6 +8,10 @@ The production fullscreen-transition refresh and real `PlayerState` are also
 compiled. Extraction asserts integration in all four fullscreen success/failure
 callbacks; dynamic titlebar/additional-info membership, stale fades, inactive
 players, disabled UI, and legacy-toolbar hover have executable regression cases.
+The current native lower-edge resize-handle class is extracted unchanged too;
+real mouse events verify that height dragging suspends the production hide timer,
+blocks idle hiding, and is canceled by the actual window-close path. A late release
+cannot save a partial height, recreate a timer, or retain its interaction owner.
 
 Only private visibility and OS boundaries are adapted: animations apply their
 target properties immediately while completion callbacks remain individually

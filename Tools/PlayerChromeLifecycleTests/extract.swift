@@ -13,6 +13,7 @@ func section(_ start: String, _ end: String) -> String {
 }
 
 let sections = [
+  section("  private var sidebarHeightConstraint:", "  private var chromeAnimationGeneration:"),
   section("  private var chromeAnimationGeneration:", "  // Left and right arrow buttons"),
   section("  enum UIAnimationState {", "  private var osdLastMessage:"),
   section("  enum SideBarViewType {", "  enum InteractiveMode {"),
@@ -32,9 +33,17 @@ for callback in ["windowDidEnterFullScreen", "windowDidExitFullScreen",
   print("PASS: \(callback) integrates the production window-transition refresh")
 }
 print("Fullscreen source integration checks passed: 4")
+let edgeSource = try String(contentsOf: root.appendingPathComponent("iina/PlayerEdgeControlsView.swift"), encoding: .utf8)
+guard let handleStart = edgeSource.range(of: "final class PlayerSidebarResizeHandle:")?.lowerBound,
+      let handleEnd = edgeSource.range(of: "/// Video controls remain dark", range: handleStart..<edgeSource.endIndex)?.lowerBound else {
+  fatalError("Production sidebar resize-handle extraction boundaries changed")
+}
+let handle = String(edgeSource[handleStart..<handleEnd])
 var code = """
 import Cocoa
 import QuartzCore
+
+\(handle)
 
 final class MainWindowUnderTest: ChromeFixture {
 \(sections.joined(separator: "\n"))
