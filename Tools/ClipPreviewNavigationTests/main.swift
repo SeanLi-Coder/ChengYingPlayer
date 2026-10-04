@@ -6,7 +6,7 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) {
   checks += 1
   if !condition() { failures += 1; print("FAIL: \(message)") }
 }
-func fixture(pending: Bool = false, independent: Bool = false,
+func fixture(pending: Bool = false, automaticPending: Bool = false, independent: Bool = false,
              operation: Operation = .clip) -> (PlayerBoundary, PanelUnderTest, WindowUnderTest) {
   let player = PlayerBoundary()
   let panel = PanelUnderTest(player: player)
@@ -14,7 +14,9 @@ func fixture(pending: Bool = false, independent: Bool = false,
   panel.startField.stringValue = "2"
   panel.endField.stringValue = "80"
   player.mainWindow.quickSettingView.videoToolsViewController = panel
-  if pending {
+  if automaticPending {
+    panel.automaticPreviewPending = true
+  } else if pending {
     panel.previewTimer = PendingTimer()
   } else {
     player.videoToolsLoopRange = VideoToolsLoopRange(start: 10, end: 15)
@@ -26,8 +28,48 @@ func checkPreparation(_ panel: PanelUnderTest, _ context: String) {
   check(panel.stops.count == 1, "\(context): cancels exactly one temporary preview")
   check(panel.stops.first?.0 == true && panel.stops.first?.1 == false,
         "\(context): updates the UI without restoring old position or playback")
-  check(panel.previewTimer == nil && panel.previewSnapshot == nil,
+  check(panel.previewTimer == nil && panel.previewSnapshot == nil && !panel.automaticPreviewPending,
         "\(context): leaves no pending restart or old snapshot")
+}
+
+// A visible panel can await metadata without having a timer or playback snapshot.
+// Explicit navigation must cancel that request before changing the playhead.
+for action in 0..<7 {
+  let (player, panel, window) = fixture(automaticPending: true)
+  switch action {
+  case 0: window.playSliderChanges(NSSlider())
+  case 1: _ = window.handleGuardedPlaybackCommand(["seek", "80", "absolute"])
+  case 2: _ = window.handleGuardedPlaybackCommand(["frame-step"])
+  case 3: panel.playbackControlClicked(NSSegmentedControl(2))
+  case 4: panel.stepFrame(NSSegmentedControl(1))
+  case 5: panel.navigateToRangeBoundary(NSSegmentedControl(1))
+  default: player.mainWindow.arrowButtonAction(left: false)
+  }
+  checkPreparation(panel, "Awaiting automatic preview, action=\(action)")
+  check(player.events.first == "prepare", "Automatic preview is cancelled before navigation")
+  panel.prepareForUserSeek()
+  check(panel.stops.count == 1, "Repeated navigation does not recancel a consumed automatic request")
+}
+
+for automaticPending in [false, true] {
+  let (player, panel, _) = fixture(pending: !automaticPending, automaticPending: automaticPending)
+  let timer = panel.previewTimer
+  panel.playbackControlClicked(NSSegmentedControl(1))
+  check(!panel.automaticPreviewPending && panel.previewTimer == nil,
+        "An explicit play/pause choice cancels both pending preview forms")
+  check(timer == nil || timer?.invalidated == true, "Play/pause invalidates any scheduled preview timer")
+  check(panel.stops.isEmpty && panel.previewSnapshot == nil,
+        "Play/pause does not fabricate a preview restore before playback has started")
+  check(player.info.state == .paused && player.seeks.isEmpty && panel.updates == 1,
+        "Play/pause honors the user's chosen state without an automatic seek")
+}
+
+do {
+  let (player, panel, _) = fixture()
+  let range = player.videoToolsLoopRange
+  panel.playbackControlClicked(NSSegmentedControl(1))
+  check(panel.previewSnapshot != nil && player.videoToolsLoopRange == range && panel.stops.isEmpty,
+        "Pausing an active preview retains its snapshot and selected range")
 }
 
 for pending in [false, true] {

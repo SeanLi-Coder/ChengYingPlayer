@@ -64,6 +64,7 @@ final class PanelUnderTest {
   var selectedOperation = Operation.clip
   var previewSnapshot: Bool?
   var previewTimer: PendingTimer?
+  var automaticPreviewPending = false
   var priorLoop: VideoToolsLoopRange?
   var stops: [(Bool, Bool)] = []
   var updates = 0
@@ -73,6 +74,7 @@ final class PanelUnderTest {
   func stopPreview(updateButton: Bool, restorePlaybackState: Bool) {
     player?.events.append("prepare")
     stops.append((updateButton, restorePlaybackState))
+    automaticPreviewPending = false
     previewTimer?.invalidate()
     previewTimer = nil
     if previewSnapshot != nil { player?.videoToolsLoopRange = priorLoop }
