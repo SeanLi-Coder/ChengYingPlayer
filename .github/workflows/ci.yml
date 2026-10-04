@@ -62,7 +62,7 @@ jobs:
       - name: Test media helper
         working-directory: Tools/VideoToolsHelper
         run: |
-          python -m ruff check helper.py media.py conversion.py dovi_clip.py tests ../VideoToolsTests/app_conversion_smoke.py ../VideoToolsTests/app_dolby_clip_smoke.py ../VideoToolsTests/app_rotation_smoke.py ../VideoToolsTests/test_rotation_smoke.py ../PlaybackRotationTests
+          python -m ruff check helper.py media.py conversion.py dovi_clip.py hdr10plus_clip.py tests ../VideoToolsTests/app_conversion_smoke.py ../VideoToolsTests/app_dolby_clip_smoke.py ../VideoToolsTests/app_hdr10plus_clip_smoke.py ../VideoToolsTests/app_rotation_smoke.py ../VideoToolsTests/test_rotation_smoke.py ../PlaybackRotationTests
           python -m pytest -q
           python -B ../VideoToolsTests/test_rotation_smoke.py
           python -B ../PlaybackRotationTests/test_pipeline.py
@@ -207,6 +207,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             Tools/VideoToolsHelper/requirements-build.txt
+            Tools/VideoToolsHelper/requirements-dev.txt
             Tools/DownloaderHelper/requirements-build.txt
             Tools/DownloaderHelper/requirements-runtime.txt
 
@@ -215,6 +216,8 @@ jobs:
           brew install cmake pkg-config meson ninja autoconf automake libtool
           python -m venv "$RUNNER_TEMP/build-python"
           "$RUNNER_TEMP/build-python/bin/python" -m pip install --require-hashes --only-binary=:all: --requirement Tools/DownloaderHelper/requirements-build.txt
+          python -m venv "$RUNNER_TEMP/media-test-python"
+          "$RUNNER_TEMP/media-test-python/bin/python" -m pip install --require-hashes --only-binary=:all: --requirement Tools/VideoToolsHelper/requirements-dev.txt
           echo "$RUNNER_TEMP/build-python/bin" >> "$GITHUB_PATH"
 
       - name: Test rotation teardown with original and patched playback source
@@ -240,6 +243,10 @@ jobs:
       - name: Build bundled video tools
         run: |
           ./other/build_media_binaries.sh
+          python3 -B other/verify_media_distribution.py "$PWD/deps"
+          python3 -B Tools/HDR10PlusCodecTests/test_codec.py
+          python3 -B Tools/HDR10PlusCodecTests/test_distribution.py
+          PATH="$PWD/deps/executable:$PATH" "$RUNNER_TEMP/media-test-python/bin/python" -B -m pytest -q Tools/VideoToolsHelper/tests/test_hdr10plus_clips.py
           bash other/build_image_codec.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/VideoToolsHelper/build_helper.sh
           HELPER_PYTHON=python HELPER_TARGET_ARCH=arm64 Tools/SubtitleToolsHelper/build_helper.sh
@@ -531,6 +538,12 @@ jobs:
         timeout-minutes: 5
         run: >-
           python -B Tools/VideoToolsTests/app_dolby_clip_smoke.py
+          --app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
+
+      - name: Test packaged precise HDR10+ clipping
+        timeout-minutes: 5
+        run: >-
+          python -B Tools/VideoToolsTests/app_hdr10plus_clip_smoke.py
           --app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
 
       - name: Test real application rapid rotation preview

@@ -699,6 +699,9 @@ def probe_video(
         "size": int(media_format.get("size") or resolved.stat().st_size),
         "bit_rate": int(media_format.get("bit_rate") or 0),
         "has_audio": isinstance(audio_stream, dict),
+        "video_stream_count": sum(stream.get("codec_type") == "video" for stream in streams),
+        "audio_stream_count": sum(stream.get("codec_type") == "audio" for stream in streams),
+        "ancillary_stream_count": sum(stream.get("codec_type") not in {"video", "audio"} for stream in streams),
         "has_data_streams": any(stream.get("codec_type") == "data" for stream in streams),
     }
 
@@ -1032,7 +1035,15 @@ class ExportManager:
             from dovi_clip import validate_dovi_clip_source
             validate_dovi_clip_source(source.metadata)
         elif source.metadata.get("dynamic_hdr_metadata_types"):
-            raise MediaError("Dynamic HDR clipping currently supports only single-layer Dolby Vision profile 8.1 or 8.4")
+            from hdr10plus_clip import (
+                is_hdr10plus_source,
+                require_hdr10plus_encoder,
+                validate_hdr10plus_clip_source,
+            )
+            if not is_hdr10plus_source(source.metadata):
+                raise MediaError("Dynamic HDR clipping currently supports only verified Dolby Vision 8.1 / 8.4 or HDR10+ HEVC")
+            validate_hdr10plus_clip_source(source.metadata)
+            require_hdr10plus_encoder(self)
         start, end = validate_time_range(
             start,
             end,
@@ -1485,6 +1496,8 @@ class ExportManager:
         if job.source.metadata.get("is_dolby_vision"):
             from dovi_clip import dovi_encoding_options
             options.extend(dovi_encoding_options(job.source.metadata))
+        elif job.source.metadata.get("dynamic_hdr_metadata_types"):
+            options.extend(["-hdr10plus", "1", "-enc_time_base:v", "demux"])
         return options
 
     @classmethod
@@ -1516,6 +1529,9 @@ class ExportManager:
         return options
 
     def _command(self, job: ExportJob, temporary_path: Path) -> list[str]:
+        # Sparse VFR/open-GOP inputs can seek past selected leading B pictures.
+        # HDR10+ clips decode before trimming so every selected PTS is preserved.
+        exact_hdr10plus = bool(job.source.metadata.get("dynamic_hdr_metadata_types")) and not job.source.metadata.get("is_dolby_vision")
         command = [
             self.ffmpeg,
             "-hide_banner",
@@ -1523,11 +1539,11 @@ class ExportManager:
             "error",
             "-nostdin",
             "-y",
-            *(["-noautorotate"] if job.source.metadata.get("is_dolby_vision") else []),
-            "-ss",
-            f"{job.start:.6f}",
+            *(["-noautorotate"] if job.source.metadata.get("is_dolby_vision") or job.source.metadata.get("dynamic_hdr_metadata_types") else []),
+            *([] if exact_hdr10plus else ["-ss", f"{job.start:.6f}"]),
             "-i",
             str(job.source.path),
+            *(["-ss", f"{job.start:.6f}"] if exact_hdr10plus else []),
             "-t",
             f"{job.end - job.start:.6f}",
             "-map",
@@ -1592,6 +1608,24 @@ class ExportManager:
                 inspect_dovi_clip_frames(self, job)
                 with job.lock:
                     job.message = "Creating a high-fidelity precise clip"
+            elif job.source.metadata.get("dynamic_hdr_metadata_types"):
+                from hdr10plus_clip import inspect_hdr10plus_clip_frames
+                with job.lock:
+                    job.message = "Inspecting HDR10+ frames in the selected range"
+                    job.estimate_remaining = False
+                inspect_hdr10plus_clip_frames(self, job)
+                with job.lock:
+                    job.message = "Creating a high-fidelity precise clip"
+                    job.estimate_remaining = True
+            elif job.source.metadata.get("is_hdr"):
+                from hdr10plus_clip import inspect_static_hdr_clip_frames
+                with job.lock:
+                    job.message = "Inspecting HDR frames in the selected range"
+                    job.estimate_remaining = False
+                inspect_static_hdr_clip_frames(self, job)
+                with job.lock:
+                    job.message = "Creating a high-fidelity precise clip"
+                    job.estimate_remaining = True
             options: dict[str, Any] = {
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.PIPE,
@@ -1654,6 +1688,12 @@ class ExportManager:
                     job.message = "Verifying Dolby Vision metadata and selected frame timestamps"
                     job.estimate_remaining = False
                 verify_dovi_clip(self, job, temporary_path)
+            elif job.source.metadata.get("dynamic_hdr_metadata_types"):
+                from hdr10plus_clip import verify_hdr10plus_clip
+                with job.lock:
+                    job.message = "Verifying HDR10+ metadata and selected frame timestamps"
+                    job.estimate_remaining = False
+                verify_hdr10plus_clip(self, job, temporary_path)
             result_metadata = probe_video(
                 temporary_path,
                 ffprobe=self.ffprobe,
@@ -1685,7 +1725,7 @@ class ExportManager:
                     "display_transform_filters", ()
                 ):
                     raise MediaError("Output verification detected a display orientation change")
-            elif not job.source.metadata.get("is_dolby_vision") and result_metadata["rotation"] != 0:
+            elif not (job.source.metadata.get("is_dolby_vision") or job.source.metadata.get("dynamic_hdr_metadata_types")) and result_metadata["rotation"] != 0:
                 raise MediaError("Output verification detected an unexpected rotation")
             if video_family in {"h264", "hevc"} and (
                 result_metadata["pix_fmt"] != job.source.metadata["pix_fmt"]
@@ -1755,7 +1795,13 @@ class ExportManager:
                 raise MediaError("Output verification detected an unexpected audio stream")
             target_duration = job.end - job.start
             frame_tolerance = 2 / max(1.0, float(job.source.metadata.get("fps") or 25))
-            if abs(float(result_metadata["duration"]) - target_duration) > max(
+            result_duration = float(result_metadata["duration"])
+            if job.source.metadata.get("dynamic_hdr_metadata_types") and not job.source.metadata.get("is_dolby_vision"):
+                # A precise VFR selection can begin in a timestamp gap. Stream
+                # duration excludes that leading empty edit; its end still has
+                # to match the requested range on the zero-based output timeline.
+                result_duration += float(result_metadata.get("video_start_time") or 0)
+            if abs(result_duration - target_duration) > max(
                 0.12, frame_tolerance
             ):
                 raise MediaError("Output verification detected an unexpected duration")

@@ -20,7 +20,7 @@ contains no AI, model download, proxy, Windows, or web-server code.
 
 ## Runtime design
 
-`helper.py`, `media.py`, `conversion.py`, and `dovi_clip.py` use only the Python standard library. A release build freezes
+`helper.py`, `media.py`, `conversion.py`, `dovi_clip.py`, and `hdr10plus_clip.py` use only the Python standard library. A release build freezes
 them into a standalone Mach-O executable with PyInstaller, so an installed app does not
 depend on a system Python installation. FFmpeg and FFprobe remain separate executables
 and their absolute paths are always passed explicitly by the app.
@@ -76,7 +76,7 @@ Install the development requirements, then run the media and protocol suites:
 python3 -m pip install -r Tools/VideoToolsHelper/requirements-dev.txt
 cd Tools/VideoToolsHelper
 python3 -m pytest -q
-python3 -m ruff check helper.py media.py conversion.py dovi_clip.py tests
+python3 -m ruff check helper.py media.py conversion.py dovi_clip.py hdr10plus_clip.py tests
 ```
 
 The integration tests require FFmpeg and FFprobe on `PATH`. They create synthetic video
@@ -96,3 +96,10 @@ verifies complete normalized RPU data, including extension blocks, before public
 The synthetic regression fixtures include different Level 1/2/5/8 metadata on every
 frame, long GOPs, B frames, variable frame rates, and orientation matrices. Fixture
 generation and provenance are documented in `tests/fixtures/dovi/README.md`.
+
+HDR10+ clipping uses a separately checked HEVC Main10 / limited-range BT.2020 PQ
+path. The bundled FFmpeg patch passes decoded SMPTE2094-40 metadata to x265 as
+registered T.35 SEI; an unpatched encoder cannot silently substitute static HDR.
+Before publication the helper compares complete selected HDR10+ payloads by real
+presentation timestamp, including variable-rate footage and reordered B frames.
+Synthetic fixtures and the packaged helper smoke test do not include user media.

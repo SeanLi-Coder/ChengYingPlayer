@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--controller-ref", help="Use controller source from this local Git commit without fetching")
     parser.add_argument("--language", choices=("en", "zh-Hans", "zh-Hant"), help="Run one language instead of all three")
     parser.add_argument("--preview-case", action="append",
-                        choices=("input", "markers", "rounding", "invalid", "lifecycle", "navigation"),
+                        choices=("opening", "input", "markers", "rounding", "invalid", "lifecycle", "navigation"),
                         help="Run an isolated automatic-preview case; repeat to select multiple cases")
     parser.add_argument("--preview-repeat", type=int, default=1,
                         help="Repeat isolated preview cases in fresh processes without recompiling")

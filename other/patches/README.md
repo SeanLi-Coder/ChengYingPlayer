@@ -66,3 +66,24 @@ teardown, repeated rotation, and seek behavior.
 the pinned libplacebo and bundled FFmpeg, reproduces the unpatched HLG failure,
 then checks synthetic Dolby Vision/HLG, PQ and SDR metadata through fallback,
 attribute copies, and AVFrame round-trips under ASan/UBSan.
+
+## FFmpeg media-tool modifications
+
+On 2026-10-05 ChengYingPlayer maintainers modified the verified FFmpeg 9.0.1
+source in `ffmpeg-9.0.1-hdr10plus.patch`. Its libx265 option `-hdr10plus 1`
+requires HDR10+ metadata on every input frame and passes the complete Samsung
+ITU-T T.35 payload to x265's copied per-frame SEI, preserving frame association
+through delayed and B-frame output. The option defaults to disabled. The patch
+also corrects HDR10+ color-saturation serialization when tone mapping is absent.
+The serializer follows FFmpeg's existing libaom implementation; FFmpeg's
+LGPL-2.1-or-later source notices and the distribution's GPLv3 configuration remain.
+
+`other/media_patches.sh` uses the independent `media-patches.tsv`,
+`media-before-sha256.txt` and `media-after-sha256.txt` locks. It verifies the
+original sources and patch bytes, applies with zero fuzz, verifies the modified
+sources and records the exact modified files. `other/verify_media_distribution.py`
+checks these records against the original verified archives and built executables.
+The application carries the records in `Legal/Media`; release sources retain them
+in `media-build-record`. `Tools/HDR10PlusCodecTests` exercises the production
+codec using generated per-frame payloads, B frames, delayed flushing, missing
+metadata rejection, optional tone-mapping/saturation syntax and other SEI data.

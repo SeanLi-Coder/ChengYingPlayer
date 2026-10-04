@@ -117,6 +117,11 @@ func runAutomaticPreviewRegression(_ scenario: String) {
     application.isActive && window.isKeyWindow && window.isVisible
   }
   pump(0.1)
+  window.makeKeyAndOrderFront(nil)
+  application.activate(ignoringOtherApps: true)
+  waitUntil("The native test window becomes active after layout settles") {
+    application.isActive && window.isKeyWindow
+  }
   diagnose("window-ready")
   check(application.isActive && window.isKeyWindow, "The native test window remains active after layout settles")
   @discardableResult
@@ -171,11 +176,101 @@ func runAutomaticPreviewRegression(_ scenario: String) {
     print("DIAGNOSTIC: \(scenario)/preview-delivery earlySamples=\(earlySamples) overdue=\(Date().timeIntervalSince(deadline))")
     check(!timer.isValid && Date() >= deadline, message)
   }
-  first.stringValue = "10"
-  last.stringValue = "20"
-  testPlayer.pause()
+  if scenario != "opening" {
+    testController.stopPreview()
+    first.stringValue = "10"
+    last.stringValue = "20"
+    testPlayer.pause()
+  }
 
   switch scenario {
+  case "opening":
+    expectsRange(10, 15, "Explicitly opening tools starts its initial range without typing or clicking preview")
+    testController.stopPreview()
+    testController.setPlaybackControlsVisible(true)
+    testController.refreshCurrentMedia()
+    pump(0.65)
+    check(testPlayer.videoToolsLoopRange == nil && field("previewTimer", as: Timer?.self) == nil,
+          "Repeated visibility and ordinary refresh do not undo a manual preview stop")
+
+    testController.setPlaybackControlsVisible(false)
+    testPlayer.info.videoDuration = nil
+    testPlayer.videoToolsMediaGeneration += 1
+    testController.refreshCurrentMedia(force: true)
+    pump(0.45)
+    check(testPlayer.videoToolsLoopRange == nil && field("previewTimer", as: Timer?.self) == nil,
+          "A file refresh in a hidden tools tab never starts preview")
+    testController.setPlaybackControlsVisible(true)
+    pump(0.45)
+    check(testPlayer.videoToolsLoopRange == nil && field("previewTimer", as: Timer?.self) == nil,
+          "Initial automatic preview waits for a finite duration")
+    testPlayer.info.videoDuration = VideoTime(12)
+    expectsRange(10, 12, "Late duration availability clamps the untouched initial range and starts preview")
+    check(first.stringValue == "00:10.000000" && last.stringValue == "00:12.000000",
+          "Only the generated initial range is updated when duration becomes available")
+    testController.setPlaybackControlsVisible(false)
+    testController.stopPreview()
+    testPlayer.info.videoDuration = nil
+    testPlayer.videoToolsMediaGeneration += 1
+    testController.refreshCurrentMedia(force: true)
+    testController.setPlaybackControlsVisible(true)
+    testController.stopPreview()
+    testPlayer.info.videoDuration = VideoTime(120)
+    pump(0.65)
+    check(testPlayer.videoToolsLoopRange == nil && field("previewTimer", as: Timer?.self) == nil,
+          "Stopping while metadata is pending prevents a late automatic restart")
+
+    testController.setPlaybackControlsVisible(false)
+    testController.setPlaybackControlsVisible(true)
+    check(field("previewTimer", as: Timer?.self) != nil, "A later explicit reveal can request a new automatic preview")
+    testController.setPlaybackControlsVisible(false)
+    pump(0.5)
+    check(testPlayer.videoToolsLoopRange == nil && field("previewTimer", as: Timer?.self) == nil,
+          "Hiding tools cancels automatic preview before its debounce deadline")
+
+    testController.setPlaybackControlsVisible(true)
+    testController.stopPreview()
+    mode.selectedSegment = 3
+    action(mode)
+    pump(0.45)
+    check(testPlayer.videoToolsLoopRange == nil, "Changing to conversion leaves playback untouched")
+    mode.selectedSegment = 0
+    action(mode)
+    expectsRange(10, 15, "Returning explicitly to clipping starts the retained valid range")
+    testController.stopPreview()
+
+    testController.setPlaybackControlsVisible(false)
+    let updateOwner = UUID()
+    check(UpdateWorkAdmission.shared.acquire(updateOwner), "The isolated update admission lock is available")
+    testController.setPlaybackControlsVisible(true)
+    pump(0.5)
+    check(testPlayer.videoToolsLoopRange == nil && field("previewTimer", as: Timer?.self) == nil,
+          "Opening tools during update installation cannot start new preview work")
+    UpdateWorkAdmission.shared.release(updateOwner)
+    pump(0.5)
+    check(testPlayer.videoToolsLoopRange == nil, "Releasing update admission does not revive a cancelled preview request")
+
+    testController.setPlaybackControlsVisible(false)
+    testController.setPlaybackControlsVisible(true)
+    let manager = VideoToolsTaskManager.shared
+    manager.simulatesTaskLifecycle = true
+    action(field("runButton", as: NSButton.self))
+    pump(0.5)
+    check(manager.snapshot?.isActive == true && testPlayer.videoToolsLoopRange == nil,
+          "Starting export cancels the pending opening preview")
+    manager.finishTask(.failed)
+    pump(0.5)
+    check(testPlayer.videoToolsLoopRange == nil && field("previewTimer", as: Timer?.self) == nil,
+          "A failed export does not unexpectedly restart preview")
+    manager.snapshot = nil
+    manager.simulatesTaskLifecycle = false
+    manager.notifyTaskChange()
+
+    testPlayer.mpv.values["time"] = 120.0
+    testPlayer.videoToolsMediaGeneration += 1
+    testController.refreshCurrentMedia(force: true)
+    expectsRange(115, 120, "Opening a new media generation at EOF previews a valid final range")
+    testController.stopPreview()
   case "input":
     check(window.makeFirstResponder(last), "The target field accepts focus before native typing begins")
     guard let editor = last.currentEditor() as? NSTextView else { fatalError("Missing settled native field editor") }
@@ -289,6 +384,7 @@ func runAutomaticPreviewRegression(_ scenario: String) {
     type("16", into: last)
     expectsRange(10, 16, "Native text temporarily previews over an existing keyboard loop")
     type("17", into: last)
+    let cancelledTimer = field("previewTimer", as: Timer?.self)!
     testController.setPlaybackControlsVisible(false)
     testController.stopPreview()
     window.makeFirstResponder(nil)
@@ -298,10 +394,16 @@ func runAutomaticPreviewRegression(_ scenario: String) {
           testPlayer.mpv.getDouble("time") == 5 && testPlayer.mpv.getFlag("pause") && testPlayer.mpv.getDouble("speed") == 0.5,
           "Hiding the panel cancels pending edits and restores the original loop, position, pause and speed")
     window.makeKeyAndOrderFront(nil)
+    application.activate(ignoringOtherApps: true)
+    let revealAt = Date()
     testController.setPlaybackControlsVisible(true)
-    pump()
+    let revealTimer = field("previewTimer", as: Timer?.self)!
+    check(!cancelledTimer.isValid && revealTimer !== cancelledTimer &&
+          revealTimer.fireDate >= revealAt.addingTimeInterval(0.35),
+          "Explicitly showing tools creates a fresh full-delay preview instead of reviving the cancelled timer")
     check(testPlayer.videoToolsLoopRange == VideoToolsLoopRange(start: 3, end: 7),
-          "Showing the panel cannot revive a cancelled automatic preview")
+          "The original keyboard loop remains in effect until the new reveal preview starts")
+    expectsRange(10, 17, "Explicitly reopening tools previews the retained selection")
     type("18", into: last)
     mode.selectedSegment = 2; action(mode)
     pump()
@@ -357,7 +459,7 @@ func runAutomaticPreviewRegression(_ scenario: String) {
 }
 
 let previewRegressionCase = ProcessInfo.processInfo.environment["CHENGYING_PREVIEW_REGRESSION_CASE"]
-for scenario in previewRegressionCase.map({ [$0] }) ?? ["input", "markers", "rounding", "invalid", "lifecycle", "navigation"] {
+for scenario in previewRegressionCase.map({ [$0] }) ?? ["opening", "input", "markers", "rounding", "invalid", "lifecycle", "navigation"] {
   runAutomaticPreviewRegression(scenario)
 }
 if previewRegressionCase != nil {

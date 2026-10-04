@@ -207,6 +207,40 @@ enum VideoToolsFailureMessage {
   static func localizedDetail(_ detail: String) -> String {
     let key: String
     switch detail {
+    case "Dynamic HDR clipping currently supports only verified Dolby Vision 8.1 / 8.4 or HDR10+ HEVC":
+      key = "videotools.error.dynamic_hdr.format"
+    case "HDR10+ clipping requires progressive single-layer HEVC 10-bit limited-range BT.2020 PQ video":
+      key = "videotools.error.hdr10plus.format"
+    case "HDR10+ clipping currently supports one video track and at most one audio track without ancillary tracks":
+      key = "videotools.error.hdr10plus.tracks"
+    case "HDR10+ frames contain changing or unsupported geometry, color, or scan properties":
+      key = "videotools.error.hdr10plus.format"
+    case "The selected HDR range contains dynamic metadata not detected in the initial frame; no output was published":
+      key = "videotools.error.dynamic_hdr.late_metadata"
+    case "HDR frame timestamps could not be inspected safely":
+      key = "videotools.error.hdr.timestamps"
+    case "The bundled video encoder does not support HDR10+ preservation; update the application":
+      key = "videotools.error.hdr10plus.encoder"
+    case "HDR10+ frames have missing presentation timestamps",
+         "HDR10+ frames have ambiguous presentation timestamps",
+         "HDR10+ packets have missing presentation timestamps",
+         "HDR10+ packets have ambiguous presentation timestamps":
+      key = "videotools.error.hdr10plus.timestamps"
+    case "A selected frame is missing HDR10+ metadata",
+         "A selected packet is missing HDR10+ metadata":
+      key = "videotools.error.hdr10plus.missing_metadata"
+    case "The selected range contains no HDR10+ video frames":
+      key = "videotools.error.hdr10plus.empty_range"
+    case "HDR10+ metadata inspection failed; no output was published",
+         "HDR10+ inspection exceeded the per-packet safety limit":
+      key = "videotools.error.hdr10plus.inspection"
+    case "Output verification detected a changed HDR10+ display matrix",
+         "Output verification detected a changed HDR10+ frame count",
+         "Output verification detected changed HDR10+ frame timestamps",
+         "Output verification detected changed HDR10+ metadata",
+         "Output verification found no HDR10+ frames",
+         "Output verification detected missing or hidden HDR10+ frames":
+      key = "videotools.error.dovi.verification"
     case "Dynamic HDR clipping currently supports only single-layer Dolby Vision profile 8.1 or 8.4":
       key = "videotools.error.dovi.profile"
     case "Dolby Vision clipping requires progressive video":
@@ -253,9 +287,12 @@ enum VideoToolsProgressMessage {
   static func localizedHDRStage(_ message: String?) -> String? {
     let key: String
     switch message {
-    case "Inspecting Dolby Vision frames in the selected range":
+    case "Inspecting Dolby Vision frames in the selected range",
+         "Inspecting HDR frames in the selected range",
+         "Inspecting HDR10+ frames in the selected range":
       key = "videotools.status.hdr_inspection"
-    case "Verifying Dolby Vision metadata and selected frame timestamps":
+    case "Verifying Dolby Vision metadata and selected frame timestamps",
+         "Verifying HDR10+ metadata and selected frame timestamps":
       key = "videotools.status.hdr_verification"
     default:
       return nil

@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--media", type=Path, help="Optional local video, opened read-only; never copied or uploaded")
     parser.add_argument("--controller-ref", help="Compare an existing git revision of the production controller")
     parser.add_argument("--build-only", action="store_true", help="Check compilation without opening any test windows")
-    parser.add_argument("--case", choices=["all", "editing", "markers", "navigation", "boundary", "precision", "invalid", "restore"], default="all")
+    parser.add_argument("--case", choices=["all", "opening", "editing", "markers", "navigation", "boundary", "precision", "invalid", "restore"], default="all")
     args = parser.parse_args()
     if args.media and not args.media.is_file():
         parser.error("The media argument must be an existing local file")
@@ -77,7 +77,7 @@ def main():
         ]
         subprocess.run(["xcrun", "swiftc", "-o", str(executable), *[str(ROOT / item) for item in sources],
                         str(tests / "LivePlayer.swift"), str(work / "PlayerMethods.swift"),
-                        str(work / "ExportBoundary.swift"), str(controller), str(tests / "main.swift"),
+                        str(work / "ExportBoundary.swift"), str(controller), str(work / "QuickSettingLifecycle.swift"), str(tests / "main.swift"),
                         str(renderer), "-import-objc-header", str(tests / "Renderer.h"),
                         "-I", str(ROOT / "deps/include"), str(ROOT / "deps/lib/libmpv.2.dylib"),
                         "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "deps/lib")], check=True)

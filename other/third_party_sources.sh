@@ -201,5 +201,9 @@ write_third_party_source_manifest() {
     done < <(third_party_source_records)
     "${HELPER_PYTHON:-python3}" "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/Tools/DownloaderHelper/source_materials.py" manifest |
       awk '{printf "%s  download-runtime/%s  %s  %s  %s\n", $1, $2, $3, $4, $5}'
+    while IFS=$'\t' read -r record_name version filename url expected_sha256; do
+      printf '%s  other/patches/%s  %s  %s  %s\n' \
+        "$expected_sha256" "$filename" "$record_name" "$version" "$url"
+    done < "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/media-patches.tsv"
   } > "$destination"
 }

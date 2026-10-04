@@ -31,6 +31,8 @@ x264 and x265 are statically linked into the FFmpeg executables. Because both co
 
 A built application includes the applicable FFmpeg, x264, and x265 license texts in `Contents/Resources/Legal`. The matching release source asset includes the exact verified source archives and build scripts used to recreate these executables.
 
+ChengYingPlayer maintainers modified FFmpeg 9.0.1 on 2026-10-05 to transfer decoded per-frame HDR10+ metadata into libx265 with an explicit required-metadata option, and to retain color-saturation syntax when tone mapping is absent. The patch retains FFmpeg's applicable license terms and original notices. [`other/patches/media-patches.tsv`](../other/patches/media-patches.tsv) records the patch's origin and SHA-256; matching before/after source locks and the patch are in the same directory. `Contents/Resources/Legal/Media` and the release source archive's `media-build-record` contain the applied patch, modified source files, original/modified hashes, exact source inputs, compiler/configuration records and pre-application-signing executable hashes. The verified upstream archive remains unchanged.
+
 Subtitle rendering additionally links the five font/shaping libraries above statically, using macOS CoreText for font discovery instead of an external Fontconfig installation. Their notices are also installed in `Contents/Resources/Legal`, and their pinned source archives are included with tagged source releases. Portions of this software are copyright © The FreeType Project (<https://freetype.org/>). All rights reserved.
 
 ## Frozen local helper

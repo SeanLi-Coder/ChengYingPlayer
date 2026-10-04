@@ -49,6 +49,8 @@ write_third_party_source_manifest "$LEGAL_DIR/SOURCE_MANIFEST.txt"
 
 "${HELPER_PYTHON:-python3}" "$SCRIPT_DIR/verify_playback_distribution.py" "$PROJECT_ROOT/deps"
 ditto --noqtn "$PROJECT_ROOT/deps/playback-build-record" "$LEGAL_DIR/Playback"
+"${HELPER_PYTHON:-python3}" "$SCRIPT_DIR/verify_media_distribution.py" "$PROJECT_ROOT/deps" --source-cache "$SOURCE_CACHE_DIR"
+ditto --noqtn "$PROJECT_ROOT/deps/media-build-record" "$LEGAL_DIR/Media"
 
 JUST_ARCHIVE="$(fetch_verified_source just "$SOURCE_CACHE_DIR")"
 PROMISEKIT_ARCHIVE="$(fetch_verified_source promisekit "$SOURCE_CACHE_DIR")"

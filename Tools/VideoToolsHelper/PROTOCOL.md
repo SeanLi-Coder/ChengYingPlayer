@@ -59,8 +59,32 @@ in presentation order. This includes extension metadata omitted by FFprobe's rea
 frame report; it is a comparison of complete normalized RPU data, not a claim of
 identical original encoded bytes or identical video pixels. Missing metadata,
 unsupported/hybrid dynamic HDR, ambiguous timestamps, changed RPU data, or unsafe
-signaling fail closed. Profile 5, enhancement-layer profiles such as 7, HDR10+, and
-other dynamic HDR are not silently converted to profile 8, static HDR, or SDR.
+signaling fail closed. Profile 5, enhancement-layer profiles such as 7, and other
+unsupported dynamic HDR are not silently converted to profile 8, static HDR, or SDR.
+
+HDR10+ has a separate precise clipping path for progressive HEVC Main10,
+10-bit limited-range BT.2020/PQ 4:2:0 video. This path accepts exactly one video
+track and at most one audio track, without ancillary streams; unsupported tracks
+are not silently dropped. Static mastering metadata is retained when present,
+but is not invented when absent. The bundled encoder explicitly
+preserves each decoded frame's SMPTE2094-40 dynamic metadata as registered T.35
+SEI. The helper inspects the complete HDR10+ messages in source and output HEVC
+packets and compares them in presentation order, alongside decoded-frame count
+and timestamps. It does not compare a lossy dictionary of FFprobe's repeated
+readable fields. Missing, changed, mixed, or ambiguous dynamic metadata prevents
+publication. Video uses the same high-quality re-encoding policy. Mono/stereo
+audio up to 24 bits uses lossless ALAC in MP4; supported multichannel or
+above-24-bit audio uses precision-preserving PCM in MOV instead. This is not
+lossless video stream copy. Rotation and format
+conversion retain their existing dynamic-HDR restrictions.
+
+HDR10+ selects the interval after decoding from the source beginning, rather than
+trusting a container's fast seek index to retain leading open-GOP pictures. This
+can take longer for late ranges in large files. Packet verification may scan the
+complete source and keeps its selected-frame index on disk with bounded memory.
+HDR sources initially classified as static also inspect the selected frames before
+encoding. If dynamic metadata appears only later, the unclassified mixed interval
+is rejected instead of being exported with its dynamic information discarded.
 
 Dolby Vision inspection and verification emit progress messages and can be cancelled.
 Verification may scan the source bitstream, so large sources take longer even for

@@ -131,6 +131,9 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private var outputGroup: NSStackView!
   private var previewTimer: Timer?
   private var playbackControlsTimer: Timer?
+  private var playbackControlsVisible = false
+  private var automaticPreviewPending = false
+  private var defaultRangeNeedsDuration = false
   private var previewSnapshot: VideoToolsPlayerSnapshot?
   private var rotationCoordinator: VideoToolsRotationCoordinator?
   private var rotationMediaGeneration: UInt64?
@@ -139,6 +142,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private var presentedTaskFailureID: String?
   private var outputDirectoryURL: URL?
   private var observedSourceURL: URL?
+  private var observedMediaGeneration: UInt64?
   private var observers: [NSObjectProtocol] = []
   private weak var toolsScrollView: NSScrollView?
   private weak var toolsDocumentView: NSView?
@@ -482,25 +486,31 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   func refreshCurrentMedia(force: Bool = false) {
     guard isViewLoaded else { return }
     let newURL = currentLocalMediaURL
+    let sourceChanged = newURL != observedSourceURL || observedMediaGeneration != player?.videoToolsMediaGeneration
     mediaInfoButton.isEnabled = newURL != nil
     if let coordinator = rotationCoordinator,
        coordinator.state.inputURL != newURL?.standardizedFileURL ||
         rotationMediaGeneration != player?.videoToolsMediaGeneration {
       resetPermanentRotation(restoreDisplayRotation: false)
     }
-    if force || newURL != observedSourceURL {
+    if force || sourceChanged {
+      let shouldPreview = automaticPreviewPending || (sourceChanged && playbackControlsVisible && selectedOperation == .clip)
       stopPreview(updateButton: true)
       observedSourceURL = newURL
+      observedMediaGeneration = player?.videoToolsMediaGeneration
       outputDirectoryURL = newURL?.deletingLastPathComponent()
       updateOutputField()
       if let player, newURL != nil {
         let start = player.videoToolsCurrentTime ?? 0
         startField.stringValue = formatTimestamp(start, precision: 6)
         setDefaultEnd(after: start)
+        defaultRangeNeedsDuration = true
       } else {
         startField.stringValue = ""
         endField.stringValue = ""
+        defaultRangeNeedsDuration = false
       }
+      automaticPreviewPending = shouldPreview
     }
 
     if let newURL {
@@ -559,6 +569,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       return false
     }
     discardPreviewSnapshot()
+    defaultRangeNeedsDuration = false
     if isEnd {
       guard player.videoToolsSetLoopEnd(), let range = player.videoToolsLoopRange else {
         updatePlaybackControls()
@@ -584,9 +595,20 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   func setPlaybackControlsVisible(_ visible: Bool) {
+    // Quick settings preloads hidden tabs. Only an explicit visibility transition
+    // requests an initial preview; repeated UI refreshes preserve a manual stop.
+    let becameVisible = visible && !playbackControlsVisible
+    playbackControlsVisible = visible
     playbackControlsTimer?.invalidate()
     playbackControlsTimer = nil
-    guard visible, isViewLoaded else { return }
+    guard visible, isViewLoaded else {
+      automaticPreviewPending = false
+      cancelScheduledPreview()
+      return
+    }
+    if becameVisible, selectedOperation == .clip, previewSnapshot == nil {
+      automaticPreviewPending = true
+    }
     updatePlaybackControls()
     let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
       self?.updatePlaybackControls()
@@ -602,13 +624,14 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   /// Independent keyboard A/B loops and rotation previews keep their existing behavior.
   func prepareForUserSeek() {
     guard selectedOperation == .clip || selectedOperation == .frames,
-          previewSnapshot != nil || previewTimer != nil else { return }
+          previewSnapshot != nil || previewTimer != nil || automaticPreviewPending else { return }
     stopPreview(updateButton: true, restorePlaybackState: false)
   }
 
   @objc private func playbackControlClicked(_ sender: NSSegmentedControl) {
     guard (0...2).contains(sender.selectedSegment), let player, player.info.state.loaded else { return }
     if sender.selectedSegment == 1 {
+      automaticPreviewPending = false
       previewTimer?.invalidate()
       previewTimer = nil
       player.togglePause()
@@ -659,6 +682,10 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   @objc private func modeChanged(_ sender: NSSegmentedControl) {
     stopPreview(updateButton: true)
     updateModeUI(resetFrameEnd: selectedOperation == .frames)
+    if playbackControlsVisible, selectedOperation == .clip {
+      automaticPreviewPending = true
+      startAutomaticPreviewIfReady()
+    }
   }
 
   @objc private func conversionModeChanged(_ sender: NSPopUpButton) {
@@ -666,6 +693,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   @objc private func setStartToCurrentTime(_ sender: NSButton) {
+    defaultRangeNeedsDuration = false
     guard player?.info.state.loaded == true else { return }
     player?.pause()
     guard let currentTime = currentPlaybackTime else { return }
@@ -679,6 +707,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   @objc private func setEndToCurrentTime(_ sender: NSButton) {
+    defaultRangeNeedsDuration = false
     guard player?.info.state.loaded == true else { return }
     player?.pause()
     guard let currentTime = currentPlaybackTime else { return }
@@ -800,6 +829,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   func controlTextDidChange(_ notification: Notification) {
     guard let field = notification.object as? NSTextField,
           field === startField || field === endField else { return }
+    automaticPreviewPending = false
+    defaultRangeNeedsDuration = false
     if field === startField, selectedOperation == .frames, let start = parseTimestamp(startField.stringValue) {
       setDefaultEnd(after: start)
     }
@@ -807,6 +838,29 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   // MARK: - Preview
+
+  private func startAutomaticPreviewIfReady() {
+    guard automaticPreviewPending, playbackControlsVisible, selectedOperation == .clip else { return }
+    guard taskManager.snapshot?.isActive != true, !hasActiveShortcutRotation,
+          !UpdateWorkAdmission.shared.isBlocked else {
+      automaticPreviewPending = false
+      return
+    }
+    guard currentLocalMediaURL != nil,
+          let duration = player?.info.videoDuration?.second,
+          duration.isFinite, duration > 0 else { return }
+    automaticPreviewPending = false
+    if defaultRangeNeedsDuration {
+      // A short file can report its duration after its range fields are created.
+      // Never replace a range the user has already edited or marked.
+      defaultRangeNeedsDuration = false
+      var start = parseTimestamp(startField.stringValue) ?? 0
+      if start >= duration { start = max(0, duration - Self.maximumFrameRange) }
+      startField.stringValue = formatTimestamp(start, precision: 6)
+      setDefaultEnd(after: start)
+    }
+    scheduleRangePreview()
+  }
 
   private func scheduleRangePreview() {
     cancelScheduledPreview()
@@ -828,7 +882,14 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func previewRange(showValidationError: Bool) {
+    guard !UpdateWorkAdmission.shared.isBlocked else {
+      automaticPreviewPending = false
+      cancelScheduledPreview()
+      updatePreviewButtons()
+      return
+    }
     guard let range = validatedRange(showError: showValidationError), let player else { return }
+    automaticPreviewPending = false
     cancelScheduledPreview()
     if previewSnapshot == nil {
       previewSnapshot = player.videoToolsCaptureSnapshot()
@@ -845,6 +906,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func stopPreview(updateButton: Bool, restorePlaybackState: Bool = true) {
+    automaticPreviewPending = false
     cancelScheduledPreview()
     if let previewSnapshot {
       player?.videoToolsRestoreSnapshot(previewSnapshot, restorePlaybackState: restorePlaybackState)
@@ -856,6 +918,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func stopPreviewBeforeMediaUnload() {
+    automaticPreviewPending = false
     cancelScheduledPreview()
     if let previewSnapshot {
       player?.videoToolsRestorePreviewBeforeUnload(previewSnapshot)
@@ -873,12 +936,13 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     rangePreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString("videotools.preview_range", comment: "Preview in player")
     let previewRange = isPreviewing && previewTimer == nil ? player?.videoToolsLoopRange : nil
     if let range = previewRange {
+      let paused = player?.mpv.getFlag(MPVOption.PlaybackControl.pause) == true
       previewStatusLabel.stringValue = String(format: NSLocalizedString(
-        "videotools.preview.active", comment: "Selected range is playing in the main player"
+        paused ? "videotools.preview.paused" : "videotools.preview.active", comment: "Selected range preview state"
       ), formatTimestamp(range.start), formatTimestamp(range.end))
-      previewStatusLabel.textColor = ChengYingStyle.accent
+      previewStatusLabel.textColor = paused ? .secondaryLabelColor : ChengYingStyle.accent
     } else {
-      let key = previewTimer != nil ? "videotools.preview.pending" :
+      let key = previewTimer != nil || automaticPreviewPending ? "videotools.preview.pending" :
         (validatedRange(showError: false) == nil ? "videotools.preview.invalid" : "videotools.preview.hint")
       previewStatusLabel.stringValue = NSLocalizedString(key, comment: "Range preview status")
       previewStatusLabel.textColor = .secondaryLabelColor
@@ -893,6 +957,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func discardPreviewSnapshot() {
+    automaticPreviewPending = false
     cancelScheduledPreview()
     previewSnapshot = nil
   }
@@ -1312,6 +1377,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   private func updatePlaybackControls() {
     guard isViewLoaded else { return }
+    startAutomaticPreviewIfReady()
     let loaded = player?.info.state.loaded == true
     let localMediaLoaded = loaded && currentLocalMediaURL != nil
     updateLoopUI()

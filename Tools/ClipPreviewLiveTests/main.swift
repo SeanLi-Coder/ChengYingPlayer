@@ -56,14 +56,18 @@ func run() throws {
                CommandLine.arguments.contains("--synthetic") ? "synthetic" : "external-read-only"))
 
   let controller = VideoToolsViewController(player: player, mainWindow: player.mainWindow)
+  _ = controller.view
+  pump(0.5)
+  try check(player.videoToolsLoopRange == nil && mpv.getFlag(MPVOption.PlaybackControl.pause),
+            "Preloading the hidden production tools tab does not start playback")
+  let parent = QuickSettingViewController(tools: controller)
   let panel = NSWindow(contentRect: NSRect(x: 750, y: 120, width: 380, height: 850),
                        styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
   panel.isReleasedWhenClosed = false
   panel.title = "Clip Preview Live Test - Production Controls"
-  panel.contentViewController = controller
+  panel.contentViewController = parent
   panel.makeKeyAndOrderFront(nil)
   application.activate(ignoringOtherApps: true)
-  controller.setPlaybackControlsVisible(true)
   controller.view.layoutSubtreeIfNeeded()
   defer {
     controller.stopPreview()
@@ -87,10 +91,13 @@ func run() throws {
   let setStart = property("setStartButton", NSButton.self)
   let setEnd = property("setEndButton", NSButton.self)
   let preview = property("rangePreviewButton", NSButton.self)
+  let mode = property("modeControl", NSSegmentedControl.self)
+  let previewState = property("previewStatusLabel", NSTextField.self)
 
   try until("The production tools window is active, key, attached, and laid out") {
     controller.view.layoutSubtreeIfNeeded()
     return application.isActive && panel.isVisible && panel.isKeyWindow &&
+      parent.appearanceUpdates > 0 &&
       controller.view.window === panel && start.window === panel && end.window === panel &&
       start.bounds.width > 0 && end.bounds.width > 0
   }
@@ -175,6 +182,49 @@ func run() throws {
   }
 
   let cases: [(String, () throws -> Void)] = [
+    ("opening", {
+      try waitForRange(0, 5)
+      try proveMotion()
+      try action(preview)
+      try until("Stopping the first automatic preview restores paused playback") {
+        !mpv.getFlag("seeking") && mpv.getFlag(MPVOption.PlaybackControl.pause) && player.videoToolsLoopRange == nil
+      }
+      controller.setPlaybackControlsVisible(true)
+      controller.refreshCurrentMedia()
+      pump(0.65)
+      try check(player.videoToolsLoopRange == nil && mpv.getFlag(MPVOption.PlaybackControl.pause) && !hasPendingTimer(),
+                "Repeated visible and media refresh callbacks preserve a manual preview stop")
+      mode.selectedSegment = 3
+      try action(mode)
+      pump(0.45)
+      try check(player.videoToolsLoopRange == nil && mpv.getFlag(MPVOption.PlaybackControl.pause),
+                "The conversion tab does not start preview")
+      mode.selectedSegment = 0
+      try action(mode)
+      try waitForRange(0, 5)
+      try proveMotion()
+      player.pause()
+      try until("A paused real decoder is not labelled as playing a preview") {
+        previewState.stringValue == String(format: NSLocalizedString("videotools.preview.paused", comment: "Paused preview"),
+                                          "00:00.000", "00:05.000")
+      }
+      // Removing/reinserting the parent matches the actual settings sidebar's
+      // view lifecycle, using its extracted production appearance callbacks.
+      parent.view.removeFromSuperview()
+      try until("Removing the actual parent view cancels preview and restores the original state") {
+        !hasPendingTimer() && player.videoToolsLoopRange == nil && mpv.getFlag(MPVOption.PlaybackControl.pause)
+      }
+      let appearanceCount = parent.appearanceUpdates
+      panel.contentViewController = nil
+      panel.contentViewController = parent
+      parent.view.frame = panel.contentView!.bounds
+      try until("Reinserting the parent executes the real tools appearance callback") {
+        parent.appearanceUpdates > appearanceCount
+      }
+      try waitForRange(0, 5)
+      try proveMotion()
+      controller.stopPreview()
+    }),
     ("editing", {
       try reset()
       try edit(start, "0.800000")
@@ -352,6 +402,7 @@ func run() throws {
                 mpv.getInt(MPVOption.Video.videoRotate) == 180,
                 "Hiding tools restores unset A-B markers, loop count, and rotation")
       panel.makeKeyAndOrderFront(nil)
+      application.activate(ignoringOtherApps: true)
       controller.setPlaybackControlsVisible(true)
       try until("The tools window becomes key again before resumed native editing") { panel.isKeyWindow && panel.isVisible }
       try edit(start, "1.100000")

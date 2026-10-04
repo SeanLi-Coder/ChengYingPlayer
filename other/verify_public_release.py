@@ -117,6 +117,13 @@ def verify_public_helper(app, info, expected_tree, output, expected_helper_build
     require(b"PASS: frozen clips retain complete RPU data" in clip_report,
             "Public frozen Dolby Vision clipping smoke did not complete.")
     (output.parent / (output.stem + "-dolby-clip.log")).write_bytes(clip_report)
+    hdr10plus_report = run([
+        sys.executable, "-B", str(ROOT / "Tools/VideoToolsTests/app_hdr10plus_clip_smoke.py"),
+        "--app", str(app),
+    ], timeout=300)
+    require(b"PASS: frozen clips retain complete HDR10+ payloads" in hdr10plus_report,
+            "Public frozen HDR10+ clipping smoke did not complete.")
+    (output.parent / (output.stem + "-hdr10plus-clip.log")).write_bytes(hdr10plus_report)
     require(tree_manifest(app) == expected_tree, "Frozen helper self-test changed the app tree.")
     verify_application(app, info)
     output.write_text(json.dumps(result, indent=2) + "\n")
@@ -125,6 +132,7 @@ def verify_public_helper(app, info, expected_tree, output, expected_helper_build
         "chrome_cookie_snapshot": result["chrome_cookie_snapshot"],
         "chrome_profiles": result["chrome_profiles"],
         "dolby_clip": "precise-complete-rpu-audio-verified",
+        "hdr10plus_clip": "precise-complete-t35-audio-verified",
         "diagnostic_log": result["diagnostic_log"], "diagnostic_identity": identity,
         "diagnostic_api": "authenticated-readonly-private-export-verified",
     }

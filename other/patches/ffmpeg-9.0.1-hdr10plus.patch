@@ -1,0 +1,132 @@
+From: ChengYingPlayer maintainers
+Date: 2026-10-05
+Subject: [PATCH] libx265: preserve frame HDR10+ metadata on explicit request
+
+Project modification against the verified FFmpeg 9.0.1 source archive.
+Serialization follows FFmpeg's libaomenc.c add_hdr_plus implementation and
+retains FFmpeg's LGPL-2.1-or-later source license. The bundled configuration
+is distributed under GPL-3.0-or-later.
+
+The explicit hdr10plus option requires metadata on every input frame.
+x265 4.3 copies userSEI in Encoder::copyUserSEIMessages before returning from
+encoder_encode; FFmpeg's existing per-call SEI cleanup therefore owns the
+temporary payload correctly, including errors and delayed/B-frame output.
+Also place color-saturation syntax outside the optional tone-mapping block,
+matching this release's decoder and serializer size calculation.
+
+--- a/libavcodec/libx265.c
++++ b/libavcodec/libx265.c
+@@ -29,6 +29,7 @@
+ 
+ #include "libavutil/avassert.h"
+ #include "libavutil/buffer.h"
++#include "libavutil/hdr_dynamic_metadata.h"
+ #include "libavutil/internal.h"
+ #include "libavutil/mastering_display_metadata.h"
+ #include "libavutil/mem.h"
+@@ -78,6 +79,7 @@
+     int sei_data_size;
+     int udu_sei;
+     int a53_cc;
++    int hdr10plus;
+ 
+     ReorderedData *rd;
+     int         nb_rd;
+@@ -694,7 +696,56 @@
+ 
+             pic->quantOffsets = qoffsets;
+         }
++    }
++    return 0;
++}
++
++static int add_hdr10plus(libx265Context *ctx, const AVFrame *frame,
++                        x265_sei *sei)
++{
++    static const uint8_t header[] = { 0xb5, 0x00, 0x3c, 0x00, 0x01, 0x04 };
++    const AVFrameSideData *sd =
++        av_frame_get_side_data(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
++    const AVDynamicHDRPlus *metadata;
++    x265_sei_payload *payload;
++    uint8_t *data, *body;
++    size_t size;
++    void *tmp;
++    int ret;
++
++    if (!sd || sd->size < sizeof(*metadata)) {
++        av_log(ctx, AV_LOG_ERROR, "HDR10+ enabled, but frame metadata is missing or invalid.\n");
++        return AVERROR_INVALIDDATA;
++    }
++    metadata = (const AVDynamicHDRPlus *)sd->data;
++    if (metadata->application_version != 1 ||
++        metadata->num_windows < 1 || metadata->num_windows > 3)
++        return AVERROR_INVALIDDATA;
++    ret = av_dynamic_hdr_plus_to_t35(metadata, NULL, &size);
++    if (ret < 0)
++        return ret;
++    data = av_malloc(sizeof(header) + size);
++    if (!data)
++        return AVERROR(ENOMEM);
++    memcpy(data, header, sizeof(header));
++    body = data + sizeof(header);
++    ret = av_dynamic_hdr_plus_to_t35(metadata, &body, &size);
++    if (ret < 0) {
++        av_free(data);
++        return ret;
+     }
++    tmp = av_fast_realloc(ctx->sei_data, &ctx->sei_data_size,
++                          (sei->numPayloads + 1) * sizeof(*payload));
++    if (!tmp) {
++        av_free(data);
++        return AVERROR(ENOMEM);
++    }
++    ctx->sei_data = tmp;
++    sei->payloads = tmp;
++    payload = &sei->payloads[sei->numPayloads++];
++    payload->payload = data;
++    payload->payloadSize = sizeof(header) + size;
++    payload->payloadType = (SEIPayloadType)SEI_TYPE_USER_DATA_REGISTERED_ITU_T_T35;
+     return 0;
+ }
+ 
+@@ -841,6 +892,14 @@
+                 /* Equal to libx265 USER_DATA_UNREGISTERED */
+                 sei_payload->payloadType = (SEIPayloadType)SEI_TYPE_USER_DATA_UNREGISTERED;
+                 sei->numPayloads++;
++            }
++        }
++
++        if (ctx->hdr10plus) {
++            ret = add_hdr10plus(ctx, pic, sei);
++            if (ret < 0) {
++                free_picture(ctx, &x265pic);
++                return ret;
+             }
+         }
+ 
+@@ -1050,6 +1109,7 @@
+     { "x265-stats",  "Filename for 2 pass stats",                                                   OFFSET(stats),     AV_OPT_TYPE_STRING, { 0 }, 0, 0, VE },
+     { "udu_sei",     "Use user data unregistered SEI if available",                                 OFFSET(udu_sei),   AV_OPT_TYPE_BOOL,   { .i64 = 0 }, 0, 1, VE },
+     { "a53cc",       "Use A53 Closed Captions (if available)",                                      OFFSET(a53_cc),    AV_OPT_TYPE_BOOL,   { .i64 = 0 }, 0, 1, VE },
++    { "hdr10plus",   "Require and encode HDR10+ metadata on every input frame",                     OFFSET(hdr10plus), AV_OPT_TYPE_BOOL,   { .i64 = 0 }, 0, 1, VE },
+     { "x265-params", "set the x265 configuration using a :-separated list of key=value parameters", OFFSET(x265_opts), AV_OPT_TYPE_DICT,   { 0 }, 0, 0, VE },
+ #if X265_BUILD >= 167
+     { "dolbyvision", "Enable Dolby Vision RPU coding", OFFSET(dovi.enable), AV_OPT_TYPE_BOOL, {.i64 = FF_DOVI_AUTOMATIC }, -1, 1, VE, .unit = "dovi" },
+--- a/libavutil/hdr_dynamic_metadata.c
++++ b/libavutil/hdr_dynamic_metadata.c
+@@ -379,11 +379,11 @@
+             for (int i = 0; i < s->params[w].num_bezier_curve_anchors; i++)
+                 put_bits(pb, 10, s->params[w].bezier_curve_anchors[i].num * bezier_anchor_den /
+                     s->params[w].bezier_curve_anchors[i].den);
+-            put_bits(pb, 1, s->params[w].color_saturation_mapping_flag);
+-            if (s->params[w].color_saturation_mapping_flag)
+-                put_bits(pb, 6, s->params[w].color_saturation_weight.num * saturation_weight_den /
+-                    s->params[w].color_saturation_weight.den);
+         }
++        put_bits(pb, 1, s->params[w].color_saturation_mapping_flag);
++        if (s->params[w].color_saturation_mapping_flag)
++            put_bits(pb, 6, s->params[w].color_saturation_weight.num * saturation_weight_den /
++                s->params[w].color_saturation_weight.den);
+     }
+ 
+     flush_put_bits(pb);

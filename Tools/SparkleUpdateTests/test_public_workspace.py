@@ -150,6 +150,7 @@ class PublicHelperTests(unittest.TestCase):
             patch.object(verifier, "run", side_effect=[
                 json.dumps(self.result).encode(), b"API fixture passed\n",
                 b"PASS: frozen clips retain complete RPU data\n",
+                b"PASS: frozen clips retain complete HDR10+ payloads\n",
             ]) as commands,
             patch.object(verifier, "tree_manifest", return_value=self.tree),
             patch.object(verifier, "verify_application") as application,
@@ -163,9 +164,21 @@ class PublicHelperTests(unittest.TestCase):
         summary, commands, application = self.invoke()
         self.assertEqual(summary["chrome_profiles"], verifier.PROFILE_SELF_TEST)
         self.assertEqual(json.loads(self.output.read_text())["chrome_profiles"], verifier.PROFILE_SELF_TEST)
-        self.assertEqual(commands.call_count, 3)
+        self.assertEqual(commands.call_count, 4)
+        self.assertEqual(summary["hdr10plus_clip"], "precise-complete-t35-audio-verified")
         application.assert_called_once_with(self.app, self.info)
         self.assertFalse(self.app.exists())
+
+    def test_incomplete_hdr10plus_smoke_blocks_public_success(self):
+        with (
+            patch.object(verifier, "run", side_effect=[
+                json.dumps(self.result).encode(), b"API fixture passed\n",
+                b"PASS: frozen clips retain complete RPU data\n", b"Incomplete fixture\n",
+            ]),
+            self.assertRaisesRegex(ValueError, "HDR10\\+ clipping"),
+        ):
+            verifier.verify_public_helper(self.app, self.info, self.tree, self.output, "a" * 64)
+        self.assertFalse(self.output.exists())
 
     def test_missing_wrong_or_unverified_profile_result_blocks_new_helper_success(self):
         for value in (None, "unverified", True, {}):

@@ -21,6 +21,7 @@ if [[ -e "$OUTPUT_PATH" || -L "$OUTPUT_PATH" ]]; then
   exit 2
 fi
 "$HELPER_PYTHON" "$SCRIPT_DIR/verify_playback_distribution.py" "$PROJECT_ROOT/deps"
+"$HELPER_PYTHON" "$SCRIPT_DIR/verify_media_distribution.py" "$PROJECT_ROOT/deps" --source-cache "$SOURCE_CACHE_DIR"
 
 for command_name in curl git install shasum tar; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -61,6 +62,7 @@ done < <(third_party_source_records)
 "$HELPER_PYTHON" "$PROJECT_ROOT/Tools/DownloaderHelper/source_materials.py" \
   package "$SOURCE_DIR/download-runtime" --cache "$SOURCE_CACHE_DIR/download-runtime"
 ditto --noqtn "$PROJECT_ROOT/deps/playback-build-record" "$PACKAGE_DIR/playback-build-record"
+ditto --noqtn "$PROJECT_ROOT/deps/media-build-record" "$PACKAGE_DIR/media-build-record"
 
 write_third_party_source_manifest "$SOURCE_DIR/SOURCE_MANIFEST.txt"
 install -m 644 "$PROJECT_ROOT/Tools/DownloaderHelper/runtime-artifacts.json" \
@@ -75,6 +77,7 @@ install -m 644 "$PROJECT_ROOT/Tools/DownloaderHelper/runtime-artifacts.json" \
   printf '%s\n' "DownloadCenter-WHEEL-MANIFEST.json identifies pinned runtime wheels. Their verified sources and runtime source manifest are in third-party-sources/download-runtime/."
   printf '%s\n' "playback-build-record/ contains the exact source, configuration, toolchain and library checksums for this release build. The App inside the matching Apple-Silicon.dmg is the installable artifact."
   printf '%s\n' "Playback patches in other/patches/ are applied automatically, in locked order, by other/build_playback_libraries.sh; playback-build-record/ preserves their exact bytes and original/modified source hashes."
+  printf '%s\n' "Media patches in other/patches/media-patches.tsv are applied automatically by other/build_media_binaries.sh; media-build-record/ preserves their exact bytes, original/modified FFmpeg source, configuration and executable checksums before application signing."
   # Expand PWD when the recipient follows these instructions, not during packaging.
   # shellcheck disable=SC2016
   printf '%s\n' 'To reuse the included playback source archives, run SOURCE_CACHE_DIR="$PWD/third-party-sources" bash other/build_playback_libraries.sh from this extracted package directory.'

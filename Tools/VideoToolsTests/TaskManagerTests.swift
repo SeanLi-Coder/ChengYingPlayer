@@ -176,7 +176,41 @@ struct TaskManagerTests {
       check(manager.snapshot?.error == detail && manager.snapshot?.errorCode == "processing_failed" && manager.snapshot?.outputURL == nil,
             "Localization preserves raw failure evidence and never exposes an unverified output")
     }
-    for detail in ["Unexpected future Dolby Vision failure", "Output verification detected an unknown Dolby Vision problem", "A different export failed"] {
+    let hdr10plusFailures: [(String, String)] = [
+      ("HDR10+ clipping currently supports one video track and at most one audio track without ancillary tracks", "tracks"),
+      ("HDR10+ frames contain changing or unsupported geometry, color, or scan properties", "format"),
+      ("HDR10+ clipping requires progressive single-layer HEVC 10-bit limited-range BT.2020 PQ video", "format"),
+      ("The bundled video encoder does not support HDR10+ preservation; update the application", "encoder"),
+      ("HDR10+ frames have missing presentation timestamps", "timestamps"),
+      ("HDR10+ frames have ambiguous presentation timestamps", "timestamps"),
+      ("HDR10+ packets have missing presentation timestamps", "timestamps"),
+      ("HDR10+ packets have ambiguous presentation timestamps", "timestamps"),
+      ("A selected frame is missing HDR10+ metadata", "missing_metadata"),
+      ("A selected packet is missing HDR10+ metadata", "missing_metadata"),
+      ("The selected range contains no HDR10+ video frames", "empty_range"),
+      ("HDR10+ metadata inspection failed; no output was published", "inspection"),
+      ("HDR10+ inspection exceeded the per-packet safety limit", "inspection"),
+    ]
+    for (detail, suffix) in hdr10plusFailures {
+      let key = "videotools.error.hdr10plus.\(suffix)"
+      let explanation = NSLocalizedString(key, comment: "HDR10+ diagnostic test")
+      check(explanation != key, "HDR10+ \(suffix) has a localized explanation")
+      check(VideoToolsFailureMessage.localizedDetail(detail) == "\(explanation)\n\(detail)",
+            "HDR10+ diagnostics retain their exact technical evidence")
+    }
+    check(VideoToolsProgressMessage.localizedHDRStage("Inspecting HDR10+ frames in the selected range") ==
+          VideoToolsProgressMessage.localizedHDRStage("Inspecting Dolby Vision frames in the selected range"),
+          "HDR10+ inspection uses the localized HDR stage without a fabricated ETA")
+    check(VideoToolsProgressMessage.localizedHDRStage("Verifying HDR10+ metadata and selected frame timestamps") ==
+          VideoToolsProgressMessage.localizedHDRStage("Verifying Dolby Vision metadata and selected frame timestamps"),
+          "HDR10+ output verification remains a visible unfinished stage")
+    let lateHDRDetail = "The selected HDR range contains dynamic metadata not detected in the initial frame; no output was published"
+    let lateHDRKey = "videotools.error.dynamic_hdr.late_metadata"
+    let lateHDRExplanation = NSLocalizedString(lateHDRKey, comment: "Late dynamic HDR diagnostic test")
+    check(lateHDRExplanation != lateHDRKey &&
+          VideoToolsFailureMessage.localizedDetail(lateHDRDetail) == "\(lateHDRExplanation)\n\(lateHDRDetail)",
+          "Late dynamic HDR is explained without losing technical evidence")
+    for detail in ["Unexpected future HDR10+ failure", "Unexpected future Dolby Vision failure", "Output verification detected an unknown Dolby Vision problem", "A different export failed"] {
       check(VideoToolsFailureMessage.localizedDetail(detail) == detail,
             "Unknown helper errors remain unmodified instead of being generalized")
     }
