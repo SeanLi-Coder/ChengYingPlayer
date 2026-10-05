@@ -413,12 +413,29 @@ def _caption_text(value: Any) -> str | None:
 
 
 def _first_line(value: str | None) -> str | None:
+    """Return the first line that carries visible text.
+
+    Instagram prefixes some captions and accessibility strings with runs of
+    invisible formatting characters (Unicode category Cf). ``str.strip`` does not
+    remove those, so such a line looks non-empty and would become a filename
+    holding no readable character at all. Only the invisible characters at the
+    ends of a line are trimmed, so an emoji zero-width joiner sitting between two
+    emoji inside the line is preserved; a line is usable only when something
+    visible remains.
+
+    The shared filename sanitizer is deliberately not changed for this: it must
+    keep emoji zero-width joiners, which are also category Cf.
+    """
     if not isinstance(value, str):
         return None
     for line in value.splitlines():
-        stripped = line.strip()
-        if stripped:
-            return stripped
+        trimmed = line.strip()
+        while trimmed and not trimmed[0].isprintable():
+            trimmed = trimmed[1:]
+        while trimmed and not trimmed[-1].isprintable():
+            trimmed = trimmed[:-1]
+        if trimmed:
+            return trimmed
     return None
 
 

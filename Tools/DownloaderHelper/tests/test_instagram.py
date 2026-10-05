@@ -441,6 +441,51 @@ def test_image_without_verifiable_dimensions_is_not_substituted():
     assert ig.parse_work(node, expected_username=USERNAME) is None
 
 
+def test_invisible_formatting_prefix_never_becomes_the_title():
+    """Measured on a real profile: 408 of 437 works had this caption shape.
+
+    The site prefixes captions and accessibility strings with runs of invisible
+    formatting characters, which ``str.strip`` does not remove. Accepting such a
+    line produced a filename holding no readable character at all.
+    """
+    node = image_node("Cq1invisible")
+    node["accessibility_caption"] = "\u2061\u2060\u2061"
+    node["caption"] = {"text": "\u2061\u2061Photo by the author"}
+    work = ig.parse_work(node, expected_username=USERNAME)
+    assert work.title == "Photo by the author"
+    assert all(character.isprintable() for character in work.title)
+
+
+def test_title_falls_back_when_no_candidate_has_visible_text():
+    node = image_node("Cq1allinvisible")
+    node["accessibility_caption"] = "\u2061\u2060"
+    node["caption"] = {"text": "\u2061\n\u2060\n"}
+    work = ig.parse_work(node, expected_username=USERNAME)
+    assert work.title == "Untitled Instagram image"
+    assert all(character.isprintable() for character in work.title)
+
+
+def test_title_keeps_an_emoji_zero_width_joiner_inside_the_line():
+    """Trimming only the ends must not destroy an emoji sequence mid-caption.
+
+    The zero-width joiner is itself a category Cf character, so filtering every
+    invisible character out of the line would break emoji that the shared
+    filename sanitizer deliberately preserves.
+    """
+    node = image_node("Cq1emoji")
+    node["accessibility_caption"] = "\u2061Family \U0001F468\u200d\U0001F469\u200d\U0001F466 trip"
+    work = ig.parse_work(node, expected_username=USERNAME)
+    assert "\u200d" in work.title
+    assert work.title == "Family \U0001F468\u200d\U0001F469\u200d\U0001F466 trip"
+
+
+def test_title_uses_the_first_line_with_visible_text():
+    node = video_node("Cq1lines")
+    node["accessibility_caption"] = "\u2061\n   \nReel by the author\nsecond line"
+    work = ig.parse_work(node, expected_username=USERNAME)
+    assert work.title == "Reel by the author"
+
+
 def test_another_authors_post_is_never_queued_under_this_profile():
     foreign = image_node("Cq1foreign", username="someoneelse", author_id="999")
     collector = ig.ProfileCollector(USERNAME, PROFILE)
