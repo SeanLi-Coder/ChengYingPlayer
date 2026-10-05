@@ -64,6 +64,26 @@ def identify_url(value: str) -> UrlInfo:
             raise UnsupportedUrlError(str(exc)) from exc
         return UrlInfo(url=url, platform=Platform.KUAISHOU, kind=SourceKind(kind))
 
+    if _is_domain(host, "instagram.com"):
+        from .errors import DiscoveryError
+        from .instagram import source_identity
+
+        try:
+            kind, identity = source_identity(url)
+        except DiscoveryError as exc:
+            raise UnsupportedUrlError(str(exc)) from exc
+        # A profile enumerates one author's posts; a single post is resolved
+        # through the media pipeline. Neither accepts an explore, stories or
+        # hashtag page, which are search or recommendation surfaces.
+        if kind == "profile":
+            url = f"https://www.instagram.com/{identity}/"
+        else:
+            # A pasted post address can carry a share tracking token. Only the
+            # shortcode identifies a post, so the canonical address keeps its
+            # path structure and drops any query or fragment.
+            url = urlunsplit(parsed._replace(query="", fragment=""))
+        return UrlInfo(url=url, platform=Platform.INSTAGRAM, kind=SourceKind(kind))
+
     if _is_domain(host, "xhslink.com"):
         return UrlInfo(
             url=url, platform=Platform.XIAOHONGSHU, kind=SourceKind.SHORT_LINK
@@ -139,5 +159,5 @@ def identify_url(value: str) -> UrlInfo:
         return UrlInfo(url=url, platform=Platform.YOUTUBE, kind=kind)
 
     raise UnsupportedUrlError(
-        "Only Xiaohongshu, Douyin, Kuaishou, Bilibili, and YouTube URLs are supported"
+        "Only Xiaohongshu, Douyin, Kuaishou, Instagram, Bilibili, and YouTube URLs are supported"
     )

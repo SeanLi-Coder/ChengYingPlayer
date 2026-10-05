@@ -18,6 +18,7 @@ class Platform(str, Enum):
     XIAOHONGSHU = "xiaohongshu"
     DOUYIN = "douyin"
     KUAISHOU = "kuaishou"
+    INSTAGRAM = "instagram"
     BILIBILI = "bilibili"
     YOUTUBE = "youtube"
 

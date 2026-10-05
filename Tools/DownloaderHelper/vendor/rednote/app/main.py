@@ -183,6 +183,12 @@ def _redact_public_url(value: str) -> str:
         parsed = urlsplit(value)
         if parsed.hostname in {"kuaishou.com", "www.kuaishou.com", "v.kuaishou.com", "m.gifshow.com"}:
             return urlunsplit(parsed._replace(query="", fragment=""))
+        # A pasted Instagram address can carry a share tracking token. The adapter
+        # only ever queues canonical shortcode addresses and normalized profile
+        # addresses, neither of which has a query, so dropping it loses nothing a
+        # download needs.
+        if parsed.hostname in {"instagram.com", "www.instagram.com"}:
+            return urlunsplit(parsed._replace(query="", fragment=""))
     except (TypeError, ValueError):
         pass
     if "xsec_token" not in value.lower():

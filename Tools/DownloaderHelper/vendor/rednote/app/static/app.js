@@ -822,6 +822,7 @@
     if (combined.includes("youtube") || combined.includes("youtu.be")) return "youtube";
     if (combined.includes("douyin") || combined.includes("抖音")) return "douyin";
     if (combined.includes("kuaishou") || combined.includes("gifshow.com") || combined.includes("快手")) return "kuaishou";
+    if (combined.includes("instagram")) return "instagram";
     return "unknown";
   }
 
@@ -831,6 +832,7 @@
       bilibili: { glyph: "B", label: "B站" },
       douyin: { glyph: "抖", label: "抖音" },
       kuaishou: { glyph: "快", label: "快手" },
+      instagram: { glyph: "In", label: "Instagram" },
       unknown: { glyph: "链", label: "正在识别平台" },
       xiaohongshu: { glyph: "红", label: "小红书" },
       youtube: { glyph: "YT", label: "YouTube" }
@@ -1275,10 +1277,124 @@
     return null;
   }
 
+  // Instagram reports skipped posts with its own reason codes, including one for
+  // a post that belongs to another author (a collab post or a reshare). Those are
+  // localized here rather than by the Kuaishou suffix parser.
+  const instagramProblemLabels = {
+    ...kuaishouProblemLabels,
+    not_this_author: "属于其他作者的作品（联动或转发），不计入本主页"
+  };
+
+  function localizeInstagramSuffixes(text) {
+    const parts = [];
+    const category = text.match(/Reason category:\s*([a-z0-9_-]+)\.?/i)?.[1];
+    if (category) {
+      parts.push(`中断原因：${kuaishouReasonLabel(category, kuaishouIssueLabels)}`);
+    }
+    // The adapter names skipped posts as "Skipped posts - <label>: <count> (ids)".
+    const skipped = text.match(/Skipped posts\s*-\s*(.*)$/i)?.[1];
+    if (skipped) {
+      const reasons = [...skipped.matchAll(/([a-z_]+):\s*(\d+)/gi)]
+        .map((match) => `${kuaishouReasonLabel(match[1], instagramProblemLabels)} ${match[2]} 个`)
+        .join("，");
+      if (reasons) parts.push(`有作品未能加入下载队列：${reasons}`);
+      const ids = skipped.match(/\(([^)]*)\)/)?.[1];
+      if (ids) parts.push(`受影响作品：${ids.replace(/,\s*further entries only counted/i, "").trim()}`);
+      if (/further entries only counted/i.test(skipped)) {
+        parts.push("其余条目仅计数，明细已按上限截断");
+      }
+    }
+    return parts.length ? ` ${parts.join("；")}。` : "";
+  }
+
+  function instagramMessage(text) {
+    if (!text.includes("Instagram")) return null;
+    const progress = text.match(/^Instagram: verified (\d+) posts across (\d+) pages$/);
+    if (progress) return `正在读取 Instagram 主页，已验证 ${progress[1]} 个作品（${progress[2]} 页）`;
+    const retry = text.match(
+      /^Instagram rate limited the profile; waiting before continuing \((\d+)\/(\d+)\)/
+    );
+    if (retry) {
+      return `Instagram 暂时限制了主页请求，程序正在等待后从当前位置继续读取（第 ${retry[1]}/${retry[2]} 次）。已验证的作品不会丢失，也不会从头重新读取；你可以随时取消。`;
+    }
+    if (text.startsWith("Opening Instagram in Chrome")) {
+      return "正在通过 Chrome 读取 Instagram 原页面并核对作品信息";
+    }
+    if (text.startsWith("Re-reading the Instagram author page")) {
+      return "正在重新读取 Instagram 作者主页以取得当前有效的图片地址（图片地址带时效签名，不能复用旧地址）";
+    }
+    if (text.startsWith("Instagram profile discovery is incomplete")) {
+      return `Instagram 主页尚未读取完整。已发现并验证的作品会继续下载；网站未确认列表结束，请稍后继续任务以重新读取主页。不能把当前数量视为全部作品。${localizeInstagramSuffixes(text)}`;
+    }
+    if (text.startsWith("Instagram stopped serving further profile pages")) {
+      return `Instagram 已停止继续提供主页内容，本次读取不完整。已验证的作品会继续下载，已保存的文件都会保留。请等待几分钟后点击“继续任务”：程序会重新读取主页以获取有效地址；已完成的文件不会被覆盖。${localizeInstagramSuffixes(text)}`;
+    }
+    if (text.startsWith("Instagram confirmed the end of this profile")) {
+      return `Instagram 已确认该主页列表结束，但作者自述的作品总数中有若干条未在时间线中返回，因此未加入下载队列。置顶、隐藏或已删除的作品无法从主页网格枚举。${localizeInstagramSuffixes(text)}`;
+    }
+    if (text.startsWith("Instagram stopped serving the profile feed before any post")) {
+      return `Instagram 在返回任何可验证作品前就停止了，因此没有加入任何下载项。这不是主页为空，程序也没有把限流当成“没有作品”。请等待几分钟后从原主页重试。${localizeInstagramSuffixes(text)}`;
+    }
+    if (text.startsWith("Instagram Chrome cookies could not be read")) {
+      // A specific local reason must not collapse into "quit Chrome", which is
+      // wrong for a keychain, permission or missing-profile failure.
+      const diagnostic = diagnosticFromText(text);
+      if (diagnostic && cookieDiagnosticMessages[diagnostic]) {
+        const detail = cookieDiagnosticMessages[diagnostic];
+        return `无法读取 Instagram 的 Chrome Cookie。${detail.description}${detail.solution}程序不会静默切换账号或改用匿名访问。诊断类别：${diagnostic}。`;
+      }
+      return "无法读取 Instagram 的 Chrome Cookie。请完全退出 Chrome 后重试，或明确关闭 Chrome Cookie 使用未登录模式；不会静默切换账号或匿名访问。";
+    }
+    const messages = [
+      ["Only Xiaohongshu, Douyin, Kuaishou, Instagram, Bilibili, and YouTube URLs are supported", "目前支持小红书、抖音、快手、Instagram、B站和 YouTube，请粘贴这些平台的视频或主页链接。"],
+      ["Instagram requires a login for this profile", "Instagram 要求登录才能查看该主页。请在 Chrome 用能看到这些作品的账号登录，开启 Chrome Cookie 后重试；程序未下载任何内容。"],
+      ["Instagram asked for a verification step", "Instagram 要求进行安全验证。请在 Chrome 完成验证后返回继续任务；程序不会绕过验证码，未下载任何内容。"],
+      ["This Instagram profile is private or restricted", "该 Instagram 主页是私密的，或对你的账号受限。只能下载你自己的登录会话可见的作品；未加入任何下载项。"],
+      ["Instagram returned no verified posts for this profile", "未取得该主页的可验证作品。请在 Chrome 确认这些作品可见后重试；程序不会下载推荐内容作为替代。"],
+      ["This Instagram post is an image or a carousel", "这条 Instagram 作品是图片或图集。请改用作者主页下载：只有主页响应才带有单帖页面不提供的图片尺寸信息。"],
+      ["Instagram rate limited this profile", "Instagram 暂时限制了该主页的请求频率。已验证的作品会保留，请等待几分钟后重试。"],
+      ["Instagram rejected the profile request", "Instagram 拒绝了本次主页请求。已验证的作品会保留，请稍后重试；程序不会绕过网站的访问限制。"],
+      ["Instagram audio pages are music tracks", "Instagram 音频页是音乐曲目，不是可下载的作品。请粘贴作品或作者主页链接。"],
+      ["Instagram stories are ephemeral", "Instagram 限时动态（Stories）是临时内容，程序不予下载，也不会绕过其访问规则。"],
+      ["Instagram hashtag pages are search results", "Instagram 话题标签页是搜索结果，不是单个作者的作品。请粘贴该作者的主页链接。"],
+      ["Instagram explore pages are recommendations", "Instagram 探索页是推荐内容，不是单个作者的作品。请粘贴该作者的主页链接。"],
+      ["Instagram share links are redirects", "Instagram 分享链接是跳转包装。请在 Chrome 打开该作品，复制地址栏中的正式链接后重试。"],
+      ["Instagram account pages are not downloadable content", "Instagram 账号设置类页面不是可下载内容。请粘贴作品或作者主页链接。"],
+      ["Only an Instagram profile or a single post URL is supported", "Instagram 仅支持作者主页或单个作品链接，不支持更深层的路径。"],
+      ["Instagram URL is not a trusted HTTPS page", "Instagram 链接必须是受支持的官方 HTTPS 地址，不能包含账号密码或自定义端口。"],
+      ["Unsupported Instagram post URL", "Instagram 作品链接格式不支持，请粘贴形如 /p/、/reels/ 或 /tv/ 的正式作品地址。"],
+      ["Unsupported Instagram profile URL", "Instagram 主页链接格式不支持，请粘贴形如 instagram.com/用户名 的作者主页地址。"],
+      ["Unsupported Instagram URL", "Instagram 链接格式不支持，请粘贴单个作品或作者主页链接。"],
+      ["Instagram page could not be opened", "无法打开 Instagram 页面，请检查下载中心的代理与网络连接后重试。"],
+      ["Instagram was blocked by the local DNS or web filter", "本机的 DNS 或网页过滤器拦截了 Instagram。请检查已配置的代理或网络访问策略；这不是 Instagram 验证码，不需要反复打开 Chrome 验证。"],
+      ["Instagram browser TLS certificate verification failed", "Instagram 连接的 HTTPS 证书校验失败，请检查代理证书或网络访问策略；程序不会关闭证书验证。"],
+      ["Instagram browser request failed", "Instagram 页面请求失败，请检查下载中心的代理和网络；已开启代理时不会自动改为直连。"],
+      ["Instagram redirected outside trusted pages", "Instagram 页面跳转到不可信地址，已在导航前拦截。请核对原始链接，不要手动放行未知地址。"],
+      ["Instagram navigated to a different page", "Instagram 跳转到了其他页面，响应已被拦截。请核对原始主页链接后重试。"],
+      ["Instagram response exceeded the safe size limit", "Instagram 响应超过安全大小限制，已停止解析。已经下载的文件不受影响。"],
+      ["Instagram no longer lists this image on the author page", "该图片已不在 Instagram 作者主页的时间线中，可能已被删除或设为私密。请从原主页重试任务。"],
+      ["Instagram returned no verified media for this source", "未取得可验证的 Instagram 媒体信息。请在 Chrome 确认该作品可见后重试；未加入任何下载项。"],
+      ["Instagram returned no verifiable media for this post", "未取得这条作品的可验证媒体信息，未加入任何下载项。图片或图集请改用作者主页下载。"],
+      ["Instagram item identity changed", "该 Instagram 条目的作品身份已变化，为避免下载到其他内容已停止处理。请从原链接新建任务。"],
+      ["Instagram author identity changed", "该 Instagram 作品的作者身份已变化，为避免把他人内容存到该作者目录已停止处理。请从原主页新建任务。"],
+      ["The Instagram item has no verified media kind", "该 Instagram 条目缺少已验证的媒体类型，无法下载。请从原链接新建任务。"],
+      ["Instagram supports Chrome Cookie", "Instagram 支持 Chrome Cookie 或明确选择的未登录模式，请检查下载设置。"]
+    ];
+    for (const [prefix, localized] of messages) {
+      if (text.startsWith(prefix)) return localized;
+    }
+    if (/Untrusted Instagram media URL|Instagram media (?:redirect was blocked|request redirected)/.test(text)) {
+      return "Instagram 媒体地址或跳转指向不可信来源，已在请求前拦截。请核对原始链接，不要手动放行未知地址。";
+    }
+    return null;
+  }
+
   function localizeRuntimeMessage(value, job = null) {
     let text = asText(value);
     const kuaishou = kuaishouMessage(text);
     if (kuaishou) return kuaishou;
+    const instagram = instagramMessage(text);
+    if (instagram) return instagram;
     const signingValidation = douyinSigningValidationMessage(text);
     if (signingValidation) return signingValidation;
     if (text.startsWith("Could not save settings. Check free disk space and write permissions for the project's data folder")) {
@@ -1934,6 +2050,8 @@
     const message = asText(value).trim();
     const kuaishou = kuaishouMessage(message);
     if (kuaishou) return kuaishou;
+    const instagram = instagramMessage(message);
+    if (instagram) return instagram;
     const platform = platformMeta(job).label;
     const target = isProfileJob(job) ? `${platform}主页` : `${platform}作品`;
     if (!message || message === "Starting media discovery") {

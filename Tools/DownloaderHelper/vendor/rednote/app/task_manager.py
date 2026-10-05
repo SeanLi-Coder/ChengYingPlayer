@@ -806,7 +806,9 @@ class DownloadManager:
                 rediscover = True
             elif (
                 (job.platform == Platform.DOUYIN and job.source_kind == SourceKind.PROFILE
-                 or job.platform == Platform.KUAISHOU)
+                 or job.platform == Platform.KUAISHOU
+                 or (job.platform == Platform.INSTAGRAM
+                     and job.source_kind == SourceKind.PROFILE))
                 and self._should_rediscover_on_retry(job)
             ):
                 targets = None
@@ -3357,7 +3359,7 @@ class DownloadManager:
             )
         return (
             job.source_kind == SourceKind.PROFILE
-            and job.platform in {Platform.XIAOHONGSHU, Platform.DOUYIN, Platform.KUAISHOU}
+            and job.platform in {Platform.XIAOHONGSHU, Platform.DOUYIN, Platform.KUAISHOU, Platform.INSTAGRAM}
             and (
                 job.status in {JobStatus.NEEDS_AUTH, JobStatus.INTERRUPTED}
                 or any(item.status == ItemStatus.NEEDS_AUTH for item in job.items)

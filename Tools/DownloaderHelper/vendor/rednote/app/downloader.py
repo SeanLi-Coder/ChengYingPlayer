@@ -78,6 +78,11 @@ from .models import (
     SourceKind,
     TransferProgress,
 )
+from .instagram import describe_item_failure as describe_instagram_item_failure
+from .instagram import discover as discover_instagram
+from .instagram import is_media_url as is_instagram_media_url
+from .instagram import source_identity as instagram_source_identity
+from .instagram import works_from_pipeline_info as instagram_works_from_pipeline_info
 from .kuaishou import discover as discover_kuaishou
 from .kuaishou import is_media_url as is_kuaishou_media_url
 from .kuaishou import source_identity as kuaishou_source_identity
@@ -722,6 +727,14 @@ class MediaDownloader:
         self.config = config or DownloaderConfig()
         self.discovery_callback = discovery_callback
         self._douyin_probe_context = threading.local()
+        # Instagram media addresses carry an expiring signature and are never
+        # persisted, so every image has to be re-resolved from the author's own
+        # timeline. One walk per engine run serves all of them; a retry builds a
+        # new engine and therefore walks again, which is what keeps a resumed
+        # task from requesting an already expired address.
+        self._instagram_profile_walks: dict[
+            tuple[str, str | None, str | None], Any
+        ] = {}
 
     @contextlib.contextmanager
     def _douyin_probe_reuse_scope(
@@ -793,6 +806,8 @@ class MediaDownloader:
             raise DownloadCancelledError("Task cancelled")
         if platform == Platform.KUAISHOU:
             return self._discover_kuaishou(url, should_cancel)
+        if platform == Platform.INSTAGRAM:
+            return self._discover_instagram(url, kind, should_cancel)
         xiaohongshu_browser_cookies = False
         if platform == Platform.XIAOHONGSHU:
             xiaohongshu_browser_cookies = self._xiaohongshu_browser_cookies_enabled()
@@ -1062,6 +1077,305 @@ class MediaDownloader:
             author=result.videos[0].author if result.videos else "Kuaishou Author",
             items=items, warning=result.warning, discovery_complete=result.complete,
         )
+
+    def _discover_instagram(
+        self, url: str, kind: SourceKind, should_cancel: CancelCallback
+    ) -> DiscoveryResult:
+        """Queue one downloadable part per Instagram post or carousel member.
+
+        Only the post's own shortcode and its position inside a carousel are
+        persisted. A media address carries an expiring signature, so storing one
+        would make every later attempt request a dead URL; each part is resolved
+        again at download time instead.
+
+        A carousel parent shortcode cannot be resolved directly, so its parts are
+        queued individually and each one can be retried or resumed on its own.
+        """
+        if self.config.cookie_browser not in {None, "chrome"}:
+            raise TemporaryAccessError(
+                "Instagram supports Chrome Cookie or explicit anonymous access only"
+            )
+        if kind == SourceKind.PROFILE:
+            result = discover_instagram(
+                url,
+                cookie_profile=self.config.cookie_profile,
+                use_browser_cookies=self.config.cookie_browser == "chrome",
+                should_cancel=should_cancel,
+                status_callback=self._report_discovery,
+            )
+            works = result.works
+            source_kind = result.source_kind
+            source_id = result.source_id
+            warning = result.warning
+            complete = result.complete
+        else:
+            # A single post is resolved through the media pipeline: Instagram
+            # serves no per-post JSON response that can be observed, and a
+            # rendered post page mixes the requested post with home-feed
+            # recommendations, so page scraping cannot isolate one post safely.
+            info, fallback = self._extract_instagram_post_info(url, should_cancel)
+            works = instagram_works_from_pipeline_info(info)
+            if not works:
+                raise describe_instagram_item_failure(
+                    str(info.get("_instagram_pipeline_error") or "")
+                )
+            source_kind = "item"
+            source_id = works[0].media_id
+            warning = COOKIE_FALLBACK_WARNING if fallback else None
+            complete = True
+            if not works[0].author:
+                works[0].author = self._author_from_info(info, fallback="") or ""
+
+        items: list[DownloadItem] = []
+        index = 0
+        for work in works:
+            if should_cancel():
+                raise DownloadCancelledError("Task cancelled")
+            for part in work.parts:
+                index += 1
+                items.append(
+                    DownloadItem(
+                        id=_item_key(Platform.INSTAGRAM, part.media_id, part.url, index),
+                        media_id=part.media_id,
+                        source_url=part.url,
+                        title=work.title,
+                        upload_date=work.upload_date,
+                        author=work.author or "Instagram Author",
+                        playlist_index=index,
+                        extractor_key="Instagram",
+                        media_type=(
+                            MediaType.IMAGE if part.kind == "image" else MediaType.VIDEO
+                        ),
+                        metadata={
+                            "instagram_author_id": work.author_id,
+                            "instagram_source_kind": source_kind,
+                            "instagram_source_id": source_id,
+                            "instagram_part_kind": part.kind,
+                            "instagram_part_position": part.position,
+                            "instagram_part_count": len(work.parts),
+                            "instagram_profile_url": (
+                                url if source_kind == "profile" else ""
+                            ),
+                            "instagram_work_kind": work.kind,
+                        },
+                    )
+                )
+        if not items:
+            # Cancellation empties the walk, so it must win here: the user stopped
+            # the task, the site did not fail to answer. Reporting no verified
+            # media would send them to Chrome to look for content they cancelled.
+            if should_cancel():
+                raise DownloadCancelledError("Task cancelled")
+            raise DiscoveryError(
+                "Instagram returned no verified media for this source. Open it in "
+                "Chrome; if the posts are visible there, retry. Nothing was queued."
+            )
+        return DiscoveryResult(
+            author=works[0].author if works and works[0].author else "Instagram Author",
+            items=items,
+            warning=warning,
+            discovery_complete=complete,
+        )
+
+    def _download_instagram_item(
+        self,
+        item: DownloadItem,
+        output_dir: Path,
+        *,
+        callback: EventCallback | None,
+        should_cancel: CancelCallback,
+    ) -> DownloadOutcome:
+        """Download one post part, resolving its address again at this moment.
+
+        Identity is verified before anything is fetched: the queued address must
+        still classify as this exact post, and the author recorded at discovery
+        must still own it. A video is left to the media pipeline, which resolves a
+        higher verified rendition than the in-page list offers. An image address
+        expires, so it is re-read from the author's own timeline rather than
+        reused from a stored value.
+        """
+        if should_cancel():
+            raise DownloadCancelledError("Task cancelled")
+        shortcode = str(item.media_id or "").strip()
+        if not shortcode:
+            raise MediaDownloadError("The Instagram item has no post identity")
+        source_kind, source_id = instagram_source_identity(item.source_url)
+        if source_kind != "item" or source_id != shortcode:
+            raise MediaDownloadError(
+                "Instagram item identity changed; download was blocked"
+            )
+        part_kind = str(item.metadata.get("instagram_part_kind") or "")
+        if part_kind not in {"image", "video"}:
+            raise MediaDownloadError("The Instagram item has no verified media kind")
+
+        if part_kind == "video":
+            return self._download_with_ytdlp(
+                item,
+                output_dir,
+                platform=Platform.INSTAGRAM,
+                callback=callback,
+                should_cancel=should_cancel,
+            )
+
+        asset, author = self._resolve_instagram_image_asset(item, should_cancel)
+        expected_author_id = str(item.metadata.get("instagram_author_id") or "")
+        if expected_author_id and author and author != expected_author_id:
+            raise MediaDownloadError(
+                "Instagram author identity changed; download was blocked"
+            )
+        position = int(item.metadata.get("instagram_part_position") or 1)
+        total = int(item.metadata.get("instagram_part_count") or 1)
+        if callback:
+            callback(EngineEvent(event="probing", message=(
+                "Re-reading the Instagram author page for a current image address"
+            )))
+        with YoutubeDL(self._base_options(False)) as ydl:
+            path, chosen = self._download_first_available_asset(
+                ydl,
+                [asset],
+                output_dir,
+                item.upload_date,
+                item.title,
+                shortcode,
+                item.source_url,
+                platform=Platform.INSTAGRAM,
+                media_type=MediaType.IMAGE,
+                callback=callback,
+                should_cancel=should_cancel,
+                asset_index=position,
+                progress_index=position,
+                progress_count=total,
+                verify_declared_dimensions=True,
+            )
+        resolution = (
+            f"{chosen.width}x{chosen.height}" if chosen.width and chosen.height else None
+        )
+        outcome = DownloadOutcome(
+            output_paths=[str(path)],
+            title=item.title,
+            author=item.author,
+            upload_date=item.upload_date,
+            media_type=MediaType.IMAGE,
+            selected_format=chosen.format_id,
+            resolution=resolution,
+        )
+        if callback:
+            callback(EngineEvent(
+                event="completed",
+                title=outcome.title,
+                author=outcome.author,
+                upload_date=outcome.upload_date,
+                media_type=outcome.media_type,
+                selected_format=outcome.selected_format,
+                resolution=outcome.resolution,
+                output_paths=outcome.output_paths,
+            ))
+        return outcome
+
+    def _resolve_instagram_image_asset(
+        self, item: DownloadItem, should_cancel: CancelCallback
+    ) -> tuple[RemoteAsset, str]:
+        """Return a currently signed image address plus the owning author's id.
+
+        A single post resolves through the media pipeline. A post discovered from
+        a profile is re-read from that profile, because only the profile response
+        carries the exact declared-size renditions, and every address from an
+        earlier walk has expired by now.
+        """
+        shortcode = str(item.media_id or "")
+        profile_url = str(item.metadata.get("instagram_profile_url") or "")
+        if str(item.metadata.get("instagram_source_kind") or "") == "profile" and profile_url:
+            result = self._instagram_profile_walk(profile_url, should_cancel)
+            for work in result.works:
+                for part in work.parts:
+                    if part.media_id == shortcode and part.kind == "image" and part.assets:
+                        return part.assets[0], work.author_id
+            raise MediaDownloadError(
+                "Instagram no longer lists this image on the author page. Retry the "
+                "original profile; the post may have been removed or made private."
+            )
+        info, _ = self._extract_instagram_post_info(item.source_url, should_cancel)
+        if info.get("_instagram_pipeline_error"):
+            raise describe_instagram_item_failure(str(info["_instagram_pipeline_error"]))
+        for work in instagram_works_from_pipeline_info(info):
+            for part in work.parts:
+                if part.media_id == shortcode and part.kind == "image" and part.assets:
+                    return part.assets[0], work.author_id
+        raise describe_instagram_item_failure(
+            "Instagram returned no verifiable media for this post"
+        )
+
+    def _instagram_profile_walk(
+        self, profile_url: str, should_cancel: CancelCallback
+    ) -> Any:
+        """Walk one author page at most once per engine run.
+
+        Every image in a task needs a freshly signed address, but walking the
+        author page costs up to the full browser budget each time. One walk serves
+        the whole run; a retry constructs a new engine and walks again, which is
+        what keeps a resumed task from requesting an expired address.
+        """
+        if should_cancel():
+            raise DownloadCancelledError("Task cancelled")
+        key = (
+            profile_url,
+            self.config.cookie_profile,
+            str(self.config.cookie_browser or ""),
+        )
+        cached = self._instagram_profile_walks.get(key)
+        if cached is not None:
+            return cached
+        result = discover_instagram(
+            profile_url,
+            cookie_profile=self.config.cookie_profile,
+            use_browser_cookies=self.config.cookie_browser == "chrome",
+            should_cancel=should_cancel,
+            status_callback=self._report_discovery,
+        )
+        self._instagram_profile_walks[key] = result
+        return result
+
+    def _extract_instagram_post_info(
+        self, url: str, should_cancel: CancelCallback
+    ) -> tuple[dict[str, Any], bool]:
+        """Resolve one post through the media pipeline without downloading it.
+
+        Returns the raw pipeline info and whether the cookie fallback was used. A
+        failure is recorded under a private key so the caller can translate it
+        into an actionable category instead of surfacing raw pipeline text.
+        """
+
+        def operation(use_cookies: bool) -> dict[str, Any]:
+            if should_cancel():
+                raise DownloadCancelled("Task cancelled")
+            options = {
+                **self._base_options(use_cookies),
+                "skip_download": True,
+                "extract_flat": False,
+                "lazy_playlist": False,
+                "ignoreerrors": False,
+                "logger": _YdlLogger(),
+            }
+            with YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=False)
+            if not isinstance(info, dict):
+                raise DownloadError("The URL returned no downloadable media")
+            entries = [
+                entry
+                for entry in list(info.get("entries") or [])
+                if isinstance(entry, dict)
+            ]
+            if entries:
+                info["entries"] = entries
+            return info
+
+        try:
+            info, fallback = self._run_with_cookie_fallback(
+                operation, url=url, should_cancel=should_cancel,
+            )
+        except DownloadError as exc:
+            return {"_instagram_pipeline_error": str(exc)}, False
+        return info, fallback
 
     def _discover_douyin_item(
         self,
@@ -1419,6 +1733,10 @@ class MediaDownloader:
         output_path.mkdir(parents=True, exist_ok=True)
         if platform == Platform.KUAISHOU:
             return self._download_kuaishou_item(
+                item, output_path, callback=callback, should_cancel=should_cancel,
+            )
+        if platform == Platform.INSTAGRAM:
+            return self._download_instagram_item(
                 item, output_path, callback=callback, should_cancel=should_cancel,
             )
         if platform == Platform.XIAOHONGSHU:
@@ -6366,6 +6684,7 @@ class MediaDownloader:
         is_xiaohongshu_source = platform == Platform.XIAOHONGSHU
         is_douyin_source = platform == Platform.DOUYIN
         is_kuaishou_source = platform == Platform.KUAISHOU
+        is_instagram_source = platform == Platform.INSTAGRAM
         transfer_budget = _douyin_transfer_budget
         for asset in assets:
             allow_verified_douyin_redirect = bool(
@@ -6454,6 +6773,8 @@ class MediaDownloader:
                         )
                     if is_kuaishou_source and not is_kuaishou_media_url(candidate):
                         raise MediaDownloadError("Untrusted Kuaishou media URL was blocked")
+                    if is_instagram_source and not is_instagram_media_url(candidate):
+                        raise MediaDownloadError("Untrusted Instagram media URL was blocked")
                     candidate_redirect_reason = (
                         self._douyin_media_redirect_rejection_reason(
                             candidate,
@@ -6488,6 +6809,8 @@ class MediaDownloader:
                         referer = DOUYIN_MEDIA_HEADERS["Referer"]
                     elif is_kuaishou_source:
                         referer = "https://www.kuaishou.com/"
+                    elif is_instagram_source:
+                        referer = "https://www.instagram.com/"
                     request_headers = {
                         "Referer": referer,
                         "Accept": "*/*",
@@ -6531,17 +6854,34 @@ class MediaDownloader:
                                 f"Redirect port: {exc.redirect_port or 'unavailable'}; "
                                 f"reason: {exc.redirect_reason or 'unrecognized-host'}"
                             ) from exc
-                    elif is_xiaohongshu_source or is_kuaishou_source:
+                    elif (
+                        is_xiaohongshu_source
+                        or is_kuaishou_source
+                        or is_instagram_source
+                    ):
+                        trusted_media_url = (
+                            is_kuaishou_media_url
+                            if is_kuaishou_source
+                            else is_instagram_media_url
+                            if is_instagram_source
+                            else is_trusted_xiaohongshu_asset_url
+                        )
                         try:
                             response = _open_xiaohongshu_response(
                                 ydl,
                                 media_request,
-                                is_trusted_url=(is_kuaishou_media_url if is_kuaishou_source
-                                                else is_trusted_xiaohongshu_asset_url),
+                                is_trusted_url=trusted_media_url,
                             )
                         except _XiaohongshuRedirectRejected as exc:
+                            platform_label = (
+                                "Kuaishou"
+                                if is_kuaishou_source
+                                else "Instagram"
+                                if is_instagram_source
+                                else "Xiaohongshu"
+                            )
                             raise MediaDownloadError(
-                                ("Kuaishou" if is_kuaishou_source else "Xiaohongshu") + " media redirect was blocked before "
+                                f"{platform_label} media redirect was blocked before "
                                 "requesting an untrusted target"
                             ) from exc
                     else:
@@ -6549,6 +6889,8 @@ class MediaDownloader:
                     final_url = str(getattr(response, "url", None) or candidate)
                     if is_kuaishou_source and not is_kuaishou_media_url(final_url):
                         raise MediaDownloadError("Kuaishou media request redirected to an untrusted URL")
+                    if is_instagram_source and not is_instagram_media_url(final_url):
+                        raise MediaDownloadError("Instagram media request redirected to an untrusted URL")
                     if is_xiaohongshu_source and not (
                         is_trusted_xiaohongshu_asset_url(final_url)
                     ):
@@ -6792,7 +7134,9 @@ class MediaDownloader:
                                     require_quality_fingerprint
                                 ),
                             )
-                        if is_kuaishou_source and media_type == MediaType.IMAGE:
+                        if (
+                            is_kuaishou_source or is_instagram_source
+                        ) and media_type == MediaType.IMAGE:
                             self._decode_local_image(temporary, should_cancel=should_cancel)
                             chosen.size = downloaded
                         path = self._publish_download(

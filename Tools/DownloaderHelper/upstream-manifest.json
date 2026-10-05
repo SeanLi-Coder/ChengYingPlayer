@@ -8,13 +8,14 @@
     ".github/"
   ],
   "allowed_patches": {
-    "app/main.py": "Optional user-owned writable-path environment hooks; redact Kuaishou share query values from public responses.",
-    "app/models.py": "Add the Kuaishou platform enum without changing existing values; add a whitelisted local diagnostic category field to the job and item records; persist an opt-in author-only output layout with a legacy-compatible default.",
-    "app/platforms.py": "Recognize strictly validated Kuaishou video, profile and share URLs.",
-    "app/downloader.py": "Connect Kuaishou discovery to verified transfer, proxy, progress and cancellation; validate album bytes, source/local SHA-256 receipts, non-first codec candidates and bounded hashing; share per-platform output paths; preserve fixed Cookie diagnostics and wrapped cancellation, apply the native same-jar Douyin session guard, and retain explicit anonymous fallback; deliver FFprobe prefix input without losing pipe bytes across cancellable polling timeouts; support opt-in direct author folders and atomically publish new native files without overwriting same-name output, staging generic transfers privately; sanitize filesystem-unsafe Unicode code points and excessive decomposed combining runs in author and media names.",
-    "app/task_manager.py": "Bind resolved Kuaishou share identities and preserve incomplete-profile retry semantics; persist whitelisted asset receipts with SHA-256 evidence, merging incremental updates without losing later saved members; keep unmatched Kuaishou profile items queued while discovery is incomplete; reuse the shared output directory calculation; carry the whitelisted Cookie diagnostic category into task state; snapshot new native author-only layout while preserving existing task directories and legacy defaults, rejecting unsafe author folders and enabling exclusive publication for new native jobs; classify local directory preparation failures without exposing paths.",
-    "app/static/app.js": "Add Kuaishou labels, localized progress and error guidance; recognize resolved share profile jobs; localize each whitelisted Chrome Cookie diagnostic category; expose explicit Chrome profile saving without rebinding old tasks, preserve legacy values, and block creation during settings saves; localize bounded retry and skipped-work summaries; give local author-directory failures dedicated storage and new-task guidance.",
-    "app/static/index.html": "Advertise Kuaishou inputs and expose Chrome profile directory-name settings with explicit new-task and independent-configuration guidance.",
+    "app/main.py": "Optional user-owned writable-path environment hooks; redact Kuaishou share query values from public responses. Redact Instagram share tracking tokens from public responses.",
+    "app/models.py": "Add the Kuaishou and Instagram platform enums without changing existing values; add a whitelisted local diagnostic category field to the job and item records; persist an opt-in author-only output layout with a legacy-compatible default.",
+    "app/platforms.py": "Recognize strictly validated Kuaishou video, profile and share URLs, and strictly validated Instagram profile and post URLs.",
+    "app/downloader.py": "Connect Kuaishou discovery to verified transfer, proxy, progress and cancellation; validate album bytes, source/local SHA-256 receipts, non-first codec candidates and bounded hashing; share per-platform output paths; preserve fixed Cookie diagnostics and wrapped cancellation, apply the native same-jar Douyin session guard, and retain explicit anonymous fallback; deliver FFprobe prefix input without losing pipe bytes across cancellable polling timeouts; support opt-in direct author folders and atomically publish new native files without overwriting same-name output, staging generic transfers privately; sanitize filesystem-unsafe Unicode code points and excessive decomposed combining runs in author and media names. Connect Instagram discovery and per-part download dispatch to the same verified transfer, proxy, progress and cancellation machinery, letting cancellation win over an empty-result report.",
+    "app/task_manager.py": "Bind resolved Kuaishou share identities and preserve incomplete-profile retry semantics; persist whitelisted asset receipts with SHA-256 evidence, merging incremental updates without losing later saved members; keep unmatched Kuaishou profile items queued while discovery is incomplete; reuse the shared output directory calculation; carry the whitelisted Cookie diagnostic category into task state; snapshot new native author-only layout while preserving existing task directories and legacy defaults, rejecting unsafe author folders and enabling exclusive publication for new native jobs; classify local directory preparation failures without exposing paths. Keep an incomplete Instagram profile discovery retryable like Kuaishou.",
+    "app/static/app.js": "Add Kuaishou labels, localized progress and error guidance; recognize resolved share profile jobs; localize each whitelisted Chrome Cookie diagnostic category; expose explicit Chrome profile saving without rebinding old tasks, preserve legacy values, and block creation during settings saves; localize bounded retry and skipped-work summaries; give local author-directory failures dedicated storage and new-task guidance. Add Instagram labels, localized progress and error guidance, and its own skipped-post reason labels.",
+    "app/static/index.html": "Advertise Kuaishou and Instagram inputs and expose Chrome profile directory-name settings with explicit new-task and independent-configuration guidance.",
+    "app/static/styles.css": "Add the platform dot colors the download-center UI references, including the orange dot Kuaishou already used and the violet dot for Instagram.",
     "tests/test_stop.py": "Isolate the no-server test from real localhost services and cover a disappearing legacy listener; production stop.py is unchanged.",
     "app/browser.py": "Add whitelisted Cookie diagnostics and a private-output logger compatible with yt-dlp warning arguments; preserve diagnosed extractor errors and safely classify bounded exception chains and SQLite/storage/reader failures; keep usable site session cookies on unrelated-cookie failure, reject authentication loss, and avoid assuming an automatic profile is Default.",
     "app/douyin_signing.py": "Use the compatible private Cookie logger, optional native task-local reader scope and bounded control-signal unwrapping; carry sanitized Cookie diagnostics without relabelling them as signing integrity failures.",
@@ -65,7 +66,7 @@
     {
       "path": "app/downloader.py",
       "upstream_sha256": "0401b8290cd9cda5b71a61a6d8086a3d59e7ad6f36d395bac9ec988f3e182573",
-      "vendored_sha256": "6c9691f8edf1ba6989578329a319b83861084640c233c535e8f453f9cdb9bee9"
+      "vendored_sha256": "b4bfb6e959e2a52c45271bae7c3a0520f80eb885cc4d20675f4a21f66c90d7d9"
     },
     {
       "path": "app/errors.py",
@@ -85,17 +86,17 @@
     {
       "path": "app/main.py",
       "upstream_sha256": "6710e6e7940d66c16f9e70814e44f868c4905d9b038317d5c47ba0f663f5af5e",
-      "vendored_sha256": "845f1e9225c48ed47f343fae86efe4f7a47fe06e47fad13d9fd4173e41a41dca"
+      "vendored_sha256": "01e6988dbe693ea070aa02687e223626742bd84ac04b6a81efbf328d2d2f10a3"
     },
     {
       "path": "app/models.py",
       "upstream_sha256": "57f289db1d85bfb67de360cb7e2fbf1d7351b8c9541d83293efb6dfcc407e0ad",
-      "vendored_sha256": "3c1889f303bec354015af8f8cfb7d05720b4aa1786faf047452d8c37d74560ae"
+      "vendored_sha256": "b5b2c651ec5653c6c00390d7638e77c65b02bed5aa6c960deb883adff0467a00"
     },
     {
       "path": "app/platforms.py",
       "upstream_sha256": "38ac7b64f1804abc24adbc9b8b8233250de6144cdc9ff041db82bf1d77085433",
-      "vendored_sha256": "7f19de0360d690cbbf126070cad8b282f11b5be85a7fe50e8bbaaa120caff652"
+      "vendored_sha256": "63fd30ae3309959bff01a8cff6218f2d18ba2064b789e35f6bb49e128910c641"
     },
     {
       "path": "app/process_guard.py",
@@ -110,7 +111,7 @@
     {
       "path": "app/static/app.js",
       "upstream_sha256": "c88f22bce27cd49ad5f289155f2d0a6ee6bfe2f7aab0fee54a22307dd5bbcbb8",
-      "vendored_sha256": "c21633e4177be935a53bc84f492b752e2c4001ff06e3de81159ee516ec4afaf7"
+      "vendored_sha256": "9da8ac8dfddc04327a87a52d1e2435e3bebf9357edac399eb2bc5cb8f8e95e0f"
     },
     {
       "path": "app/static/favicon.svg",
@@ -120,12 +121,12 @@
     {
       "path": "app/static/index.html",
       "upstream_sha256": "70a385836d05dacad77876c7c8f7e59c4ab565348f740c61395552da2d7c1141",
-      "vendored_sha256": "c4576426f30d553aa86e1a0d1ada4e59e79122f7b85941304f89ec0f6bd431b5"
+      "vendored_sha256": "020deba36ada551f85f3987c77756269e1b7d6bf4961c898e3645db6ff11d5d4"
     },
     {
       "path": "app/static/styles.css",
       "upstream_sha256": "2bdff8071473b9eba67b7eb4520e7b5ee7737b1579b869ed971fff023074425d",
-      "vendored_sha256": "2bdff8071473b9eba67b7eb4520e7b5ee7737b1579b869ed971fff023074425d"
+      "vendored_sha256": "eea7718d8ef047e7cc47d762e6baae9f339e40b40f39683fc99b0f9726073ad9"
     },
     {
       "path": "app/storage.py",
@@ -135,7 +136,7 @@
     {
       "path": "app/task_manager.py",
       "upstream_sha256": "2264717a9ed202fc1db757d54140dea575c14799ec49bef48815fb679a862236",
-      "vendored_sha256": "03dfaa65f48fe3b1edb0d8503c24c531fceffb1bb5e2a4e42319234323370235"
+      "vendored_sha256": "49f7bafa7a2e7cd5fffb0d2b974d0da634a3b0c8b17b3fe401b853731ab3a16a"
     },
     {
       "path": "app/xiaohongshu.py",
@@ -373,6 +374,11 @@
       "path": "app/kuaishou.py",
       "license": "GPL-3.0-or-later",
       "sha256": "67a722a70b2c842261259ced3e43a4bbdb92bd303e57d5c15176fae26aa18460"
+    },
+    {
+      "path": "app/instagram.py",
+      "license": "GPL-3.0-or-later",
+      "sha256": "88c1c190410289bf6aa42db9771017b9c4e077a4916b51d4519c116a93ea6342"
     }
   ]
 }

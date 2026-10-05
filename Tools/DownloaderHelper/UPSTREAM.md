@@ -46,6 +46,19 @@ existing queue, verified asset transfer, retry/cancel and state machinery.
 progress/errors and input guidance; original platform behavior is retained.
 Each intentional change is explicitly allowlisted and hashed in the manifest.
 
+The additive Instagram integration patches that same set of files, plus
+`app/static/styles.css`: `app/models.py` gains an `INSTAGRAM` platform value
+without changing an existing one; `app/platforms.py` recognizes strictly validated
+profile and post URLs and rejects explore, stories, hashtag, account and
+share-tracking surfaces; `app/downloader.py` adds discovery and per-part download
+dispatch on the existing verified transfer, proxy, progress and cancellation
+machinery; `app/task_manager.py` keeps an incomplete profile discovery retryable;
+`app/main.py` redacts Instagram share tracking tokens; and `app/static/app.js` with
+`app/static/index.html` add the platform label, localized progress/errors and input
+guidance. `app/static/styles.css` supplies the platform dot colors the interface
+already referenced, so a dot renders in its platform color rather than the
+inherited text color.
+
 Chrome Cookie failures are diagnosed by an additive patch to `app/browser.py`,
 which classifies a read failure into one fixed, safe category: decryption,
 permission, database lock, missing Chrome data directory, invalid or missing
@@ -262,6 +275,96 @@ The adapter must not use `run.py`'s project lock in the application bundle. Its
 legacy `--runtime-dir` option only moves runtime records, not configuration,
 task state, downloads, or the project lock. The native host owns process lifetime,
 its private runtime directory, authenticated loopback transport, and shutdown.
+
+### Instagram profile enumeration, interruption and resume semantics
+
+`app/instagram.py` is an original ChengYing extension, licensed GPL-3.0-or-later,
+not part of the MIT upstream snapshot. It observes the paginated GraphQL profile
+timeline that Instagram's own page JavaScript produces while the page is scrolled.
+It does not copy third-party signing code, replay private signed APIs, bypass
+challenges, or strip watermarks. Author and post identity, trusted HTTPS media
+hosts and redirect targets are checked before accepting media. Its independent
+regression tests live in the helper's `tests/` folder.
+
+Requests are allowed natively rather than relayed. Fetching each request inside
+the route handler and fulfilling the route with that copy stalls this page:
+measured against a real logged-in profile through the production discovery path,
+loading stopped at 67 responses and never advanced through 20 further scrolls,
+the profile component never mounted, so the site never issued its timeline query
+and discovery reported no verified posts for an author with 442. Three controls
+separate the cause: registering a handler that calls `continue_()` for every
+request loaded 353 responses and produced the timeline query; no handler at all
+loaded 345 and produced it; every relay variant produced none. Keeping the
+original cookie header, stripping `content-encoding` on fulfill and not aborting
+media all failed identically, so the relay itself is the cause, not a missing
+header or a blocked subresource. Kuaishou tolerates the same relay because its
+page is far lighter.
+
+The redirect guarantee the relay existed to provide is kept, and strengthened.
+`continue_()` does not re-enter the route handler for each hop, so a request
+listener re-applies the trusted-host allowlist to every request Chromium actually
+issues, measured at 295 of 295 on a real profile with zero off-host redirects.
+A `framenavigated` listener records the URL the main frame committed to, which the
+existing identity check verifies; that observes the final rendered location
+instead of each requested hop. Blocking media, image and font subresources is
+retained and measured harmless: it skipped 110 image requests while the timeline
+query was still issued, and it keeps the browser budget for pagination.
+
+Completion is claimed only on site-confirmed evidence. `page_info.has_next_page`
+observed as false is the only site-confirmed end of list. The same response set
+carries `data.user.media_count`, the author's own declared post total, so a walk
+that stops short of it is reported incomplete with the missing count rather than
+being silently presented as finished. Works are accumulated as each response
+arrives, because a profile renders a virtual list whose DOM only ever holds a
+sliding window of links; reading links back at the end would lose most of them.
+
+Media kind is resolved deliberately. Images are taken from the page's own
+`image_versions2` candidates, which do declare exact dimensions, and a candidate
+without its own width and height can never be claimed as the highest quality.
+Videos are left to the existing media pipeline: a post's own `video_versions`
+top out below the rendition that pipeline resolves, so pinning the in-page
+address would silently downgrade quality. A single post is not resolved by page
+scraping either, because Instagram serves no observable per-post JSON response
+and a rendered post page mixes the requested post with home-feed
+recommendations. Only `p/<shortcode>` and the deprecated `<post>/media/` suffix
+identify one post; a deeper path is a different surface and is rejected, so an
+unrelated post whose first segment merely looks like a shortcode is never
+downloaded.
+
+A rate-limited or transiently failing profile page no longer discards the works
+already verified. Only `rate_limited`, `request_rejected`, `site_unavailable` and
+`network_error` are treated as recoverable, and only while a profile is actually
+being paginated. Login, verification, author/post identity and security failures
+stay fatal and are never degraded into a partial result, because doing so would
+hide a real access problem. `content_unavailable` is also excluded: it describes
+one post, not a pagination interruption.
+
+Recovery retries with a bounded exponential backoff (3 attempts at 5s, 10s and
+20s). Every wait counts against the existing 300 second browser budget and is
+checked against cancellation in 200ms slices, so cancellation stays immediate and
+one task can never wait indefinitely. A retry resumes from the same expected
+cursor, which preserves cursor continuity instead of restarting the walk or
+skipping pages. When retries are exhausted the verified works are still returned
+as an incomplete result carrying a fixed reason category. If nothing was verified
+at all, the real error is raised; an interruption is never reported as an empty
+profile.
+
+Cancellation takes priority over an empty result. A cancelled walk yields no
+items, so the dispatcher re-checks cancellation before concluding that the site
+returned no verified media; the user's own stop is never reported to them as a
+site problem that sends them to look for content they cancelled.
+
+Posts that cannot be queued are reported with a bounded detail list (20 entries)
+using fixed reason codes only: `no_verifiable_media`, `unsupported_media_type`,
+`not_this_author`, `queue_limit_reached`, `page_item_limit_reached`. The
+user-facing summary counts them and names up to ten affected shortcodes through a
+fixed label map, stating explicitly when further entries were only counted. No
+caption, media URL, cookie or account detail is ever included.
+
+A media address carries an expiring signature, so none is persisted. Each part is
+resolved again at download time, and a retry rediscovers the profile with fresh
+cursors. Only the post shortcode and its position inside a carousel are stored,
+so every carousel member can be retried or resumed on its own.
 
 ## Preserved behavior
 

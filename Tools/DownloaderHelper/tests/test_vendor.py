@@ -39,9 +39,10 @@ class VendorIntegrityTests(unittest.TestCase):
         self.assertEqual(manifest["schema_version"], 2)
         self.assertEqual(
             {entry["path"] for entry in manifest["integration_files"]},
-            {"app/kuaishou.py"},
+            {"app/kuaishou.py", "app/instagram.py"},
         )
         self.assertNotIn("app/kuaishou.py", {entry["path"] for entry in manifest["files"]})
+        self.assertNotIn("app/instagram.py", {entry["path"] for entry in manifest["files"]})
 
     def test_original_adapter_has_independent_integrity_and_license_checks(self):
         with tempfile.TemporaryDirectory(prefix="chengying-integration-integrity-") as name:

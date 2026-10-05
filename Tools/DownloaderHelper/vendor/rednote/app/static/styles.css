@@ -443,6 +443,10 @@ svg {
 .platform-dot.pink { color: #ff78aa; }
 .platform-dot.blue { color: #6f9fff; }
 .platform-dot.cyan { color: #55e7ed; }
+/* Kuaishou already referenced an orange dot before this class existed, so its
+   dot rendered in the inherited text color instead of the platform color. */
+.platform-dot.orange { color: #ffa94d; }
+.platform-dot.violet { color: #c86dd7; }
 
 .form-error {
   margin: 0;
