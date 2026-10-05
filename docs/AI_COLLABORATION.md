@@ -123,12 +123,14 @@
 | 范围 | 仓库路径 |
 | --- | --- |
 | 快手网页发现、作者归属、分页与浏览器请求 | `Tools/DownloaderHelper/vendor/rednote/app/kuaishou.py` |
+| Instagram 主页枚举、单帖分派与作者归属 | 同目录 `instagram.py` |
 | 平台类型、链接识别 | 同目录 `models.py`、`platforms.py` |
 | 媒体下载、任务队列、取消重试 | 同目录 `downloader.py`、`task_manager.py` |
 | HTTP API、状态脱敏、下载界面 | 同目录 `main.py`、`static/app.js`、`static/index.html` |
 | 原生宿主与代理 | `Tools/DownloaderHelper/helper.py`、`proxy_config.py`、`proxy_transport.py` |
 | 播放器下载窗口与桥接 | `iina/DownloadCenter/` |
 | 快手专项回归 | `Tools/DownloaderHelper/tests/test_kuaishou.py`、`test_kuaishou_frontend.py` |
+| Instagram 专项回归 | `Tools/DownloaderHelper/tests/test_instagram.py` |
 | 来源清单与校验 | `Tools/DownloaderHelper/upstream-manifest.json`、`verify_vendor.py`、`UPSTREAM.md` |
 | 构建、完整验证、正式发布 | `.github/workflows/ci.yml`、`README.md` 的开发构建章节 |
 
@@ -158,6 +160,29 @@
 同时断言 CSS 实际生效、JS 实际执行。仅 mock `route.fetch` 参数不够。
 可研究同 BrowserContext 的 URL-only `context.request.fetch`，但必须验证 Cookie／Set-Cookie、
 已配置代理、重定向和响应释放等语义，不能机械替换。
+
+#### 2026-10-06 Instagram 实测结论：中继会让重前端页面停载
+
+上面第 4 条风险已被实测证实，且比“诊断不够具体”更严重：Instagram 适配器原先对
+每个请求都 `route.fetch()` 再 `route.fulfill()`，真实登录主页上加载停在约 67 个
+响应处不再推进，再滚动 20 次、累计 33 秒仍无新增，主页组件从未挂载，站点因此从不
+发出时间线查询，发现阶段只报“无可验证作品”，而该主页实际有 442 篇。
+
+三组对照分离出因果：注册处理器但对每个请求 `route.continue_()`，加载 353 个响应并
+发出时间线查询；完全不注册处理器，加载 345 个并发出；所有中继变体一个都没发出。
+因此“注册路由处理器”本身无害，成因是中继本身。三种常见怀疑已逐一排除且失败表现
+完全一致：保留原始 cookie 头、在 fulfill 时剥离 `content-encoding`、不拦截图媒体
+子资源。
+
+**这不代表快手坏了。** 快手今天仍走同一中继且实站验证通过，因为其页面轻得多。
+结论是：中继能否用取决于站点前端重量，接入新的重前端站点前必须先实测，不能沿用。
+修复方式与保留的安全保证见
+[`Instagram 主页批量下载交接`](handoffs/2026-10-06-instagram-profile-downloads.md)。
+
+注意本文档下方“保留逐跳可信 HTTPS 目标检查”一条仍然成立：`route.continue_()`
+之后重定向跳不再重进路由处理器，必须另行监听 `request` 事件复核主机白名单，并用
+`framenavigated` 记录主框架真正提交的 URL 交身份校验。实站测量中重定向跳数为 0，
+即真实站点未触发该路径，所以这两项保证目前由离线回归证明，尚无实站样本。
 
 ### 主页完整性与画质
 
@@ -500,6 +525,15 @@ HDR 默认关闭改动见 [PR #1](https://github.com/SeanLi-Coder/ChengYingPlaye
 [`docs/handoffs/2026-09-25-kuaishou-codex-review.md`](handoffs/2026-09-25-kuaishou-codex-review.md)。
 
 Codex review 前先确认当前 `main` 包含 `ca14c85e`，并重新核对公开 release 状态；不要把快手真实主页尚未通过登录态验收写成已完成。
+
+Instagram 主页与单帖下载的发现失效根因、原生放行修复、离线门禁与实站验证证据见：
+
+[`docs/handoffs/2026-10-06-instagram-profile-downloads.md`](handoffs/2026-10-06-instagram-profile-downloads.md)。
+
+其中发现、视频与图片的实站端到端下载均已通过真实主页验证：1599 个部件，
+视频 3 个均 1080x1920 VP9，图片 3 个均 1440x1920 JPEG，抽样 6/6 成功。
+首次运行时图片曾因本机代理上游退化失败，代理恢复后同一路径全部成功。
+仍待验收的是主线／标签 CI、签名安装、增量全树还原与匿名公开交付。
 
 
 > 请先阅读根目录 AGENTS.md、docs/AI_COLLABORATION.md 和

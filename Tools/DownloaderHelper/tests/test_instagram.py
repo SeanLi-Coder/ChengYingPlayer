@@ -159,9 +159,11 @@ class InstagramBrowserFixture:
     No socket is opened.
     """
 
-    def __init__(self, *, final_url=PROFILE, responses=(), title="Instagram fixture"):
+    def __init__(self, *, final_url=PROFILE, responses=(), title="Instagram fixture",
+                 redirect_requests=()):
         self.final_url = final_url
         self.responses = list(responses)
+        self.redirect_requests = list(redirect_requests)
         self.page = self
         self.main_frame = SimpleNamespace(url=PROFILE)
         self.version = "140.0.0.0"
@@ -229,6 +231,11 @@ class InstagramBrowserFixture:
         # request and committed-URL events arrive after the handler ran.
         if "request" in self.listeners:
             self.listeners["request"](request)
+            for redirect_url in self.redirect_requests:
+                # A redirect hop never re-enters the route handler, so it can only
+                # be seen here. Emitting it without the handler is what makes the
+                # allowlist re-check on this event load-bearing.
+                self.listeners["request"](SimpleNamespace(url=redirect_url))
         self.url = self.final_url
         self.main_frame.url = self.final_url
         if "framenavigated" in self.listeners:
@@ -1263,6 +1270,58 @@ def test_navigation_to_an_untrusted_page_blocks_discovery(monkeypatch):
     )
     with pytest.raises((DiscoveryError, TemporaryAccessError)):
         ig.discover(PROFILE)
+
+
+def test_untrusted_redirect_hop_blocks_discovery_without_reaching_the_handler(monkeypatch):
+    """A redirect hop must be caught even though it never re-enters the handler.
+
+    ``route.continue_()`` lets Chromium follow redirects itself, so a hop is only
+    visible to the request listener. Without that re-check the host allowlist
+    would cover only the first request of each chain, and an off-site redirect
+    could be downloaded silently.
+    """
+    browser = InstagramBrowserFixture(
+        redirect_requests=["https://evil.example/steal"],
+        responses=[
+            InstagramResponse(
+                profile_content_response(1), operation=ig.PROFILE_CONTENT_OPERATION
+            ),
+            InstagramResponse(
+                timeline_response([image_node("Cq1a")], has_next_page=False),
+                operation="PolarisProfilePostsQuery",
+            ),
+        ],
+    )
+    monkeypatch.setattr(ig, "sync_playwright", browser.playwright)
+    monkeypatch.setattr(
+        ig, "_extract_chrome_cookies", Mock(side_effect=AssertionError("Must not read cookies"))
+    )
+    with pytest.raises(DiscoveryError, match="outside trusted pages"):
+        ig.discover(PROFILE)
+    # The navigation itself was still allowed natively; the hop was what failed.
+    assert browser.continued_requests == [PROFILE]
+
+
+def test_trusted_redirect_hop_is_allowed(monkeypatch):
+    """A hop onto another trusted Instagram host must not be treated as a leak."""
+    browser = InstagramBrowserFixture(
+        redirect_requests=["https://www.instagram.com/yiluntan_news/"],
+        responses=[
+            InstagramResponse(
+                profile_content_response(1), operation=ig.PROFILE_CONTENT_OPERATION
+            ),
+            InstagramResponse(
+                timeline_response([image_node("Cq1a")], has_next_page=False),
+                operation="PolarisProfilePostsQuery",
+            ),
+        ],
+    )
+    monkeypatch.setattr(ig, "sync_playwright", browser.playwright)
+    monkeypatch.setattr(
+        ig, "_extract_chrome_cookies", Mock(side_effect=AssertionError("Must not read cookies"))
+    )
+    result = ig.discover(PROFILE)
+    assert [work.media_id for work in result.works] == ["Cq1a"]
 
 
 # ---------------------------------------------------------------------------

@@ -60,6 +60,7 @@ def _check() -> dict[str, object]:
         "LICENSE",
         "app/main.py",
         "app/kuaishou.py",
+        "app/instagram.py",
         "app/static/index.html",
     ):
         if not (vendor_root / relative).is_file():
