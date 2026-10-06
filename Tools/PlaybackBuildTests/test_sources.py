@@ -18,7 +18,16 @@ PRIMARY_URL = (
 )
 MIRROR_URL = "https://sources.buildroot.net/dav1d/dav1d-1.5.3.tar.xz"
 SOURCE_FILENAME = "dav1d-1.5.3.tar.xz"
+FREETYPE_VERSION = "2.14.3"
+FREETYPE_FILENAME = "freetype-2.14.3.tar.xz"
+FREETYPE_PRIMARY_URL = (
+    "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz"
+)
+FREETYPE_MIRROR_URL = (
+    "https://sources.buildroot.net/freetype/freetype-2.14.3.tar.xz"
+)
 PINNED_SHA256 = "732010aa5ef461fa93355ed2c6c5fedb48ddc4b74e697eaabe8907eaeb943011"
+PINNED_FREETYPE_SHA256 = "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f"
 FIXTURE_BYTES = b"Verified source fixture\x00\xff\x10\n"
 FIXTURE_SHA256 = hashlib.sha256(FIXTURE_BYTES).hexdigest()
 
@@ -60,11 +69,12 @@ class PlaybackSourceTests(unittest.TestCase):
             + ' --fake-curl "$@"\n'
         )
         fake.chmod(0o755)
+        self.filename = SOURCE_FILENAME
         self.set_plan({})
 
     @property
     def destination(self):
-        return self.cache / SOURCE_FILENAME
+        return self.cache / self.filename
 
     def set_plan(self, plan):
         self.plan_path.write_text(json.dumps(plan))
@@ -83,6 +93,132 @@ class PlaybackSourceTests(unittest.TestCase):
             for entry in self.requests()
         ]
 
+    def test_freetype_mirror_used_when_savannah_is_unreachable(self):
+        self.filename = FREETYPE_FILENAME
+        self.set_plan(
+            {FREETYPE_PRIMARY_URL: self.response(28), FREETYPE_MIRROR_URL: self.response()}
+        )
+        self.assert_success(self.fetch_freetype())
+        self.assertEqual(self.urls(), [FREETYPE_PRIMARY_URL, FREETYPE_MIRROR_URL])
+
+    def test_freetype_mirror_request_is_bounded_and_https_only(self):
+        self.filename = FREETYPE_FILENAME
+        self.set_plan(
+            {FREETYPE_PRIMARY_URL: self.response(28), FREETYPE_MIRROR_URL: self.response()}
+        )
+        self.assert_success(self.fetch_freetype())
+        arguments = self.requests()[1]["arguments"]
+        for flag, expected in (
+            ("--connect-timeout", "15"),
+            ("--max-time", "120"),
+            ("--retry", "0"),
+            ("--proto", "=https"),
+            ("--proto-redir", "=https"),
+        ):
+            self.assertEqual(arguments[arguments.index(flag) + 1], expected)
+        self.assertNotIn("--insecure", arguments)
+        self.assertNotIn("--retry-all-errors", arguments)
+
+    def test_freetype_primary_success_never_requests_mirror(self):
+        self.filename = FREETYPE_FILENAME
+        self.set_plan({FREETYPE_PRIMARY_URL: self.response()})
+        self.assert_success(self.fetch_freetype())
+        self.assertEqual(self.urls(), [FREETYPE_PRIMARY_URL])
+
+    def test_freetype_mirror_checksum_mismatch_is_fatal(self):
+        self.filename = FREETYPE_FILENAME
+        self.set_plan(
+            {
+                FREETYPE_PRIMARY_URL: self.response(28),
+                FREETYPE_MIRROR_URL: self.response(body=b"incorrect mirror"),
+            }
+        )
+        self.assert_failure(self.fetch_freetype(), 1)
+        self.assertEqual(self.urls(), [FREETYPE_PRIMARY_URL, FREETYPE_MIRROR_URL])
+        self.assertFalse(self.destination.exists())
+
+    def test_freetype_primary_checksum_mismatch_never_falls_back(self):
+        self.filename = FREETYPE_FILENAME
+        self.set_plan(
+            {
+                FREETYPE_PRIMARY_URL: self.response(body=b"incorrect archive"),
+                FREETYPE_MIRROR_URL: self.response(),
+            }
+        )
+        result = self.fetch_freetype()
+        self.assert_failure(result, 1)
+        self.assertIn("checksum mismatch", result.stderr)
+        self.assertEqual(self.urls(), [FREETYPE_PRIMARY_URL])
+        self.assertFalse(self.destination.exists())
+
+    def test_freetype_connection_failure_status_propagates_when_mirror_fails(self):
+        self.filename = FREETYPE_FILENAME
+        self.set_plan(
+            {FREETYPE_PRIMARY_URL: self.response(28), FREETYPE_MIRROR_URL: self.response(7)}
+        )
+        self.assert_failure(self.fetch_freetype(), 7)
+        self.assertEqual(self.urls(), [FREETYPE_PRIMARY_URL, FREETYPE_MIRROR_URL])
+        self.assertFalse(self.destination.exists())
+
+    def test_freetype_tls_error_does_not_fall_back(self):
+        self.filename = FREETYPE_FILENAME
+        self.set_plan(
+            {FREETYPE_PRIMARY_URL: self.response(35), FREETYPE_MIRROR_URL: self.response()}
+        )
+        self.assert_failure(self.fetch_freetype(), 35)
+        self.assertEqual(self.urls(), [FREETYPE_PRIMARY_URL])
+        self.assertFalse(self.destination.exists())
+
+    def test_freetype_mirror_is_scoped_to_the_pinned_primary_url(self):
+        """A rewritten primary URL must not silently inherit the mirror fallback."""
+        self.filename = FREETYPE_FILENAME
+        self.set_plan(
+            {
+                "https://evil.example/freetype-2.14.3.tar.xz": self.response(28),
+                FREETYPE_MIRROR_URL: self.response(),
+            }
+        )
+        self.assert_failure(
+            self.fetch_freetype(url="https://evil.example/freetype-2.14.3.tar.xz"), 28
+        )
+        self.assertEqual(self.urls(), ["https://evil.example/freetype-2.14.3.tar.xz"])
+        self.assertFalse(self.destination.exists())
+
+    def test_freetype_failed_partial_is_not_appended_to_mirror_response(self):
+        self.filename = FREETYPE_FILENAME
+        self.set_plan(
+            {
+                FREETYPE_PRIMARY_URL: self.response(28, b"unverified original partial"),
+                FREETYPE_MIRROR_URL: self.response(append=True),
+            }
+        )
+        self.assert_success(self.fetch_freetype())
+        self.assertEqual(self.requests()[1]["output_before"], "")
+
+    def test_production_freetype_record_keeps_original_identity(self):
+        expected = [
+            "freetype",
+            FREETYPE_VERSION,
+            FREETYPE_FILENAME,
+            FREETYPE_PRIMARY_URL,
+            PINNED_FREETYPE_SHA256,
+        ]
+        result = subprocess.run(
+            [
+                "/bin/bash",
+                "-c",
+                'source "$1"; third_party_source_records',
+                "source-records",
+                str(THIRD_PARTY_SOURCES),
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+        records = [line.split("\t") for line in result.stdout.splitlines()]
+        self.assertEqual([record for record in records if record[0] == "freetype"], [expected])
+
     def fetch(
         self,
         *,
@@ -93,6 +229,7 @@ class PlaybackSourceTests(unittest.TestCase):
         filename=SOURCE_FILENAME,
         url=PRIMARY_URL,
         conditional=False,
+        records_function="playback_source_records",
     ):
         # Replace source fixture data, not any production retrieval or hash logic.
         record = f"{record_name}\t{version}\t{filename}\t{url}\t{FIXTURE_SHA256}"
@@ -115,7 +252,7 @@ class PlaybackSourceTests(unittest.TestCase):
             [
                 "/bin/bash",
                 "-c",
-                'source "$1"; playback_source_records() { '
+                'source "$1"; ' + records_function + '() { '
                 'printf "%s\\n" "$PLAYBACK_TEST_RECORDS"; }; ' + invocation,
                 "source-test",
                 str(script),
@@ -128,6 +265,19 @@ class PlaybackSourceTests(unittest.TestCase):
             capture_output=True,
             timeout=10,
             check=False,
+        )
+
+    def fetch_freetype(self, *, url=FREETYPE_PRIMARY_URL, **extra):
+        """Drive the third-party entrypoint through the freetype mirror branch."""
+        return self.fetch(
+            entrypoint="fetch_verified_source",
+            component="freetype",
+            record_name="freetype",
+            version=FREETYPE_VERSION,
+            filename=FREETYPE_FILENAME,
+            url=url,
+            records_function="third_party_source_records",
+            **extra,
         )
 
     def assert_success(self, result):

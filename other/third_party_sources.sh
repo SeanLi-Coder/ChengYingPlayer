@@ -37,6 +37,11 @@ FREETYPE_VERSION="2.14.3"
 FREETYPE_SOURCE_FILE="freetype-${FREETYPE_VERSION}.tar.xz"
 FREETYPE_SOURCE_URL="https://download.savannah.gnu.org/releases/freetype/${FREETYPE_SOURCE_FILE}"
 FREETYPE_SOURCE_SHA256="36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f"
+# Savannah periodically refuses connections from CI runners, and its own
+# download-mirror host has been unreachable at the same time. This mirror is the
+# same source already trusted for dav1d, and it was verified byte-for-byte
+# against the pinned digest above before being listed here.
+FREETYPE_SOURCE_MIRROR_URL="https://sources.buildroot.net/freetype/${FREETYPE_SOURCE_FILE}"
 
 HARFBUZZ_VERSION="14.4.0"
 HARFBUZZ_SOURCE_FILE="harfbuzz-${HARFBUZZ_VERSION}.tar.xz"
@@ -164,11 +169,44 @@ fetch_verified_source() {
     rm -f "$destination"
   fi
 
+  local fallback=""
+  local download_status=0
+  local mirror_status=0
+  local curl_options=(--fail --location --proto '=https' --proto-redir '=https')
+  if [[ "$record_name" == freetype && "$url" == "$FREETYPE_SOURCE_URL" ]]; then
+    fallback="$FREETYPE_SOURCE_MIRROR_URL"
+    curl_options+=(--connect-timeout 15 --max-time 120 --retry 0)
+  else
+    curl_options+=(--retry 3 --retry-all-errors)
+  fi
+
   echo "Downloading $record_name $version source..." >&2
   rm -f "$partial"
-  curl --fail --location --retry 3 --retry-all-errors \
-    "$url" \
-    --output "$partial"
+  if curl "${curl_options[@]}" "$url" --output "$partial"; then
+    :
+  else
+    download_status=$?
+    case "$download_status" in
+      6|7|28)
+        if [[ -z "$fallback" ]]; then
+          rm -f "$partial"
+          return "$download_status"
+        fi
+        echo "Primary $record_name source is unreachable; trying the verified HTTPS mirror..." >&2
+        : > "$partial"
+        curl "${curl_options[@]}" "$fallback" --output "$partial"
+        mirror_status=$?
+        if [[ "$mirror_status" -ne 0 ]]; then
+          rm -f "$partial"
+          return "$mirror_status"
+        fi
+        ;;
+      *)
+        rm -f "$partial"
+        return "$download_status"
+        ;;
+    esac
+  fi
 
   actual_sha256="$(shasum -a 256 "$partial" | awk '{print $1}')"
   if [[ "$actual_sha256" != "$expected_sha256" ]]; then
