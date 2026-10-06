@@ -188,6 +188,13 @@ PROBLEM_UNSUPPORTED = "unsupported_media_type"
 PROBLEM_FOREIGN_AUTHOR = "not_this_author"
 PROBLEM_QUEUE_LIMIT = "queue_limit_reached"
 PROBLEM_PAGE_LIMIT = "page_item_limit_reached"
+# A carousel member that could not be built is not the same thing as a post that
+# could not be parsed: the post still queues its usable members, so reporting
+# nothing would silently shrink the album. These say why a member was dropped.
+PROBLEM_PART_MISSING_IDENTITY = "carousel_part_missing_identity"
+PROBLEM_PART_NO_MEDIA = "carousel_part_no_verifiable_media"
+PROBLEM_PART_NO_SIZE = "carousel_part_no_declared_size"
+PROBLEM_PART_UNSUPPORTED = "carousel_part_unsupported_media_type"
 
 PROBLEM_LABELS = {
     PROBLEM_NO_MEDIA: "no verifiable media",
@@ -195,6 +202,10 @@ PROBLEM_LABELS = {
     PROBLEM_FOREIGN_AUTHOR: "another author's post",
     PROBLEM_QUEUE_LIMIT: "queue limit reached",
     PROBLEM_PAGE_LIMIT: "page item limit reached",
+    PROBLEM_PART_MISSING_IDENTITY: "album member with no usable post identity",
+    PROBLEM_PART_NO_MEDIA: "album member with no verifiable media",
+    PROBLEM_PART_NO_SIZE: "album member with no declared size",
+    PROBLEM_PART_UNSUPPORTED: "album member of an unsupported media type",
 }
 
 LOGIN_REQUIRED = (
@@ -248,6 +259,12 @@ class Work:
     upload_date: str | None
     parts: list[WorkPart] = field(default_factory=list)
     kind: str = "image"  # "image" | "video" | "carousel"
+    # How many members the site declared for this post, and which of them could
+    # not be built. Kept with the site's own 1-based position so a dropped member
+    # stays identifiable even though the queued parts are renumbered by what
+    # survived. Empty for a post whose every member was usable.
+    declared_part_count: int = 0
+    unresolved_parts: list[tuple[int, str]] = field(default_factory=list)
 
     @property
     def image_count(self) -> int:
@@ -256,6 +273,10 @@ class Work:
     @property
     def video_count(self) -> int:
         return sum(1 for part in self.parts if part.kind == "video")
+
+    @property
+    def missing_part_count(self) -> int:
+        return len(self.unresolved_parts)
 
 
 @dataclass(slots=True)
@@ -511,16 +532,18 @@ def _is_clips(node: dict) -> bool:
     return node.get("product_type") == "clips"
 
 
-def _part_from_node(node: dict, position: int) -> WorkPart | None:
+def _part_from_node(node: dict, position: int) -> tuple[WorkPart | None, str | None]:
     """Build one downloadable part from a media node.
 
-    Returns ``None`` when the node offers no verifiable media. A missing image
+    Returns the part, or ``None`` with a fixed reason code. A missing image
     candidate is never substituted with a thumbnail or a cover, because that
-    would silently save a lower-quality file than the site actually offers.
+    would silently save a lower-quality file than the site actually offers. The
+    reason is what lets a caller report a dropped album member instead of
+    silently shrinking the post.
     """
     shortcode = node.get("code")
     if not isinstance(shortcode, str) or not re.fullmatch(SHORTCODE_PATTERN, shortcode):
-        return None
+        return None, PROBLEM_PART_MISSING_IDENTITY
     media_type = node.get("media_type")
     declared_width = _positive(node.get("original_width"))
     declared_height = _positive(node.get("original_height"))
@@ -532,11 +555,17 @@ def _part_from_node(node: dict, position: int) -> WorkPart | None:
             url=canonical_post_url(shortcode, clips=_is_clips(node)),
             width=declared_width,
             height=declared_height,
-        )
+        ), None
     if media_type == MEDIA_TYPE_IMAGE:
+        candidates = _object(node.get("image_versions2")).get("candidates")
         asset = _image_asset(node)
         if asset is None:
-            return None
+            # Distinguish "the site offered nothing" from "it offered renditions
+            # that carry no declared size": only the latter can be told apart by
+            # a user as a quality problem rather than a removed member.
+            if isinstance(candidates, list) and candidates:
+                return None, PROBLEM_PART_NO_SIZE
+            return None, PROBLEM_PART_NO_MEDIA
         return WorkPart(
             position=position,
             kind="image",
@@ -545,8 +574,8 @@ def _part_from_node(node: dict, position: int) -> WorkPart | None:
             assets=[asset],
             width=asset.width or declared_width,
             height=asset.height or declared_height,
-        )
-    return None
+        ), None
+    return None, PROBLEM_PART_UNSUPPORTED
 
 
 def _work_kind(parts: list[WorkPart]) -> str:
@@ -582,15 +611,26 @@ def parse_work(
     author = username or author_id or ""
 
     parts: list[WorkPart] = []
+    unresolved: list[tuple[int, str]] = []
+    declared = 1
     if media_type == MEDIA_TYPE_CAROUSEL:
         children = node.get("carousel_media")
         if isinstance(children, list):
-            for index, child in enumerate(children[:MAX_CAROUSEL_PARTS], start=1):
-                part = _part_from_node(_object(child), index)
-                if part is not None:
+            # Truncating to the supported maximum is a hard cap, not a dropped
+            # member, so the declared count is capped the same way: otherwise a
+            # 120-member album would look permanently incomplete.
+            limited = children[:MAX_CAROUSEL_PARTS]
+            declared = len(limited)
+            for index, child in enumerate(limited, start=1):
+                part, reason = _part_from_node(_object(child), index)
+                if part is None:
+                    # The site's own position is kept, so the member stays
+                    # identifiable even though the queued parts are not renumbered.
+                    unresolved.append((index, reason or PROBLEM_PART_NO_MEDIA))
+                else:
                     parts.append(part)
     else:
-        part = _part_from_node(node, 1)
+        part, _reason = _part_from_node(node, 1)
         if part is not None:
             parts.append(part)
     if not parts:
@@ -604,6 +644,8 @@ def parse_work(
         upload_date=upload_date,
         parts=parts,
         kind=kind,
+        declared_part_count=declared,
+        unresolved_parts=unresolved,
     )
 
 
@@ -754,6 +796,11 @@ class ProfileCollector:
         self.complete = False
         self.problems: dict[str, list[str]] = {}
         self.problem_count = 0
+        # Dropped album members are tracked apart from skipped posts. A post whose
+        # members partly failed is still queued, so folding those members into the
+        # skipped-post count would inflate it and misreport the profile.
+        self.part_problems: dict[str, list[str]] = {}
+        self.part_problem_count = 0
         self.pages = 0
         self.author_id: str | None = None
 
@@ -766,6 +813,18 @@ class ProfileCollector:
         details = self.problems.setdefault(reason, [])
         if len(details) < MAX_PROBLEM_DETAILS:
             details.append(media_id or f"#{position}")
+
+    def _record_part_problem(self, work: Work) -> None:
+        """Record every album member that could not be built, with its position.
+
+        The post itself stays queued with the members that were usable, so this is
+        what keeps a partly-failed album from being presented as complete.
+        """
+        for position, reason in work.unresolved_parts:
+            self.part_problem_count += 1
+            details = self.part_problems.setdefault(reason, [])
+            if len(details) < MAX_PROBLEM_DETAILS:
+                details.append(f"{work.media_id}#{position}")
 
     def accept_profile_content(self, payload: dict) -> None:
         user = _profile_user(payload)
@@ -831,6 +890,10 @@ class ProfileCollector:
             if work.media_id not in self.works:
                 self.works[work.media_id] = work
                 accepted += 1
+                # The post is queued with the members that were usable; the ones
+                # that were not are reported rather than dropped from the tally.
+                if work.unresolved_parts:
+                    self._record_part_problem(work)
         info = _object(info or page_info)
         if info.get("has_next_page") is False:
             # The site explicitly confirmed the end of this author's list. This
@@ -871,6 +934,39 @@ def problem_summary(collector: ProfileCollector) -> str | None:
     if uncapped > 0:
         parts.append(f"{uncapped} further skipped entries only counted")
     return "Skipped posts - " + "; ".join(parts) + "." if parts else None
+
+
+def part_problem_summary(collector: ProfileCollector) -> str | None:
+    """Summarize album members that could not be queued, using fixed codes only.
+
+    These are reported separately from skipped posts: the parent post *was*
+    queued, so without this a partly-failed album would look complete. Only
+    positions and fixed reason labels appear, never a caption or media address.
+    """
+    if not collector.part_problem_count:
+        return None
+    parts: list[str] = []
+    for reason, details in sorted(collector.part_problems.items()):
+        label = PROBLEM_LABELS.get(reason, reason)
+        count = (
+            collector.part_problem_count
+            if len(collector.part_problems) == 1
+            else len(details)
+        )
+        text = f"{label}: {count}"
+        if details:
+            shown = details[:MAX_PROBLEM_NAMES]
+            text += f" ({', '.join(shown)}"
+            if len(details) > MAX_PROBLEM_NAMES:
+                text += ", further entries only counted"
+            text += ")"
+        parts.append(text)
+    uncapped = collector.part_problem_count - sum(
+        len(v) for v in collector.part_problems.values()
+    )
+    if uncapped > 0:
+        parts.append(f"{uncapped} further album members only counted")
+    return "Album members not queued - " + "; ".join(parts) + "." if parts else None
 
 
 def is_recoverable_profile_interruption(
@@ -1078,17 +1174,19 @@ def identity_mismatch(
     return None
 
 
-def _part_from_pipeline(info: dict, position: int) -> WorkPart | None:
+def _part_from_pipeline(info: dict, position: int) -> tuple[WorkPart | None, str | None]:
     """Build one downloadable part from a resolved post or carousel member.
 
     A video part keeps only its canonical address: the media pipeline resolves a
     higher verified rendition than the in-page list offers, so pinning an in-page
     URL would silently downgrade quality. An image part carries its highest
-    declared-size rendition.
+    declared-size rendition. Returns ``None`` with a fixed reason code when the
+    member cannot be built, so a dropped album part is reported rather than
+    silently shrinking the post.
     """
     shortcode = post_shortcode(info)
     if not shortcode:
-        return None
+        return None, PROBLEM_PART_MISSING_IDENTITY
     if info_has_video(info):
         return WorkPart(
             position=position,
@@ -1097,10 +1195,10 @@ def _part_from_pipeline(info: dict, position: int) -> WorkPart | None:
             url=canonical_post_url(shortcode),
             width=_positive(info.get("width")),
             height=_positive(info.get("height")),
-        )
+        ), None
     asset = best_image_asset(info)
     if asset is None:
-        return None
+        return None, PROBLEM_PART_NO_MEDIA
     return WorkPart(
         position=position,
         kind="image",
@@ -1109,7 +1207,7 @@ def _part_from_pipeline(info: dict, position: int) -> WorkPart | None:
         assets=[asset],
         width=asset.width,
         height=asset.height,
-    )
+    ), None
 
 
 def works_from_pipeline_info(info: dict, *, shortcode: str | None = None) -> list[Work]:
@@ -1118,15 +1216,20 @@ def works_from_pipeline_info(info: dict, *, shortcode: str | None = None) -> lis
     A carousel expands into one entry per part and each entry carries its own
     shortcode, so every part is built separately and can be downloaded, retried
     or resumed on its own. A carousel parent shortcode cannot be resolved
-    directly, which is exactly why the parts, not the parent, are queued.
+    directly, which is exactly why the parts, not the parent, are queued. A
+    member that cannot be built is recorded with its own position so the caller
+    can report a partial album instead of claiming every part was queued.
     """
     info = _object(info)
     entries = info.get("entries")
     if isinstance(entries, list) and entries:
         parts: list[WorkPart] = []
+        unresolved: list[tuple[int, str]] = []
         for index, entry in enumerate(entries, start=1):
-            part = _part_from_pipeline(_object(entry), index)
-            if part is not None:
+            part, reason = _part_from_pipeline(_object(entry), index)
+            if part is None:
+                unresolved.append((index, reason or PROBLEM_PART_NO_MEDIA))
+            else:
                 parts.append(part)
         parent = shortcode or post_shortcode(info)
         if not parts or not parent:
@@ -1141,10 +1244,12 @@ def works_from_pipeline_info(info: dict, *, shortcode: str | None = None) -> lis
                 upload_date=pipeline_upload_date(info),
                 parts=parts,
                 kind=_work_kind(parts),
+                declared_part_count=len(entries),
+                unresolved_parts=unresolved,
             )
         ]
     resolved = shortcode or post_shortcode(info)
-    part = _part_from_pipeline(info, 1)
+    part, _reason = _part_from_pipeline(info, 1)
     if part is None or not resolved:
         return []
     author_id, author = _pipeline_author(info)
@@ -1157,6 +1262,7 @@ def works_from_pipeline_info(info: dict, *, shortcode: str | None = None) -> lis
             upload_date=pipeline_upload_date(info),
             parts=[part],
             kind=part.kind,
+            declared_part_count=1,
         )
     ]
 
@@ -1627,6 +1733,9 @@ def _completion_warning(
     summary = problem_summary(collector)
     if summary:
         warning = f"{warning} {summary}" if warning else summary
+    part_summary = part_problem_summary(collector)
+    if part_summary:
+        warning = f"{warning} {part_summary}" if warning else part_summary
     return warning
 
 

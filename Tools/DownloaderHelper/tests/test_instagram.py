@@ -896,6 +896,177 @@ def test_pipeline_post_without_a_shortcode_yields_nothing():
 
 
 # ---------------------------------------------------------------------------
+# Album members that fail to parse must not vanish (R3)
+#
+# A carousel used to keep only the members that parsed, and a post with at least
+# one usable member was accepted as whole. A two-image album whose second image
+# carried no candidates therefore reported one part, zero problems and no warning
+# -- the post total still matched, so nothing revealed the missing member.
+# ---------------------------------------------------------------------------
+
+
+def no_candidate_child(code):
+    """An image member whose rendition list is empty."""
+    child = image_node(code)
+    child["image_versions2"] = {"candidates": []}
+    return child
+
+
+def no_size_child(code):
+    """An image member that offers renditions but declares no size for any."""
+    child = image_node(code)
+    child["image_versions2"] = {"candidates": [{"url": MEDIA}, {"url": MEDIA + "?alt=1"}]}
+    return child
+
+
+def no_identity_child():
+    """An album member that carries no usable post identity at all."""
+    child = image_node("Cq1noident")
+    child.pop("code")
+    return child
+
+
+def test_instagram_carousel_retains_unresolved_parts():
+    """A dropped middle member is recorded with its own position, not renumbered."""
+    work = ig.parse_work(
+        carousel_node(
+            "Cq1album",
+            [image_node("Cq1ok1"), no_candidate_child("Cq1bad"), image_node("Cq1ok2")],
+        ),
+        expected_username=USERNAME,
+    )
+    assert work is not None
+    # The usable members survive, keeping the site's own positions.
+    assert [part.media_id for part in work.parts] == ["Cq1ok1", "Cq1ok2"]
+    assert [part.position for part in work.parts] == [1, 3]
+    # The dropped member is accounted for instead of disappearing.
+    assert work.declared_part_count == 3
+    assert work.unresolved_parts == [(2, ig.PROBLEM_PART_NO_MEDIA)]
+    assert work.missing_part_count == 1
+
+
+def test_instagram_carousel_all_members_invalid_yields_nothing():
+    """An album where every member failed is not queued as an empty post."""
+    assert ig.parse_work(
+        carousel_node("Cq1allbad", [no_candidate_child("Cq1b1"), no_size_child("Cq1b2")]),
+        expected_username=USERNAME,
+    ) is None
+
+
+def test_instagram_carousel_records_missing_identity_and_unsupported_members():
+    """Missing identity and unsupported types are each reported distinctly."""
+    unsupported = image_node("Cq1unsup")
+    unsupported["media_type"] = 99
+
+    with_identity = ig.parse_work(
+        carousel_node("Cq1ident", [image_node("Cq1ok"), no_identity_child()]),
+        expected_username=USERNAME,
+    )
+    assert with_identity is not None
+    assert with_identity.unresolved_parts == [(2, ig.PROBLEM_PART_MISSING_IDENTITY)]
+
+    with_unsupported = ig.parse_work(
+        carousel_node("Cq1unsup2", [image_node("Cq1ok"), unsupported]),
+        expected_username=USERNAME,
+    )
+    assert with_unsupported is not None
+    assert with_unsupported.unresolved_parts == [(2, ig.PROBLEM_PART_UNSUPPORTED)]
+
+
+def test_instagram_carousel_distinguishes_missing_size_from_missing_media():
+    """Renditions without a declared size are a different failure than no media."""
+    work = ig.parse_work(
+        carousel_node("Cq1sizes", [image_node("Cq1ok"), no_size_child("Cq1nosize")]),
+        expected_username=USERNAME,
+    )
+    assert work is not None
+    assert work.unresolved_parts == [(2, ig.PROBLEM_PART_NO_SIZE)]
+
+
+def test_instagram_mixed_carousel_reports_the_dropped_member():
+    """A mixed image/video album still reports the one member that failed."""
+    work = ig.parse_work(
+        carousel_node(
+            "Cq1mixed",
+            [video_node("Cq1vid"), no_candidate_child("Cq1broken"), image_node("Cq1pic")],
+        ),
+        expected_username=USERNAME,
+    )
+    assert work is not None
+    assert work.kind == "carousel"
+    assert [part.kind for part in work.parts] == ["video", "image"]
+    assert work.declared_part_count == 3
+    assert work.unresolved_parts == [(2, ig.PROBLEM_PART_NO_MEDIA)]
+
+
+def test_instagram_complete_album_reports_no_missing_parts():
+    """An album where every member parsed must not claim anything was dropped."""
+    work = ig.parse_work(
+        carousel_node("Cq1whole", [image_node("Cq1a"), video_node("Cq1b")]),
+        expected_username=USERNAME,
+    )
+    assert work is not None
+    assert work.declared_part_count == 2
+    assert work.unresolved_parts == []
+
+
+def test_instagram_discovery_surfaces_dropped_album_members():
+    """A partly-failed album reaches the user as a warning, not as complete.
+
+    Enumeration itself finished and the post total matches, so nothing else could
+    reveal the gap: the member-level summary is what makes it visible.
+    """
+    collector = ig.ProfileCollector(USERNAME, PROFILE)
+    collector.accept_profile_content(profile_content_response(1))
+    accepted = collector.accept(
+        timeline_response(
+            [carousel_node(
+                "Cq1drop",
+                [image_node("Cq1ok"), no_candidate_child("Cq1bad")],
+            )],
+            has_next_page=False,
+        )
+    )
+    assert accepted is True
+    collector.finalize()
+
+    work = collector.works["Cq1drop"]
+    assert len(work.parts) == 1, "the usable member must still be queued"
+    assert collector.complete is True
+
+    warning = ig._completion_warning(collector, False, None)
+    assert warning is not None
+    assert "Album members not queued" in warning
+    # The dropped member is not folded into the skipped-post tally, which would
+    # make one partially-failed album look like a missing post.
+    assert ig.problem_summary(collector) is None
+    assert collector.problem_count == 0
+    assert collector.part_problem_count == 1
+    assert collector.part_problems == {
+        ig.PROBLEM_PART_NO_MEDIA: ["Cq1drop#2"]
+    }
+
+
+def test_instagram_pipeline_carousel_reports_partial_media():
+    """The single-post pipeline entry reports a dropped member too."""
+    works = ig.works_from_pipeline_info(pipeline_info(
+        shortcode="Cq1pipeparent",
+        entries=[
+            pipeline_info(
+                shortcode="Cq1pipeok",
+                thumbnails=[{"url": MEDIA, "width": 100, "height": 100}],
+            ),
+            pipeline_info(shortcode="Cq1pipebad", thumbnails=[]),
+        ],
+    ))
+    assert len(works) == 1
+    work = works[0]
+    assert [part.media_id for part in work.parts] == ["Cq1pipeok"]
+    assert work.declared_part_count == 2
+    assert work.unresolved_parts == [(2, ig.PROBLEM_PART_NO_MEDIA)]
+
+
+# ---------------------------------------------------------------------------
 # Downloader discovery wiring
 # ---------------------------------------------------------------------------
 
