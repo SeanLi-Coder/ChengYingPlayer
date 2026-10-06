@@ -81,6 +81,7 @@ from .models import (
 )
 from .instagram import describe_item_failure as describe_instagram_item_failure
 from .instagram import discover as discover_instagram
+from .instagram import identity_mismatch as instagram_identity_mismatch
 from .instagram import is_media_url as is_instagram_media_url
 from .instagram import source_identity as instagram_source_identity
 from .instagram import works_from_pipeline_info as instagram_works_from_pipeline_info
@@ -172,6 +173,14 @@ OUTPUT_TEMPLATE = (
     "%(_filename_title,title|Untitled)s "
     "[%(_filename_media_id,id|unknown-id)s].%(ext)s"
 )
+# Platforms whose media address is re-resolved internally on every attempt, so a
+# retained ``.part`` cannot be proven to belong to the same source bytes a resume
+# would append to. yt-dlp resolves the Instagram rendition itself and the signed
+# address changes each run (it can even point at another CDN or bitrate), so the
+# only safe choice is a conservative full re-download rather than a Range resume
+# that could splice a stale partial onto different content. Douyin already opts
+# out for the same reason. Membership is exact: the other platforms keep resume.
+NO_RESUME_PLATFORMS = frozenset({Platform.DOUYIN, Platform.INSTAGRAM})
 AUTH_ERROR_MARKERS = (
     "captcha required",
     "captcha challenge",
@@ -1291,6 +1300,160 @@ class MediaDownloader:
                 output_paths=outcome.output_paths,
             ))
         return outcome
+
+    def _verify_instagram_video_file(
+        self,
+        path: Path,
+        info: dict[str, Any],
+        *,
+        should_cancel: CancelCallback,
+    ) -> dict[str, Any]:
+        """Verify a landed Instagram video before it is published as complete.
+
+        The declared metadata comes from the site, and FFprobe can read a header
+        from a file that is truncated or is not video at all, so this checks the
+        file itself: a real video stream, a positive duration, dimensions no lower
+        than the rendition that was selected, and an audio stream only when the
+        resolved formats declared sound. A legally silent video must not be
+        rejected, and a file that probes but fails a full decode is not published.
+
+        Returns the measured media facts so the caller can report the verified
+        resolution instead of repeating the site's claim.
+        """
+        executable = self._find_ffprobe_executable()
+        if not executable:
+            raise MediaDownloadError(FFPROBE_REQUIRED_MESSAGE)
+        try:
+            payload = self._run_ffprobe(
+                [
+                    executable,
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    (
+                        "stream=codec_type,codec_name,width,height,bit_rate,duration:"
+                        "format=duration,bit_rate,size"
+                    ),
+                    "-of",
+                    "json",
+                    "-i",
+                    str(path),
+                ],
+                timeout_seconds=DOUYIN_FFPROBE_FILE_TIMEOUT_SECONDS,
+                should_cancel=should_cancel,
+            )
+        except DownloadCancelled as exc:
+            raise DownloadCancelledError("Task cancelled") from exc
+        media = self._parse_ffprobe_payload(payload) or {}
+        if not media:
+            raise MediaDownloadError(
+                "Instagram returned a file that is not a decodable video; it was "
+                "not published as a completed download"
+            )
+
+        actual_width = int(media.get("width") or 0)
+        actual_height = int(media.get("height") or 0)
+        if actual_width <= 0 or actual_height <= 0:
+            raise MediaDownloadError(
+                "Instagram video dimensions could not be verified, so the file was "
+                "not published as a completed download"
+            )
+
+        selected_width, selected_height = self._selected_video_dimensions(info)
+        if selected_width and selected_height and (
+            min(actual_width, actual_height) < min(selected_width, selected_height)
+            or max(actual_width, actual_height) < max(selected_width, selected_height)
+        ):
+            raise MediaDownloadError(
+                "Instagram delivered a video below its selected "
+                f"{selected_width}x{selected_height} rendition, so it was not "
+                "published as a completed download"
+            )
+
+        declared_duration = self._float_or_none(info.get("duration"))
+        actual_duration = self._float_or_none(media.get("duration"))
+        if actual_duration is None or actual_duration <= 0:
+            raise MediaDownloadError(
+                "Instagram video duration could not be verified, so the file was "
+                "not published as a completed download"
+            )
+        if declared_duration and declared_duration > 0:
+            tolerance = max(0.5, min(2.0, declared_duration * 0.05))
+            if abs(actual_duration - declared_duration) > tolerance:
+                raise MediaDownloadError(
+                    "Instagram video duration did not match the post metadata, so "
+                    "the file was not published as a completed download"
+                )
+
+        if self._declared_formats_have_audio(info) and str(
+            media.get("acodec") or "none"
+        ).lower() in {"", "none"}:
+            raise MediaDownloadError(
+                "Instagram video lost its audio track, so it was not published as a "
+                "completed download"
+            )
+
+        # FFprobe reads a header without decoding the whole file, so a truncated
+        # transfer can still look valid here. Decode it fully before publishing.
+        self._decode_local_media(path, "video", should_cancel=should_cancel)
+        return {
+            "width": actual_width,
+            "height": actual_height,
+            "duration": actual_duration,
+        }
+
+    @staticmethod
+    def _selected_video_dimensions(info: dict[str, Any]) -> tuple[int, int]:
+        """The dimensions of the rendition that was actually selected."""
+        candidates = [*(info.get("requested_formats") or []), info]
+        dimensions = [
+            (int(value.get("width") or 0), int(value.get("height") or 0))
+            for value in candidates
+            if isinstance(value, dict)
+        ]
+        width, height = max(
+            dimensions, key=lambda pair: pair[0] * pair[1], default=(0, 0)
+        )
+        return width, height
+
+    @staticmethod
+    def _declared_formats_have_audio(info: dict[str, Any]) -> bool:
+        """True only when a resolved format actually declared an audio stream.
+
+        A silent video is legitimate, so absence of evidence must not be read as
+        evidence of loss: the audio track is required only when the pipeline
+        resolved one.
+        """
+        formats = info.get("requested_formats") or info.get("formats") or []
+        if not isinstance(formats, list):
+            formats = []
+        for value in formats:
+            if not isinstance(value, dict):
+                continue
+            codec = str(value.get("acodec") or "").lower()
+            if codec and codec != "none":
+                return True
+            if str(value.get("vcodec") or "").lower() in {"", "none"} and value.get(
+                "abr"
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _discard_unverified_paths(paths: Iterable[str]) -> None:
+        """Remove files this attempt just produced but that failed verification.
+
+        Only the exact paths handed in are unlinked, and only when they are real
+        files inside the download tree, so a rejected transfer cannot be left in
+        the output folder looking complete. Existing user files are never named
+        here and are never touched; an unlink failure is suppressed because the
+        caller is already raising the verification error.
+        """
+        for value in paths:
+            path = Path(value)
+            with contextlib.suppress(OSError):
+                if path.is_file() and not path.is_symlink():
+                    path.unlink()
 
     def _resolve_instagram_image_asset(
         self, item: DownloadItem, should_cancel: CancelCallback
@@ -4508,6 +4671,17 @@ class MediaDownloader:
         reports a decode error. A truncated or corrupt image must be re-downloaded
         rather than silently reused as a completed album member.
         """
+        self._decode_local_media(path, "image", should_cancel=should_cancel)
+
+    def _decode_local_media(
+        self, path: Path, kind: str, *, should_cancel: CancelCallback
+    ) -> None:
+        """Fully decode a saved media file so a header match is not trusted alone.
+
+        ``kind`` only words the failure ("image", "video"); the check is the same:
+        FFmpeg must decode the whole file. A truncated transfer can present valid
+        header metadata, so this is what proves the bytes are actually playable.
+        """
         executable = self._find_ffmpeg_executable()
         if not executable:
             raise MediaDownloadError(FFPROBE_REQUIRED_MESSAGE)
@@ -4540,7 +4714,9 @@ class MediaDownloader:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 self._terminate_process(process)
-                raise MediaDownloadError("Image decode timed out while verifying a saved file")
+                raise MediaDownloadError(
+                    f"Saved {kind} decode timed out while verifying the file"
+                )
             try:
                 _, stderr = process.communicate(
                     timeout=min(DOUYIN_PROCESS_POLL_SECONDS, remaining),
@@ -4552,7 +4728,9 @@ class MediaDownloader:
             detail = safe_external_error_message(
                 MediaDownloadError((stderr or b"").decode("utf-8", "replace")[:400])
             )
-            raise MediaDownloadError(f"Saved image failed full decode verification: {detail}")
+            raise MediaDownloadError(
+                f"Saved {kind} failed full decode verification: {detail}"
+            )
 
     def _run_ffprobe(
         self,
@@ -4810,6 +4988,25 @@ class MediaDownloader:
                     verification_url,
                 )
 
+        # Instagram videos are gated on the identity the pipeline actually
+        # resolved, not just the queued URL, so a re-resolved address that lands
+        # on another post or another author is blocked before any byte is fetched.
+        # Only a video part is checked here: an image part re-reads its address
+        # from the author's own timeline and verifies the author separately.
+        expected_instagram_shortcode: str | None = None
+        expected_instagram_author_id: str | None = None
+        if platform == Platform.INSTAGRAM and (
+            str(item.metadata.get("instagram_part_kind") or "") == "video"
+        ):
+            expected_instagram_shortcode = str(item.media_id or "").strip() or None
+            expected_instagram_author_id = (
+                str(item.metadata.get("instagram_author_id") or "").strip() or None
+            )
+            if not expected_instagram_shortcode:
+                raise MediaDownloadError(
+                    "The Instagram video item has no post identity to verify"
+                )
+
         def emit(event: EngineEvent) -> None:
             if callback:
                 callback(event)
@@ -4861,16 +5058,30 @@ class MediaDownloader:
             final_paths.append(str(Path(filename).resolve()))
 
         def match_filter(info: dict[str, Any], *, incomplete: bool = False) -> None:
-            if not expected_douyin_id:
-                return None
+            # yt-dlp filters a playlist wrapper before its entries. That wrapper
+            # carries no post identity, so judging it would reject a whole
+            # carousel before any child part was offered.
             if incomplete and not info.get("id"):
                 return None
-            self._validate_douyin_info(
-                info,
-                expected_douyin_id,
-                verification_url,
-                expected_douyin_profile_id,
-            )
+            if expected_douyin_id:
+                self._validate_douyin_info(
+                    info,
+                    expected_douyin_id,
+                    verification_url,
+                    expected_douyin_profile_id,
+                )
+                return None
+            if expected_instagram_shortcode:
+                reason = instagram_identity_mismatch(
+                    info,
+                    expected_shortcode=expected_instagram_shortcode,
+                    expected_author_id=expected_instagram_author_id or "",
+                )
+                if reason:
+                    raise MediaDownloadError(
+                        "Instagram resolved media that is not the queued post, so "
+                        f"nothing was downloaded. {reason}."
+                    )
             return None
 
         job_scope = safe_component(
@@ -4908,7 +5119,7 @@ class MediaDownloader:
                 },
                 "outtmpl": {"default": OUTPUT_TEMPLATE},
                 "windowsfilenames": True,
-                "continuedl": platform != Platform.DOUYIN,
+                "continuedl": platform not in NO_RESUME_PLATFORMS,
                 "overwrites": True,
                 "ignoreerrors": False,
                 "noplaylist": True,
@@ -4918,7 +5129,7 @@ class MediaDownloader:
                 "post_hooks": [post_hook],
                 "logger": logger,
             }
-            if expected_douyin_id:
+            if expected_douyin_id or expected_instagram_shortcode:
                 options["match_filter"] = match_filter
             with YoutubeDL(options) as ydl:
                 ydl.add_post_processor(
@@ -5073,6 +5284,35 @@ class MediaDownloader:
                         verification_url,
                         expected_douyin_profile_id,
                     )
+                if expected_instagram_shortcode:
+                    # Verify the landed video before anything is published: a
+                    # truncated or non-video file that probes by header alone must
+                    # not become a completed download. Record the measured facts so
+                    # the outcome reports the verified resolution, not the claim.
+                    landed = self._existing_unique_paths([*final_paths, *candidates])
+                    if not landed:
+                        raise MediaDownloadError(
+                            "Instagram finished but no video file was produced"
+                        )
+                    verified = None
+                    try:
+                        for landed_path in landed:
+                            verified = self._verify_instagram_video_file(
+                                Path(landed_path), result, should_cancel=should_cancel
+                            )
+                    except BaseException:
+                        # Without isolated staging yt-dlp writes straight into the
+                        # output folder, so a rejected file is already sitting
+                        # where the user would find it. Retire only the files this
+                        # attempt produced: an invalid download must not be left
+                        # behind looking complete, and existing user files are
+                        # never touched.
+                        self._discard_unverified_paths(landed)
+                        raise
+                    if verified:
+                        result["_verified_local_resolution"] = (
+                            f"{verified['width']}x{verified['height']}"
+                        )
             paths = [*final_paths, *candidates]
             if isolated_output:
                 if any(Path(path).is_symlink() for path in paths):
@@ -5119,7 +5359,7 @@ class MediaDownloader:
             self._cleanup_ytdlp_parts_dir(
                 parts_dir,
                 output_dir,
-                remove_contents=(platform == Platform.DOUYIN or operation_succeeded),
+                remove_contents=(platform in NO_RESUME_PLATFORMS or operation_succeeded),
             )
         unique_paths = self._existing_unique_paths(paths)
         if not unique_paths:
@@ -5132,8 +5372,8 @@ class MediaDownloader:
             media_type=self._media_type(info),
             selected_format=self._format_id(info),
             resolution=(
-                str(info.get("_verified_local_resolution"))
-                if expected_douyin_id
+                str(info["_verified_local_resolution"])
+                if info.get("_verified_local_resolution")
                 else self._resolution(info)
             ),
             cookie_fallback_used=fallback,

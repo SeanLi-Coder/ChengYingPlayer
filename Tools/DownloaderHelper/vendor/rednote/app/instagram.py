@@ -58,6 +58,7 @@ from .errors import (
     AuthenticationRequiredError,
     DiscoveryError,
     DownloadCancelledError,
+    MediaDownloadError,
     SiteIssueCode,
     TemporaryAccessError,
 )
@@ -1016,6 +1017,67 @@ def _pipeline_title(info: dict) -> str:
     return "Untitled Instagram post"
 
 
+def identity_mismatch(
+    info: dict,
+    *,
+    expected_shortcode: str,
+    expected_author_id: str = "",
+) -> str | None:
+    """Compare what the pipeline actually resolved against the queued identity.
+
+    Returns ``None`` when this resolved entry *is* the queued part, so its
+    transfer may proceed. Otherwise it returns a short, user-safe reason: the
+    caller skips or rejects the entry instead of fetching bytes for a different
+    post or a different author.
+
+    Only the pipeline's own reported identity counts. The queued shortcode and
+    author were recorded at discovery time, so re-reading them here would prove
+    nothing; this reads ``id`` and the uploader fields the extractor resolved for
+    the address it was actually given.
+
+    A carousel is handled explicitly rather than by comparing raw identifiers. A
+    child address resolves to that child, while a parent address resolves to a
+    playlist whose entries carry their own child shortcodes, so a parent/child
+    difference is not evidence of a different post: the expected child is looked
+    for among the entries. Missing identity is never treated as a match, because
+    an unproven post cannot be shown to belong to this author.
+    """
+    entries = info.get("entries")
+    is_playlist = entries is not None or str(info.get("_type") or "").lower() in {
+        "playlist",
+        "multi_video",
+    }
+    if is_playlist:
+        if not isinstance(entries, list) or not entries:
+            return "Instagram expanded this post into an empty list"
+        resolved = [
+            post_shortcode(_object(entry))
+            for entry in entries
+            if isinstance(entry, dict)
+        ]
+        if expected_shortcode in resolved:
+            return None
+        return (
+            "Instagram expanded this post into a list that does not contain the "
+            "queued part"
+        )
+
+    actual_shortcode = post_shortcode(info)
+    if not actual_shortcode:
+        return "Instagram did not report a verifiable post identity"
+    if actual_shortcode != expected_shortcode:
+        return "Instagram resolved a different post than the one queued"
+
+    if not expected_author_id:
+        return None
+    actual_author_id, _ = _pipeline_author(info)
+    if not actual_author_id:
+        return "Instagram did not report a verifiable post author"
+    if actual_author_id != expected_author_id:
+        return "Instagram resolved a post by a different author"
+    return None
+
+
 def _part_from_pipeline(info: dict, position: int) -> WorkPart | None:
     """Build one downloadable part from a resolved post or carousel member.
 
@@ -1152,6 +1214,133 @@ def describe_item_failure(message: str) -> DiscoveryError | AuthenticationRequir
     )
 
 
+BLOCKED_RESOURCE_TYPES = frozenset({"Image", "Media", "Font"})
+
+
+def _install_request_gate(
+    context,
+    page,
+    *,
+    should_cancel: Callable[[], bool],
+    on_error: Callable[[Exception], None],
+    is_trusted_page: Callable[[str], bool] | None = None,
+    is_trusted_host: Callable[[str], bool] | None = None,
+    blocked_resource_types: frozenset[str] = BLOCKED_RESOURCE_TYPES,
+):
+    """Gate every request before Chromium dispatches it, including redirect hops.
+
+    CDP ``Fetch`` pauses each request at the ``Request`` stage, which is the only
+    point where a redirect hop can still be stopped. Playwright routing cannot do
+    this: a native continue never re-enters the route handler, so an allowlist
+    enforced there only ever sees the first request of a chain, and an untrusted
+    target has already been contacted by the time an observer event arrives.
+
+    Trusted requests are released with ``continueRequest`` instead of being
+    fetched and fulfilled here. Relaying bytes through this process was measured
+    to stall a real profile page: loading stopped after roughly sixty responses
+    and the profile component never mounted, so the site never issued the
+    timeline request. Releasing natively keeps the page's own script running
+    while still deciding every request before it leaves the browser. Nothing is
+    downloaded here, so there is no path that could fall back to a direct
+    connection when the configured proxy fails.
+
+    Both predicates default to the production rules. A caller may inject
+    substitutes so a regression can drive this exact code against loopback
+    origins; that substitution stays in the test and never widens the shipped
+    allowlist.
+    """
+    trusted_page = is_trusted_page if is_trusted_page is not None else is_page_url
+    if is_trusted_host is not None:
+        trusted_host = is_trusted_host
+    else:
+
+        def trusted_host(value: str) -> bool:
+            host = _secure_host(value)
+            return bool(host and _matches_domain(host, BROWSER_DOMAINS))
+
+    cdp = context.new_cdp_session(page)
+    # The first document is the main-frame navigation; later documents belong to
+    # subframes. Keeping that distinction stops a trusted non-page frame from
+    # being judged as a navigation away from the profile.
+    main_frame_id: list[str] = []
+
+    def block_request(request_id: str) -> None:
+        with contextlib.suppress(PlaywrightError):
+            cdp.send(
+                "Fetch.failRequest",
+                {"requestId": request_id, "errorReason": "BlockedByClient"},
+            )
+
+    def release_request(request_id: str) -> None:
+        with contextlib.suppress(PlaywrightError):
+            cdp.send("Fetch.continueRequest", {"requestId": request_id})
+
+    def gate_request(params: dict) -> None:
+        """Decide one paused request before it reaches its target."""
+        request_id = str(params.get("requestId") or "")
+        try:
+            if should_cancel():
+                block_request(request_id)
+                return
+            url = str((params.get("request") or {}).get("url") or "")
+            resource_type = str(params.get("resourceType") or "")
+            frame_id = str(params.get("frameId") or "")
+            if resource_type == "Document":
+                if not main_frame_id:
+                    main_frame_id.append(frame_id)
+                is_main_navigation = frame_id == main_frame_id[0]
+            else:
+                is_main_navigation = False
+            allowed = trusted_page(url) if is_main_navigation else trusted_host(url)
+            if not allowed:
+                # Reaching an off-site origin at all is a boundary violation worth
+                # surfacing, not merely a request to drop, so every untrusted
+                # request fails discovery exactly as the observer it replaces did.
+                on_error(
+                    DiscoveryError(
+                        "Instagram redirected outside trusted pages; navigation "
+                        "was blocked"
+                    )
+                )
+            if not allowed or resource_type in blocked_resource_types:
+                # Discovery never needs pixels: the timeline response carries the
+                # metadata. Skipping these keeps the browser budget for pagination
+                # instead of thumbnails, measured on a real profile to avoid over
+                # a hundred requests without stopping the timeline query.
+                block_request(request_id)
+                return
+            release_request(request_id)
+        except (AttributeError, TypeError, PlaywrightError):
+            # A malformed CDP payload or a failed protocol round trip must not
+            # leave the request paused, which would hang the page. Blocking is the
+            # conservative default and the discovery loop surfaces the failure
+            # instead of continuing silently.
+            #
+            # This is deliberately narrow: the gate never classifies a site
+            # problem, it only reports through ``on_error`` for the loop to raise,
+            # so nothing a caller must see can be swallowed here. An unexpected
+            # error from ``should_cancel`` still propagates.
+            block_request(request_id)
+            on_error(
+                TemporaryAccessError(
+                    "Instagram browser request could not be gated, so it was "
+                    "blocked. Check the configured proxy and network; no direct "
+                    "fallback was attempted.",
+                    issue_code=SiteIssueCode.NETWORK_ERROR,
+                )
+            )
+
+    cdp.on("Fetch.requestPaused", gate_request)
+    cdp.send(
+        "Fetch.enable",
+        {
+            "handleAuthRequests": False,
+            "patterns": [{"urlPattern": "*", "requestStage": "Request"}],
+        },
+    )
+    return cdp
+
+
 def _discover_profile(
     url: str,
     username: str,
@@ -1162,6 +1351,7 @@ def _discover_profile(
 ) -> Result:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel="chrome", headless=True)
+        cdp = None
         try:
             context = browser.new_context(
                 user_agent=chrome_user_agent(browser.version),
@@ -1180,82 +1370,12 @@ def _discover_profile(
             collector = ProfileCollector(username, url)
             navigation = {"url": url}
 
-            def trusted_host(value: str) -> bool:
-                host = _secure_host(value)
-                return bool(host and _matches_domain(host, BROWSER_DOMAINS))
-
-            def route_request(route):
-                """Allow trusted requests natively instead of relaying them.
-
-                Relaying every request by fetching it here and fulfilling the
-                route with that copy stalls this page: measured against a real
-                logged-in profile, loading stops at roughly sixty responses and
-                the profile component never mounts, so the site never issues the
-                timeline request and discovery reports no verified posts even
-                though the author has hundreds. Letting Chromium load trusted
-                requests itself keeps the page's own script running. The host
-                allowlist is still enforced before every request, and redirect
-                targets are checked separately because a native continue does not
-                re-enter this handler for each hop.
-                """
-                request = route.request
-                if should_cancel():
-                    route.abort()
-                    return
-                is_navigation = (
-                    request.is_navigation_request() and request.frame == page.main_frame
-                )
-                if is_navigation:
-                    allowed = is_page_url(request.url)
-                    if not allowed:
-                        errors.append(
-                            DiscoveryError(
-                                "Instagram redirected outside trusted pages; "
-                                "navigation was blocked"
-                            )
-                        )
-                else:
-                    allowed = trusted_host(request.url)
-                # Media, images and fonts are never needed for discovery: the
-                # timeline response carries the metadata. Blocking them keeps the
-                # browser budget for pagination instead of thumbnails. Measured on
-                # a real profile this skips over a hundred requests and does not
-                # stop the timeline query from being issued.
-                if not allowed or request.resource_type in {"media", "image", "font"}:
-                    route.abort()
-                    return
-                try:
-                    route.continue_()
-                except PlaywrightError as exc:
-                    # The frame can close while a request is still in flight, for
-                    # example when a navigation error is being reported.
-                    if should_cancel():
-                        return
-                    errors.append(
-                        TemporaryAccessError(
-                            "Instagram browser request failed. Check the configured "
-                            "proxy and network; no direct fallback was attempted.",
-                            issue_code=SiteIssueCode.NETWORK_ERROR,
-                        )
-                    )
-                    del exc
-
-            def check_redirect_target(request):
-                """Verify every request Chromium issues, including redirect hops.
-
-                A native continue lets the browser follow redirects without
-                re-entering the route handler, so the allowlist would otherwise
-                only cover each chain's first request. Nothing is downloaded from
-                an untrusted origin silently: the discovery fails instead.
-                """
-                if should_cancel() or trusted_host(request.url):
-                    return
-                errors.append(
-                    DiscoveryError(
-                        "Instagram redirected outside trusted pages; navigation "
-                        "was blocked"
-                    )
-                )
+            cdp = _install_request_gate(
+                context,
+                page,
+                should_cancel=should_cancel,
+                on_error=errors.append,
+            )
 
             def track_navigation(frame):
                 """Record the URL the main frame actually committed to.
@@ -1334,11 +1454,12 @@ def _discover_profile(
                     # become a false login or verification requirement.
                     return
 
-            context.route("**/*", route_request)
-            # A native continue does not re-enter the route handler for redirect
-            # hops, so the allowlist is re-checked on every request Chromium
-            # actually issues, and the committed main-frame URL is tracked.
-            page.on("request", check_redirect_target)
+            # The gate is already armed by ``_install_request_gate``: it paused
+            # every request at the Request stage and released or blocked it before
+            # dispatch. The committed main-frame URL is still tracked separately:
+            # gating bounds what can be contacted, while this bounds what was
+            # actually rendered, so a chain that ends on another account or a
+            # non-profile page is rejected by the identity check below.
             page.on("framenavigated", track_navigation)
             page.on("response", observe)
             started = time.monotonic()
@@ -1468,6 +1589,14 @@ def _discover_profile(
                 collector.declared_count,
             )
         finally:
+            # Disable the gate before the browser closes so no request is left
+            # paused on a session that is about to disappear. The session stays
+            # None if launch or context setup failed before it was created.
+            if cdp is not None:
+                with contextlib.suppress(PlaywrightError):
+                    cdp.send("Fetch.disable")
+                with contextlib.suppress(PlaywrightError):
+                    cdp.detach()
             browser.close()
 
 

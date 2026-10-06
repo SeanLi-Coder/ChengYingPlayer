@@ -69,7 +69,7 @@
     {
       "path": "app/downloader.py",
       "upstream_sha256": "0401b8290cd9cda5b71a61a6d8086a3d59e7ad6f36d395bac9ec988f3e182573",
-      "vendored_sha256": "fedae2ea31a78ddbdaa63f8e3f419bdc6af8c08b83cbcc5330d00e13d2a87a9f"
+      "vendored_sha256": "59cc1faa44e8f3ff8caee2491d79a4a785d9ba654ea46eeb720289d750e7cece"
     },
     {
       "path": "app/errors.py",
@@ -381,7 +381,7 @@
     {
       "path": "app/instagram.py",
       "license": "GPL-3.0-or-later",
-      "sha256": "43e2deba7392139a96417010a763a7a494064ec3c73ead346ecd80ac97213fd5"
+      "sha256": "700e2facf1f9fdf0afc8b260ea69eecea093f7c2c8d6321612be4b4f76431191"
     }
   ]
 }

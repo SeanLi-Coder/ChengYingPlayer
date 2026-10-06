@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib
 import json
@@ -9,12 +10,14 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import Mock
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -149,15 +152,51 @@ class InstagramResponse:
         return self._raw
 
 
-class InstagramBrowserFixture:
-    """Serve a profile timeline through the adapter's own observation hooks.
+class FakeCDPSession:
+    """Stand in for the CDP session that arms the adapter's request gate.
 
-    Requests are allowed natively, exactly as the adapter now does, so this
-    fixture exercises the real trusted-host and navigation-identity gates rather
-    than bypassing them: the route handler runs first, then every request the
-    page issues is re-checked, and the committed main-frame URL is tracked.
-    No socket is opened.
+    Records every command so a test can assert that the gate was really enabled
+    and that each request was released or failed before it left the browser.
     """
+
+    def __init__(self, fixture):
+        self.fixture = fixture
+        self.handlers = {}
+        self.commands = []
+        self.enabled = False
+        self.disabled = False
+        self.detached = False
+
+    def on(self, event, handler):
+        self.handlers[event] = handler
+
+    def send(self, method, params=None):
+        params = dict(params or {})
+        self.commands.append((method, params))
+        if method == "Fetch.enable":
+            self.enabled = True
+        elif method == "Fetch.disable":
+            self.disabled = True
+        elif method == "Fetch.continueRequest":
+            self.fixture.record_decision(params.get("requestId"), released=True)
+        elif method == "Fetch.failRequest":
+            self.fixture.record_decision(params.get("requestId"), released=False)
+
+    def detach(self):
+        self.detached = True
+
+
+class InstagramBrowserFixture:
+    """Serve a profile timeline through the adapter's own gate and hooks.
+
+    Requests are paused by the production CDP gate exactly as a real browser
+    pauses them, so this fixture exercises the real trusted-host and
+    navigation-identity decisions instead of bypassing them: every request is
+    offered to the gate before it is "dispatched", redirect hops included, and
+    the committed main-frame URL is still tracked. No socket is opened.
+    """
+
+    MAIN_FRAME = "frame-main"
 
     def __init__(self, *, final_url=PROFILE, responses=(), title="Instagram fixture",
                  redirect_requests=()):
@@ -169,13 +208,15 @@ class InstagramBrowserFixture:
         self.version = "140.0.0.0"
         self.url = PROFILE
         self.listeners = {}
-        self.handler = None
+        self.cdp = None
         self.closed = False
         self.added_cookies = []
         self.launch_options = None
         self.scrolls = 0
-        self.aborted_requests = []
+        # url -> requestId, and the two decision ledgers a test asserts against.
+        self.requests_by_id = {}
         self.continued_requests = []
+        self.failed_requests = []
         self._title = title
 
     @property
@@ -194,48 +235,50 @@ class InstagramBrowserFixture:
     def new_page(self):
         return self
 
+    def new_cdp_session(self, page):
+        assert page is self
+        self.cdp = FakeCDPSession(self)
+        return self.cdp
+
     def add_cookies(self, cookies):
         self.added_cookies.extend(cookies)
 
     def set_default_timeout(self, value):
         pass
 
-    def route(self, pattern, handler):
-        self.handler = handler
-
     def on(self, event, listener):
         self.listeners[event] = listener
 
+    def record_decision(self, request_id, *, released):
+        url = self.requests_by_id.get(str(request_id))
+        if released:
+            self.continued_requests.append(url)
+        else:
+            self.failed_requests.append(url)
+
+    def dispatch_request(self, url, resource_type, frame_id=None):
+        """Offer one request to the gate and report whether it was released."""
+        assert self.cdp is not None, "gate installed after a request was issued"
+        handler = self.cdp.handlers.get("Fetch.requestPaused")
+        assert handler is not None, "the gate never subscribed to paused requests"
+        request_id = f"request-{len(self.requests_by_id)}"
+        self.requests_by_id[request_id] = url
+        handler({
+            "requestId": request_id,
+            "request": {"url": url},
+            "resourceType": resource_type,
+            "frameId": self.MAIN_FRAME if frame_id is None else frame_id,
+        })
+        return url not in self.failed_requests
+
     def goto(self, url, **kwargs):
-        request = SimpleNamespace(
-            url=self.final_url,
-            is_navigation_request=lambda: True,
-            frame=self.main_frame,
-            resource_type="document",
-            method="GET",
-            post_data_buffer=None,
-            headers={},
-        )
-        route = SimpleNamespace(
-            request=request,
-            abort=Mock(),
-            continue_=Mock(),
-        )
-        self.handler(route)
-        if route.abort.called:
-            self.aborted_requests.append(request.url)
-            raise RuntimeError("Navigation aborted")
-        if route.continue_.called:
-            self.continued_requests.append(request.url)
-        # A native continue lets Chromium follow the navigation itself, so the
-        # request and committed-URL events arrive after the handler ran.
-        if "request" in self.listeners:
-            self.listeners["request"](request)
-            for redirect_url in self.redirect_requests:
-                # A redirect hop never re-enters the route handler, so it can only
-                # be seen here. Emitting it without the handler is what makes the
-                # allowlist re-check on this event load-bearing.
-                self.listeners["request"](SimpleNamespace(url=redirect_url))
+        # The navigation itself is gated first, then each redirect hop is a
+        # separate paused request. Playwright routing never sees a hop, which is
+        # precisely why the gate has to be armed at the protocol level.
+        if not self.dispatch_request(self.final_url, "Document"):
+            raise RuntimeError("Navigation blocked by the request gate")
+        for redirect_url in self.redirect_requests:
+            self.dispatch_request(redirect_url, "Document")
         self.url = self.final_url
         self.main_frame.url = self.final_url
         if "framenavigated" in self.listeners:
@@ -321,11 +364,11 @@ def redact_public_url(monkeypatch, tmp_path):
 
 def instagram_item(shortcode, *, part_kind="image", position=1, count=1,
                    profile_url=PROFILE, author_id=AUTHOR_ID, **kwargs):
+    kwargs.setdefault("source_url", f"https://www.instagram.com/p/{shortcode}/")
+    kwargs.setdefault("title", "Fixture Instagram post")
     return DownloadItem(
         id=shortcode,
         media_id=shortcode,
-        source_url=f"https://www.instagram.com/p/{shortcode}/",
-        title="Fixture Instagram post",
         author=USERNAME,
         media_type=MediaType.IMAGE if part_kind == "image" else MediaType.VIDEO,
         metadata={
@@ -1256,16 +1299,19 @@ def test_trusted_requests_load_natively_without_relaying(monkeypatch):
 
     Measured against a real logged-in profile, a fetch-and-fulfill route stops
     loading after roughly sixty responses, the profile component never mounts and
-    the site never issues its timeline request. The adapter therefore lets
-    trusted requests through natively; this guards against reintroducing the
-    relay, which would silently break discovery without failing any request.
+    the site never issues its timeline request. The gate therefore releases
+    trusted requests with a native ``Fetch.continueRequest`` rather than fetching
+    and fulfilling a copy here; this guards against reintroducing the relay,
+    which would silently break discovery without failing any request.
     """
     import inspect
 
     source = inspect.getsource(ig)
-    assert "route.continue_()" in source
+    # The gate releases natively and never relays bytes through this process.
+    assert "Fetch.continueRequest" in source
     assert "route.fetch(" not in source
     assert "fulfill_checked_route" not in source
+    assert "context.route(" not in source
 
     browser = InstagramBrowserFixture(responses=[
         InstagramResponse(profile_content_response(1), operation=ig.PROFILE_CONTENT_OPERATION),
@@ -1280,16 +1326,22 @@ def test_trusted_requests_load_natively_without_relaying(monkeypatch):
     )
     result = ig.discover(PROFILE)
     assert [work.media_id for work in result.works] == ["Cq1a"]
+    # The trusted navigation was released before dispatch; nothing was blocked.
     assert browser.continued_requests == [PROFILE]
-    assert browser.aborted_requests == []
+    assert browser.failed_requests == []
+    # The gate was really armed at the protocol level and torn down afterwards.
+    assert browser.cdp.enabled
+    assert browser.cdp.disabled or browser.cdp.detached
 
 
 def test_every_issued_request_is_rechecked_against_the_host_allowlist(monkeypatch):
-    """A native continue does not re-enter the route handler for redirect hops.
+    """Every request is gated before dispatch, redirect hops included.
 
-    The allowlist is therefore re-applied to every request Chromium issues, and
-    the committed main-frame URL is tracked, so an off-site redirect still fails
-    discovery instead of being downloaded silently.
+    A native continue does not re-enter a Playwright route handler for redirect
+    hops, so the CDP gate pauses each request at the Request stage and applies the
+    allowlist there, while the committed main-frame URL is still tracked. An
+    off-site redirect is therefore blocked before its target is contacted instead
+    of being downloaded silently.
     """
     browser = InstagramBrowserFixture(responses=[
         InstagramResponse(profile_content_response(1), operation=ig.PROFILE_CONTENT_OPERATION),
@@ -1303,7 +1355,14 @@ def test_every_issued_request_is_rechecked_against_the_host_allowlist(monkeypatc
         ig, "_extract_chrome_cookies", Mock(side_effect=AssertionError("Must not read cookies"))
     )
     ig.discover(PROFILE)
-    assert {"response", "request", "framenavigated"} <= set(browser.listeners)
+    # The committed-URL tracker and timeline observer are still wired, but the
+    # per-request allowlist now lives in the armed CDP gate, not a request event.
+    assert {"response", "framenavigated"} <= set(browser.listeners)
+    assert "request" not in browser.listeners
+    assert browser.cdp.enabled
+    # Every dispatched request passed through the gate and was explicitly decided.
+    assert browser.continued_requests and not browser.failed_requests
+    assert set(browser.continued_requests) <= set(browser.requests_by_id.values())
 
 
 def test_navigation_to_an_untrusted_page_blocks_discovery(monkeypatch):
@@ -1475,3 +1534,917 @@ def test_image_part_transfer_over_local_http_writes_and_verifies_real_bytes(
     assert hashlib.sha256(landed.read_bytes()).hexdigest() == expected_sha256
     assert (chosen.width, chosen.height) == (width, height)
     assert served == ["/image.jpg"]
+
+
+# ---------------------------------------------------------------------------
+# Real-browser redirect gating (R4)
+#
+# Playwright routing cannot stop a redirect hop: a native continue never
+# re-enters the route handler, so an observer only learns of an off-site request
+# after the target already received it. These regressions drive the production
+# gate (``_install_request_gate``) in real Chrome against two loopback origins
+# and assert the untrusted one records *zero* requests. The loopback exception
+# lives only in the injected predicates; the shipped allowlist still requires
+# HTTPS on port 443.
+# ---------------------------------------------------------------------------
+
+REAL_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+requires_real_chrome = pytest.mark.skipif(
+    not REAL_CHROME.is_file(),
+    reason="The optional real Chrome runtime is not installed",
+)
+
+
+@contextmanager
+def redirect_origins(status, *, page_script="fetch('/hop').catch(function(){});"):
+    """Two loopback origins: a trusted page that redirects to an untrusted one.
+
+    The trusted origin serves ``/page`` (running ``page_script``), ``/hop`` and
+    ``/navhop`` (both a ``status`` redirect to the untrusted origin's ``/target``)
+    and ``/selfhop`` (a same-origin redirect to its own ``/target``). The
+    untrusted origin records every request it actually receives, so a regression
+    can assert it was never contacted. Loopback only; no external network.
+    """
+    untrusted_hits: list[tuple[str, str]] = []
+    trusted_target_hits: list[str] = []
+
+    class Untrusted(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def _record(self):
+            untrusted_hits.append((self.command, self.path))
+            body = b"leaked"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        do_GET = _record
+        do_POST = _record
+        do_HEAD = _record
+
+        def log_message(self, *args):
+            pass
+
+    untrusted = ThreadingHTTPServer(("127.0.0.1", 0), Untrusted)
+    untrusted_origin = f"http://127.0.0.1:{untrusted.server_port}"
+
+    class Trusted(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def _redirect_to_untrusted(self):
+            self.send_response(status)
+            self.send_header("Location", untrusted_origin + "/target")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _serve_target(self):
+            trusted_target_hits.append(self.path)
+            body = b"trusted-target"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        def _route(self):
+            path = urlsplit(self.path).path
+            if path == "/page":
+                body = (
+                    "<title>trusted</title><script>" + page_script + "</script>"
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif path in {"/hop", "/navhop"}:
+                self._redirect_to_untrusted()
+            elif path == "/selfhop":
+                self.send_response(302)
+                self.send_header("Location", "/target")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            elif path == "/target":
+                self._serve_target()
+            else:
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        def do_GET(self):
+            self._route()
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            if length:
+                self.rfile.read(length)
+            self._route()
+
+        def do_HEAD(self):
+            self._route()
+
+        def log_message(self, *args):
+            pass
+
+    trusted = ThreadingHTTPServer(("127.0.0.1", 0), Trusted)
+    trusted_origin = f"http://127.0.0.1:{trusted.server_port}"
+
+    threads = [
+        threading.Thread(target=untrusted.serve_forever, daemon=True),
+        threading.Thread(target=trusted.serve_forever, daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        yield trusted_origin, untrusted_origin, untrusted_hits, trusted_target_hits
+    finally:
+        for server, thread in ((untrusted, threads[0]), (trusted, threads[1])):
+            server.shutdown()
+            thread.join(timeout=3)
+            server.server_close()
+
+
+def drive_gate(goto_url, *, trusted_origin, wait_ms=1500):
+    """Run the production gate in real Chrome and return the errors it reported.
+
+    Only the two injected predicates know about the loopback origins; every other
+    decision (main-frame detection, resource-type blocking, release-versus-fail)
+    is the shipped code path.
+    """
+    from playwright.sync_api import sync_playwright
+
+    errors: list[Exception] = []
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(
+            channel="chrome", headless=True, timeout=15000
+        )
+        try:
+            context = browser.new_context(service_workers="block")
+            page = context.new_page()
+            cdp = ig._install_request_gate(
+                context,
+                page,
+                should_cancel=lambda: False,
+                on_error=errors.append,
+                is_trusted_page=lambda value: value.startswith(trusted_origin),
+                is_trusted_host=lambda value: value.startswith(trusted_origin),
+            )
+            try:
+                with contextlib.suppress(Exception):
+                    page.goto(goto_url, wait_until="load", timeout=8000)
+                page.wait_for_timeout(wait_ms)
+            finally:
+                cdp.send("Fetch.disable")
+        finally:
+            browser.close()
+    return errors
+
+
+@requires_real_chrome
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_instagram_redirect_is_blocked_before_target_receives_request(status):
+    """A subrequest redirect hop never reaches the untrusted origin."""
+    with redirect_origins(status) as (trusted_origin, _untrusted, hits, _targets):
+        errors = drive_gate(trusted_origin + "/page", trusted_origin=trusted_origin)
+    assert hits == [], f"untrusted origin was contacted for status {status}: {hits}"
+    assert any("outside trusted pages" in str(error) for error in errors)
+
+
+@requires_real_chrome
+@pytest.mark.parametrize("status", [302, 307])
+def test_instagram_navigation_redirect_is_blocked_before_target_receives_request(status):
+    """A top-level navigation redirect off-site is blocked before dispatch too."""
+    with redirect_origins(status) as (trusted_origin, _untrusted, hits, _targets):
+        errors = drive_gate(trusted_origin + "/navhop", trusted_origin=trusted_origin)
+    assert hits == [], f"untrusted origin was contacted for navigation {status}: {hits}"
+    assert any("outside trusted pages" in str(error) for error in errors)
+
+
+@requires_real_chrome
+@pytest.mark.parametrize("status", [307, 308])
+def test_instagram_post_redirect_is_blocked_before_target_receives_request(status):
+    """A body-preserving 307/308 POST hop is still blocked before it is sent."""
+    script = "fetch('/hop',{method:'POST',body:'secret'}).catch(function(){});"
+    with redirect_origins(status, page_script=script) as (
+        trusted_origin,
+        _untrusted,
+        hits,
+        _targets,
+    ):
+        errors = drive_gate(trusted_origin + "/page", trusted_origin=trusted_origin)
+    assert hits == [], f"untrusted origin received the POST hop for {status}: {hits}"
+    assert any("outside trusted pages" in str(error) for error in errors)
+
+
+@requires_real_chrome
+def test_instagram_trusted_redirect_is_released_to_its_target():
+    """A hop that stays on the trusted origin completes instead of being blocked.
+
+    Blocking everything would also stop the real profile from loading, so the gate
+    must release a same-origin redirect and let its target be fetched.
+    """
+    script = "fetch('/selfhop').catch(function(){});"
+    with redirect_origins(302, page_script=script) as (
+        trusted_origin,
+        _untrusted,
+        hits,
+        targets,
+    ):
+        errors = drive_gate(trusted_origin + "/page", trusted_origin=trusted_origin)
+    assert hits == [], "the untrusted origin must never be involved in a trusted hop"
+    assert targets, "the trusted same-origin redirect target was not reached"
+    assert not any("outside trusted pages" in str(error) for error in errors)
+
+
+# ---------------------------------------------------------------------------
+# Real-transfer resume regression (R1)
+#
+# An Instagram video address is re-resolved by yt-dlp on every attempt and the
+# signed URL changes between runs, so a retained ``.part`` cannot be proven to
+# belong to the same source bytes a resume would append to. These regressions
+# drive the real yt-dlp transfer against a slow loopback server, interrupt the
+# first attempt mid-flight, then retry the *same* post (same title/id, so the
+# same output filename) against a different same-length source. The fixed code
+# removes the stale partial and re-downloads in full; the pre-fix code kept the
+# partial, sent ``Range: bytes=N-`` and published a spliced file.
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def resumable_media_server(sources_by_phase, *, honours_range=True):
+    """Serve byte sources on one path, slowly, and log Range headers.
+
+    ``sources_by_phase`` is a one-element list holding the payload to serve, so a
+    test can swap the source between phases while the URL stays identical. Only
+    the served bytes change; the request path and derived output name do not.
+
+    ``honours_range=False`` models a server that ignores ``Range`` and always
+    replies with the complete body, so a regression can prove the fix does not
+    depend on the server honouring a resume request.
+    """
+    range_headers: list[str] = []
+    state = {"payload": sources_by_phase[0]}
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self):
+            header = self.headers.get("Range")
+            if header:
+                range_headers.append(header)
+            payload = state["payload"]
+            total = len(payload)
+            start = 0
+            if honours_range and header and header.startswith("bytes="):
+                with contextlib.suppress(ValueError):
+                    start = int(header.split("=")[1].split("-")[0])
+            body = payload[start:]
+            if start:
+                self.send_response(206)
+                self.send_header(
+                    "Content-Range", f"bytes {start}-{total - 1}/{total}"
+                )
+            else:
+                self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            # Serve in small chunks with a pause so yt-dlp emits repeated
+            # progress events and a cancel can land mid-transfer rather than
+            # after the file has already completed.
+            for offset in range(0, len(body), 8192):
+                try:
+                    self.wfile.write(body[offset:offset + 8192])
+                    self.wfile.flush()
+                except BrokenPipeError:
+                    # The client aborted mid-transfer, which is exactly what the
+                    # interrupted attempt is meant to do.
+                    return
+                time.sleep(0.02)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    origin = f"http://127.0.0.1:{server.server_port}"
+
+    def set_payload(payload: bytes) -> None:
+        state["payload"] = payload
+
+    try:
+        yield origin, range_headers, set_payload
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+        server.server_close()
+
+
+# Bytes into a transfer at which a test triggers a cancel. Both real videos must
+# be several times larger than this, or the cancel lands after the file already
+# completed and the resume path is never exercised.
+CANCEL_AFTER_BYTES = 16384
+
+
+@pytest.fixture(scope="session")
+def real_video_sources(tmp_path_factory):
+    """Two distinct, decodable videos large enough to interrupt mid-transfer.
+
+    Using real media keeps the resume regressions honest: the identity gate and
+    the pre-publication media verification both run for real, so nothing about the
+    production path is stubbed out. Generated once per session and reused.
+    """
+    work = tmp_path_factory.mktemp("instagram-real-videos")
+    ffmpeg = shutil.which("ffmpeg")
+    sources = {}
+    for label, pattern, seconds in (("big", "testsrc2", 3), ("small", "testsrc", 3)):
+        target = work / f"{label}.mp4"
+        subprocess.run(
+            [
+                ffmpeg, "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi",
+                "-i", f"{pattern}=size=1280x720:rate=30:duration={seconds}",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+                "-pix_fmt", "yuv420p", str(target),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=180,
+        )
+        payload = target.read_bytes()
+        # Both must be large enough that a cancel lands mid-transfer rather than
+        # after the file already completed, or the resume path is never exercised.
+        assert len(payload) > 4 * CANCEL_AFTER_BYTES, label
+        sources[label] = payload
+    assert sources["big"] != sources["small"]
+    return sources
+
+
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg"),
+    reason="The optional local FFmpeg runtime is not installed",
+)
+def test_instagram_retry_does_not_splice_changed_source_bytes(
+    monkeypatch, tmp_path, real_video_sources
+):
+    """A retry after an interrupt must not append a stale partial to new bytes.
+
+    The real yt-dlp transfer, staging directory, identity gate, media verification
+    and publish path are all exercised; only the cancel predicate is driven by the
+    test. The sources differ in length, so a pre-fix resume would splice a prefix
+    of the first video onto the second and still report completion.
+    """
+    source_a = real_video_sources["big"]
+    source_b = real_video_sources["small"]
+    out_dir = (tmp_path / "out").resolve()
+    out_dir.mkdir()
+    instance = downloader()
+    # Loopback media must be treated as trusted so the real transfer proceeds.
+    monkeypatch.setattr(
+        engine, "is_instagram_media_url", lambda value: value.startswith("http://127.0.0.1:")
+    )
+
+    def make_item(url):
+        # The loopback path is named after the queued shortcode, so the generic
+        # extractor resolves the same identity the queue recorded and the real
+        # identity gate passes instead of being stubbed out. Identical title and
+        # media_id across both phases keep one output filename, so a surviving
+        # ``.part`` would be reused.
+        return instagram_item(
+            "r1splice", part_kind="video", source_url=url, title="Fixture video",
+            author_id="",
+        )
+
+    with resumable_media_server([source_a]) as (origin, range_headers, set_payload):
+        media_url = origin + "/r1splice.mp4"
+        cancel = {"flag": False}
+
+        def callback(event):
+            progress = getattr(event, "progress", None)
+            if progress and progress.downloaded_bytes > CANCEL_AFTER_BYTES:
+                cancel["flag"] = True
+
+        # Phase 1: interrupt a real transfer partway through the first video.
+        with pytest.raises(engine.DownloadCancelledError):
+            instance._download_with_ytdlp(
+                make_item(media_url), out_dir, platform=Platform.INSTAGRAM,
+                callback=callback, should_cancel=lambda: cancel["flag"],
+            )
+        # The failed attempt must not leave a resumable partial behind.
+        assert list(out_dir.rglob("*.part")) == []
+
+        # Phase 2: same post, a re-signed source carrying different bytes.
+        set_payload(source_b)
+        range_headers.clear()
+        outcome = instance._download_with_ytdlp(
+            make_item(media_url), out_dir, platform=Platform.INSTAGRAM,
+            callback=None, should_cancel=lambda: False,
+        )
+
+    published = Path(outcome.output_paths[0])
+    data = published.read_bytes()
+    assert data == source_b, "retry published a spliced file instead of the full source"
+    assert data[:1024] != source_a[:1024], "the stale partial prefix survived"
+    assert range_headers == [], "a resume Range request was sent against a changed source"
+    # The completed event was published for a genuinely complete file.
+    assert outcome.resolution == "1280x720"
+
+
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg"),
+    reason="The optional local FFmpeg runtime is not installed",
+)
+def test_instagram_retry_reuses_partial_only_with_verified_source_identity(
+    monkeypatch, tmp_path, real_video_sources
+):
+    """An unchanged source re-downloads cleanly and produces the exact bytes.
+
+    Instagram has no source identity that survives a re-signed URL, so the safe
+    behaviour is a full re-download: with the same bytes on both attempts the
+    published file must still equal the complete source and no Range is sent.
+    """
+    source = real_video_sources["small"]
+    out_dir = (tmp_path / "out").resolve()
+    out_dir.mkdir()
+    instance = downloader()
+    monkeypatch.setattr(
+        engine, "is_instagram_media_url", lambda value: value.startswith("http://127.0.0.1:")
+    )
+
+    with resumable_media_server([source]) as (origin, range_headers, _set_payload):
+        media_url = origin + "/r1same.mp4"
+        item = instagram_item(
+            "r1same", part_kind="video", source_url=media_url,
+            title="Fixture video", author_id="",
+        )
+        outcome = instance._download_with_ytdlp(
+            item, out_dir, platform=Platform.INSTAGRAM,
+            callback=None, should_cancel=lambda: False,
+        )
+
+    data = Path(outcome.output_paths[0]).read_bytes()
+    assert data == source
+    assert range_headers == [], "a fresh same-source download must not resume"
+
+
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg"),
+    reason="The optional local FFmpeg runtime is not installed",
+)
+def test_instagram_full_redownload_does_not_rely_on_server_honouring_range(
+    monkeypatch, tmp_path, real_video_sources
+):
+    """The fix must not depend on the server answering a Range request.
+
+    A stale partial is removed rather than resumed, so even a server that ignores
+    ``Range`` and always replies with the whole body yields the exact new source.
+    """
+    source_a = real_video_sources["big"]
+    source_b = real_video_sources["small"]
+    out_dir = (tmp_path / "out").resolve()
+    out_dir.mkdir()
+    instance = downloader()
+    monkeypatch.setattr(
+        engine, "is_instagram_media_url", lambda value: value.startswith("http://127.0.0.1:")
+    )
+
+    def make_item(url):
+        return instagram_item(
+            "r1norang", part_kind="video", source_url=url,
+            title="Fixture video", author_id="",
+        )
+
+    with resumable_media_server(
+        [source_a], honours_range=False
+    ) as (origin, range_headers, set_payload):
+        media_url = origin + "/r1norang.mp4"
+        cancel = {"flag": False}
+
+        def callback(event):
+            progress = getattr(event, "progress", None)
+            if progress and progress.downloaded_bytes > CANCEL_AFTER_BYTES:
+                cancel["flag"] = True
+
+        with pytest.raises(engine.DownloadCancelledError):
+            instance._download_with_ytdlp(
+                make_item(media_url), out_dir, platform=Platform.INSTAGRAM,
+                callback=callback, should_cancel=lambda: cancel["flag"],
+            )
+        assert list(out_dir.rglob("*.part")) == []
+
+        set_payload(source_b)
+        range_headers.clear()
+        outcome = instance._download_with_ytdlp(
+            make_item(media_url), out_dir, platform=Platform.INSTAGRAM,
+            callback=None, should_cancel=lambda: False,
+        )
+
+    assert Path(outcome.output_paths[0]).read_bytes() == source_b
+    assert range_headers == [], "the retry must not attempt a resume at all"
+
+
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg"),
+    reason="The optional local FFmpeg runtime is not installed",
+)
+def test_instagram_retry_with_a_changed_source_length_publishes_the_new_source(
+    monkeypatch, tmp_path, real_video_sources
+):
+    """A length change between attempts must not truncate or pad the output.
+
+    Resuming against a differently sized source is the clearest way to end up with
+    a file that matches neither version, so the retry has to publish the complete
+    new source and nothing else.
+    """
+    source_a = real_video_sources["big"]
+    source_b = real_video_sources["small"]
+    out_dir = (tmp_path / "out").resolve()
+    out_dir.mkdir()
+    instance = downloader()
+    monkeypatch.setattr(
+        engine, "is_instagram_media_url", lambda value: value.startswith("http://127.0.0.1:")
+    )
+
+    def make_item(url):
+        return instagram_item(
+            "r1length", part_kind="video", source_url=url,
+            title="Fixture video", author_id="",
+        )
+
+    with resumable_media_server([source_a]) as (origin, range_headers, set_payload):
+        media_url = origin + "/r1length.mp4"
+        cancel = {"flag": False}
+
+        def callback(event):
+            progress = getattr(event, "progress", None)
+            if progress and progress.downloaded_bytes > CANCEL_AFTER_BYTES:
+                cancel["flag"] = True
+
+        with pytest.raises(engine.DownloadCancelledError):
+            instance._download_with_ytdlp(
+                make_item(media_url), out_dir, platform=Platform.INSTAGRAM,
+                callback=callback, should_cancel=lambda: cancel["flag"],
+            )
+
+        set_payload(source_b)
+        range_headers.clear()
+        outcome = instance._download_with_ytdlp(
+            make_item(media_url), out_dir, platform=Platform.INSTAGRAM,
+            callback=None, should_cancel=lambda: False,
+        )
+
+    data = Path(outcome.output_paths[0]).read_bytes()
+    assert data == source_b
+    assert len(data) == len(source_b)
+    assert len(data) != len(source_a)
+    assert range_headers == []
+
+
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg"),
+    reason="The optional local FFmpeg runtime is not installed",
+)
+def test_instagram_failed_attempt_only_cleans_its_own_staging(
+    monkeypatch, tmp_path, real_video_sources
+):
+    """Cleaning up a failed attempt must not touch another task's staged data.
+
+    The staging tree is scoped per job and item, so retiring this task's partial
+    has to leave an unrelated job's files exactly as they were.
+    """
+    out_dir = (tmp_path / "out").resolve()
+    out_dir.mkdir()
+    instance = downloader()
+    monkeypatch.setattr(
+        engine, "is_instagram_media_url", lambda value: value.startswith("http://127.0.0.1:")
+    )
+
+    # An unrelated job's staged bytes, plus a finished file the user already has.
+    other_job_dir = out_dir / ".parts" / "other-job" / "other-item"
+    other_job_dir.mkdir(parents=True)
+    other_partial = other_job_dir / "Unknown-Date-other [other].mp4.part"
+    other_partial.write_bytes(b"Q" * 4096)
+    unrelated_finished = out_dir / "2026-01-01-Kept work [keptid].mp4"
+    unrelated_finished.write_bytes(b"K" * 2048)
+
+    source_a = real_video_sources["big"]
+    source_b = real_video_sources["small"]
+
+    def make_item(url):
+        item = instagram_item(
+            "r1scope", part_kind="video", source_url=url,
+            title="Fixture video", author_id="",
+        )
+        item.metadata["_job_id"] = "job-scope"
+        return item
+
+    with resumable_media_server([source_a]) as (origin, _range_headers, set_payload):
+        media_url = origin + "/r1scope.mp4"
+        cancel = {"flag": False}
+
+        def callback(event):
+            progress = getattr(event, "progress", None)
+            if progress and progress.downloaded_bytes > CANCEL_AFTER_BYTES:
+                cancel["flag"] = True
+
+        with pytest.raises(engine.DownloadCancelledError):
+            instance._download_with_ytdlp(
+                make_item(media_url), out_dir, platform=Platform.INSTAGRAM,
+                callback=callback, should_cancel=lambda: cancel["flag"],
+            )
+
+        set_payload(source_b)
+        outcome = instance._download_with_ytdlp(
+            make_item(media_url), out_dir, platform=Platform.INSTAGRAM,
+            callback=None, should_cancel=lambda: False,
+        )
+
+    assert Path(outcome.output_paths[0]).read_bytes() == source_b
+    # This task's own staging is gone; the other job's data is untouched.
+    assert not (out_dir / ".parts" / "job-scope").exists()
+    assert other_partial.read_bytes() == b"Q" * 4096
+    assert unrelated_finished.read_bytes() == b"K" * 2048
+
+
+# ---------------------------------------------------------------------------
+# Video identity and media verification before publication (R2)
+#
+# A video part used to leave for the generic yt-dlp pipeline with only the queued
+# URL compared against the stored shortcode, so a resolved post by another author
+# -- or a response that is not video at all -- was still published and reported
+# complete. The identity mismatch and the invalid-media cases are constructed
+# separately below so one failure cannot mask the other.
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def static_media_server(files):
+    """Serve named byte payloads over a real loopback socket.
+
+    ``files`` maps a request path to bytes. The generic extractor derives a post
+    id from the file name, so naming a path after (or deliberately *not* after) a
+    queued shortcode is what makes the real identity gate pass or fail.
+    """
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self):
+            payload = files.get(urlsplit(self.path).path, b"")
+            self.send_response(200 if payload else 404)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            if payload:
+                self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+        server.server_close()
+
+
+@pytest.fixture(scope="session")
+def real_media_kinds(tmp_path_factory):
+    """Real media for the publication gate: with audio, silent, truncated, junk.
+
+    These are generated once per session. The truncated file still probes by
+    header, which is exactly why publication needs a full decode rather than a
+    metadata read.
+    """
+    work = tmp_path_factory.mktemp("instagram-real-media")
+    ffmpeg = shutil.which("ffmpeg")
+
+    def encode(target, extra):
+        subprocess.run(
+            [
+                ffmpeg, "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc2=size=720x1280:rate=30:duration=2",
+                *extra,
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+                "-pix_fmt", "yuv420p", str(target),
+            ],
+            check=True, capture_output=True, timeout=180,
+        )
+        return target
+
+    with_audio = encode(
+        work / "with_audio.mp4",
+        ["-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:a", "aac", "-shortest"],
+    )
+    silent = encode(work / "silent.mp4", [])
+    truncated = work / "truncated.mp4"
+    whole = with_audio.read_bytes()
+    truncated.write_bytes(whole[: int(len(whole) * 0.4)])
+    return {
+        "with_audio": with_audio.read_bytes(),
+        "silent": silent.read_bytes(),
+        "truncated": truncated.read_bytes(),
+        "junk": b"not-a-video" * 4096,
+    }
+
+
+def instagram_video_info(*, duration=2.0, width=720, height=1280, has_audio=True):
+    """Info shaped like the real Instagram extractor's, not the generic one's.
+
+    The loopback fixtures in these tests resolve through yt-dlp's generic
+    extractor, which reports no duration, dimensions or codecs. Declaring them
+    here is what lets the publication gate be exercised against real files.
+    """
+    formats = [{"format_id": "v", "vcodec": "h264", "acodec": "none",
+                "width": width, "height": height}]
+    if has_audio:
+        formats.append({"format_id": "a", "vcodec": "none", "acodec": "aac", "abr": 128})
+    return {
+        "duration": duration,
+        "width": width,
+        "height": height,
+        "requested_formats": formats,
+    }
+
+
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg"),
+    reason="The optional local FFmpeg runtime is not installed",
+)
+def test_instagram_video_rejects_resolved_identity_mismatch(
+    monkeypatch, tmp_path, real_media_kinds
+):
+    """A normal video that is not the queued post must not be published.
+
+    The media itself is valid, so only the identity can be wrong here: the
+    resolved post carries a different shortcode than the queue recorded.
+    """
+    out_dir = (tmp_path / "out").resolve()
+    out_dir.mkdir()
+    instance = downloader()
+    monkeypatch.setattr(
+        engine, "is_instagram_media_url", lambda value: value.startswith("http://127.0.0.1:")
+    )
+    good_video = real_media_kinds["with_audio"]
+
+    with static_media_server({"/someone_elses_post.mp4": good_video}) as origin:
+        item = instagram_item(
+            "QueuedPost", part_kind="video",
+            source_url=origin + "/someone_elses_post.mp4",
+            title="Fixture video", author_id="",
+        )
+        with pytest.raises(MediaDownloadError, match="not the queued post"):
+            instance._download_with_ytdlp(
+                item, out_dir, platform=Platform.INSTAGRAM,
+                callback=None, should_cancel=lambda: False,
+            )
+
+    # Nothing was published, and the other author's video was never staged as
+    # though it belonged to this task.
+    assert list(out_dir.rglob("*.mp4")) == []
+    assert list(out_dir.rglob("*.part")) == []
+
+
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg"),
+    reason="The optional local FFmpeg runtime is not installed",
+)
+def test_instagram_video_missing_author_identity_is_rejected(
+    monkeypatch, tmp_path, real_media_kinds
+):
+    """Missing author identity must not be treated as a match.
+
+    The post identity is right and the media is valid, so this isolates the
+    author check: an unproven author cannot be shown to own the queued post.
+    """
+    out_dir = (tmp_path / "out").resolve()
+    out_dir.mkdir()
+    instance = downloader()
+    monkeypatch.setattr(
+        engine, "is_instagram_media_url", lambda value: value.startswith("http://127.0.0.1:")
+    )
+    good_video = real_media_kinds["with_audio"]
+
+    with static_media_server({"/r2author.mp4": good_video}) as origin:
+        item = instagram_item(
+            "r2author", part_kind="video", source_url=origin + "/r2author.mp4",
+            title="Fixture video", author_id=AUTHOR_ID,
+        )
+        with pytest.raises(MediaDownloadError, match="not the queued post"):
+            instance._download_with_ytdlp(
+                item, out_dir, platform=Platform.INSTAGRAM,
+                callback=None, should_cancel=lambda: False,
+            )
+
+    assert list(out_dir.rglob("*.mp4")) == []
+
+
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg"),
+    reason="The optional local FFmpeg runtime is not installed",
+)
+def test_instagram_video_rejects_invalid_media_before_publication(
+    monkeypatch, tmp_path, real_media_kinds
+):
+    """Identity correct but the body is not video: reject before publication.
+
+    The response is served with ``Content-Type: video/mp4`` while carrying
+    non-video bytes, which is what a captive portal or an error page looks like.
+    """
+    out_dir = (tmp_path / "out").resolve()
+    out_dir.mkdir()
+    instance = downloader()
+    monkeypatch.setattr(
+        engine, "is_instagram_media_url", lambda value: value.startswith("http://127.0.0.1:")
+    )
+
+    with static_media_server({"/r2media.mp4": real_media_kinds["junk"]}) as origin:
+        item = instagram_item(
+            "r2media", part_kind="video", source_url=origin + "/r2media.mp4",
+            title="Fixture video", author_id="",
+        )
+        with pytest.raises(MediaDownloadError):
+            instance._download_with_ytdlp(
+                item, out_dir, platform=Platform.INSTAGRAM,
+                callback=None, should_cancel=lambda: False,
+            )
+
+    assert list(out_dir.rglob("*.mp4")) == [], "invalid media was published"
+
+
+def test_instagram_video_rejects_truncated_file_and_declared_dimension_mismatch(
+    tmp_path, real_media_kinds
+):
+    """A truncated file and an under-delivered rendition must both be rejected.
+
+    FFprobe reads a header without decoding the whole file, so a truncated
+    transfer can still look valid; the publication gate decodes it fully.
+    """
+    instance = downloader()
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    truncated = media_dir / "truncated.mp4"
+    truncated.write_bytes(real_media_kinds["truncated"])
+    good = media_dir / "good.mp4"
+    good.write_bytes(real_media_kinds["with_audio"])
+
+    with pytest.raises(MediaDownloadError):
+        instance._verify_instagram_video_file(
+            truncated, instagram_video_info(), should_cancel=lambda: False
+        )
+    # A valid file measured below the rendition that was selected is rejected.
+    with pytest.raises(MediaDownloadError, match="below its selected"):
+        instance._verify_instagram_video_file(
+            good,
+            instagram_video_info(width=1080, height=1920),
+            should_cancel=lambda: False,
+        )
+    # A declared duration the file cannot match is rejected.
+    with pytest.raises(MediaDownloadError, match="duration"):
+        instance._verify_instagram_video_file(
+            good, instagram_video_info(duration=45.0), should_cancel=lambda: False
+        )
+
+
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg") or not shutil.which("ffprobe"),
+    reason="Synthetic video tests require local FFmpeg and FFprobe",
+)
+def test_instagram_video_preserves_expected_audio_stream(tmp_path, real_media_kinds):
+    """Audio is required only when the resolved formats declared sound.
+
+    A legitimately silent video must not be rejected, while a video that lost the
+    audio its own metadata promised must be.
+    """
+    instance = downloader()
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    silent = media_dir / "silent.mp4"
+    silent.write_bytes(real_media_kinds["silent"])
+    with_audio = media_dir / "with_audio.mp4"
+    with_audio.write_bytes(real_media_kinds["with_audio"])
+
+    # A silent video whose formats never declared audio is valid.
+    verified = instance._verify_instagram_video_file(
+        silent, instagram_video_info(has_audio=False), should_cancel=lambda: False
+    )
+    assert verified["width"] == 720 and verified["height"] == 1280
+
+    # The same silent file is rejected when the formats did declare audio.
+    with pytest.raises(MediaDownloadError, match="audio"):
+        instance._verify_instagram_video_file(
+            silent, instagram_video_info(has_audio=True), should_cancel=lambda: False
+        )
+
+    # A video that really has audio passes the audio expectation.
+    verified = instance._verify_instagram_video_file(
+        with_audio, instagram_video_info(has_audio=True), should_cancel=lambda: False
+    )
+    assert verified["duration"] > 0
