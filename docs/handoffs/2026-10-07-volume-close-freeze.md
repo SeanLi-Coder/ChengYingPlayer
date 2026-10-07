@@ -1,7 +1,8 @@
 # 音量控件与关闭窗口卡住修补
 
 基线：`b380d660797a32a349ba5153a0f9b2cf8a66250c`（最新正式版 `v0.2.67` / build `78` 之后的主线）。
-目标：`v0.2.68` / build `79`。本轮由 Codex 负责唯一发布，正式状态在文末记录。
+目标：`v0.2.69` / build `80`。`v0.2.68` / build `79` 是未发布候选，未覆写其标签。
+本轮由 Codex 负责唯一发布，正式状态在文末记录。
 
 ## 已确认的问题和改动
 
@@ -38,15 +39,27 @@
   `bash Tools/PlaybackLifecycleTests/run.sh` 均通过；后两项分别为 618 项和 76 项。
 - `python3 -B Tools/ClipPreviewLiveTests/run.py`：324 项通过、0 用例失败、305 帧实际渲染，
   覆盖编辑、控制条自动隐藏、换片、循环落点和面板关闭后的状态恢复。
+- `PLAYBACK_SOAK_SECONDS=180 bash Tools/PlaybackSoakTests/run.sh`：3 分钟实际 4K 渲染通过，
+  H.264／HEVC Main10 均核实 VideoToolbox，帧缓冲 3840×2160，6 次载入、3 次换片、
+  15 次跳转、9 次变速；177 个内存样本，预热后 RSS 增长约 9.9 MiB。
+  这不是数小时播放或所有编码的覆盖证明。
 - `uv tool run --from typos==1.50.2 typos .`、三种语言资源的 `plutil -lint`、
   `git diff --check` 均通过。
 - 自动更新回归：`test_release_policy.py` 19 项、`test_release_delivery.py` 20 项、
   `test_delta_assets.py` 14 项、`Tools/SparkleUpdateTests/run.sh` 23 项通过，
-  后者使用本地 Sparkle SDK，包含签名安装、损坏增量回退及偏好／模型保留。
+  后者使用本地 Sparkle SDK 验证签名归档、清单及损坏内容拒绝。
+  完整 App 的实际签名安装／重启、损坏增量回退和偏好／模型保留由发布 CI 的
+  `AppUpdateIntegrationTests` 独立验收，不与签名归档单元测试混同。
 
 生产完整 `ViewLayer` 的合成 4K/60fps 窗口关／开检查分别要求软件解码和实际
-`hwdec-current=videotoolbox`。最终分别完成 30 次载入／关闭，软件渲染 266 帧、硬解渲染
-224 帧。测试生成并播放素材、确认真实帧交付，而非只初始化解码器。
+`hwdec-current=videotoolbox`。加强后的测试在每次 `FILE_LOADED` 后重新取基线，
+等待两个实际彩色帧缓冲画面、播放重启事件及播放时间前进，再关闭窗口；不强制空绘制。
+像素采样明确绑定 Core Animation 交付的非零 framebuffer，采样后恢复 GL 读取状态，
+保留原有 `frames > 30`，另要求至少 60 次有效画面。最终完全相同源码的
+`CHENGYING_TEST_SOFTWARE_GL=1 python3 -B Tools/PlayerCloseTests/run.py` 与
+`CLOSE_TEST_HWDEC=videotoolbox python3 -B Tools/PlayerCloseTests/run.py`
+分别完成 30 次载入／关闭、61 和 145 次有效画面，均正常清理。
+Generic Float 每轮画面就绪实际需要约 1.719–2.256 秒，高于旧的固定 0.1 秒。
 窗口委托及部分播放器服务是隔离边界，因此不是完整 App 的 `PlayerCore.stop` 现场复现；
 没有用户卡住时的线程采样，不能断言所有现场卡死均由同一问题引起。
 新测试通过 `TestAppWorkspace` 精确注销并清理自己的临时 App，不替换 `/Applications` 安装、
@@ -55,5 +68,19 @@
 
 ## 发布状态
 
-本地修补与回归已完成，正在完成集成复核、正式构建和发布验收。
-尚未把标签、草稿或构建中状态当成已发布；最终须记录完整包、增量包及匿名更新交付的验证结果。
+`v0.2.68` 候选对应提交 `5713bc95`，CI `37643167193` 未通过，未生成正式 Release，
+也未改动现有用户的更新源：
+
+- 下载中心 1,141 个测试中，首次 Chrome 本地页面初始化等待 `/api/config` 超过 5 秒；
+  其余 1,140 项与 65 个子测试通过。相同原始合成 Chrome 文件本机连续 4 轮、共 28 项全过，
+  保持 5 秒限制、未跳过；没有访问真实 Chrome 资料。本版下载器无变更，现有证据不能把
+  偶发冷启动延迟认定为已确定原因。下一候选仍须原样通过这项检查。
+- 新增关闭实播测试完成了全部 30 次关闭，但未达到 `frames > 30` 绘制断言。
+  原测试每次收到 `FILE_LOADED` 后只固定等待 0.1 秒，没有确认该媒体真实画面已经交付。
+  本机 Generic Float 复现了同一旧断言失败。现改为上述有界真实画面条件，
+  不通过删除帧断言、跳过测试或改生产播放策略来放行。每轮载入上限 3 秒、画面就绪上限
+  8 秒；总 watchdog 390 秒、CI 步骤 10 分钟，包含编译和必须完成的隔离工作区清理。
+  独立锁测试的 1 秒获取界限和 10 秒 watchdog 未变，旧生产代码负对照仍明确失败。
+
+本地生产修补与独立复核已完成，正在完成正式构建和发布验收。
+最终须记录完整包、增量包及匿名更新交付的验证结果，不能把标签或构建中状态当成已发布。

@@ -22,6 +22,7 @@ final class MPVController {
       ("osd-level", "0"), ("loop-file", "no"), ("loop-playlist", "no")
     ] { precondition(mpv_set_option_string(mpv, name, value) >= 0) }
     precondition(mpv_initialize(mpv) >= 0)
+    precondition(mpv_observe_property(mpv, 1, "time-pos", MPV_FORMAT_DOUBLE) >= 0)
   }
   func getEnum(_ name: String) -> CocoaCbSwRenderer {
     ProcessInfo.processInfo.environment["CHENGYING_TEST_SOFTWARE_GL"] == "1" ? .yes : .auto
@@ -111,9 +112,54 @@ final class VideoView: NSView {
 
 final class ObservedLayer: ViewLayer {
   @Atomic static var frames = 0
+  @Atomic static var pictureFrames = 0
+  @Atomic static var readinessChecks = 0
+  @Atomic static var acceptedReadinessChecks = 0
+  override func canDraw(inCGLContext ctx: CGLContextObj, pixelFormat pf: CGLPixelFormatObj,
+                        forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) -> Bool {
+    Self.$readinessChecks.withLock { $0 += 1 }
+    let accepted = super.canDraw(inCGLContext: ctx, pixelFormat: pf, forLayerTime: t, displayTime: ts)
+    if accepted { Self.$acceptedReadinessChecks.withLock { $0 += 1 } }
+    return accepted
+  }
   override func draw(inCGLContext ctx: CGLContextObj, pixelFormat pf: CGLPixelFormatObj,
                      forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) {
+    var target: GLint = 0
+    glGetIntegerv(GLenum(GL_DRAW_FRAMEBUFFER_BINDING), &target)
     super.draw(inCGLContext: ctx, pixelFormat: pf, forLayerTime: t, displayTime: ts)
     Self.$frames.withLock { $0 += 1 }
+    // A zero target makes production use its private cached FBO. Do not count an
+    // unrelated default back buffer as verified output when that target is unknown.
+    guard target > 0 else { return }
+    // Sample the actual framebuffer after production drawing. The generated
+    // color pattern must not be confused with a clear-only/empty layer callback.
+    var viewport: [GLint] = [0, 0, 0, 0]
+    glGetIntegerv(GLenum(GL_VIEWPORT), &viewport)
+    guard viewport[2] > 0, viewport[3] > 0 else { return }
+    // mpv restores most GL state, including framebuffer bindings. Read from the
+    // framebuffer Core Animation supplied to production draw, not its default.
+    var savedReadFramebuffer: GLint = 0
+    var savedReadBuffer: GLint = 0
+    glGetIntegerv(GLenum(GL_READ_FRAMEBUFFER_BINDING), &savedReadFramebuffer)
+    glGetIntegerv(GLenum(GL_READ_BUFFER), &savedReadBuffer)
+    glBindFramebuffer(GLenum(GL_READ_FRAMEBUFFER), GLuint(target))
+    glReadBuffer(GLenum(GL_COLOR_ATTACHMENT0))
+    defer {
+      glBindFramebuffer(GLenum(GL_READ_FRAMEBUFFER), GLuint(savedReadFramebuffer))
+      glReadBuffer(GLenum(savedReadBuffer))
+    }
+    var colors = Set<UInt32>()
+    for row in 1...3 {
+      for column in 1...3 {
+        var pixel: [UInt8] = [0, 0, 0, 0]
+        glReadPixels(viewport[0] + viewport[2] * GLint(column) / 4,
+                     viewport[1] + viewport[3] * GLint(row) / 4,
+                     1, 1, GLenum(GL_RGBA), GLenum(GL_UNSIGNED_BYTE), &pixel)
+        guard glGetError() == GLenum(GL_NO_ERROR) else { return }
+        let color = UInt32(pixel[0]) << 16 | UInt32(pixel[1]) << 8 | UInt32(pixel[2])
+        if color != 0 { colors.insert(color) }
+      }
+    }
+    if colors.count >= 2 { Self.$pictureFrames.withLock { $0 += 1 } }
   }
 }

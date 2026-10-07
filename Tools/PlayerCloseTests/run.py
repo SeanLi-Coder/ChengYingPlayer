@@ -54,7 +54,7 @@ with TestAppWorkspace(prefix="player-close-") as directory:
     }))
     media = work / "generated.mp4"
     subprocess.run([str(ROOT / "deps/executable/ffmpeg"), "-nostdin", "-hide_banner", "-loglevel", "error",
-                    "-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=60", "-t", "2",
+                    "-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=60", "-t", "10",
                     "-c:v", "libx264", "-preset", "ultrafast", str(media)], check=True)
     sources = ["iina/Atomic.swift", "iina/Lock.swift", "iina/ReadWriteAtomic.swift",
                "iina/ReadWriteLock.swift", "iina/MPVOption.swift",
@@ -65,6 +65,6 @@ with TestAppWorkspace(prefix="player-close-") as directory:
                     "-import-objc-header", str(ROOT / "Tools/PlayerCloseTests/Bridge.h"),
                     "-I", str(ROOT / "deps/include"), str(ROOT / "deps/lib/libmpv.2.dylib"),
                     "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "deps/lib")], check=True)
-    result = subprocess.run([str(executable), str(media)], timeout=60, check=False)
+    result = subprocess.run([str(executable), str(media)], timeout=390, check=False)
 print("CLEANUP: owned test app unregistered and disposable workspace retired")
 raise SystemExit(result.returncode if result.returncode >= 0 else 1)

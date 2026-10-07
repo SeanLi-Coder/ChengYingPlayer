@@ -18,10 +18,17 @@ gets a no-op method solely to compile against the same scheduling harness.
 
 Run `python3 -B Tools/PlayerCloseTests/run.py` for actual playback. It compiles
 the full production `ViewLayer` and native OpenGL/Core Animation drawing against
-the shipped libmpv, generates a disposable 4K/60fps H.264 clip, and closes and
+the shipped libmpv, generates a disposable ten-second 4K/60fps H.264 clip, and closes and
 reopens a real `NSWindow` 30 times. Alternating iterations restore preview-like
 rotation/loop/seek state before issuing synchronous pause and stop calls. It
-requires actual drawing, not only decoder initialization. Application services
+waits for actual drawing, not only decoder initialization: after each file-loaded
+event it requires two additional decoded-picture draws, a playback-restart event,
+and an advancing playback position. Nine actual framebuffer RGB samples reject
+empty/clear-only draw callbacks. Each iteration logs its frame and picture deltas,
+restart count, position, readiness wait, and native view state for diagnosis.
+The original total `frames > 30` assertion remains, with at least 60 verified
+picture draws now required as well. No forced draw is used to satisfy readiness.
+Application services
 and the window delegate are small isolated boundaries; this is not the complete
 player GUI, `PlayerCore.stop`, or a reproduction of an individual user's hang.
 
@@ -42,7 +49,20 @@ always remain failures.
 
 Both modes use `TestAppWorkspace`; expanded test apps and generated clips are
 owned, unregistered, and removed on exit. They do not launch the installed player,
-change user preferences, or access personal videos. Native calls have a 60-second
-outer watchdog. `Tools/RenderLifecycleTests/run.sh` separately verifies the real
+change user preferences, or access personal videos. Each iteration allows three
+seconds for file loading and eight seconds for picture readiness. A 390-second
+native-process watchdog covers those 30 finite iteration budgets plus 60 seconds
+of synchronous close/shutdown overhead; the CI step allows ten minutes so that
+compilation and mandatory workspace cleanup can finish before its outer deadline.
+The independent deterministic priority-lock probe retains its one-second
+acquisition bound and ten-second process watchdog.
+`Tools/RenderLifecycleTests/run.sh` separately verifies the real
 Core Animation shadow constructor shares both display and priority ownership,
 plus CGL reference balancing, callback shutdown, Intel typechecking, and ASan.
+
+The original 100 ms post-load sleep failed the final frame-count assertion on the
+release runner and reproduced locally with `CHENGYING_TEST_SOFTWARE_GL=1` while
+all 30 close operations returned. A state-driven wait allowed actual Generic Float
+draws to arrive. This corrects a test-readiness assumption, not a production render
+or close policy; it neither relaxes the drawing assertion nor changes the locked
+production `ViewLayer`.
