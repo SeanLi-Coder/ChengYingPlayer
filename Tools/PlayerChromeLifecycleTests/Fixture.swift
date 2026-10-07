@@ -4,6 +4,7 @@ import QuartzCore
 let UIAnimationDuration = 0.25
 let SideBarAnimationDuration = 0.2
 let SettingsWidth: CGFloat = 360
+let SettingsSidebarHeight: CGFloat = 600
 let PlaylistMinWidth: CGFloat = 240
 let PlaylistMaxWidth: CGFloat = 500
 
@@ -125,7 +126,7 @@ class FixtureSidebar: NSViewController, SidebarViewController {
   }
 }
 final class QuickSettingViewController: FixtureSidebar {
-  enum TabViewType { case video, audio, sub }
+  enum TabViewType { case video, audio, sub, tools }
   var currentTab: TabViewType = .video
   var closes = 0
   func pleaseSwitchToTab(_ tab: TabViewType) { currentTab = tab }

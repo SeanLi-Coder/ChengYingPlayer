@@ -135,6 +135,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private var automaticPreviewPending = false
   private var defaultRangeNeedsDuration = false
   private var rangeIsUntouched = false
+  private var validationMessage: String?
   private var previewSnapshot: VideoToolsPlayerSnapshot?
   private var rotationCoordinator: VideoToolsRotationCoordinator?
   private var rotationMediaGeneration: UInt64?
@@ -499,6 +500,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     let previewInFlight = automaticPreviewPending || previewTimer != nil || previewSnapshot != nil
     if sourceChanged || (force && !previewInFlight) {
       let shouldPreview = automaticPreviewPending || (sourceChanged && playbackControlsVisible && selectedOperation == .clip)
+      if sourceChanged { validationMessage = nil }
       stopPreview(updateButton: true)
       observedSourceURL = newURL
       observedMediaGeneration = player?.videoToolsMediaGeneration
@@ -577,6 +579,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     discardPreviewSnapshot()
     defaultRangeNeedsDuration = false
     rangeIsUntouched = false
+    validationMessage = nil
     if isEnd {
       guard player.videoToolsSetLoopEnd(), let range = player.videoToolsLoopRange else {
         updatePlaybackControls()
@@ -688,6 +691,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   @objc private func modeChanged(_ sender: NSSegmentedControl) {
+    validationMessage = nil
     stopPreview(updateButton: true)
     updateModeUI(resetFrameEnd: selectedOperation == .frames)
     if playbackControlsVisible, selectedOperation == .clip {
@@ -704,6 +708,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   @objc private func setStartToCurrentTime(_ sender: NSButton) {
     defaultRangeNeedsDuration = false
     rangeIsUntouched = false
+    validationMessage = nil
     guard player?.info.state.loaded == true else { return }
     player?.pause()
     guard let currentTime = currentPlaybackTime else { return }
@@ -719,6 +724,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   @objc private func setEndToCurrentTime(_ sender: NSButton) {
     defaultRangeNeedsDuration = false
     rangeIsUntouched = false
+    validationMessage = nil
     guard player?.info.state.loaded == true else { return }
     player?.pause()
     guard let currentTime = currentPlaybackTime else { return }
@@ -806,6 +812,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
     stopPreview(updateButton: true)
     do {
+      validationMessage = nil
       ownedTaskID = try taskManager.start(
         operation: operation,
         inputURL: inputURL,
@@ -843,6 +850,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     automaticPreviewPending = false
     defaultRangeNeedsDuration = false
     rangeIsUntouched = false
+    validationMessage = nil
     if field === startField, selectedOperation == .frames, let start = parseTimestamp(startField.stringValue) {
       setDefaultEnd(after: start)
     }
@@ -926,6 +934,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       }
       return
     }
+    validationMessage = nil
     player.videoToolsPreviewRange(start: range.start, end: range.end)
     announcePreviewState(String(format: NSLocalizedString(
       "videotools.preview.active", comment: "Selected range preview state"
@@ -992,6 +1001,13 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     let isPreviewing = previewSnapshot != nil
     let stopTitle = NSLocalizedString("videotools.stop_preview", comment: "Stop preview")
     rangePreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString("videotools.preview_range", comment: "Preview in player")
+    rotationPreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString("videotools.preview_rotation", comment: "Preview rotation")
+    defer { previewStatusLabel.toolTip = previewStatusLabel.stringValue }
+    if let validationMessage {
+      previewStatusLabel.stringValue = validationMessage
+      previewStatusLabel.textColor = .systemRed
+      return
+    }
     let previewRange = isPreviewing && previewTimer == nil ? player?.videoToolsLoopRange : nil
     if let range = previewRange {
       let paused = player?.mpv.getFlag(MPVOption.PlaybackControl.pause) == true
@@ -1005,8 +1021,6 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       previewStatusLabel.stringValue = NSLocalizedString(key, comment: "Range preview status")
       previewStatusLabel.textColor = .secondaryLabelColor
     }
-    previewStatusLabel.toolTip = previewStatusLabel.stringValue
-    rotationPreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString("videotools.preview_rotation", comment: "Preview rotation")
   }
 
   private func cancelScheduledPreview() {
@@ -1366,7 +1380,10 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private func showValidationError(_ message: String) {
     statusLabel.stringValue = message
     statusLabel.textColor = .systemRed
-    revealTaskDetails()
+    // Short validation feedback belongs beside the preview controls in the fixed card so
+    // the time fields stay in view; only task diagnostics reveal the scrolling details.
+    validationMessage = message
+    if isViewLoaded { updatePreviewButtons() }
   }
 
   private func revealTaskDetails() {

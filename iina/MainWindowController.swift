@@ -34,6 +34,9 @@ fileprivate let OSCTopMainViewMarginTop: CGFloat = TitleBarHeightNormal + 4
 fileprivate let OSCTopMainViewMarginTopInFullScreen: CGFloat = 6
 
 fileprivate let SettingsWidth: CGFloat = 360
+/// Settings panels keep a fixed height; the clip tab needs both time rows and their
+/// navigation above the fold, which the former 400-point cap could not show.
+fileprivate let SettingsSidebarHeight: CGFloat = 600
 fileprivate let PlaylistMinWidth: CGFloat = 240
 fileprivate let PlaylistMaxWidth: CGFloat = 800
 
@@ -239,7 +242,7 @@ class MainWindowController: PlayerWindowController {
     }
     sidebarHeightDragOrigin = nil
     sidebarHeightDragValue = nil
-    sidebarHeightConstraint?.constant = sideBarStatus == .playlist ? preferredPlaylistHeight : 400
+    sidebarHeightConstraint?.constant = sideBarStatus == .playlist ? preferredPlaylistHeight : SettingsSidebarHeight
     window?.contentView?.layoutSubtreeIfNeeded()
     endControlInteraction()
   }
@@ -250,8 +253,8 @@ class MainWindowController: PlayerWindowController {
     sidebarResizeHandle = nil
     let resizable = isUsingEdgeControls && sideBarStatus == .playlist
     sidebarContentBottomConstraint?.constant = resizable ? -12 : 0
-    sidebarHeightConstraint?.constant = resizable ? preferredPlaylistHeight : 400
-    sidebarMaximumHeightConstraint?.constant = resizable ? 16384 : 400
+    sidebarHeightConstraint?.constant = resizable ? preferredPlaylistHeight : SettingsSidebarHeight
+    sidebarMaximumHeightConstraint?.constant = resizable ? 16384 : SettingsSidebarHeight
     guard resizable, !sideBarView.subviews.isEmpty else { return }
     let handle = PlayerSidebarResizeHandle(frame: .zero)
     handle.translatesAutoresizingMaskIntoConstraints = false
@@ -295,6 +298,13 @@ class MainWindowController: PlayerWindowController {
     guard isSidebarVisible, let editor = window?.firstResponder as? NSTextView else { return false }
     if editor.isDescendant(of: sideBarView) { return true }
     return (editor.delegate as? NSView)?.isDescendant(of: sideBarView) == true
+  }
+
+  /// A click on the picture dismisses a popover-like sidebar. The tools tab is a working
+  /// panel whose temporary preview must survive such clicks, so it only ends text editing.
+  private var sidebarDismissesOnVideoClick: Bool {
+    guard sideBarStatus != .hidden else { return false }
+    return !(sideBarStatus == .settings && quickSettingView.currentTab == .tools)
   }
 
   func beginControlInteraction() {
@@ -1111,11 +1121,11 @@ class MainWindowController: PlayerWindowController {
     if isUsingEdgeControls, let corner = cornerControls, let footer = edgeControls {
       NSLayoutConstraint.deactivate(originalSidebarVerticalConstraints)
       let preferredHeight = sideBarView.heightAnchor.constraint(equalToConstant:
-        sideBarStatus == .playlist ? preferredPlaylistHeight : 400)
+        sideBarStatus == .playlist ? preferredPlaylistHeight : SettingsSidebarHeight)
       preferredHeight.priority = .defaultLow
       sidebarHeightConstraint = preferredHeight
       let maximumHeight = sideBarView.heightAnchor.constraint(lessThanOrEqualToConstant:
-        sideBarStatus == .playlist ? 16384 : 400)
+        sideBarStatus == .playlist ? 16384 : SettingsSidebarHeight)
       sidebarMaximumHeightConstraint = maximumHeight
       let belowToolbar = sideBarView.topAnchor.constraint(equalTo: corner.bottomAnchor, constant: 6)
       belowToolbar.priority = .init(999)
@@ -1157,7 +1167,7 @@ class MainWindowController: PlayerWindowController {
     guard isUsingEdgeControls else { return }
     cornerTopConstraint?.constant = fsState.isFullscreen ? 10 : 28
     sidebarHeightConstraint?.constant = sideBarStatus == .playlist ?
-      (sidebarHeightDragValue ?? preferredPlaylistHeight) : 400
+      (sidebarHeightDragValue ?? preferredPlaylistHeight) : SettingsSidebarHeight
     if sideBarStatus != .hidden {
       sideBarWidthConstraint.constant = min(sideBarWidthConstraint.constant, sidebarMaxWidth)
     }
@@ -1238,7 +1248,12 @@ class MainWindowController: PlayerWindowController {
     // if the click is outside a shown sidebar, sidebar will be hidden upon mouseUp
     // this event is considered consumed
     if !isMouseEvent(event, inAnyOf: [sideBarView, subPopoverView]) && sideBarStatus != .hidden {
-      shouldCallSuper = false
+      if sidebarDismissesOnVideoClick {
+        shouldCallSuper = false
+      } else {
+        // The tools panel stays open: the click only ends text editing and acts on the picture.
+        window?.makeFirstResponder(nil)
+      }
     }
     // currently, it only passes the event to plugins in super
     if shouldCallSuper {
@@ -1296,7 +1311,7 @@ class MainWindowController: PlayerWindowController {
 
       // Single click. Note that `event.clickCount` will be 0 if there is at least one call to `mouseDragged()`,
       // but we will only count it as a drag if `isDragging==true`
-      if event.clickCount <= 1 && videoView.lastEventId == event.eventNumber && sideBarStatus != .hidden {
+      if event.clickCount <= 1 && videoView.lastEventId == event.eventNumber && sidebarDismissesOnVideoClick {
         hideSideBar()
         return
       }

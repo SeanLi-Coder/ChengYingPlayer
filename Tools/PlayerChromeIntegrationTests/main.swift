@@ -340,8 +340,9 @@ controller.sideBarStatus = .settings
 controller.updateEdgeControlsLayout()
 controller.updateSidebarResizeHandle()
 content.layoutSubtreeIfNeeded()
-check(controller.sidebarResizeHandle == nil && near(controller.sideBarView.frame.height, 400),
-      "Settings retains its compact height and does not expose the playlist-only drag grip")
+check(controller.sidebarResizeHandle == nil && near(controller.sideBarView.frame.height, SettingsSidebarHeight) &&
+        SettingsSidebarHeight == 600,
+      "Settings uses its taller fixed height and does not expose the playlist-only drag grip")
 check(Preference.double(for: .playlistHeight) == savedHeight, "Opening settings preserves the saved playlist height")
 prepareResizablePlaylist()
 

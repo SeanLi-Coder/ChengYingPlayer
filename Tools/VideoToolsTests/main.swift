@@ -399,8 +399,9 @@ func runAutomaticPreviewRegression(_ scenario: String) {
     testPlayer.mpv.values["time"] = 11
     action(lastMarker)
     pump()
-    check(testPlayer.videoToolsLoopRange == nil && previewState.stringValue == text("videotools.preview.invalid"),
-          "An end marker before the start cancels automatic preview and explains the invalid range")
+    check(testPlayer.videoToolsLoopRange == nil && previewState.stringValue == text("videotools.error.invalid_range") &&
+            previewState.textColor == .systemRed,
+          "An end marker before the start cancels automatic preview and explains the invalid range beside the preview controls")
   case "rounding":
     for duration in [5.1234567, 119.9999997] {
       testController.stopPreview()
@@ -580,6 +581,27 @@ for height: CGFloat in [240, 300, 350, 400, 600] {
   }
 }
 }
+// Validation feedback stays beside the preview controls instead of scrolling the inputs away.
+let validationStatus = property("previewStatusLabel", as: NSTextField.self)
+let (originalStart, originalEnd) = (start.stringValue, end.stringValue)
+layoutTools(height: 400)
+toolsScroll.contentView.scroll(to: .zero)
+toolsScroll.reflectScrolledClipView(toolsScroll.contentView)
+start.stringValue = "10"; end.stringValue = "5"
+action(preview)
+let invalidRangeText = NSLocalizedString("videotools.error.invalid_range", comment: "")
+check(validationStatus.stringValue == invalidRangeText && validationStatus.textColor == .systemRed,
+      "A range validation error is shown in red beside the preview controls")
+check(taskStatus.stringValue == invalidRangeText, "The task status still records the validation message")
+let startFrameAfterError = toolsScroll.documentView!.convert(start.bounds, from: start)
+check(startFrameAfterError.intersects(toolsScroll.documentVisibleRect) && toolsScroll.documentVisibleRect.minY < 1,
+      "A validation error does not scroll the time fields out of view")
+end.stringValue = "20"
+controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: end))
+check(validationStatus.textColor != .systemRed && validationStatus.stringValue != invalidRangeText,
+      "Editing the range clears the validation message")
+controller.stopPreview()
+start.stringValue = originalStart; end.stringValue = originalEnd
 taskStatus.stringValue = originalTaskStatus
 layoutTools(height: 600)
 toolsScroll.contentView.scroll(to: .zero)

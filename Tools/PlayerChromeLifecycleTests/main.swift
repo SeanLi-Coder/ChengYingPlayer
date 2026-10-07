@@ -560,6 +560,27 @@ withFixture { controller in
   check(controller.quickSettingView.closes == 1, "Repeated close invalidation does not report another close")
 }
 
+withFixture { controller in
+  // A click on the picture dismisses popover-like sidebars, but the tools tab is a working
+  // panel whose temporary preview must survive clicks on the video.
+  check(!controller.sidebarDismissesOnVideoClick, "A hidden sidebar has nothing for a picture click to dismiss")
+  controller.showPlaylistSidebar()
+  ChromeAnimations.drain()
+  check(controller.sidebarDismissesOnVideoClick, "A click on the picture dismisses the playlist sidebar")
+  controller.hideSideBar(animate: false)
+  ChromeAnimations.drain()
+  controller.showSettingsSidebar()
+  ChromeAnimations.drain()
+  controller.quickSettingView.currentTab = .video
+  check(controller.sidebarDismissesOnVideoClick, "A click on the picture dismisses ordinary settings tabs")
+  controller.quickSettingView.currentTab = .tools
+  check(!controller.sidebarDismissesOnVideoClick, "A click on the picture keeps the tools panel and its preview open")
+  controller.hideUIAndCursor()
+  ChromeAnimations.drain()
+  check(controller.sidebarAutoHidden && !controller.sidebarDismissesOnVideoClick,
+        "An auto-hidden tools panel is not dismissed by a picture click either")
+}
+
 for value in [Double.nan, .infinity, -.infinity] {
   check(PlayerChromePolicy.hideDelay(value) == 2.5, "Non-finite auto-hide delay uses the safe default")
 }
