@@ -67,7 +67,12 @@ python3 -B Tools/ClipPreviewNavigationTests/run.py
 `37610343190` 首轮再次在既有「Test real video picture zoom and pan」步骤超时（与 v0.2.66 标签首轮相同的
 `The player request exceeded its deadline`，软件渲染 4K 重绘未在 8 秒内到达）。本机该测试两次 148 项通过。
 为降低云端误报，`Tools/VideoViewportTests/Live/main.swift` 的单次采样共享上限由 8 秒放宽到 20 秒，
-不改任何像素、方向、尺寸或窗口断言，90 秒外部看门狗不变；主线失败 job 已重跑。
+不改任何像素、方向、尺寸或窗口断言，90 秒外部看门狗不变。主线失败 job 重跑（attempt 2）仍以完全相同的
+签名失败（`frames=24`、中心 `161.5`），说明不是单纯的慢，而是重置后再没有新画面到达 harness。
+`Renderer.m` 原先只在收到 render API 的 update 回调后才调用 `mpv_render_context_update`；回调早于帧就绪时
+标志被消费而帧不再被通知。现改为每次事件泵都查询 render API、报告有帧才渲染（与剪辑预览 harness 一致，
+提交 `44f5c449`），本机两次 148 项通过；其后主线 `37616993588`（`44f5c449`）含该步骤在内全部通过。
+这只是一次云端通过，不能据此宣称误报已彻底消除；若再出现同签名失败，应继续排查 render API 的时序。
 
 ### 正式交付
 
