@@ -16,6 +16,7 @@ final class PlayerCore {
   let info = PlaybackInfo()
   var seeks: [Double] = []
   var volumes: [Double] = []
+  var volumeUnmuteRequests: [Bool] = []
   var speeds: [Double] = []
   var pauses = 0
   var resumes = 0
@@ -26,7 +27,11 @@ final class PlayerCore {
   }
   func resume() { resumes += 1; info.state = .playing }
   func seek(relativeSecond: Double, option: Preference.SeekOption) { seeks.append(relativeSecond) }
-  func setVolume(_ value: Double) { volumes.append(value); info.volume = value }
+  func setVolume(_ value: Double, unmute: Bool = false) {
+    volumes.append(value)
+    volumeUnmuteRequests.append(unmute)
+    info.volume = value
+  }
   func setSpeed(_ value: Double) { speeds.append(value); info.playSpeed = value }
 }
 

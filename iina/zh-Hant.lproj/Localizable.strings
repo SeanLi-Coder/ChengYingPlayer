@@ -546,6 +546,7 @@
 "mini_player.add" = "加入播放清單";
 "mini_player.delete" = "清除播放清單";
 "mini_player.volume" = "音量";
+"player.volume.no_selected_audio" = "沒有啟用的音軌（影片可能無聲，或音軌已關閉）";
 "mini_player.close" = "結束音樂模式";
 "mini_player.back" = "返回影片模式";
 "mini_player.sort" = "排序播放清單";

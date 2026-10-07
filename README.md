@@ -16,6 +16,8 @@ Qwen 的简短入口是 [`QWEN.md`](QWEN.md)；客户端不自动加载时，请
 
 每次打开或切换到**视频**时，播放器音量在音频输出开始前归零，之后可以手动调高。不改变 macOS 系统音量；暂停、跳转、变速和 A/B 循环不会重置已调整的音量。纯音频文件（包括只有专辑封面的音频）保留原音量。
 
+底部音量控件在没有启用音轨时保持可见但禁用，并显示提示；切换到有声视频或重新启用音轨后自动恢复。默认上下方向键、滑块、音量菜单和滚轮调高到非零音量会解除播放器静音。已自定义的方向键仍按用户绑定执行，文字输入框中的方向键仍用于编辑。
+
 界面保留本地播放、视频处理和独立下载中心需要的入口：不提供网络地址直接播放、在线字幕搜索、插件、浏览器扩展和开发调试菜单。字幕加载、播放列表、章节、画中画、播放历史和快捷键设置仍然保留；旧版本保存的插件工具栏按钮会自动隐藏，旧的在线字幕自动搜索和高级 mpv 配置不再执行。
 
 ### 精简的功能范围
@@ -202,6 +204,7 @@ HDR 播放输出默认开启：新安装以及从未手动保存 HDR 偏好的�
 - 后台时间轴缩略图在换片、重开同一文件、关闭窗口或退出时取消旧请求；过期的解码与磁盘读取结果不会写回新视频。保存缓存使用对应视频的结果快照，不会把两部视频的缩略图混写。
 - 缩略图解码的失败和取消路径释放 FFmpeg / Core Graphics 资源，按当前帧尺寸处理动态分辨率，校验尺寸和缓存长度。损坏的缩略图缓存会失效并重新生成，不影响源视频。
 - 修复显示缩放 / presentation layer 切换时 OpenGL 对象的引用生命周期，以及停止显示刷新时的锁顺序问题。这些保护不通过降低视频分辨率、码率或关闭硬件解码实现。
+- 渲染锁的主线程优先机制允许当前持锁线程递归绘制，避免关闭窗口等操作等待渲染时互相卡住；Core Animation 的模型层与显示副本共享相同锁所有权。
 - 已核对当前播放依赖与上游的 [AV1 解码崩溃修复](https://github.com/iina/iina/releases/tag/v1.4.2-build164)、[大视频被误当封面读入内存的修复](https://github.com/iina/iina/pull/5818)。当前固定播放栈已包含这两类修复，不代表所有历史崩溃都属于同一原因。
 
 仓库提供真实 libmpv + OpenGL 的 4K H.264 / HEVC Main10 持续播放检查，覆盖循环、跳转、变速、换片与内存趋势；默认 3 分钟，可显式延长到 4 小时。测试使用自行生成的素材，不读取个人视频。它与原生渲染生命周期回归互补，**不能代替所有编码、HDR 显示器或数小时完整 App 的实测，也不保证任何视频都不会崩溃**。如果实际使用仍闪退，保留对应时间的 macOS 崩溃报告和视频编码信息，便于定位到具体调用栈。
@@ -389,6 +392,8 @@ CHENGYING_PERFORMANCE_BENCHMARK=1 bash Tools/MediaFolderBrowserTests/run.sh
 测试只对输出语义与工作量设置断言，不把依赖机器负载的耗时倍数硬编码成通关条件。
 
 播放稳定性专项检查：`bash Tools/ThumbnailLifecycleTests/run.sh` 验证真实请求生命周期；`bash Tools/ThumbnailCacheTests/run.sh` 验证损坏缓存与清理；`bash Tools/RenderLifecycleTests/run.sh` 验证 CGL 引用与退出锁顺序。准备好播放动态库和媒体工具后，`bash Tools/ThumbnailDecoderTests/run.sh` 验证实际 FFmpeg 缩略图解码，执行 `PLAYBACK_SOAK_SECONDS=600 bash Tools/PlaybackSoakTests/run.sh` 可做 10 分钟真实 4K 硬件解码与 OpenGL 渲染检查；明确设置 `PLAYBACK_SOAK_MODE=software` 才使用软件解码，测试结果会分别标示，不把软件回退当作硬件验证成功。详细范围见各测试目录的 README。
+
+关闭窗口专项检查：`python3 -B Tools/PlayerCloseTests/run.py --priority` 确定性复现并验证递归渲染锁竞争；`python3 -B Tools/PlayerCloseTests/run.py` 使用生产 `ViewLayer`、真实 libmpv 与合成 4K/60fps 视频关闭／重开 30 轮，包含预览状态恢复式同步调用。默认软件解码；加 `CLOSE_TEST_HWDEC=videotoolbox` 要求实际选中硬件解码。测试只在受管临时目录运行，不改正式安装或个人配置；隔离的窗口委托不等于完整 App 现场复现。`bash Tools/SilentVideoOpenTests/run.sh` 覆盖真实音轨切换、默认静音开片、显式调音量解除静音及原生键盘焦点／自定义键位保留。
 
 图片专项检查：`bash Tools/ImageViewerTests/run.sh`、`bash Tools/ImageEditingTests/run.sh`、`bash Tools/ImageCropTests/run.sh`、`bash Tools/ImageViewerUITests/run.sh`、`bash Tools/ImageRoutingTests/run.sh`、`bash Tools/ImageSlideshowTests/run.sh`、`bash Tools/ImageSlideshowUITests/run.sh`。裁剪编辑覆盖真实像素方向、位深 / ICC / 透明度、动画时序、Retina 坐标、鼠标选区、原图不覆盖及旧异步预览失效；幻灯片覆盖实际 AppKit 控件、Finder 多色标签、排序、慢图 / 坏图 / 动图、动态间隔、最小化恢复与转换隔离，并使用临时偏好域。先运行 `bash other/build_image_codec.sh` 再运行 `bash Tools/ImageCodecHelper/run.sh`，可测试真实 WebP 像素、动画时序、透明度、ICC、安全限制与取消。测试只生成临时素材，不读取个人相册。完整 App 由 CI 构建、签名验证及 DMG 打包检查。
 

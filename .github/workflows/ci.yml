@@ -109,6 +109,7 @@ jobs:
           bash Tools/ThumbnailLifecycleTests/run.sh
           bash Tools/ThumbnailCacheTests/run.sh
           bash Tools/RenderLifecycleTests/run.sh
+          python3 -B Tools/PlayerCloseTests/run.py --priority
           bash Tools/WindowLifecycleTests/run.sh
           bash Tools/AutoFileMatchingTests/run.sh
           bash Tools/PlaybackUIPerformanceTests/run.sh
@@ -287,6 +288,10 @@ jobs:
 
       - name: Test live filter node safety
         run: bash Tools/PlaybackLifecycleTests/run_live.sh
+
+      - name: Test real rendering while closing and reopening 4K video windows
+        timeout-minutes: 5
+        run: python3 -B Tools/PlayerCloseTests/run.py
 
       - name: Test silent video opening before audio output
         run: PATH="$PWD/deps/executable:$PATH" bash Tools/SilentVideoOpenTests/run.sh

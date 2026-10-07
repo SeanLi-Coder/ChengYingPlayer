@@ -1242,13 +1242,21 @@ class PlayerCore: NSObject {
     postNotification(.iinaPlaylistChanged)
   }
 
-  func setVolume(_ volume: Double, constrain: Bool = true) {
+  func setVolume(_ volume: Double, constrain: Bool = true, unmute: Bool = false) {
+    guard volume.isFinite, info.state.active, mpv.mpv != nil else { return }
     let maxVolume = Preference.integer(for: .maxVolume)
     let constrainedVolume = volume.clamped(to: 0...Double(maxVolume))
     let appliedVolume = constrain ? constrainedVolume : volume
     info.volume = appliedVolume
     mpv.setDouble(MPVOption.Audio.volume, appliedVolume, level: .verbose)
+    // An explicit audible volume is a request to hear playback. Silent file opening uses
+    // a separate file-local mpv option and must never enter this user-action path.
+    if unmute, appliedVolume > 0, mpv.getFlag(MPVOption.Audio.mute) {
+      info.isMuted = false
+      mpv.setFlag(MPVOption.Audio.mute, false)
+    }
     Preference.set(constrainedVolume, for: .softVolume)
+    syncUI(.volume)
   }
 
   /// Reconcile the volume UI with mpv without changing the saved volume preference.
@@ -2137,11 +2145,6 @@ class PlayerCore: NSObject {
     refreshSyncUITimer()
     touchBarSupport.setupTouchBarUI()
 
-    if info.aid == 0 {
-      mainWindow.muteButton.isHidden = true
-      mainWindow.volumeSlider.isHidden = true
-    }
-
     if info.vid == 0 {
       notifyWindowVideoSizeChanged()
     }
@@ -2187,8 +2190,7 @@ class PlayerCore: NSObject {
     guard info.state.active else { return }
     info.aid = Int(mpv.getInt(MPVOption.TrackSelection.aid))
     guard mainWindow.loaded else { return }
-    mainWindow?.muteButton.isHidden = (info.aid == 0)
-    mainWindow?.volumeSlider.isHidden = (info.aid == 0)
+    syncUI(.volume)
     postNotification(.iinaAIDChanged)
     sendOSD(.track(info.currentTrack(.audio) ?? .noneAudioTrack))
   }
@@ -2416,6 +2418,9 @@ class PlayerCore: NSObject {
     log("Track list changed")
     getTrackInfo()
     getSelectedTracks()
+    // Track selection can settle without another aid event after a window is loaded.
+    // Refresh both enabled and visible states instead of inheriting the previous file.
+    syncUI(.volume)
     let audioStatus = checkCurrentMediaIsAudio()
     currentMediaIsAudio = audioStatus
 

@@ -538,6 +538,7 @@
 "mini_player.add" = "添加到播放列表";
 "mini_player.delete" = "从播放列表中删除所有曲目";
 "mini_player.volume" = "音量";
+"player.volume.no_selected_audio" = "没有启用的音轨（视频可能无声，或音轨已关闭）";
 "mini_player.close" = "关闭音乐模式";
 "mini_player.back" = "返回视频模式";
 "mini_player.sort" = "排序播放列表";

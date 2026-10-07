@@ -141,6 +141,7 @@ class ViewLayer: CAOpenGLLayer {
     cglPixelFormat = CGLRetainPixelFormat(previousLayer.cglPixelFormat)
     cglContext = CGLRetainContext(previousLayer.cglContext)
     displayLock = previousLayer.displayLock
+    mainThreadPriorityLock = previousLayer.mainThreadPriorityLock
     super.init(layer: layer)
     autoresizingMask = previousLayer.autoresizingMask
     backgroundColor = previousLayer.backgroundColor
@@ -245,7 +246,10 @@ class ViewLayer: CAOpenGLLayer {
     // May need to block other threads to allow the main thread to lock displayLock.
     mainThreadPriorityLock.beforeLocking()
     displayLock.lock()
-    defer { displayLock.unlock() }
+    defer {
+      mainThreadPriorityLock.beforeUnlocking()
+      displayLock.unlock()
+    }
     mainThreadPriorityLock.afterLocked()
 
     let isUpdate = needsFlip
@@ -489,6 +493,12 @@ private class MainThreadPriorityLock {
   /// `True` when the main thread is waiting to lock a lock; `false` otherwise.
   private var needsLock = false
 
+  /// Core Animation may reenter display from flush while its caller still owns the
+  /// recursive display lock. That owner must be able to finish even when the main
+  /// thread has started waiting; blocking it would also block the main thread.
+  private var owner: pthread_t?
+  private var depth = 0
+
   /// All threads call this before attempting to lock a lock the main thread has trouble acquiring.
   ///
   /// When called by the main thread this function will record that the main thread is waiting for a lock. When called by other threads
@@ -497,7 +507,8 @@ private class MainThreadPriorityLock {
     lock.lock()
     defer { lock.unlock() }
     guard Thread.isMainThread else {
-      while needsLock { lock.wait() }
+      let thread = pthread_self()
+      while needsLock && (owner == nil || pthread_equal(owner!, thread) == 0) { lock.wait() }
       return
     }
     needsLock = true
@@ -505,14 +516,28 @@ private class MainThreadPriorityLock {
 
   /// All threads call this after locking a lock the main thread has trouble acquiring.
   ///
-  /// When called by the main thread this function will record that the main thread has the lock and will allow any blocked threads to
-  /// proceed. When called by other threads this function does nothing. This avoids the caller only calling this when running on the
-  /// main thread.
+  /// Record ownership for recursive render callbacks. When the main thread acquires
+  /// the display lock, unblock ordinary background contenders as before.
   func afterLocked() {
-    guard Thread.isMainThread else { return }
     lock.lock()
     defer { lock.unlock() }
-    needsLock = false
-    lock.broadcast()
+    let thread = pthread_self()
+    precondition(owner == nil || pthread_equal(owner!, thread) != 0)
+    owner = thread
+    depth += 1
+    if Thread.isMainThread {
+      needsLock = false
+      lock.broadcast()
+    }
+  }
+
+  /// Balance every display-lock acquisition, including recursive calls and copies
+  /// of the same Core Animation layer. Do not clear the owner at an inner return.
+  func beforeUnlocking() {
+    lock.lock()
+    defer { lock.unlock() }
+    precondition(depth > 0 && owner != nil && pthread_equal(owner!, pthread_self()) != 0)
+    depth -= 1
+    if depth == 0 { owner = nil }
   }
 }

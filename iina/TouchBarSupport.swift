@@ -178,7 +178,7 @@ class TouchBarSupport: NSObject, NSTouchBarDelegate {
 
   @objc func touchBarVolumeAction(_ sender: NSButton) {
     let currVolume = player.info.volume
-    player.setVolume(currVolume + (sender.tag == 0 ? 5 : -5))
+    player.setVolume(currVolume + (sender.tag == 0 ? 5 : -5), unmute: true)
   }
 
   @objc func touchBarRewindAction(_ sender: NSButton) {

@@ -53,6 +53,9 @@ func testShadowLifetime() {
     autoreleasepool {
       var shadow: ViewLayer? = ViewLayer(layer: model!)
       check(shadow!.cglContext == context, "Shadow context must retain the shared identity")
+      check(shadow!.displayLock === model!.displayLock &&
+            shadow!.mainThreadPriorityLock === model!.mainThreadPriorityLock,
+            "Shadow layers sharing the recursive display lock must share its priority ownership")
       check(CGLGetContextRetainCount(context) == contextBaseline + 1,
             "Each shadow must independently retain the context")
       check(CGLGetPixelFormatRetainCount(pixelFormat) == formatBaseline + 1,

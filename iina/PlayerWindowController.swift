@@ -256,6 +256,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
         return false
       }
     } else {
+      if handleVolumeKeyBinding(keyBinding.action) { return true }
       if player.handleLoopModeKeyBinding(keyBinding.action) { return true }
       if handleGuardedPlaybackCommand(keyBinding.action) { return true }
       // - mpv command
@@ -293,6 +294,25 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
         return false
       }
     }
+  }
+
+  /// Keep ordinary volume bindings on the same explicit-user path as the slider and menu.
+  /// Leave compound commands, modifiers, and non-volume custom bindings to mpv unchanged.
+  private func handleVolumeKeyBinding(_ tokens: [String]) -> Bool {
+    guard tokens.count == 3, tokens[1] == MPVOption.Audio.volume,
+          ["set", "add", "multiply"].contains(tokens[0]),
+          let amount = Double(tokens[2]), amount.isFinite else { return false }
+    guard player.info.state.active, player.mpv.mpv != nil else { return true }
+    let volume: Double
+    switch tokens[0] {
+    case "set": volume = amount
+    case "add": volume = player.mpv.getDouble(MPVOption.Audio.volume) + amount
+    case "multiply": volume = player.mpv.getDouble(MPVOption.Audio.volume) * amount
+    default: return false
+    }
+    guard volume.isFinite else { return false }
+    player.setVolume(volume, unmute: true)
+    return true
   }
 
   func abLoop() {
@@ -601,7 +621,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       // don't use precised delta for mouse
       let sensitivity = AppData.volumeMap[volumeScrollAmount.clamped(to: 1...(AppData.volumeMap.count - 1))]
       let newVolume = player.info.volume + (isMouse ? delta : sensitivity * delta)
-      player.setVolume(newVolume)
+      player.setVolume(newVolume, unmute: true)
       volumeSlider.doubleValue = newVolume
     case .playbackSpeed:
       let min = 0.05
@@ -701,6 +721,17 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
   }
 
   func updateVolume() {
+    let hasSelectedAudio = (player.info.aid ?? 0) > 0
+    // Keep the control discoverable even for a silent video or a deselected audio track.
+    // A later file/track refresh must undo every state inherited from the previous file.
+    volumeSlider.isHidden = false
+    muteButton.isHidden = false
+    volumeSlider.isEnabled = hasSelectedAudio
+    muteButton.isEnabled = hasSelectedAudio
+    let hint = hasSelectedAudio ? NSLocalizedString("mini_player.volume", comment: "Volume") :
+      NSLocalizedString("player.volume.no_selected_audio", value: "No active audio track", comment: "Disabled volume control")
+    volumeSlider.toolTip = hint
+    muteButton.toolTip = hint
     volumeSlider.doubleValue = player.info.volume
     muteButton.state = player.info.isMuted ? .on : .off
   }
@@ -777,7 +808,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     if Preference.double(for: .maxVolume) > 100, value > 100 && value < 101 {
       NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
     }
-    player.setVolume(value)
+    player.setVolume(value, unmute: true)
   }
 
   @IBAction func playButtonAction(_ sender: NSButton) {

@@ -159,6 +159,8 @@ run("sensitivity") {
     volume.volumeScrollAmount = value
     volume.scrollWheel(with: event(y: 4, phase: .began))
     check(volume.player.volumes.last?.isFinite == true, "Volume sensitivity is safe for persisted value \(value)")
+    check(volume.player.volumeUnmuteRequests == [true],
+          "An explicit volume gesture requests audible playback")
     check(volume.player.mainWindow.quickSettingView.preparations == 0,
           "Volume scrolling preserves the temporary edit preview")
 
