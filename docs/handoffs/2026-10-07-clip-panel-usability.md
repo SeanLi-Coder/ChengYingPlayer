@@ -54,7 +54,38 @@ python3 -B Tools/ClipPreviewNavigationTests/run.py
 
 ## 发布状态
 
-RELEASE_RESULT_PLACEHOLDER
+生产提交 `0d9b62af`，标签 `v0.2.67`（build `78`）。拼写 CI `37606094575` 成功。
+
+标签 CI `37606110769` 首轮 `build-apple-silicon`（全部 Swift 回归、完整 App、签名安装／重启与增量验证）成功，
+`media-helper-tests` 失败于 Python helper 的 `tests/test_conversion.py::test_large_input_pts_does_not_prematurely_complete_progress`
+（`assert all(progress <= 99 ...)`，其余 319 项通过）。该测试与本轮 Swift 改动无关：worker 在任务锁内同时写入
+`completed` 与 `100.0`，测试在「线程仍存活」与「worker 退出」之间读到的完成快照被当成提前报 100%。
+只重跑失败 job（attempt 2）后 `media-helper-tests` 与 `publish-release` 成功；测试本身已另行修正为只记录
+运行中的采样（提交 `1eb1e9bb`，本机 45 项通过、ruff 通过），不改 helper 生产逻辑。
+
+主线 `0d9b62af` 的运行 `37606094620` 因随后推送 `1eb1e9bb` 被并发策略取消；`1eb1e9bb` 的主线运行
+`37610343190` 首轮再次在既有「Test real video picture zoom and pan」步骤超时（与 v0.2.66 标签首轮相同的
+`The player request exceeded its deadline`，软件渲染 4K 重绘未在 8 秒内到达）。本机该测试两次 148 项通过。
+为降低云端误报，`Tools/VideoViewportTests/Live/main.swift` 的单次采样共享上限由 8 秒放宽到 20 秒，
+不改任何像素、方向、尺寸或窗口断言，90 秒外部看门狗不变；主线失败 job 已重跑。
+
+### 正式交付
+
+`v0.2.67` / build `78` 已于 `2026-10-07T11:22:35Z`（北京时间 **2026-10-07 19:22:35**）正式发布，
+非草稿、非预发布，发布 job `112766304696` 于 `2026-10-07T11:22:41Z` 完成。本机不使用登录态与 API 的匿名核验：
+
+- `releases/latest` 匿名重定向到 `releases/tag/v0.2.67`。
+- 已安装客户端的 feed 返回单条项目：`sparkle:version` 78、`sparkle:shortVersionString` 0.2.67，
+  enclosure 指向本版完整 DMG，长度 `168971816`，带 Ed25519 签名。
+- 完整 DMG 匿名下载 `168971816` 字节，SHA-256
+  `6e278201ffc6875a3b5e12c9264789e996576244afb2c1d62ad82f24e4bcc11c`，与公开 `.sha256` 及 feed 长度一致。
+- 从 build `77` 的增量包匿名下载 `1068742` 字节，SHA-256
+  `a56a5ab72a0f51ac23d24c73bae64beb0c86511adce877bb9f6212c348f4769a`，与公开 `.sha256` 及 feed 长度一致。
+- 发布资产共 8 项（DMG、增量包、各自 `.sha256`、签名 `appcast.xml`、发行源码包及其 `.sha256`、第三方源码清单）。
+
+[正式版本](https://github.com/SeanLi-Coder/ChengYingPlayer/releases/tag/v0.2.67)
+与[发布流水线](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/37606110769)。
+本机正式安装（仍为 v0.2.48）、用户媒体与偏好未覆盖；Ed25519 公钥连续性与增量全树还原由标签流水线既有门禁验证。
 
 ## 限制
 

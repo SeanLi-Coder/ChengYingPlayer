@@ -27,9 +27,11 @@ func snapshot(_ context: String, like reference: ViewportLiveSnapshot? = nil,
   var result = ViewportLiveSnapshot()
   // A successful property reply does not mean the asynchronous redraw reached
   // the framebuffer. Observe real pixels with the unchanged fixture tolerance.
-  // Eight seconds matches the existing player-request deadline; the external
-  // ninety-second watchdog still bounds the whole test, including slow drivers.
-  let deadline = ProcessInfo.processInfo.systemUptime + 8
+  // Loaded CI runners rendering 4K through the Apple Software Renderer have
+  // needed more than eight seconds for a redraw; twenty seconds keeps every
+  // pixel and direction assertion intact while the external ninety-second
+  // watchdog still bounds the whole test, including slow drivers.
+  let deadline = ProcessInfo.processInfo.systemUptime + 20
   var matched = false
   repeat {
     let lastComplete = result
