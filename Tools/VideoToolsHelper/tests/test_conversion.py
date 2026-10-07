@@ -819,7 +819,12 @@ def test_large_input_pts_does_not_prematurely_complete_progress(
     observed = []
     deadline = time.monotonic() + 20
     while job.worker.is_alive() and time.monotonic() < deadline:
-        observed.append(job.snapshot()["progress"])
+        snapshot = job.snapshot()
+        # Completion publishes the final status and 100 % together under the job lock. A
+        # sample taken between the liveness check and the worker's exit is therefore a
+        # legitimate completed snapshot, not a premature progress report.
+        if snapshot["status"] != "completed":
+            observed.append(snapshot["progress"])
         job.worker.join(timeout=0.02)
     assert wait(job)["status"] == "completed", job.snapshot()
     assert any(5 < progress < 90 for progress in observed)
