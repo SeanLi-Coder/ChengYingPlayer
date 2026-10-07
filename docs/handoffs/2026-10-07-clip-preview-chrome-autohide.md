@@ -129,7 +129,39 @@ the temporary preview range playing」失败，证明用例捕获的正是该缺
 
 ## 发布状态
 
-（见下文记录。）
+生产提交 `f142348c`，标签 `v0.2.66`（build `77`）。拼写 CI `37592727262` 与主线 CI `37592727296`
+（含同一提交的全部实播、原生面板、viewport、完整 App 与升级安装步骤）均成功。
+
+标签 CI `37592734061` 首轮在既有步骤「Test real video picture zoom and pan」失败：
+`FAIL: The player request exceeded its deadline`，最后完整样本 `reset shortcut; center=319.5,161.5`，
+期望 `179.5`。该测试不涉及本轮改动的任何文件；主线流水线在同一提交上两分钟前刚通过同一步骤，
+本机 `CHENGYING_ALLOW_CI_GL_SKIP=1 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh`
+148 项通过，渲染 53 帧。Codex 在 v0.2.45 与 v0.2.63 的交接中记录过同一测试在云端的偶发像素方向／时序失败。
+按既有做法只重跑失败的 job（attempt 2），不改标签、不改测试断言、不发布未通过的构建。
+
+### 正式交付
+
+`v0.2.66` / build `77` 已于 `2026-10-07T09:50:31Z`（北京时间 **2026-10-07 17:50:31**）正式发布，
+标签对应 `f142348c132f10088e7bcc19b286c824fe6700f2`，非草稿、非预发布。
+标签 CI `37592734061` 第二次执行 `build-apple-silicon`、`media-helper-tests`、`publish-release` 全部成功，
+发布 job `112732472948` 于 `2026-10-07T09:50:37Z` 完成；首轮失败的 viewport 步骤重跑后通过，未改标签或断言。
+
+本机随后不使用任何登录态与 API 做独立匿名核验（仅 HTML 重定向与直接下载）：
+
+- `releases/latest` 匿名重定向到 `releases/tag/v0.2.66`。
+- 已安装客户端使用的 feed `releases/latest/download/appcast.xml` 返回单条项目，
+  `sparkle:version` 77、`sparkle:shortVersionString` 0.2.66，enclosure 指向本版完整 DMG，长度 `168877907`，
+  带 Ed25519 enclosure 与文件签名。
+- 完整 DMG 匿名下载 `168877907` 字节，SHA-256
+  `173ad3d08110daf6a80110939981404648e58f48167b7fd536e7169e686177df`，与公开 `.sha256` 资产及 feed 长度一致。
+- 从 build `76` 的增量包匿名下载 `1267974` 字节，SHA-256
+  `2971fbe969e083396a5bc60252c0baab7a9edce4cf3eae88c6b6729ec51ad58e`，与公开 `.sha256` 及 feed 长度一致。
+- 发布资产共 8 项：DMG、增量包、各自 `.sha256`、签名 `appcast.xml`、发行源码包及其 `.sha256`、第三方源码清单。
+
+[正式版本](https://github.com/SeanLi-Coder/ChengYingPlayer/releases/tag/v0.2.66)
+与[发布流水线](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/37592734061)。
+本机正式安装（仍为 v0.2.48）、用户媒体与偏好未覆盖；未操作真实站点账号；
+Ed25519 公钥连续性与增量全树还原由标签流水线既有门禁验证，本机未重复。
 
 ## 独立评审要点
 
