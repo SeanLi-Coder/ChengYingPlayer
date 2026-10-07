@@ -67,7 +67,11 @@ static void *get_proc(void *context, const char *name) {
 }
 
 static void render(void) {
-  if (!renderer || !atomic_exchange(&render_pending, false)) return;
+  if (!renderer) return;
+  // Query the render API on every pump instead of only after an update callback:
+  // the callback can precede frame readiness, and a frame signalled once must not
+  // be missed on a slow host, which left the loaded CI runner without a redraw.
+  atomic_store(&render_pending, false);
   [view.openGLContext makeCurrentContext];
   if (!(mpv_render_context_update(renderer) & MPV_RENDER_UPDATE_FRAME)) return;
   mpv_opengl_fbo target = {(int)framebuffer, WIDTH, HEIGHT, GL_RGBA8};
