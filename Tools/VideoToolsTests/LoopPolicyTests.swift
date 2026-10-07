@@ -10,6 +10,8 @@ func runVideoToolsLoopTests() {
   check(VideoToolsLoopRange(start: 5, end: 5) == nil && VideoToolsLoopRange(start: 5, end: 4) == nil, "Equal or reversed markers are invalid")
   check(VideoToolsLoopRange(start: .nan, end: 5) == nil && VideoToolsLoopRange(start: 0, end: .infinity) == nil, "Non-finite loop endpoints are invalid")
   check(VideoToolsLoopRange(start: 0, end: 121, duration: 120) == nil, "Loop endpoints cannot pass the media duration")
+  check(range.admits(-0.005) && range.admits(0) && !range.admits(-0.02) && !range.admits(5),
+        "Recovery admits mpv's exact-seek landing slack before A but not displaced positions or B")
   let tiny = VideoToolsLoopRange(start: 10, end: 10.0001)!
   check(tiny.contains(tiny.lastSeekPosition), "Sub-millisecond loop clamps to its interior")
   let eofRange = VideoToolsLoopRange(start: 100, end: 120, duration: 120)!

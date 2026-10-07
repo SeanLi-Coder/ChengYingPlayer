@@ -25,6 +25,15 @@ struct VideoToolsLoopRange: Equatable {
     position.isFinite && position >= start && position < end
   }
 
+  /// mpv's exact seek may display a frame up to 5 ms before the requested position, and a
+  /// marker captured from `time-pos` can round above its frame by a microsecond. Recovery
+  /// treats such a landing as inside the range; only a displaced decoder is corrected.
+  static let seekLandingTolerance = 0.01
+
+  func admits(_ position: Double) -> Bool {
+    position.isFinite && position >= start - Self.seekLandingTolerance && position < end
+  }
+
   func clamped(_ position: Double) -> Double {
     guard position.isFinite else { return start }
     return min(lastSeekPosition, max(start, position))

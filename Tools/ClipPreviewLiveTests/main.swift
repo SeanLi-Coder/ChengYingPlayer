@@ -60,7 +60,7 @@ func run() throws {
   pump(0.5)
   try check(player.videoToolsLoopRange == nil && mpv.getFlag(MPVOption.PlaybackControl.pause),
             "Preloading the hidden production tools tab does not start playback")
-  let parent = QuickSettingViewController(tools: controller)
+  let parent = QuickSettingViewController(tools: controller, mainWindow: player.mainWindow)
   let panel = NSWindow(contentRect: NSRect(x: 750, y: 120, width: 380, height: 850),
                        styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
   panel.isReleasedWhenClosed = false
@@ -85,6 +85,19 @@ func run() throws {
   func hasPendingTimer() -> Bool {
     guard let value = Mirror(reflecting: controller).children.first(where: { $0.label == "previewTimer" })?.value else { return false }
     return !Mirror(reflecting: value).children.isEmpty
+  }
+  func hasPreviewSnapshot() -> Bool {
+    guard let value = Mirror(reflecting: controller).children.first(where: { $0.label == "previewSnapshot" })?.value else { return false }
+    return !Mirror(reflecting: value).children.isEmpty
+  }
+  func timestamp(_ text: String) throws -> Double {
+    let parts = text.split(separator: ":").map(String.init)
+    guard (1...3).contains(parts.count), let seconds = Double(parts.last!) else {
+      throw TestFailure(message: "The production field holds a parsable timestamp")
+    }
+    let minutes = parts.count >= 2 ? Double(parts[parts.count - 2]) ?? 0 : 0
+    let hours = parts.count == 3 ? Double(parts[0]) ?? 0 : 0
+    return hours * 3600 + minutes * 60 + seconds
   }
   let start = property("startField", NSTextField.self)
   let end = property("endField", NSTextField.self)
@@ -201,7 +214,11 @@ func run() throws {
                 "The conversion tab does not start preview")
       mode.selectedSegment = 0
       try action(mode)
-      try waitForRange(0, 5)
+      let reopenedStart = try timestamp(start.stringValue)
+      let reopenedEnd = try timestamp(end.stringValue)
+      try check(abs(reopenedEnd - reopenedStart - 5) < 0.001 && abs(reopenedStart - mpv.getDouble(MPVProperty.timePos)) < 0.12,
+                "Returning to the clip tab anchors an untouched range at the current playback position")
+      try waitForRange(reopenedStart, reopenedEnd)
       try proveMotion()
       player.pause()
       try until("A paused real decoder is not labelled as playing a preview") {
@@ -221,7 +238,7 @@ func run() throws {
       try until("Reinserting the parent executes the real tools appearance callback") {
         parent.appearanceUpdates > appearanceCount
       }
-      try waitForRange(0, 5)
+      try waitForRange(try timestamp(start.stringValue), try timestamp(end.stringValue))
       try proveMotion()
       controller.stopPreview()
     }),
@@ -375,9 +392,202 @@ func run() throws {
       try edit(end, "1.600000")
       try waitForRange(0.8, 1.6)
       try edit(end, "0.100000")
-      try until("An invalid active range restores the paused pre-preview state") {
-        player.videoToolsLoopRange == nil && mpv.getFlag(MPVOption.PlaybackControl.pause)
+      try until("An invalid active range ends the loop without restoring the saved position") {
+        player.videoToolsLoopRange == nil && !mpv.getFlag(MPVOption.PlaybackControl.pause) &&
+          hasPreviewSnapshot() && mpv.getDouble(MPVProperty.timePos) > 0.6
       }
+      try check(previewState.stringValue == NSLocalizedString("videotools.preview.invalid", comment: "Invalid range"),
+                "The status explains that the typed range is invalid while the picture keeps playing")
+      try edit(end, "1.700000")
+      try waitForRange(0.8, 1.7)
+      try proveMotion()
+      try action(preview)
+      try until("Stopping after an invalid interlude still restores the original paused position") {
+        !mpv.getFlag("seeking") && mpv.getFlag(MPVOption.PlaybackControl.pause) &&
+          abs(mpv.getDouble(MPVProperty.timePos) - 0.25) < 0.12
+      }
+    }),
+    ("fullwidth", {
+      try reset()
+      // Chinese input methods emit full-width digits and punctuation.
+      try edit(start, "\u{FF10}\u{FF0E}\u{FF18}")
+      try edit(end, "\u{FF11}\u{3002}\u{FF15}")
+      try waitForRange(0.8, 1.5)
+      try proveMotion()
+      controller.stopPreview()
+    }),
+    ("chrome-autohide", {
+      try reset()
+      try edit(start, "0.700000")
+      try edit(end, "1.400000")
+      try waitForRange(0.7, 1.4)
+      try proveMotion()
+      panel.makeFirstResponder(nil)
+      // The edge-controls chrome hides the whole sidebar once the pointer rests on the
+      // video. AppKit reports that hidden ancestor as a disappearance of the real parent
+      // although it stays attached to its window and the settings sidebar stays open.
+      player.mainWindow.sideBarStatus = .settings
+      player.mainWindow.sidebarAutoHidden = true
+      let disappearances = parent.disappearances
+      let appearances = parent.appearanceUpdates
+      parent.view.isHidden = true
+      try until("Hiding the attached parent with the player chrome runs the real disappearance callback") {
+        parent.disappearances > disappearances
+      }
+      pump(0.6)
+      func previewKeepsRunning(_ label: String) -> Bool {
+        let healthy = player.videoToolsLoopRange == VideoToolsLoopRange(start: 0.7, end: 1.4) &&
+          !mpv.getFlag(MPVOption.PlaybackControl.pause) && !hasPendingTimer() && hasPreviewSnapshot()
+        if !healthy {
+          print("DIAGNOSTIC[\(label)]: range=\(String(describing: player.videoToolsLoopRange)); paused=\(mpv.getFlag(MPVOption.PlaybackControl.pause)); seeking=\(mpv.getFlag("seeking")); pendingTimer=\(hasPendingTimer()); snapshot=\(hasPreviewSnapshot()); position=\(mpv.getDouble(MPVProperty.timePos)); recovery=\(player.videoToolsLoopRecovery); disappearances=\(parent.disappearances); appearances=\(parent.appearanceUpdates); hidden=\(parent.view.isHidden); window=\(parent.view.window != nil); status=\(player.mainWindow.sideBarStatus)")
+        }
+        return healthy
+      }
+      func proveMotionWhileHidden(_ label: String) throws {
+        // Record the real seeking/pause timeline so a settle timeout is diagnosable.
+        let started = LiveClock.now
+        var timeline: [String] = []
+        while LiveClock.now < started + 3 {
+          let seeking = mpv.getFlag("seeking")
+          let paused = mpv.getFlag(MPVOption.PlaybackControl.pause)
+          timeline.append(String(format: "%.2f%@%@@%.3f", LiveClock.now - started, seeking ? "S" : "-",
+                                 paused ? "P" : "-", mpv.getDouble(MPVProperty.timePos)))
+          if !seeking && !paused { break }
+          pump(0.015)
+        }
+        if let last = timeline.last, last.contains("S") || last.contains("P") {
+          print("DIAGNOSTIC[\(label)] settle timeline: \(timeline.suffix(60).joined(separator: " "))")
+          print("DIAGNOSTIC[\(label)] restarts=\(mpv.restartEvents) seekCommands=\(mpv.seekCommands) eof=\(mpv.getFlag(MPVProperty.eofReached)) recovery=\(player.videoToolsLoopRecovery) abA=\(mpv.getString(MPVOption.PlaybackControl.abLoopA) ?? "nil") abB=\(mpv.getString(MPVOption.PlaybackControl.abLoopB) ?? "nil") count=\(mpv.getString(MPVOption.PlaybackControl.abLoopCount) ?? "nil")")
+        }
+        do { try proveMotion() } catch {
+          _ = previewKeepsRunning(label)
+          throw error
+        }
+      }
+      try check(previewKeepsRunning("after-hide"), "Auto-hidden player chrome keeps the temporary preview range playing")
+      try proveMotionWhileHidden("after-hide-motion")
+      player.mainWindow.sidebarAutoHidden = false
+      parent.view.isHidden = false
+      try until("Revealing the player chrome runs the real appearance callback") {
+        parent.appearanceUpdates > appearances
+      }
+      pump(0.6)
+      try check(previewKeepsRunning("after-unhide"), "Revealing the player chrome neither restarts nor interrupts the running preview")
+      try proveMotionWhileHidden("after-unhide-motion")
+      // Closing the sidebar changes its status before the view detaches and then notifies
+      // the panel, matching hideSideBar. That real close still ends the preview and
+      // restores the saved paused position.
+      player.mainWindow.sideBarStatus = .hidden
+      parent.view.removeFromSuperview()
+      parent.sidebarDidClose()
+      try until("Closing the sidebar still cancels the preview and restores the paused position") {
+        !hasPendingTimer() && !hasPreviewSnapshot() && player.videoToolsLoopRange == nil &&
+          !mpv.getFlag("seeking") && mpv.getFlag(MPVOption.PlaybackControl.pause) &&
+          abs(mpv.getDouble(MPVProperty.timePos) - 0.25) < 0.12
+      }
+      func reattachParent(_ message: String) throws {
+        let reattached = parent.appearanceUpdates
+        panel.contentViewController = nil
+        panel.contentViewController = parent
+        parent.view.frame = panel.contentView!.bounds
+        player.mainWindow.sideBarStatus = .settings
+        try until(message) { parent.appearanceUpdates > reattached }
+      }
+      try reattachParent("Reinserting the parent after a close executes the real appearance callback")
+      // The window can close, or a keyboard shortcut can close the sidebar, while the
+      // chrome still hides it. AppKit sends no second disappearance then, so the explicit
+      // close must end the preview and the later media reload must not revive it.
+      try waitForRange(0.7, 1.4)
+      try proveMotion()
+      player.mainWindow.sidebarAutoHidden = true
+      parent.view.isHidden = true
+      pump(0.3)
+      try check(previewKeepsRunning("before-hidden-close"), "The preview is still running when the hidden sidebar closes")
+      player.mainWindow.sidebarAutoHidden = false
+      player.mainWindow.sideBarStatus = .hidden
+      parent.view.removeFromSuperview()
+      parent.sidebarDidClose()
+      try until("Closing the sidebar while the chrome hides it still cancels the preview") {
+        !hasPendingTimer() && !hasPreviewSnapshot() && player.videoToolsLoopRange == nil &&
+          !mpv.getFlag("seeking") && mpv.getFlag(MPVOption.PlaybackControl.pause) &&
+          abs(mpv.getDouble(MPVProperty.timePos) - 0.25) < 0.12
+      }
+      controller.refreshCurrentMedia(force: true)
+      pump(0.65)
+      try check(!hasPendingTimer() && !hasPreviewSnapshot() && player.videoToolsLoopRange == nil &&
+                mpv.getFlag(MPVOption.PlaybackControl.pause),
+                "A media reload after a hidden close does not revive the automatic preview")
+      parent.view.isHidden = false
+      try reattachParent("Reinserting the parent after a hidden close executes the real appearance callback")
+      controller.stopPreview()
+    }),
+    ("media-reload", {
+      try reset()
+      // Mirror the real application's load sequence: the main window's own file-loaded
+      // observer reloads the visible tools tab first, then the panel's observer forces a
+      // refresh of the now-unchanged source. The automatic preview must survive both.
+      player.videoToolsMediaGeneration &+= 1
+      controller.refreshCurrentMedia()
+      try check(hasPendingTimer(), "The reloaded tools tab schedules the automatic preview for the new media")
+      controller.refreshCurrentMedia(force: true)
+      let defaultStart = try timestamp(start.stringValue)
+      let defaultEnd = try timestamp(end.stringValue)
+      try check(defaultEnd - defaultStart > 4.9 && defaultEnd - defaultStart < 5.1,
+                "The reloaded media keeps its default five-second range")
+      try check(hasPendingTimer(), "The forced refresh of the unchanged source keeps the scheduled automatic preview")
+      try waitForRange(defaultStart, defaultEnd)
+      try proveMotion()
+      controller.stopPreview()
+    }),
+    ("landing", {
+      try reset()
+      // The synthetic 30000/1001 fps source has frame 1 at 0.0333666… s. A marker captured
+      // from time-pos rounds it up to 0.033367, and mpv's exact seek then displays that frame
+      // 0.3 µs before the request. Recovery must accept the landing instead of suspending.
+      try edit(start, "0.033367")
+      try edit(end, "0.900000")
+      try waitForRange(0.033367, 0.9)
+      try proveMotion()
+      player.pause()
+      let restarts = mpv.restartEvents
+      player.seek(absoluteSecond: 0.033367)
+      try until("The paused seek to the rounded marker settles on the real decoder frame") {
+        mpv.restartEvents > restarts && !mpv.getFlag("seeking") && mpv.getFlag(MPVOption.PlaybackControl.pause)
+      }
+      pump(0.8)
+      let landed = mpv.getDouble(MPVProperty.timePos)
+      print(String(format: "LANDING: marker=0.033367 time-pos=%.9f recovery=%@", landed,
+                   String(describing: player.videoToolsLoopRecovery)))
+      try check(landed > 0.03 && landed < 0.0339, "mpv displays the frame at the requested marker")
+      try check(!player.videoToolsLoopRecovery.suspended && player.videoToolsLoopRecovery.failures == 0,
+                "A landing microseconds before the marker is accepted without corrections")
+      player.resume()
+      try until("Resuming after the paused landing plays the loop") { !mpv.getFlag(MPVOption.PlaybackControl.pause) }
+      try proveMotion()
+      controller.stopPreview()
+    }),
+    ("anchor", {
+      try reset()
+      // The file-loaded refresh records the range at the load position. Revealing the clip
+      // tab later must re-anchor an untouched range to where the user is actually watching.
+      controller.setPlaybackControlsVisible(false)
+      player.videoToolsMediaGeneration &+= 1
+      controller.refreshCurrentMedia(force: true)
+      let loadedStart = try timestamp(start.stringValue)
+      try check(abs(loadedStart - 0.25) < 0.12, "The file-loaded refresh records the load position as the default start")
+      let restarts = mpv.restartEvents
+      player.seek(absoluteSecond: 2)
+      try until("The real decoder settles on the later viewing position") {
+        mpv.restartEvents > restarts && !mpv.getFlag("seeking") && abs(mpv.getDouble(MPVProperty.timePos) - 2) < 0.12
+      }
+      controller.setPlaybackControlsVisible(true)
+      let anchoredStart = try timestamp(start.stringValue)
+      let anchoredEnd = try timestamp(end.stringValue)
+      try check(abs(anchoredStart - 2) < 0.12 && abs(anchoredEnd - anchoredStart - 5) < 0.001,
+                "Revealing the clip tab anchors the untouched default range at the current position")
+      try waitForRange(anchoredStart, anchoredEnd)
+      try proveMotion()
+      controller.stopPreview()
     }),
     ("restore", {
       try reset(position: 0.4)

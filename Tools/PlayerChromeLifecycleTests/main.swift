@@ -525,6 +525,41 @@ withFixture { controller in
   other.close()
 }
 
+withFixture { controller in
+  // Idle hiding keeps the settings panel open, so it must not report a close. Only an
+  // explicit close does, because AppKit sends no second disappearance for hidden content.
+  controller.showSettingsSidebar()
+  ChromeAnimations.drain()
+  check(controller.quickSettingView.closes == 0, "Opening the settings sidebar does not report a close")
+  controller.hideUIAndCursor()
+  ChromeAnimations.drain()
+  check(controller.sidebarAutoHidden && controller.sideBarView.isHidden && controller.quickSettingView.closes == 0,
+        "Idle hiding the settings sidebar does not report a close to the panel")
+  controller.hideSideBar(animate: false)
+  ChromeAnimations.drain()
+  check(controller.sideBarStatus == .hidden && controller.quickSettingView.closes == 1,
+        "Explicitly closing the auto-hidden settings sidebar reports exactly one close")
+  controller.showPlaylistSidebar()
+  ChromeAnimations.drain()
+  controller.hideSideBar(animate: false)
+  ChromeAnimations.drain()
+  check(controller.quickSettingView.closes == 1, "Closing the playlist sidebar does not notify the settings panel")
+}
+
+withFixture { controller in
+  controller.showSettingsSidebar()
+  ChromeAnimations.drain()
+  controller.hideUIAndCursor()
+  ChromeAnimations.drain()
+  check(controller.sideBarView.isHidden && controller.quickSettingView.closes == 0,
+        "The settings sidebar is concealed by the chrome before the window closes")
+  controller.invalidateChromeOnClose()
+  check(controller.sideBarStatus == .hidden && controller.quickSettingView.closes == 1,
+        "Closing the window while the chrome hides the settings sidebar still reports the close")
+  controller.invalidateChromeOnClose()
+  check(controller.quickSettingView.closes == 1, "Repeated close invalidation does not report another close")
+}
+
 for value in [Double.nan, .infinity, -.infinity] {
   check(PlayerChromePolicy.hideDelay(value) == 2.5, "Non-finite auto-hide delay uses the safe default")
 }

@@ -457,8 +457,34 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
 
   override func viewDidDisappear() {
     super.viewDidDisappear()
+    // The edge-controls chrome fades the whole sidebar together with the playback
+    // controls and AppKit reports that hidden state as a disappearance. The panel is
+    // still open, so a temporary clip or rotation preview must keep playing; only an
+    // actual close or detach ends it and restores the saved playback state.
+    guard !isHiddenWithPlayerChrome else { return }
+    sidebarDidClose()
+  }
+
+  /// The settings sidebar closed or its window is going away. The main window calls
+  /// this explicitly because AppKit reports no second disappearance for content that
+  /// the auto-hidden chrome already hid; repeated calls are harmless.
+  func sidebarDidClose() {
     videoToolsViewController?.setPlaybackControlsVisible(false)
     videoToolsViewController?.stopPreview()
+  }
+
+  /// True while the settings sidebar is merely hidden by the auto-hiding player chrome.
+  private var isHiddenWithPlayerChrome: Bool {
+    guard isViewLoaded, view.window != nil, let mainWindow,
+          mainWindow.sideBarStatus == .settings, mainWindow.sidebarAutoHidden else { return false }
+    // AppKit's cached isHiddenOrHasHiddenAncestor is stale inside appearance callbacks,
+    // so inspect the actual hidden flags up the attached hierarchy.
+    var current: NSView? = view
+    while let candidate = current {
+      if candidate.isHidden { return true }
+      current = candidate.superview
+    }
+    return false
   }
 
   deinit {

@@ -106,6 +106,7 @@
 "videotools.preview.active" = "Preview in player · %@ – %@";
 "videotools.preview.paused" = "Preview paused · %@ – %@";
 "videotools.preview.invalid" = "Enter a valid start and end time to preview.";
+"videotools.preview.stopped" = "Preview ended";
 "videotools.status.hdr_inspection" = "Inspecting the selected video frames and HDR metadata. Remaining time cannot be estimated yet.";
 "videotools.error.hdr10plus.format" = "This HDR10+ variant cannot be clipped safely. The supported path requires progressive single-layer HEVC, 10-bit limited-range BT.2020/PQ video with no mixed dynamic HDR. The source is unchanged.";
 "videotools.error.hdr10plus.encoder" = "The bundled encoder lacks HDR10+ preservation support. Update the complete application and retry; no downgraded clip was created.";

@@ -17,19 +17,28 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--media", type=Path, help="Optional local video, opened read-only; never copied or uploaded")
     parser.add_argument("--controller-ref", help="Compare an existing git revision of the production controller")
+    parser.add_argument("--parent-ref", help="Compare an existing git revision of the production settings parent")
+    parser.add_argument("--core-ref", help="Compare an existing git revision of the production playback methods")
     parser.add_argument("--build-only", action="store_true", help="Check compilation without opening any test windows")
-    parser.add_argument("--case", choices=["all", "opening", "editing", "markers", "navigation", "boundary", "precision", "invalid", "restore"], default="all")
+    parser.add_argument("--case", choices=["all", "opening", "editing", "markers", "navigation", "boundary", "precision",
+                                           "invalid", "restore", "chrome-autohide", "media-reload", "fullwidth",
+                                           "landing", "anchor"], default="all")
     args = parser.parse_args()
     if args.media and not args.media.is_file():
         parser.error("The media argument must be an existing local file")
-    controller_ref = None
-    if args.controller_ref:
+    def resolve(reference, description):
+        if not reference:
+            return None
         try:
-            controller_ref = subprocess.check_output([
-                "git", "rev-parse", "--verify", "--end-of-options", f"{args.controller_ref}^{{commit}}"
+            return subprocess.check_output([
+                "git", "rev-parse", "--verify", "--end-of-options", f"{reference}^{{commit}}"
             ], cwd=ROOT, text=True).strip()
         except subprocess.CalledProcessError:
-            parser.error("The controller reference must resolve to an existing commit")
+            parser.error(f"The {description} reference must resolve to an existing commit")
+
+    controller_ref = resolve(args.controller_ref, "controller")
+    parent_ref = resolve(args.parent_ref, "parent")
+    core_ref = resolve(args.core_ref, "playback core")
     tests = ROOT / "Tools/ClipPreviewLiveTests"
     with TestAppWorkspace(prefix="clip-preview-live-") as directory:
         work = Path(directory)
@@ -51,7 +60,14 @@ def main():
             target.mkdir()
             for name in ["Localizable.strings", "MediaInfo.strings"]:
                 shutil.copyfile(ROOT / "iina" / f"{language}.lproj" / name, target / name)
-        subprocess.run(["xcrun", "swift", str(tests / "extract.swift"), str(ROOT), str(work)], check=True)
+        extract = ["xcrun", "swift", str(tests / "extract.swift"), str(ROOT), str(work), "-", "-"]
+        for index, (reference, name) in enumerate([(parent_ref, "QuickSettingViewController.swift"),
+                                                   (core_ref, "PlayerCore.swift")], start=5):
+            if reference:
+                baseline = work / name
+                baseline.write_bytes(subprocess.check_output(["git", "show", f"{reference}:iina/{name}"], cwd=ROOT))
+                extract[index] = str(baseline)
+        subprocess.run(extract, check=True)
         controller = ROOT / "iina/VideoTools/VideoToolsViewController.swift"
         if controller_ref:
             controller = work / "VideoToolsViewController.swift"

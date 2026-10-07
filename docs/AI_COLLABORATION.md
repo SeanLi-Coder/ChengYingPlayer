@@ -12,6 +12,18 @@
 这是澄影视界播放器，不是独立的 Local Video Cutter 项目。
 文档中的历史观察截至 **2026-09-25**；开始前以当前源码、用户新要求和实际测试为准。
 
+## 2026-10-07 剪辑预览随控制条自动隐藏而中断
+
+三轮预览修复后用户仍反馈「预览一直不行」的根因与修复见
+[剪辑预览自动隐藏交接](handoffs/2026-10-07-clip-preview-chrome-autohide.md)。
+Movist 风格界面把侧栏随控制条一起 `isHidden`，AppKit 据此调用 `viewDidDisappear`，
+`QuickSettingViewController` 便停止预览并恢复播放位置；鼠标一动又重新开始。
+修复只在面板仍打开且被控制条自动隐藏时跳过停止逻辑，真正关闭侧栏（含窗口关闭、裁剪模式退出）
+改为显式通知面板。同轮经独立评审确认并修复：载入新文件时第二个观察者取消自动预览、打开剪辑页跳回
+文件载入位置、逐字输入时来回跳、全角标点无法解析、精确 seek 落点早于 A 导致循环挂起且无法恢复。
+实播 harness 新增 `chrome-autohide`、`media-reload`、`anchor`、`fullwidth`、`landing` 用例以及
+`--parent-ref` / `--core-ref` 负对照；发布状态以该交接记录为准。
+
 ## 2026-10-06 Instagram：Qwen 接手修补前先读
 
 用户要求将 Codex 对 `v0.2.65` / build `76` 的 review 交给 Qwen 修复，详情见

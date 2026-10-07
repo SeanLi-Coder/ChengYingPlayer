@@ -56,12 +56,15 @@ final class MPVController {
   }
   func addHook(_ name: String, hook: MPVHookValue) { hooks.append(hook) }
 }
+enum OSDMessage { case custom(String) }
 final class PlayerCore: NSObject {
   let info = PlaybackInfo()
   let mpv = MPVController()
   var videoToolsMediaGeneration: UInt64 = 1
   var videoToolsLoopRecovery = VideoToolsLoopRecovery()
   var lastStepBackwards: Bool?
+  var osdMessages: [String] = []
+  func sendOSD(_ message: OSDMessage) { if case .custom(let text) = message { osdMessages.append(text) } }
   func syncPositionIfNeeded() {}
   func togglePause() { mpv.values["pause"] = !mpv.getFlag("pause") }
   func pause() { mpv.values["pause"] = true }

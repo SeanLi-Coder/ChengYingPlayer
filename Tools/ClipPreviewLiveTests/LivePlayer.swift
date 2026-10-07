@@ -23,7 +23,13 @@ final class PlaybackInfo {
   var vid: Int? = 1
 }
 final class LiveVideoView { func displayActive() { _ = clip_renderer_pump() } }
-final class MainWindowController: NSObject { let videoView = LiveVideoView() }
+enum SideBarViewType { case hidden, settings, playlist, plugins }
+final class MainWindowController: NSObject {
+  let videoView = LiveVideoView()
+  /// The production parent consults these to tell an auto-hidden sidebar from a closed one.
+  var sideBarStatus = SideBarViewType.settings
+  var sidebarAutoHidden = false
+}
 enum Logger { enum Level { case verbose, warning, debug } }
 enum OSDMessage { case custom(String) }
 final class MPVHookValue {

@@ -195,7 +195,8 @@ class MainWindowController: PlayerWindowController {
   private var sidebarHeightDragValue: CGFloat?
   private var chromeAnimationGeneration: UInt64 = 0
   private var sidebarAnimationGeneration: UInt64 = 0
-  private var sidebarAutoHidden = false
+  /// The sidebar faded out with the player chrome and will return on pointer movement.
+  private(set) var sidebarAutoHidden = false
   private var controlInteractionDepth = 0
 
   private var isUsingEdgeControls: Bool { oscPosition == .bottom }
@@ -315,8 +316,10 @@ class MainWindowController: PlayerWindowController {
     controlInteractionDepth = 0
     sidebarAutoHidden = false
     sidebarAnimationState = .hidden
+    let closingSidebar = sideBarStatus
     sideBarStatus = .hidden
     sideBarView.subviews.forEach { $0.removeFromSuperview() }
+    notifySidebarClosed(closingSidebar)
     sidebarResizeHandle = nil
     sidebarContentBottomConstraint = nil
     sideBarView.isHidden = true
@@ -2647,11 +2650,19 @@ class MainWindowController: PlayerWindowController {
     }
   }
 
+  /// AppKit reports no second disappearance for sidebar content that the auto-hidden
+  /// chrome already hid, so every real close tells the settings panel explicitly.
+  private func notifySidebarClosed(_ closingSidebar: SideBarViewType) {
+    guard closingSidebar == .settings else { return }
+    quickSettingView.sidebarDidClose()
+  }
+
   func hideSideBar(animate: Bool = true, after: @escaping () -> Void = { }) {
     sidebarResizeHandle?.cancelResize()
     sidebarAnimationGeneration &+= 1
     let generation = sidebarAnimationGeneration
     chromeAnimationGeneration &+= 1
+    let closingSidebar = sideBarStatus
     sidebarAutoHidden = false
     // Invalidate any captured auto-hide completion before explicitly closing the panel.
     showUI(force: true)
@@ -2674,6 +2685,7 @@ class MainWindowController: PlayerWindowController {
       if self.sidebarAnimationGeneration == generation && self.sidebarAnimationState == .willHide {
         self.sideBarStatus = .hidden
         self.sideBarView.subviews.forEach { $0.removeFromSuperview() }
+        self.notifySidebarClosed(closingSidebar)
         self.sidebarResizeHandle = nil
         self.sidebarContentBottomConstraint = nil
         self.sideBarView.isHidden = true
@@ -2832,6 +2844,7 @@ class MainWindowController: PlayerWindowController {
   func exitInteractiveMode(immediately: Bool = false, then: @escaping () -> Void = {}) {
     window?.backgroundColor = .black
     standardWindowButtons.forEach { $0.isEnabled = true }
+    let closingSidebar = sideBarStatus
 
     if let constraint = aspectRatioConstraintForInteractiveMode {
       constraint.isActive = false
@@ -2852,6 +2865,7 @@ class MainWindowController: PlayerWindowController {
       }
       self.cropSettingsView?.cropBoxView.removeFromSuperview()
       self.sideBarStatus = .hidden
+      self.notifySidebarClosed(closingSidebar)
       self.bottomView.subviews.removeAll()
       self.bottomView.isHidden = true
       return
@@ -2868,6 +2882,7 @@ class MainWindowController: PlayerWindowController {
     }) {
       self.cropSettingsView?.cropBoxView.removeFromSuperview()
       self.sideBarStatus = .hidden
+      self.notifySidebarClosed(closingSidebar)
       self.bottomView.subviews.removeAll()
       self.bottomView.isHidden = true
       self.showUI()

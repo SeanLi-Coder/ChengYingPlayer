@@ -89,6 +89,7 @@
 "videotools.preview.active" = "播放器中預覽 · %@ – %@";
 "videotools.preview.paused" = "預覽已暫停 · %@ – %@";
 "videotools.preview.invalid" = "請填寫有效的起止時間後預覽。";
+"videotools.preview.stopped" = "預覽結束";
 "videotools.status.hdr_inspection" = "正在檢查所選區間的影片影格和 HDR 中繼資料，剩餘時間暫時無法估算。";
 "videotools.error.hdr10plus.format" = "暫時無法安全剪輯這種 HDR10+ 變體。目前支援逐行、單層 HEVC、10 位 limited-range BT.2020/PQ，且不能混合其他動態 HDR；原影片未改動。";
 "videotools.error.hdr10plus.encoder" = "目前隨軟體安裝的編碼器不支援保留 HDR10+。請完整更新軟體後重試；沒有產生降級畫質的成品。";

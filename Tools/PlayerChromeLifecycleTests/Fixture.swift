@@ -127,7 +127,9 @@ class FixtureSidebar: NSViewController, SidebarViewController {
 final class QuickSettingViewController: FixtureSidebar {
   enum TabViewType { case video, audio, sub }
   var currentTab: TabViewType = .video
+  var closes = 0
   func pleaseSwitchToTab(_ tab: TabViewType) { currentTab = tab }
+  func sidebarDidClose() { closes += 1 }
 }
 final class PlaylistViewController: FixtureSidebar {
   enum TabViewType { case playlist, chapters }

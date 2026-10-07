@@ -402,7 +402,7 @@ CHENGYING_PERFORMANCE_BENCHMARK=1 bash Tools/MediaFolderBrowserTests/run.sh
 
 在 Mac 上执行 `./Tools/VideoToolsTests/run.sh` 可运行原生播放与打点回归检查；只需 Xcode Command Line Tools。检查直接编译真实的工具界面和播放器桥接代码，使用模拟播放器验证按钮、区间预览、打点精度、刷新定时器与中文布局，并覆盖固定快捷键解析、循环边界策略和累计旋转队列。输入测试使用真正的 AppKit field editor，不手动伪造文字变化通知。完整 App 构建和媒体处理测试由 GitHub Actions 继续验证。
 
-剪辑自动预览实播检查：准备好仓库锁定的 `deps/lib/libmpv.2.dylib` 和媒体工具后，运行 `python3 -B Tools/ClipPreviewLiveTests/run.py`。它编译生产工具面板、桥接与播放方法，通过真实输入、打点按钮和 libmpv 软件解码／渲染验证延迟启动、画面帧交付、反复修改、区间循环、片尾精度、选新终点与状态恢复；默认只生成合成视频。加 `--media /path/to/authorized-local-video.mp4` 可只读测试指定本地素材，不复制或上传原片、不改播放器偏好。此检查不等于正式 App 的硬件解码或系统级键盘事件验收。测试 App 使用受管 `.noindex` 工作区并在结束后精确注销清理。
+剪辑自动预览实播检查：准备好仓库锁定的 `deps/lib/libmpv.2.dylib` 和媒体工具后，运行 `python3 -B Tools/ClipPreviewLiveTests/run.py`。它编译生产工具面板、桥接与播放方法，通过真实输入、打点按钮和 libmpv 软件解码／渲染验证延迟启动、画面帧交付、反复修改、区间循环、片尾精度、选新终点与状态恢复；默认只生成合成视频。加 `--media /path/to/authorized-local-video.mp4` 可只读测试指定本地素材，不复制或上传原片、不改播放器偏好。`chrome-autohide` 用例覆盖 Movist 风格控制条自动隐藏侧栏时预览必须继续、真正关闭时必须停止，`media-reload`、`anchor`、`fullwidth`、`landing` 分别覆盖换片后的自动预览、打开面板时锚定当前位置、全角输入与精确 seek 落点容差；加 `--parent-ref`、`--controller-ref` 或 `--core-ref <commit>` 可用旧版源码作负对照。此检查不等于正式 App 的硬件解码或系统级键盘事件验收。测试 App 使用受管 `.noindex` 工作区并在结束后精确注销清理。
 
 画面缩放与平移专项检查：`bash Tools/VideoViewportTests/run.sh` 使用真实 AppKit 窗口、键盘事件和生产桥接代码检查快捷键、范围限制、复位、焦点保护及播放状态不变；准备好播放动态库和媒体工具后，`bash Tools/VideoViewportTests/Live/run.sh` 对合成 4K 视频进行真实 mpv / OpenGL 像素检查，验证缩放比例、四向平移和窗口尺寸不变。默认要求硬件解码，CI 明确设置 `VIDEO_VIEWPORT_LIVE_MODE=software` 使用软件解码，两种结果分别标示。
 

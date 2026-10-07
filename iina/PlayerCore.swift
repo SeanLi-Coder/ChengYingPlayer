@@ -809,6 +809,11 @@ class PlayerCore: NSObject {
     if mpv.getFlag(MPVProperty.eofReached) {
       seek(absoluteSecond: 0)
     }
+    if videoToolsLoopRecovery.suspended {
+      // An explicit resume is the user's decision: grant the loop a fresh recovery budget
+      // instead of re-pausing forever behind a transient OSD.
+      videoToolsLoopRecovery.reset()
+    }
     videoToolsEnforceLoopBounds()
     guard !videoToolsLoopRecovery.suspended else { return }
     mpv.setFlag(MPVOption.PlaybackControl.pause, false, level: .verbose)
@@ -944,9 +949,13 @@ class PlayerCore: NSObject {
     }
     guard !mpv.getFlag("seeking") else { return }
     if playbackRestarted { videoToolsLoopRecovery.didRestart() }
-    guard videoToolsLoopRecovery.pendingTarget == nil,
-          let position = videoToolsCurrentTime else { return }
-    if range.contains(position), !mpv.getFlag(MPVProperty.eofReached) {
+    guard videoToolsLoopRecovery.pendingTarget == nil else { return }
+    // Use the raw decoder position: the EOF substitution in videoToolsCurrentTime serves
+    // marker capture, while mpv reports eof-reached at the B clip of an active loop.
+    let position = mpv.getDouble(MPVProperty.timePos)
+    guard position.isFinite else { return }
+    // A paused last frame of the range is in range; only playback at EOF needs the wrap.
+    if range.admits(position), !mpv.getFlag(MPVProperty.eofReached) || mpv.getFlag(MPVOption.PlaybackControl.pause) {
       videoToolsLoopRecovery.reachedRange()
       return
     }

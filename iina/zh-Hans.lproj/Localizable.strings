@@ -106,6 +106,7 @@
 "videotools.preview.active" = "播放器中预览 · %@ – %@";
 "videotools.preview.paused" = "预览已暂停 · %@ – %@";
 "videotools.preview.invalid" = "请填写有效的起止时间后预览。";
+"videotools.preview.stopped" = "预览结束";
 "videotools.status.hdr_inspection" = "正在检查所选区间的视频帧和 HDR 元数据，剩余时间暂无法估算。";
 "videotools.error.hdr10plus.format" = "暂时无法安全剪辑这种 HDR10+ 变体。当前支持逐行、单层 HEVC、10 位 limited-range BT.2020/PQ，且不能混合其他动态 HDR；原视频未改动。";
 "videotools.error.hdr10plus.encoder" = "当前随软件安装的编码器不支持保留 HDR10+。请完整更新软件后重试；没有生成降级画质的成品。";
