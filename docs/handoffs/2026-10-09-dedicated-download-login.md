@@ -1,7 +1,8 @@
 # 独立下载登录与升级后权限体验
 
 基线：`7e509959`（上一正式版 `v0.2.69` / build `80` 后的文档提交）。
-候选：`v0.2.70` / build `81`。本轮唯一发布者为 Codex；尚未宣称正式发布。
+候选：`v0.2.70` / build `81`，提交 `2e069c40` 已进入主线，发布被实播回归拦截。
+本轮唯一发布者为 Codex；没有正式发布，最新公开版仍为 `v0.2.69`。
 
 ## 用户需求与实现
 
@@ -31,7 +32,8 @@
 - 下载模块完整回归：1,373 项通过、65 个 subtests 通过，无跳过；包含独立存储、认证接入、API、总结与真实隔离 Chrome UI。
 - 独立安全复核通过：总结的两条请求路径均保留 host-only Cookie 策略；关闭失败不解除 watchdog；旧任务不换身份。
 - source helper 协议／私有 API／重启 smoke 通过。新增冻结自检验收和实际更新保留
-  专用登录配置、快照、浏览器会话合成文件的检查。本机真实签名全量更新／替换／重启检查通过；冻结构建及其他更新场景待 CI 完成。
+  专用登录配置、快照、浏览器会话合成文件的检查。本机六种真实签名安装场景通过：完整包、增量包、损坏完整包拒绝、损坏增量回退、不匹配增量回退、双重损坏拒绝。
+  成功路径均完成实际替换和重启；使用本地 Sparkle SDK 的隔离 App fixture，不冒充最终发布 App 的 CI 验收。
 - `ruff check`、`git diff --check`、vendor 完整性与 `typos==1.50.2` 均通过；发布策略 19 项、公开验收工具 10 项通过。
 - 所有测试使用合成资料，没有读取用户日常 Chrome、钥匙串、真实 Cookie 或测试其他账号。
   没有向真实网站登录；六平台入口已接入不等于六平台真实账号验收。
@@ -49,8 +51,76 @@ build/player-v29-tests.nD75s9/bin/python Tools/DownloaderHelper/verify_vendor.py
 build/player-v29-tests.nD75s9/bin/python -B Tools/SparkleUpdateTests/test_public_workspace.py
 build/player-v29-tests.nD75s9/bin/python -B Tools/SparkleUpdateTests/test_release_policy.py
 SPARKLE_TEST_ROOT=build/sparkle-local-updater.tmslcJ/sdk build/player-v29-tests.nD75s9/bin/python -B Tools/AppUpdateIntegrationTests/run.py --scenario upgrade
+SPARKLE_TEST_ROOT=build/sparkle-local-updater.tmslcJ/sdk build/player-v29-tests.nD75s9/bin/python -B Tools/AppUpdateIntegrationTests/run.py --scenario delta-upgrade
+SPARKLE_TEST_ROOT=build/sparkle-local-updater.tmslcJ/sdk build/player-v29-tests.nD75s9/bin/python -B Tools/AppUpdateIntegrationTests/run.py --scenario tampered-dmg
+SPARKLE_TEST_ROOT=build/sparkle-local-updater.tmslcJ/sdk build/player-v29-tests.nD75s9/bin/python -B Tools/AppUpdateIntegrationTests/run.py --scenario tampered-delta
+SPARKLE_TEST_ROOT=build/sparkle-local-updater.tmslcJ/sdk build/player-v29-tests.nD75s9/bin/python -B Tools/AppUpdateIntegrationTests/run.py --scenario mismatched-delta
+SPARKLE_TEST_ROOT=build/sparkle-local-updater.tmslcJ/sdk build/player-v29-tests.nD75s9/bin/python -B Tools/AppUpdateIntegrationTests/run.py --scenario tampered-delta-and-dmg
 ```
 
 ## 发布记录
 
 尚未发布。必须完成完整回归、冻结 helper、DMG／更新签名、实际更新保留测试和匿名交付核验后更新此节。
+
+### 候选首轮与渲染测试对照
+
+候选提交 `2e069c409e5c1e13dc1ed1bd544fbd2bd5d94567`，标签 `v0.2.70` / build `81`。
+流水线 `37815780691` 的首轮：媒体／下载测试 job `113443922406` 成功，
+构建 job `113443921936` 在既有 4K 关闭／重开渲染测试失败；没有上传发行资产，
+发布 job `113457285945` 跳过。此前已完成内置工具冻结构建及其自检。
+
+- 失败发生在第 0 次首次播放、执行关闭之前：加载和播放推进正常，`frames=4`、
+  `pictures=0`、`position=2.3`、等待 `8.010s`。原“两张实际彩色图片”断言有效拦截。
+- 本机原样命令也复现一次：`frames=7`、`pictures=0`、`position=7.6`、等待 `8.005s`。
+  临时有界诊断发现真实 FBO 非零且完整、上下文正确、没有 GL 错误，但采样全黑。
+  不能归因于零 FBO；成功诊断前后 viewport 都为 `640×360`，也没有尺寸越界证据。
+- 随后的诊断、关闭诊断和精确旧观察器对照三轮各完成 `30` 次加载／关闭，
+  `rendered=61`、`pictures=61`。未遮挡标记为 false、App 未激活也能成功出图，
+  不把遮挡当作已确认根因。所有测试工作区正常注销和清理。
+- 完全撤销临时诊断、恢复原文件及编译顺序后，原命令再次在首次播放失败：
+  `frames=7`、`pictures=0`、`position=7.5833`、等待 `8.004s`。
+  因而不能把诊断版本的通过当作原测试已稳定通过，更不能当作修复证据。
+- 单次最小日志实验仅增加有界 mpv 警告／错误输出及 CGL 初始化上下文比较，
+  保持原编译顺序、采样和断言；完成 `30/61/61`。只有预期软件渲染器警告，
+  首八次 draw 的初始化／回调／当前上下文相同，没有 shader 错误。
+  这次没有复现失败，故不能排除失败运行中的上下文问题，也不能认定日志改变修复了问题。
+  所有临时诊断均精确撤销，`git diff --exit-code -- Tools/PlayerCloseTests` 为空。
+- 该目录、生产 `ViewLayer`、锁与依赖选择、CI 工作流相对 `v0.2.69` 完全未改。
+  现有证据支持间歇性现象，但不足以确定根因，不能宣称生产黑屏或测试本身已修复。
+- 仅对相同候选提交重跑一次失败构建 job；保持原始测试和全部断言不变，
+  没有跳过或放宽超时。如果第二次仍失败，不能继续重复试绿作为发布依据。
+- 第二次构建 job `113461595044` 已在同一门失败：首次播放 `frames=4`、
+  `pictures=0`、`position=2.9833`、等待 `8.013s`，测试工作区正常清理。
+  发布再次跳过；没有第三次原样重试，没有发布 `v0.2.70`。
+- 本机单变量补充 `NSApplication.shared.finishLaunching()` 仍在首次播放失败：
+  `frames=7`、`pictures=0`、`position=7.6`、等待 `8.000s`。
+  该诊断改动已撤销，不能把启动完成步骤遗漏宣称为此次黑帧根因。
+- 延后到 READY 才输出的有界诊断明确再次复现失败：七次完成绘制的初始化／回调／
+  当前 context 一致，入口／出口 viewport 均为 `[0,0,640,360]`，读写 FBO 一致且完整，
+  颜色掩码全开、scissor 关闭、无 draw 重入，63 个 RGBA 样本全黑且 GL error 为零。
+  因而这次失败不是上述几项采样假阴性。增加 NEXT_FRAME_INFO 和更多 GL 查询的下一次
+  诊断则完成 `30/61/61`，只能记录为通过的诊断运行，不能当作生产修复。
+- 固定诊断矩阵只编译一次，二进制 SHA-256 为
+  `d2243d2f9a148b8e5e947a95fb6a296e5a1689c8383b2b99ba6957524c0a9fdb`。
+  原诊断／仅 NEXT_FRAME_INFO／仅扩展 GL 查询／两者／原诊断的固定顺序结果为
+  `PASS / PASS / FAIL / FAIL / PASS`；成功项各完成 `30/61/61`，失败项仍在首轮全黑。
+  两者模式失败时七条 NEXT_FRAME_INFO 全部返回成功、flags 均为 1，depth、stencil、
+  cull、blend、rasterizer discard、sRGB 全关闭；其余 context／viewport／FBO 正常。
+  不把查询相关性认定为根因，更不以加入查询代替修复。汇总没有保留 target_time，
+  不补猜这项数据。合成结果保留于本机 `build/player-close-diagnostic-matrix-20261009.json`。
+- 最后单次完成性诊断只在原九点全黑时才会 `glFinish` 并重读，二次结果不参与原通过断言。
+  该次完成 `30/61/61`，未遇原始黑帧，因而 `glFinish` 从未执行；同步假设仍未验证。
+  完整合成记录见本机 `build/player-close-completion-diagnostic-20261009.json`。
+  其后用 `apply_patch` 撤销全部临时测试改动，`git diff --exit-code HEAD -- Tools/PlayerCloseTests`
+  为空。没有将诊断查询、固定延迟、放宽断言或跳过检查作为发布修复。
+
+### 当前交付状态与后续入口
+
+- 独立登录功能代码和上述功能回归已完成，但本轮正式发布未完成。核实远端 latest 仍为
+  `v0.2.69`；没有覆盖用户安装、偏好、模型、Chrome 资料或系统权限。
+- 渲染检查失败发生于测试 fixture 的首次软件 OpenGL 播放。尚未确定是测试环境／观察器
+  还是生产路径问题，不能宣称只是误报，也不能外推为所有实际硬件播放均黑屏。
+- 后续应先保留原始命令复现，找出可解释失败且能验证的最小修补；不要恢复临时诊断后
+  仅凭一次通过就发布。修补必须保留真实彩色图片、播放推进和 30 次关闭／重开检查。
+- 不移动 `v0.2.70` 标签。若需要代码或测试修补，使用更高版本／build 作为新候选，
+  完成完整构建、冻结 helper、签名、实际更新保留及公开更新交付核验后才能正式发布。
