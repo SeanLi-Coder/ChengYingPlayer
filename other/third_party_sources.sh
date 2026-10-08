@@ -25,7 +25,10 @@ LIBWEBP_SOURCE_SHA256="e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e
 X264_VERSION="r3222"
 X264_COMMIT="b35605ace3ddf7c1a5d67a2eb553f034aef41d55"
 X264_SOURCE_FILE="x264-${X264_COMMIT}.tar.gz"
-X264_SOURCE_URL="https://code.videolan.org/videolan/x264/-/archive/${X264_COMMIT}/${X264_SOURCE_FILE}"
+# Official origin: https://code.videolan.org/videolan/x264
+# The fixed-commit GitHub mirror archive was verified byte-for-byte against the
+# original VideoLAN archive. Keep the original filename and SHA256 unchanged.
+X264_SOURCE_URL="https://codeload.github.com/mirror/x264/tar.gz/${X264_COMMIT}"
 X264_SOURCE_SHA256="cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9"
 
 X265_VERSION="4.3"
@@ -175,6 +178,8 @@ fetch_verified_source() {
   local curl_options=(--fail --location --proto '=https' --proto-redir '=https')
   if [[ "$record_name" == freetype && "$url" == "$FREETYPE_SOURCE_URL" ]]; then
     fallback="$FREETYPE_SOURCE_MIRROR_URL"
+    curl_options+=(--connect-timeout 15 --max-time 120 --retry 0)
+  elif [[ "$record_name" == x264 ]]; then
     curl_options+=(--connect-timeout 15 --max-time 120 --retry 0)
   else
     curl_options+=(--retry 3 --retry-all-errors)

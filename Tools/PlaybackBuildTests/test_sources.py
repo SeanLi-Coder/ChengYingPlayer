@@ -28,6 +28,11 @@ FREETYPE_MIRROR_URL = (
 )
 PINNED_SHA256 = "732010aa5ef461fa93355ed2c6c5fedb48ddc4b74e697eaabe8907eaeb943011"
 PINNED_FREETYPE_SHA256 = "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f"
+X264_COMMIT = "b35605ace3ddf7c1a5d67a2eb553f034aef41d55"
+X264_VERSION = "r3222-" + X264_COMMIT
+X264_FILENAME = f"x264-{X264_COMMIT}.tar.gz"
+X264_PRIMARY_URL = f"https://codeload.github.com/mirror/x264/tar.gz/{X264_COMMIT}"
+PINNED_X264_SHA256 = "cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9"
 FIXTURE_BYTES = b"Verified source fixture\x00\xff\x10\n"
 FIXTURE_SHA256 = hashlib.sha256(FIXTURE_BYTES).hexdigest()
 
@@ -92,6 +97,79 @@ class PlaybackSourceTests(unittest.TestCase):
             next(argument for argument in entry["arguments"] if "://" in argument)
             for entry in self.requests()
         ]
+
+    def test_x264_primary_is_bounded_and_https_only(self):
+        self.filename = X264_FILENAME
+        self.set_plan({X264_PRIMARY_URL: self.response()})
+        self.assert_success(self.fetch_x264())
+        self.assertEqual(self.urls(), [X264_PRIMARY_URL])
+        arguments = self.requests()[0]["arguments"]
+        for flag, expected in (
+            ("--connect-timeout", "15"),
+            ("--max-time", "120"),
+            ("--retry", "0"),
+            ("--proto", "=https"),
+            ("--proto-redir", "=https"),
+        ):
+            self.assertEqual(arguments[arguments.index(flag) + 1], expected)
+        self.assertNotIn("--insecure", arguments)
+        self.assertNotIn("--retry-all-errors", arguments)
+
+    def test_x264_verified_cache_skips_network(self):
+        self.filename = X264_FILENAME
+        self.cache.mkdir()
+        self.destination.write_bytes(FIXTURE_BYTES)
+        before = self.destination.stat()
+        self.assert_success(self.fetch_x264())
+        self.assertEqual(self.urls(), [])
+        self.assertEqual(self.destination.stat().st_ino, before.st_ino)
+        self.assertEqual(self.destination.stat().st_mtime_ns, before.st_mtime_ns)
+
+    def test_x264_success_response_with_bad_digest_fails_closed(self):
+        self.filename = X264_FILENAME
+        self.set_plan({X264_PRIMARY_URL: self.response(body=b"HTTP 200 but not the archive")})
+        for conditional in (False, True):
+            with self.subTest(conditional=conditional):
+                result = self.fetch_x264(conditional=conditional)
+                self.assert_failure(result, 1)
+                self.assertIn("checksum mismatch", result.stderr)
+                self.assertFalse(self.destination.exists())
+        self.assertEqual(self.urls(), [X264_PRIMARY_URL] * 2)
+
+    def test_x264_transport_errors_clean_up_without_fallback(self):
+        self.filename = X264_FILENAME
+        statuses = (6, 7, 18, 22, 23, 28, 35, 47, 51, 60)
+        for conditional in (False, True):
+            for status in statuses:
+                with self.subTest(conditional=conditional, status=status):
+                    self.set_plan({X264_PRIMARY_URL: self.response(status, b"incomplete archive")})
+                    self.assert_failure(self.fetch_x264(conditional=conditional), status)
+                    self.assertFalse(self.destination.exists())
+        self.assertEqual(self.urls(), [X264_PRIMARY_URL] * (len(statuses) * 2))
+
+    def test_x264_cleanup_preserves_unrelated_partial(self):
+        self.filename = X264_FILENAME
+        self.cache.mkdir()
+        unrelated = self.cache / (X264_FILENAME + ".partial-unrelated")
+        unrelated.write_bytes(b"another download")
+        self.set_plan({X264_PRIMARY_URL: self.response(28, b"partial")})
+        result = self.fetch_x264()
+        self.assertEqual(result.returncode, 28, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(unrelated.read_bytes(), b"another download")
+        self.assertEqual(list(self.cache.glob("*.partial*")), [unrelated])
+        self.assertFalse(self.destination.exists())
+        self.assertEqual(self.urls(), [X264_PRIMARY_URL])
+
+    def test_production_x264_record_preserves_fixed_archive_identity(self):
+        expected = ["x264", X264_VERSION, X264_FILENAME, X264_PRIMARY_URL, PINNED_X264_SHA256]
+        result = subprocess.run(
+            ["/bin/bash", "-c", 'source "$1"; third_party_source_records',
+             "source-records", str(THIRD_PARTY_SOURCES)],
+            check=True, text=True, capture_output=True, timeout=10,
+        )
+        records = [line.split("\t") for line in result.stdout.splitlines()]
+        self.assertEqual([record for record in records if record[0] == "x264"], [expected])
 
     def test_freetype_mirror_used_when_savannah_is_unreachable(self):
         self.filename = FREETYPE_FILENAME
@@ -276,6 +354,19 @@ class PlaybackSourceTests(unittest.TestCase):
             version=FREETYPE_VERSION,
             filename=FREETYPE_FILENAME,
             url=url,
+            records_function="third_party_source_records",
+            **extra,
+        )
+
+    def fetch_x264(self, **extra):
+        """Drive the actual third-party x264 path with fixture bytes and hashing."""
+        return self.fetch(
+            entrypoint="fetch_verified_source",
+            component="x264",
+            record_name="x264",
+            version=X264_VERSION,
+            filename=X264_FILENAME,
+            url=X264_PRIMARY_URL,
             records_function="third_party_source_records",
             **extra,
         )
