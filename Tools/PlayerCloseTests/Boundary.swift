@@ -1,6 +1,31 @@
 import Cocoa
 import OpenGL.GL3
 
+let failureDiagnosticDirectory: URL? = CommandLine.arguments.count > 2
+  ? URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true) : nil
+let playerCloseGLPassDiagnosticsEnabled = ProcessInfo.processInfo.environment["CLOSE_TEST_GL_PASS_DIAGNOSTICS"] == "1"
+var playerCloseGLInitUnpackSnapshots: [[String: Any]] = []
+
+private func captureInitialUnpackState(_ phase: String) {
+  guard playerCloseGLPassDiagnosticsEnabled else { return }
+  let parameters: [(String, GLenum)] = [
+    ("clientStorageApple", GLenum(0x85B2)),
+    ("alignment", GLenum(GL_UNPACK_ALIGNMENT)), ("swapBytes", GLenum(GL_UNPACK_SWAP_BYTES)),
+    ("rowLength", GLenum(GL_UNPACK_ROW_LENGTH)), ("skipRows", GLenum(GL_UNPACK_SKIP_ROWS)),
+    ("skipPixels", GLenum(GL_UNPACK_SKIP_PIXELS)), ("imageHeight", GLenum(GL_UNPACK_IMAGE_HEIGHT)),
+    ("skipImages", GLenum(GL_UNPACK_SKIP_IMAGES)),
+    ("pixelUnpackBuffer", GLenum(GL_PIXEL_UNPACK_BUFFER_BINDING)),
+  ]
+  var snapshot: [String: Any] = ["phase": phase, "entryError": glGetError()]
+  for (name, parameter) in parameters {
+    var value: GLint = -1
+    glGetIntegerv(parameter, &value)
+    snapshot[name] = value
+  }
+  snapshot["queryError"] = glGetError()
+  playerCloseGLInitUnpackSnapshots.append(snapshot)
+}
+
 enum Logger {
   enum Level { case debug, verbose, warning }
   static func makeSubsystem(_ value: String) -> String { value }
@@ -14,6 +39,10 @@ final class MPVController {
   var openGLContext: CGLContextObj!
   init() {
     mpv = mpv_create()!
+    if failureDiagnosticDirectory != nil {
+      precondition(mpv_request_log_messages(mpv, "debug") >= 0)
+      precondition(mpv_set_option_string(mpv, "screenshot-format", "png") >= 0)
+    }
     for (name, value) in [
       ("config", "no"), ("terminal", "no"), ("input-default-bindings", "no"),
       ("input-terminal", "no"), ("idle", "yes"), ("keep-open", "yes"),
@@ -45,6 +74,11 @@ final class MPVController {
     defer { pointers.forEach { free(UnsafeMutablePointer(mutating: $0)) } }
     precondition(mpv_command(mpv, &pointers) >= 0)
   }
+  func diagnosticCommand(_ args: [String], identifier: UInt64) -> Int32 {
+    var pointers: [UnsafePointer<CChar>?] = args.map { UnsafePointer(strdup($0)) } + [nil]
+    defer { pointers.forEach { free(UnsafeMutablePointer(mutating: $0)) } }
+    return mpv_command_async(mpv, identifier, &pointers)
+  }
   func lockAndSetOpenGLContext() {
     CGLLockContext(openGLContext)
     CGLSetCurrentContext(openGLContext)
@@ -56,8 +90,31 @@ final class MPVController {
   }
   func startRendering(layer: ViewLayer) {
     openGLContext = CGLGetCurrentContext()
+    captureInitialUnpackState("before-context-create")
+    if let mode = ProcessInfo.processInfo.environment["CLOSE_TEST_MPE_CONTROL"] {
+      precondition(mode == "default" || mode == "disabled", "Unknown MPE diagnostic control")
+      var before: GLint = -1
+      let beforeResult = CGLIsEnabled(openGLContext, kCGLCEMPEngine, &before)
+      guard beforeResult == kCGLNoError && before == 1 else {
+        print("MPE_CONTROL_INVALID: mode=\(mode), before_result=\(beforeResult.rawValue), before=\(before)")
+        fflush(stdout)
+        exit(78)
+      }
+      let disableResult = mode == "disabled" ? CGLDisable(openGLContext, kCGLCEMPEngine) : kCGLNoError
+      var after: GLint = -1
+      let afterResult = CGLIsEnabled(openGLContext, kCGLCEMPEngine, &after)
+      let expected: GLint = mode == "disabled" ? 0 : 1
+      print("MPE_CONTROL: mode=\(mode), before_result=\(beforeResult.rawValue), before=\(before), disable_result=\(disableResult.rawValue), after_result=\(afterResult.rawValue), after=\(after)")
+      fflush(stdout)
+      guard disableResult == kCGLNoError && afterResult == kCGLNoError && after == expected else {
+        print("MPE_CONTROL_INVALID: requested state was not observed")
+        fflush(stdout)
+        exit(78)
+      }
+    }
     let lookup: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> UnsafeMutableRawPointer? = { _, name in
       guard let name else { return nil }
+      if playerCloseGLPassDiagnosticsEnabled, let pointer = playerCloseGLDiagnosticFunction(name) { return pointer }
       return CFBundleGetFunctionPointerForName(CFBundleGetBundleWithIdentifier("com.apple.opengl" as CFString), String(cString: name) as CFString)
     }
     var gl = mpv_opengl_init_params(get_proc_address: lookup, get_proc_address_ctx: nil)
@@ -75,6 +132,7 @@ final class MPVController {
         precondition(mpv_render_context_create(&mpvRenderContext, mpv, &params) >= 0)
       }
     }
+    captureInitialUnpackState("after-context-create")
     mpv_render_context_set_update_callback(mpvRenderContext, { pointer in
       guard let pointer else { return }
       Unmanaged<ViewLayer>.fromOpaque(pointer).takeUnretainedValue().update()

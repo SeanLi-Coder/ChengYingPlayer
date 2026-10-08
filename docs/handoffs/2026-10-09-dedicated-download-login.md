@@ -124,3 +124,66 @@ SPARKLE_TEST_ROOT=build/sparkle-local-updater.tmslcJ/sdk build/player-v29-tests.
   仅凭一次通过就发布。修补必须保留真实彩色图片、播放推进和 30 次关闭／重开检查。
 - 不移动 `v0.2.70` 标签。若需要代码或测试修补，使用更高版本／build 作为新候选，
   完成完整构建、冻结 helper、签名、实际更新保留及公开更新交付核验后才能正式发布。
+
+### 后续定位：缩放 LUT 未初始化（2026-10-09）
+
+- 两次 CI 拦截仍是同一个首次 4K 实播黑帧断言，不是独立登录功能测试失败。
+  没有第三次原样重试，也没有修改已发布版本或 `v0.2.70` 标签。
+- 本机进一步按实际 GL draw pass 读取浮点画面，固定三次结果为
+  `PASS / FAIL / FAIL`。失败时前两个 pass 的九点输出与成功项逐项相同，
+  第三个色度横向 Lanczos pass 的 UV 为 NaN，GL error 仍为零。
+  CPU 解码截图正常；GPU 截图在两个失败进程中分别全黑、严重缺色。
+  不能将其解释为仅观察器误报，也不能外推为所有硬件播放都会失败。
+- 后续增加 uniform、LUT 和邻点读取的固定三次均通过，不能当成修复。
+  有效六个系数完全相同，两个 padding 槽却出现不同垃圾值，说明输入确有
+  未初始化数据。报告分别在本机 `build/player-close-glpasses-20261009` 和
+  `build/player-close-gluniforms-20261009`；只含生成素材和隔离测试资料。
+- **证据范围修正：**上述本机实验使用的库 SHA-256 为
+  `5a76b8188eecf781a22567f6902f67e8da82da99495e633da1aa2d3edd65e81e`，
+  本机 build record 只有两个 ICC 补丁，并非 CI 的完整四补丁链。它证明本机
+  渲染故障机制，不能冒充相同 CI 二进制复现。后续验证必须显式选择重新构建的
+  完整补丁库，并记录库摘要和补丁清单；不依赖旧 `deps` 目录的新旧程度猜测身份。
+- mpv 上游已于 2026-09-29 修复同一处未初始化：
+  [72d43dc9](https://github.com/mpv-player/mpv/commit/72d43dc9c999a21d867cdc0f934f3e4cd2195aa9)，
+  [PR 18540](https://github.com/mpv-player/mpv/pull/18540)。当前回移完整六行补丁，
+  只填充每行最后两项，不改变有效系数、滤波器、HDR、码流或 libmpv ABI。
+  五补丁链零 fuzz 应用及全部九个修改源码校验通过。
+- `python3 -B other/patches/test_scaler_lut.py`：实际 mpv 权重生成代码的旧逻辑
+  保留 512 个异常 padding 值；补丁的 444 组 kernel/size/NaN/Inf 回归在
+  ASan/UBSan 下通过，系数与内存边界不变。
+- `python3 -B Tools/ScalerLUTTests/run.py`：独立真实 Apple Software Renderer
+  4.1 APPLE-23.1.1 因果实验通过。相同 context、RGBA32F LUT 和有效系数下，
+  只改变 padding：NaN、正负 Inf 在 LINEAR 采样中污染 24 个有效系数通道，
+  NEAREST 对照正常；应用从实际补丁提取的循环后，四个相位的全部有效系数恢复。
+  该实验不创建 App，不用个人素材，也不替代完整播放器和发行验证。
+- 首轮故障诊断曾发生测试 App 注销失败，按安全规则保留工作区。确认进程退出后，
+  对该 exact workspace 调用原注销函数一次，返回成功且 scoped registry 查询为空；
+  未重置系统注册库、未删除安全标记或强制结束系统服务。
+- 完整五补丁播放库已在 `build/scaler-lut-playback.uZAXpM` 隔离重建，
+  libmpv SHA-256 为 `2bdcbd6e80d3dd383d1676be907920aa7fb41195d990fb0e5d13f7417a280c3b`。
+  分发核验确认 16 份固定源码、五补丁链、九个 ARM64 动态库、原许可证及构建记录；
+  PlaybackBuildTests 的 69 项实际选项和 11 个配置值通过。没有替换旧 `deps`。
+- 新库软件 GL 固定三次均完成 `30/61/61`；随后不带任何诊断选项的原门禁再完成
+  `30/61/61`。硬件单次完成 `30/150/150`，断言实际使用 `videotoolbox`。
+  合计 150 次关闭／重开均通过，所有工作区正常清理。原 8 秒等待、真实画面、
+  播放推进断言不变；没有用截图、重试、GL 状态干预或放宽采样作为通过依据。
+- 新库 ICC 回归 6,158 项／12 次实际渲染通过；sRGB、PQ、HLG 渲染分别
+  8,676／8,674／8,682 项通过，各五次真实出图。HDRSourceTests 的原版负例与
+  修后 154 项合成 AVFrame 校验通过，未改变 Dolby Vision、色彩或 HDR 策略。
+- **同构建四补丁负对照已复现：**仅撤回 LUT 六行修补并重编译，其他八个库和 145 份
+  头文件逐字节相同。诊断库 `build/scaler-lut-negative.lQQZYg` 的 libmpv SHA-256 为
+  `9b8687229c976d7721f15a7e2faebef2d88b4dedb81fc16c8e24ab08a1533fde`；
+  它不是生产分发，未伪造五补丁 build record。固定三次为 `PASS / PASS / FAIL`，
+  无追加重试，失败发生于首轮 `frames=7/pictures=0/wait=8.009s`，清理完成。
+  同次读取的 LUT 有 214 个负 Inf，全部位于 stride=8 的第 6 号 padding 槽；
+  前六个有效系数均有限且与成功项完全相同。实际 uniform 指向同一 LUT，
+  第 2 个缩放 pass 即输出 NaN，随后传入下一 pass 并最终变黑。
+  这次首坏 pass 为第 2 个，不沿用早期旧二补丁实验“第 3 个”的观察。
+  证据在 `build/player-close-lut-negative-20261009`，合成诊断会改变时序，
+  不冒称与 CI 完全相同二进制；但与独立 GL 毒化实验共同确认未初始化 LUT 的机制。
+- 原始门禁保留，新增有界诊断只在明确选择时启用；多次诊断必须全部通过且清理成功
+  才报告整体通过。加载库路径、SHA、补丁身份均记录，拒绝继承的 loader/MPE 覆盖。
+  两位独立只读终审未发现发布阻断项。分发回归 32 项、源码下载 37 项、
+  更新策略／交付／增量测试 19／20／14 项通过；模拟交付不冒充真实发布。
+- 修补候选为 `v0.2.71` / build `82`。本地根因及回归已完成，仍需完整 CI、
+  正式 App 更新安装、签名资产与匿名更新交付检查；目前不能写成正式发布成功。

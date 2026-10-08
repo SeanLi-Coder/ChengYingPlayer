@@ -1,0 +1,29 @@
+Backport: vo_gpu: fill the padding of the scaler LUT
+Origin: https://github.com/mpv-player/mpv/commit/72d43dc9c999a21d867cdc0f934f3e4cd2195aa9
+Upstream-Date: 2026-09-29
+Upstream-Issue: https://github.com/mpv-player/mpv/pull/18540
+Applied-to: mpv 0.38.0 after the existing four playback patches
+Modified-by: ChengYingPlayer maintainers, 2026-10-09
+
+This is the complete six-line upstream fix. Only hunk line numbers and trailing
+context are adapted to the pinned release after the existing playback patches.
+Rows of six weights occupy two RGBA texels. Fill the two unused components with
+the same channels of the preceding texel, instead of uploading uninitialized
+memory. This preserves all computed weights, kernel choices and public ABI.
+The original upstream source notices and applicable license terms remain intact.
+
+--- a/video/out/gpu/video.c
++++ b/video/out/gpu/video.c
+@@ -1782,6 +1782,12 @@ static void reinit_scaler(struct gl_video *p, struct scaler *scaler,
+     float *weights = talloc_array(NULL, float, lut_size * stride);
+     mp_compute_lut(scaler->kernel, lut_size, stride, weights);
+ 
++    for (int n = 0; n < lut_size; n++) {
++        float *row = weights + n * stride;
++        for (int i = size; i < stride; i++)
++            row[i] = row[i - num_components];
++    }
++
+     bool use_1d = scaler->kernel->polar && (p->ra->caps & RA_CAP_TEX_1D);
+ 
+     struct ra_tex_params lut_params = {

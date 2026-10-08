@@ -228,6 +228,7 @@ jobs:
         run: |
           python3 -B Tools/PlaybackBuildTests/test_sources.py
           bash other/build_playback_libraries.sh
+          python3 -B other/patches/test_scaler_lut.py
           bash Tools/PlaybackBuildTests/run.sh
           python other/verify_playback_distribution.py "$PWD/deps"
           bash Tools/RenderTestSupport/test_native_capability.sh

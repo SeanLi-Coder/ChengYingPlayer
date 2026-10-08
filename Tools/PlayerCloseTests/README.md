@@ -66,3 +66,61 @@ all 30 close operations returned. A state-driven wait allowed actual Generic Flo
 draws to arrive. This corrects a test-readiness assumption, not a production render
 or close policy; it neither relaxes the drawing assertion nor changes the locked
 production `ViewLayer`.
+
+## Isolated dependency and diagnostic runs
+
+`--deps-dir /absolute/path/to/playback-deps` selects a separate playback tree
+without replacing the repository's installed dependencies. Its `include/` and
+`lib/libmpv.2.dylib` are used for compilation and its `lib/` is the executable's
+runtime search path. The default remains `deps/`. Generated media still uses
+`deps/executable/ffmpeg`, because playback-only output trees need not contain
+an FFmpeg executable. Diagnostic reports record the selected library path,
+SHA256 and patch IDs from `playback-build-record/patches.tsv`; a missing patch
+record is reported as unavailable, not as an empty proven patch chain. Verify
+this identity before comparing a local result with release CI.
+
+Inherited `DYLD_*` variables and `LD_LIBRARY_PATH` are rejected explicitly,
+including empty values. Unset them before running instead of silently redirecting
+library loading or removing a caller's requested loader configuration. The
+validated environment snapshot is used by all preparation and test subprocesses.
+Git source lookups have 30-second limits, FFmpeg generation has a 120-second limit,
+and Swift compilation has a 180-second limit. The original eight-second picture
+readiness requirement, 30 iterations and 390-second native watchdog are unchanged.
+
+For an explicitly bounded diagnostic group, use a new output directory:
+
+```sh
+CHENGYING_TEST_SOFTWARE_GL=1 CLOSE_TEST_GL_PASS_DIAGNOSTICS=1 \
+  python3 -B Tools/PlayerCloseTests/run.py \
+  --deps-dir /absolute/path/to/playback-deps \
+  --failure-diagnostics build/player-close-diagnostic-report \
+  --diagnostic-attempts 3
+```
+
+These options are diagnostic-only, not alternate release gates. The group compiles
+once and runs exactly the requested one to three attempts, including failures;
+it does not stop after finding a passing result or retry until green. An existing
+report directory is rejected. `CLOSE_TEST_GL_PASS_DIAGNOSTICS=1` requires
+`--failure-diagnostics`; it must never silently instrument the ordinary gate.
+The optional `--mpe-diagnostic-matrix` selects its own fixed
+default/disabled/default/disabled group. Inherited `CLOSE_TEST_MPE_CONTROL` is
+always rejected, even if empty or a matrix was requested, so only that explicit
+CLI option can select this state-changing experiment.
+
+The GL observer records at most 18 passes, including bounded intermediate-FBO
+samples, uniforms and small lookup textures. Readback synchronizes the renderer
+and consumes GL error state; it can change timing and must not be described as
+uninstrumented playback. Its samples never contribute to the original picture
+counter. Failure-only mpv video/window screenshots are independent GPU renders,
+not captures of the original Core Animation output; a separately requested
+software screenshot is a decoded-source control. No user video or account data
+is involved. The first-ready, failure and final JSON/log snapshots are retained
+outside the disposable app workspace.
+
+`summary.json` separates `execution_passed` from overall `passed`. While the owned
+workspace still needs cleanup, `passed` remains false and `cleanup.status` is
+`pending`. Only successful unregister/removal can set cleanup to `completed` and
+make an otherwise passing execution successful overall. A cleanup error becomes
+`needs_attention`, preserves the evidence workspace and returns a nonzero exit
+code even when every playback attempt passed. Do not delete ownership or cleanup
+markers to bypass this safety check.
