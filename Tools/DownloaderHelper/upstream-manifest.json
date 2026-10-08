@@ -8,7 +8,7 @@
     ".github/"
   ],
   "allowed_patches": {
-    "app/main.py": "Optional user-owned writable-path environment hooks; redact Kuaishou share query values from public responses. Redact Instagram share tracking tokens from public responses.",
+    "app/main.py": "Optional user-owned writable-path environment hooks; redact Kuaishou share query values from public responses. Redact Instagram share tracking tokens and private dedicated-login revision identifiers from public responses.",
     "app/models.py": "Add the Kuaishou and Instagram platform enums without changing existing values; add a whitelisted local diagnostic category field to the job and item records; persist an opt-in author-only output layout with a legacy-compatible default.",
     "app/platforms.py": "Recognize strictly validated Kuaishou video, profile and share URLs, and strictly validated Instagram profile and post URLs.",
     "app/downloader.py": "Connect Kuaishou discovery to verified transfer, proxy, progress and cancellation; validate album bytes, source/local SHA-256 receipts, non-first codec candidates and bounded hashing; share per-platform output paths; preserve fixed Cookie diagnostics and wrapped cancellation, apply the native same-jar Douyin session guard, and retain explicit anonymous fallback; deliver FFprobe prefix input without losing pipe bytes across cancellable polling timeouts; support opt-in direct author folders and atomically publish new native files without overwriting same-name output, staging generic transfers privately; sanitize filesystem-unsafe Unicode code points and excessive decomposed combining runs in author and media names. Connect Instagram discovery and per-part download dispatch to the same verified transfer, proxy, progress and cancellation machinery, letting cancellation win over an empty-result report.",
@@ -46,7 +46,7 @@
     {
       "path": "app/browser.py",
       "upstream_sha256": "5bdd4a9b642ba056f2fcea29b592a352f4e8aeff53b781b39c28c3ec4a7a42fc",
-      "vendored_sha256": "a6fe89380f3845a99d510041d1a9efdf0b9daae97274495a704303ecada77bde"
+      "vendored_sha256": "b16271480753ee917a0eba2bf3be7302e3cd48d58438f758a2372927d8ab7e64"
     },
     {
       "path": "app/build_info.py",
@@ -86,7 +86,7 @@
     {
       "path": "app/main.py",
       "upstream_sha256": "6710e6e7940d66c16f9e70814e44f868c4905d9b038317d5c47ba0f663f5af5e",
-      "vendored_sha256": "01e6988dbe693ea070aa02687e223626742bd84ac04b6a81efbf328d2d2f10a3"
+      "vendored_sha256": "1fae8aca63cd3125a277780697216fdd764419a0171faa9d04e01e64ef752920"
     },
     {
       "path": "app/models.py",
@@ -111,7 +111,7 @@
     {
       "path": "app/static/app.js",
       "upstream_sha256": "c88f22bce27cd49ad5f289155f2d0a6ee6bfe2f7aab0fee54a22307dd5bbcbb8",
-      "vendored_sha256": "9da8ac8dfddc04327a87a52d1e2435e3bebf9357edac399eb2bc5cb8f8e95e0f"
+      "vendored_sha256": "f014157369df8bed107a9fda5c4f1611470ccbdee4ef0f9e0cdf040b8422e7b9"
     },
     {
       "path": "app/static/favicon.svg",

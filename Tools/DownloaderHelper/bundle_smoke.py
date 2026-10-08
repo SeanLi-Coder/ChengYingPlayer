@@ -20,6 +20,7 @@ def _check() -> dict[str, object]:
     from diagnostic_log import verify_diagnostic_log
     from ejs_smoke import verify_ejs_runtime
     from filename_smoke import verify_filename_runtime
+    from login_smoke import verify_login_runtime
     from playwright.sync_api import sync_playwright
     from profile_smoke import verify_profile_runtime
     from yt_dlp.extractor import gen_extractor_classes
@@ -72,6 +73,8 @@ def _check() -> dict[str, object]:
         "static/diagnostics.css",
         "static/chrome_profiles.js",
         "static/chrome_profiles.css",
+        "static/login_sessions.js",
+        "static/login_sessions.css",
         "upstream-manifest.json",
     ):
         if not (runtime_root / relative).is_file():
@@ -111,6 +114,7 @@ def _check() -> dict[str, object]:
     cookie_runtime = verify_cookie_runtime()
     profile_runtime = verify_profile_runtime()
     filename_runtime = verify_filename_runtime()
+    login_runtime = verify_login_runtime()
     diagnostics = verify_diagnostic_log()
     identity = runtime_identity()
     if getattr(sys, "frozen", False) and identity.get("identity_source") != "bundled":
@@ -158,6 +162,7 @@ def _check() -> dict[str, object]:
         "ejs_challenges": "n-and-signature-solved-offline",
         "chrome_cookies": cookie_runtime,
         "chrome_profiles": profile_runtime,
+        "dedicated_login": login_runtime,
         "filenames": filename_runtime,
         "chrome_cookie_snapshot": "wal-and-malformed-data-verified-offline",
         "diagnostic_log": "bounded-redacted-export-verified-offline",

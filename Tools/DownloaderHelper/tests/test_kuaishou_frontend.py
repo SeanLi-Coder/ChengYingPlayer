@@ -115,6 +115,7 @@ def test_live_discovery_progress_reports_verified_items_not_an_invented_total():
 
 
 COOKIE_DIAGNOSTIC_CASES = [
+    ("dedicated_login_unavailable", "独立下载登录需要重新准备"),
     ("cookie_decryption_failed", "钥匙串"),
     ("cookie_permission_denied", "完全磁盘访问权限"),
     ("cookie_database_locked", "被占用或锁定"),
@@ -178,6 +179,9 @@ def test_job_title_names_the_specific_cookie_reason(diagnostic):
         "error": "Kuaishou Chrome cookies could not be read.",
     }
     title = run_ui(f"window.testAPI.issueTitleForJob({json.dumps(job)})")
+    if diagnostic == "dedicated_login_unavailable":
+        assert title == "独立下载登录需要重新准备"
+        return
     assert title.startswith("Chrome Cookie 读取失败：")
     assert title != "Chrome Cookie 读取失败"
 

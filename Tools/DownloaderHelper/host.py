@@ -178,10 +178,13 @@ def validate_download_directory(value: object, *, bundle_root: Path) -> str:
 
 
 def install_desktop_adapter(
-    engine, *, token: str, origin: str, assets: Path, proxy_settings=None
+    engine, *, token: str, origin: str, assets: Path, proxy_settings=None,
+    login_sessions=None, login_policy=None,
 ):
     application = engine.app
-    maintenance = UpdateMaintenance(engine.manager)
+    maintenance = UpdateMaintenance(
+        engine.manager, additional_activity=login_sessions.active if login_sessions else None
+    )
     from chrome_profiles import (
         PROFILE_DIRECTORY_RE,
         list_chrome_profiles,
@@ -197,6 +200,19 @@ def install_desktop_adapter(
                 "code": code,
                 "message": "Select an available Chrome profile in download settings and save before creating a new task.",
             })
+
+    def login_mode():
+        return login_policy.mode() if login_policy is not None else "chrome"
+
+    def login_error_detail(code):
+        messages = {
+            "login_session_missing": "请先在“下载登录”中打开对应平台的专用窗口，手动登录并保存，再创建下载任务。",
+            "login_session_expired": "专用登录已过期。请重新登录并保存，再从原链接创建新任务；无需授权日常 Chrome。",
+            "login_session_invalid": "专用登录记录无法安全读取，请在下载登录面板重新登录并保存。",
+            "login_busy": "专用登录窗口仍在处理，请完成并保存登录，或关闭该窗口后再创建任务。",
+        }
+        return {"code": code, "message": messages.get(code,
+            "专用下载登录暂不可用，请在下载登录面板刷新状态并检查提示；不要发送 Cookie 或密码。")}
     # The original engine/API/static files remain unmodified. Only its host page
     # receives desktop affordances; its own build handshake still covers its source.
     application.router.routes[:] = [
@@ -243,7 +259,7 @@ def install_desktop_adapter(
             # new tasks still require an available explicit profile.
             with engine._CONFIG_LOCK:
                 previous = engine.get_config()
-                if (config.chrome_profile != previous.chrome_profile
+                if login_mode() == "chrome" and (config.chrome_profile != previous.chrome_profile
                         or config.use_chrome_cookies != previous.use_chrome_cookies):
                     require_profile(config)
                 return engine.update_config(config)
@@ -269,14 +285,48 @@ def install_desktop_adapter(
             # The validation and original submission must share one settings
             # snapshot; a concurrent save cannot change the chosen identity.
             with engine._CONFIG_LOCK:
-                require_profile(engine.get_config())
-                return engine.create_job(job_request)
+                mode = login_mode()
+                if mode == "chrome":
+                    require_profile(engine.get_config())
+                    return engine.create_job(job_request)
+                from login_sessions import LoginSessionError
+                try:
+                    source = engine.identify_url(job_request.url)
+                    profile = None
+                    if mode == "dedicated":
+                        if login_sessions.active():
+                            raise HTTPException(409, detail=login_error_detail("login_busy"))
+                        profile = login_sessions.current_token(source.platform.value)
+                        # Recheck the actual snapshot, not a remembered UI badge.
+                        login_sessions.cookie_jar(profile)
+                    snapshot = engine.get_config()
+                    return engine._public_job(engine.manager.create_job(
+                        job_request.url, output_root=snapshot.download_dir,
+                        cookie_browser="chrome" if profile else None,
+                        cookie_profile=profile,
+                    ))
+                except LoginSessionError as error:
+                    raise HTTPException(error.status, detail=login_error_detail(error.code)) from None
+                except HTTPException:
+                    raise
+                except Exception as error:  # noqa: BLE001 -- Reuse the engine's sanitized public error mapper.
+                    raise engine._http_error(error) from None
 
         return await run_in_threadpool(submit)
 
     @application.get("/", include_in_schema=False)
     def desktop_index():
         document = engine.index().body.decode("utf-8")
+        login_assets = (
+            '<link rel="stylesheet" href="/native/login_sessions.css">'
+            '<script src="/native/login_sessions.js" defer></script>'
+            if login_sessions is not None else ""
+        )
+        chrome_assets = (
+            '<link rel="stylesheet" href="/native/chrome_profiles.css">'
+            '<script src="/native/chrome_profiles.js" defer></script>'
+            if login_mode() == "chrome" else ""
+        )
         document = document.replace(
             "<title>原迹下载器</title>", "<title>澄影 · 下载中心</title>"
         )
@@ -284,8 +334,7 @@ def install_desktop_adapter(
             "</head>",
             '<link rel="stylesheet" href="/native/desktop.css">'
             '<script src="/native/desktop.js" defer></script>'
-            '<link rel="stylesheet" href="/native/chrome_profiles.css">'
-            '<script src="/native/chrome_profiles.js" defer></script>'
+            + login_assets + chrome_assets +
             '<link rel="stylesheet" href="/native/diagnostics.css">'
             '<script src="/native/diagnostics.js" defer></script></head>',
             1,
@@ -310,6 +359,10 @@ def install_desktop_adapter(
 
     @application.get("/api/native/chrome-profiles", include_in_schema=False)
     def native_chrome_profiles():
+        if login_mode() != "chrome":
+            return {"schema_version": 1, "status": "disabled", "profiles": [],
+                    "selected_profile": None, "selected_status": "unverified",
+                    "use_chrome_cookies": False}
         config = engine.get_config()
         result = list_chrome_profiles()
         selected = config.chrome_profile
@@ -329,6 +382,92 @@ def install_desktop_adapter(
                 "selected_profile": selected if selected_status not in {"automatic", "invalid"} else None,
                 "selected_status": selected_status,
                 "use_chrome_cookies": config.use_chrome_cookies}
+
+    if login_sessions is not None:
+        from login_auth import LoginPolicyError, is_session_profile
+        from login_sessions import LoginSessionError
+
+        @application.exception_handler(LoginPolicyError)
+        async def login_policy_error(request, error):
+            return JSONResponse({"detail": {"code": error.code}}, status_code=error.status)
+
+        def login_status():
+            return {**login_sessions.status(), "mode": login_mode()}
+
+        async def login_payload(request):
+            import json
+
+            raw = bytearray()
+            async for part in request.stream():
+                raw.extend(part)
+                if len(raw) > 1024:
+                    raise HTTPException(413, detail={"code": "login_request_invalid"})
+            try:
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise TypeError
+                return payload
+            except (ValueError, TypeError, UnicodeError):
+                raise HTTPException(422, detail={"code": "login_request_invalid"}) from None
+
+        @application.get("/api/native/login", include_in_schema=False)
+        def get_login_status():
+            return login_status()
+
+        @application.put("/api/native/login/mode", include_in_schema=False)
+        async def set_login_mode(request: Request):
+            payload = await login_payload(request)
+            if set(payload) != {"mode"}:
+                raise HTTPException(422, detail={"code": "login_request_invalid"})
+
+            def save_mode():
+                with engine._CONFIG_LOCK, maintenance.lock:
+                    if login_sessions.active():
+                        raise HTTPException(409, detail={"code": "login_busy"})
+                    login_policy.save(payload["mode"])
+                    return login_status()
+
+            return await run_in_threadpool(save_mode)
+
+        @application.post("/api/native/login/{platform}/{action}", include_in_schema=False)
+        async def change_login(platform: str, action: str, request: Request):
+            payload = await login_payload(request)
+            if payload or action not in {"open", "save"}:
+                raise HTTPException(422, detail={"code": "login_request_invalid"})
+
+            def change():
+                with engine._CONFIG_LOCK, maintenance.lock:
+                    if login_mode() != "dedicated":
+                        raise HTTPException(409, detail={"code": "login_mode_required"})
+                    try:
+                        if action == "open":
+                            login_sessions.start(platform)
+                        else:
+                            login_sessions.finish(platform)
+                    except LoginSessionError as error:
+                        raise HTTPException(error.status, detail={"code": error.code}) from None
+                    return login_status()
+
+            return await run_in_threadpool(change)
+
+        # A saved task keeps its immutable login revision. Opening a fresh login
+        # must not silently replace that identity during a retry.
+        application.router.routes[:] = [route for route in application.router.routes
+            if not (getattr(route, "path", None) == "/api/jobs/{job_id}/verify"
+                    and "POST" in getattr(route, "methods", set()))]
+
+        @application.post("/api/jobs/{job_id}/verify", include_in_schema=False)
+        def verify_job_login(job_id: str):
+            try:
+                job = engine.manager.get_job(job_id)
+                if is_session_profile(job.cookie_profile):
+                    raise HTTPException(409, detail={"code": "login_refresh_new_task",
+                        "message": "请在下载登录面板重新登录并保存，再从原链接新建任务；旧任务不会自动更换登录身份。"})
+                return engine.open_verification(job_id)
+            except HTTPException:
+                raise
+            except Exception as error:  # noqa: BLE001 -- Reuse the engine's sanitized public error mapper.
+                raise engine._http_error(error) from None
 
     @application.get("/api/native/activity", include_in_schema=False)
     def native_activity():

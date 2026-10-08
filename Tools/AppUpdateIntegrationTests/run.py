@@ -154,6 +154,10 @@ def main():
             "download-history.json": b'[{"id":"fixture-complete","status":"completed"}]',
             "models/fixture-model/weights.bin": os.urandom(4096),
             "models/fixture-model/ready.json": b'{"verified":true,"fixture":true}',
+            "DownloadCenter/login-policy.json": b'{"version":1,"mode":"dedicated"}',
+            "DownloadCenter/login-sessions/douyin/current.json": b'{"fixture":"private-login-index"}',
+            "DownloadCenter/login-sessions/douyin/snapshots/fixture.json": b'{"fixture":"private-login-snapshot"}',
+            "DownloadCenter/login-sessions/douyin/chrome/Default/fixture-session": b"synthetic-browser-session",
         }
         for relative, value in support_values.items():
             target = support / relative

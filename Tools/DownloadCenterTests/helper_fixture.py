@@ -35,6 +35,10 @@ PROFILE_OPTIONS = [{"directory": "Profile 1", "has_cookie_database": True},
                    {"directory": "Profile 2", "has_cookie_database": True},
                    {"directory": "Profile 4", "has_cookie_database": False}]
 DIAGNOSTICS = {"reads": 0, "mutations": 0, "error": "", "revision": 1}
+LOGIN = {"enabled": False, "mode": "dedicated", "reads": 0, "writes": 0, "opens": 0, "saves": 0,
+         "fail_mode": False, "platforms": [
+             {"platform": name, "status": "idle", "has_saved_session": False}
+             for name in ("douyin", "xiaohongshu", "kuaishou", "instagram", "bilibili", "youtube")]}
 FRONTEND_SAFETY_PROBES = """<script>
 window.fixtureErrors = [];
 addEventListener('error', event => fixtureErrors.push(event.message));
@@ -128,6 +132,16 @@ def profile_snapshot():
             "config_writes": PROXY["config_writes"]}
 
 
+def login_status():
+    return {"schema_version": 1, "mode": LOGIN["mode"], "platforms": LOGIN["platforms"]}
+
+
+def login_snapshot():
+    return {**login_status(), "reads": LOGIN["reads"], "writes": LOGIN["writes"],
+            "opens": LOGIN["opens"], "saves": LOGIN["saves"], "profile_reads": PROFILE_STATE["reads"],
+            "jobs": len(PROFILE_STATE["jobs"]), "config_writes": PROXY["config_writes"], "config": CONFIG}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
@@ -194,7 +208,36 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         with PROXY_LOCK:
-            if path == "/api/fixture/profile-mode" and self.command == "POST":
+            if path == "/api/fixture/login-mode" and self.command == "POST":
+                if "enabled" in payload:
+                    LOGIN["enabled"] = payload["enabled"] is True
+                if "fail_mode" in payload:
+                    LOGIN["fail_mode"] = payload["fail_mode"] is True
+                self.json_response(login_snapshot())
+            elif path == "/api/native/login/mode" and self.command == "PUT":
+                if LOGIN["fail_mode"]:
+                    self.proxy_error("login_busy", 409)
+                    return
+                if payload.get("mode") not in {"dedicated", "chrome", "anonymous"}:
+                    self.proxy_error("login_mode_invalid", 422)
+                    return
+                LOGIN["mode"] = payload["mode"]
+                LOGIN["writes"] += 1
+                self.json_response(login_status())
+            elif path.startswith("/api/native/login/") and self.command == "POST":
+                parts = path.split("/")
+                row = next((item for item in LOGIN["platforms"] if len(parts) == 6 and item["platform"] == parts[4]), None)
+                if row is None or parts[-1] not in {"open", "save"} or payload:
+                    self.proxy_error("login_request_invalid", 422)
+                    return
+                if parts[-1] == "open":
+                    row["status"] = "login_open"
+                    LOGIN["opens"] += 1
+                else:
+                    row.update(status="saved", has_saved_session=True)
+                    LOGIN["saves"] += 1
+                self.json_response(login_status())
+            elif path == "/api/fixture/profile-mode" and self.command == "POST":
                 if payload.get("status") in {"ok", "cookie_permission_denied"}:
                     PROFILE_STATE["status"] = payload["status"]
                 self.json_response(profile_snapshot())
@@ -272,7 +315,16 @@ class Handler(BaseHTTPRequestHandler):
             mime = "application/json"
         elif MODE == "frontend":
             path = urlsplit(self.path).path
-            if path == "/api/native/chrome-profiles":
+            if path == "/api/native/login":
+                with PROXY_LOCK:
+                    LOGIN["reads"] += 1
+                    self.json_response(login_status())
+                return
+            elif path == "/api/fixture/login-mode":
+                with PROXY_LOCK:
+                    self.json_response(login_snapshot())
+                return
+            elif path == "/api/native/chrome-profiles":
                 with PROXY_LOCK:
                     PROFILE_STATE["reads"] += 1
                     self.json_response(profile_inventory())
@@ -328,10 +380,13 @@ class Handler(BaseHTTPRequestHandler):
                 page = page.replace("<head>", "<head>" + FRONTEND_SAFETY_PROBES)
                 page = page.replace("</head>", "<script>new MutationObserver((records,observer)=>{const control=document.querySelector('#desktop-proxy-save');if(control){window.fixtureProxyInitiallyDisabled=control.disabled&&document.querySelector('#desktop-proxy-test').disabled&&document.querySelector('#desktop-proxy-url').disabled;observer.disconnect();}}).observe(document.documentElement,{childList:true,subtree:true});</script></head>")
                 page = page.replace("</head>", '<link rel="stylesheet" href="/native/desktop.css"><script src="/native/desktop.js" defer></script></head>')
-                page = page.replace("</head>", '<link rel="stylesheet" href="/native/chrome_profiles.css"><script src="/native/chrome_profiles.js" defer></script></head>')
+                if LOGIN["enabled"]:
+                    page = page.replace("</head>", '<link rel="stylesheet" href="/native/login_sessions.css"><script src="/native/login_sessions.js" defer></script></head>')
+                if not LOGIN["enabled"] or LOGIN["mode"] == "chrome":
+                    page = page.replace("</head>", '<link rel="stylesheet" href="/native/chrome_profiles.css"><script src="/native/chrome_profiles.js" defer></script></head>')
                 page = page.replace("</head>", '<link rel="stylesheet" href="/native/diagnostics.css"><script src="/native/diagnostics.js" defer></script></head>')
                 content, mime = page.encode(), "text/html"
-            elif path in {"/static/app.js", "/static/styles.css", "/static/favicon.svg", "/native/desktop.js", "/native/desktop.css", "/native/chrome_profiles.js", "/native/chrome_profiles.css", "/native/diagnostics.js", "/native/diagnostics.css"}:
+            elif path in {"/static/app.js", "/static/styles.css", "/static/favicon.svg", "/native/desktop.js", "/native/desktop.css", "/native/chrome_profiles.js", "/native/chrome_profiles.css", "/native/diagnostics.js", "/native/diagnostics.css", "/native/login_sessions.js", "/native/login_sessions.css"}:
                 asset = (DESKTOP_ASSETS if path.startswith("/native/") else VENDORED_ASSETS) / path.rsplit("/", 1)[1]
                 content = asset.read_bytes()
                 mime = "application/javascript" if path.endswith(".js") else "text/css" if path.endswith(".css") else "image/svg+xml"

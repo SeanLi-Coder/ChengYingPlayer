@@ -49,7 +49,7 @@ MESSAGES = {
     "invalid_paths": "The private job folder or bundled media tools are unavailable.",
     "job_conflict": "This job folder belongs to another source or is already in use.",
     "configuration_unavailable": "Saved download settings cannot be read safely.",
-    "cookies_unavailable": "The selected Chrome login data could not be read. Check the Chrome profile in the download center, or disable Chrome login there to try public content anonymously.",
+    "cookies_unavailable": "The saved download login is unavailable. Open Download Login in the download center, sign in and save, or explicitly choose anonymous mode for public content. Daily Chrome permissions are only needed if you choose the legacy Chrome mode.",
     "authentication_required": "The website requires a valid login. Check the download center login settings.",
     "source_unavailable": "The website source could not be acquired. Check network, proxy, and access permissions.",
     "audio_unavailable": "No usable audio-only stream is available for this video.",
@@ -583,12 +583,20 @@ def acquire(
     node=None,
 ):
     """Inject transport factories in tests; production reads only explicit saved settings."""
+    from login_auth import (
+        LoginPolicy,
+        LoginPolicyError,
+        install_session_requests,
+        install_session_ytdlp,
+        mark_session_cookies,
+    )
+    from login_sessions import LoginSessionError, LoginSessions
     from proxy_config import ProxySettings, ProxySettingsError
     from proxy_transport import _download_proxy
 
     settings = read_private_json(args.data_dir / "config.json") or {}
-    # A first-time summary request must not require Chrome to be installed.
-    # Only an explicitly saved opt-in may access the browser's login database.
+    # The old Chrome preference is consulted only in explicit legacy mode.
+    # Dedicated mode uses the same immutable private snapshots as downloads.
     use_cookies = settings.get("use_chrome_cookies", False)
     profile = settings.get("chrome_profile")
     if (
@@ -601,6 +609,23 @@ def acquire(
         proxy = ProxySettings(args.data_dir, None).proxy_url()
     except (ProxySettingsError, OSError, ValueError):
         raise SourceError("configuration_unavailable") from None
+    session_cookies = None
+    try:
+        mode = LoginPolicy(args.data_dir).mode()
+        if mode == "dedicated":
+            sessions = LoginSessions(args.data_dir, lambda: proxy)
+            try:
+                token = sessions.current_token(platform)
+                session_cookies = sessions.cookie_jar(token)
+            finally:
+                sessions.close()
+            use_cookies, profile = False, None
+        elif mode == "anonymous":
+            use_cookies, profile = False, None
+    except LoginPolicyError:
+        raise SourceError("configuration_unavailable") from None
+    except LoginSessionError:
+        raise SourceError("cookies_unavailable") from None
     if node is None:
         from js_runtime import node_path
 
@@ -712,8 +737,10 @@ def acquire(
         from yt_dlp.cookies import YoutubeDLCookieJar
 
         private_jar = YoutubeDLCookieJar()
+        if session_cookies is not None:
+            mark_session_cookies(private_jar)
         try:
-            cookies = ydl.cookiejar
+            cookies = session_cookies if session_cookies is not None else ydl.cookiejar
         except SourceError:
             raise
         except Exception:  # noqa: BLE001 -- Browser failures may include private profile paths; emit only a fixed diagnostic.
@@ -721,6 +748,8 @@ def acquire(
         for cookie in cookies:
             private_jar.set_cookie(copy.copy(cookie))
         ydl.cookiejar = private_jar
+        if session_cookies is not None:
+            install_session_ytdlp(ydl)
         info = None
         extraction_url = url
         for _ in range(4):
@@ -789,6 +818,9 @@ def acquire(
             session.cookies.clear()
             for cookie in private_jar:
                 session.cookies.set_cookie(copy.copy(cookie))
+            if session_cookies is not None:
+                mark_session_cookies(session.cookies)
+                install_session_requests(session)
             session.headers.update(
                 {"User-Agent": "Mozilla/5.0", "Referer": extraction_url}
             )

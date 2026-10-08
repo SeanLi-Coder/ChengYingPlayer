@@ -11,8 +11,9 @@ from fastapi.responses import JSONResponse
 
 
 class UpdateMaintenance:
-    def __init__(self, manager):
+    def __init__(self, manager, additional_activity=None):
         self.manager = manager
+        self.additional_activity = additional_activity or (lambda: False)
         self.lock = getattr(manager, "_lock", threading.RLock())
         self.supported = hasattr(manager, "_futures") and all(
             callable(getattr(manager, name, None))
@@ -47,7 +48,7 @@ class UpdateMaintenance:
             raise HTTPException(409, "An application update is being prepared. Try again shortly.")
 
     def _active(self):
-        return self.mutations > 0 or any(
+        return self.mutations > 0 or self.additional_activity() or any(
             not future.done() for future in self.manager._futures.values()
         )
 

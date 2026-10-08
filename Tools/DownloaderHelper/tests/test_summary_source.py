@@ -131,6 +131,8 @@ class SummarySourceTests(unittest.TestCase):
         self.data = self.root / "data"
         self.job = self.root / "job"
         self.data.mkdir()
+        # Existing extractor tests intentionally exercise the legacy opt-in path.
+        (self.data / "login-policy.json").write_text(json.dumps({"version": 1, "mode": "chrome"}))
         self.job.mkdir()
         self.ffmpeg = self.root / "ffmpeg"
         self.ffprobe = self.root / "ffprobe"
@@ -349,7 +351,7 @@ class SummarySourceTests(unittest.TestCase):
         )
         self.assertEqual(downloader.options["remote_components"], [])
         self.assertEqual((self.data / "config.json").read_bytes(), before)
-        self.assertEqual({item.name for item in self.data.iterdir()}, {"config.json"})
+        self.assertEqual({item.name for item in self.data.iterdir()}, {"config.json", "login-policy.json"})
         self.assertEqual(
             [event["stage"] for event in events], ["reading_source", "reading_source"]
         )

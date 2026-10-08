@@ -118,6 +118,7 @@ class ProxySettings:
         self._enabled = False
         self._url: str | None = None
         self._unreadable = False
+        self.additional_activity = lambda: False
         self._load()
 
     def _load(self):
@@ -205,10 +206,10 @@ class ProxySettings:
             enabled, url = self._candidate(payload)
             if not self._unreadable and (enabled, url) == (self._enabled, self._url):
                 return self.status()
-            if any(not future.done() for future in self.manager._futures.values()):
+            if self.additional_activity() or any(not future.done() for future in self.manager._futures.values()):
                 raise ProxySettingsError(
                     "proxy_busy",
-                    "Wait for active downloads to finish or cancel them before changing the proxy.",
+                    "Close the download login window and finish or cancel active downloads before changing the proxy.",
                     409,
                 )
             temporary: Path | None = None

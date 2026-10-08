@@ -33,7 +33,7 @@ _DIAGNOSTICS = frozenset({
     "cookie_decryption_failed", "cookie_permission_denied", "cookie_database_locked",
     "cookie_database_invalid", "cookie_storage_failed", "cookie_reader_failed",
     "chrome_data_directory_missing", "chrome_profile_invalid", "chrome_profile_missing",
-    "cookie_database_missing", "cookie_access_unknown",
+    "cookie_database_missing", "cookie_access_unknown", "dedicated_login_unavailable",
 })
 _ISSUES = frozenset({
     "rate_limited", "verification_required", "login_required", "request_rejected",

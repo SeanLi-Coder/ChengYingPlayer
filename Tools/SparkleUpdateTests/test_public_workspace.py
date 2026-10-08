@@ -138,6 +138,7 @@ class PublicHelperTests(unittest.TestCase):
             "status": "ok", "chrome_cookies": verifier.COOKIE_SELF_TEST,
             "chrome_cookie_snapshot": "wal-and-malformed-data-verified-offline",
             "chrome_profiles": verifier.PROFILE_SELF_TEST,
+            "dedicated_login": verifier.LOGIN_SELF_TEST,
             "diagnostic_log": "bounded-redacted-export-verified-offline",
             "diagnostic_identity": {
                 "player_version": "99.0.2", "player_build": "101",

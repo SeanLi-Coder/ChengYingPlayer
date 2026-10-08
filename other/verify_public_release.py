@@ -34,6 +34,7 @@ from verify_appcast import (
 
 COOKIE_SELF_TEST = "macos-v10-aes-and-fixed-diagnostics-verified-offline"
 PROFILE_SELF_TEST = "synthetic-directories-and-explicit-selection-verified-offline"
+LOGIN_SELF_TEST = "isolated-revisions-and-restart-verified-offline"
 
 
 def run(arguments, timeout=300, *, env=None):
@@ -96,6 +97,8 @@ def verify_public_helper(app, info, expected_tree, output, expected_helper_build
             "Public helper missed the new WAL and malformed-cookie verification.")
     require(result.get("chrome_profiles") == PROFILE_SELF_TEST,
             "Public helper missed the offline Chrome-profile selection verification.")
+    require(result.get("dedicated_login") == LOGIN_SELF_TEST,
+            "Public helper missed the private login persistence verification.")
     require(result.get("diagnostic_log") == "bounded-redacted-export-verified-offline",
             "Public helper did not pass the new diagnostic privacy verification.")
     identity = result.get("diagnostic_identity", {})
@@ -131,6 +134,7 @@ def verify_public_helper(app, info, expected_tree, output, expected_helper_build
         "status": result["status"], "chrome_cookies": result["chrome_cookies"],
         "chrome_cookie_snapshot": result["chrome_cookie_snapshot"],
         "chrome_profiles": result["chrome_profiles"],
+        "dedicated_login": result["dedicated_login"],
         "dolby_clip": "precise-complete-rpu-audio-verified",
         "hdr10plus_clip": "precise-complete-t35-audio-verified",
         "diagnostic_log": result["diagnostic_log"], "diagnostic_identity": identity,

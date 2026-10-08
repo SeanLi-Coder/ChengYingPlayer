@@ -66,6 +66,7 @@ COOKIE_DIAGNOSTIC_CODES = frozenset(
         "chrome_profile_missing",
         "cookie_database_missing",
         "cookie_access_unknown",
+        "dedicated_login_unavailable",
     }
 )
 
@@ -240,6 +241,8 @@ def chrome_cookie_diagnostic(
     instead of being reclassified as a site response change. Only ``OSError`` is
     caught, so cancellation and interpreter-exit signals still propagate.
     """
+    if isinstance(profile, str) and profile.startswith("cy-session:"):
+        return "dedicated_login_unavailable"
     chain = _cookie_exception_chain(error)
     for current in chain:
         structured = public_cookie_diagnostic_code(

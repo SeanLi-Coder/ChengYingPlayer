@@ -25,6 +25,35 @@ and pytest caches are ignored; they are not source or redistribution assets.
 
 ## Deliberate patches
 
+### 原生专用登录边界（2026-10-09）
+
+`login_sessions.py` 管理独立 Chrome 窗口，只用播放器数据目录中的专用 `user_data_dir`，
+不读取日常 Chrome、Local State 或钥匙串，也不自动授予文件访问权限。用户显式打开、手动登录、
+显式保存；网站挑战仍由用户处理。`login-policy.json` 默认为 `dedicated`，另可明确选择
+`chrome` 或 `anonymous`；旧 config、任务、输出目录均不迁移。
+
+`login-sessions/<platform>/chrome` 与 owner-only 的不可变快照放在 App 外，升级不改路径。
+快照仅含该平台允许域的非分区 Cookie，保存和每次读取均检查本地认证 Cookie 的名称、域、根路径及有效期；
+这些启发式不能证明服务器仍认可登录，网站认证格式变化也可能需要更新适配。旧任务固定旧修订，
+重新登录后需新建任务，不静默换号。快照标识不会进入公开任务响应，Cookie 不进入 API、日志或诊断。
+
+`login_auth.py` 在 native helper 内统一接管 pinned yt-dlp 底层 Cookie extractor 及 XHS 的
+资料预检；专用任务禁止匿名降级，拒绝平台与修订不匹配。专用 CookieJar 经 yt-dlp 合并及 requests
+请求准备／重定向后仍保留 host-only 约束。`summary_source.py` 使用相同模式与快照，
+但仅包装自身传输实例，不加载真实 `app.main` 状态。旧 Chrome 模式的提取策略不变。
+
+主机 API 仍经过原有认证、同源与版本屏障。专用窗口整个生命周期计入更新和代理忙碌状态，
+代理保存后才打开窗口，失败不回退直连；关闭未确认时保持忙碌，不宣称成功退出。
+helper 在关闭失败时保留现有父进程控制的退出 watchdog，不使用全局 Chrome 清理或 TCC 操作。
+
+`browser.py` 仅新增固定专用登录诊断及提前返回，避免错误诊断再次扫描日常 Chrome；
+`main.py` 隐去专用快照标识；`static/app.js` 提供相应指引。这三处新增补丁均记录精确散列。
+原始 standalone 行为和上游哈希不变，不把这些原生新增模块冒充上游源码。
+
+离线验证使用私有临时数据、合成 Cookie、真实隔离 Chrome 及原生 WKWebView 的回环页面。
+`login_smoke.py` 还验证实际冻结运行时的不可变快照／重启。Google 可能拒绝自动化窗口登录；
+没有真实账号验收时不得声称所有平台登录或下载已成功。
+
 Two optional environment variables in `app/main.py` move
 writable files out of the signed, read-only application bundle:
 

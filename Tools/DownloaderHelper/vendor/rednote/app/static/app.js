@@ -161,6 +161,10 @@
   // come from the downloader's whitelist, never from raw exception text, so no
   // local path, cookie value or token can be echoed here.
   const cookieDiagnosticMessages = {
+    dedicated_login_unavailable: {
+      description: "独立下载登录需要重新准备：任务绑定的登录资料已失效、缺失或无法读取；这不需要日常 Chrome 的完全磁盘访问权限。",
+      solution: "在下载登录面板打开对应网站，手动登录后点击“保存登录”，再从原链接新建任务。旧任务保留原来的登录身份，不会自动换号。"
+    },
     cookie_decryption_failed: {
       description: "Chrome Cookie 未能解密：可能未取得钥匙串密钥，或部分 Cookie 已损坏。此提示本身不能证明钥匙串拒绝授权，也不代表账号已退出。",
       solution: "如 macOS 弹出 Chrome Safe Storage 授权，请先核对是否由本播放器触发，再决定是否允许。也请确认使用了已登录的 Chrome Profile，并在 Chrome 中重新访问目标网站后重试。不要删除钥匙串条目或发送 Cookie 内容。"
@@ -208,6 +212,7 @@
   };
 
   const cookieDiagnosticLabels = {
+    dedicated_login_unavailable: "独立下载登录需要重新准备",
     cookie_decryption_failed: "Chrome Cookie 解密失败",
     cookie_permission_denied: "文件读取权限被拒绝",
     cookie_database_locked: "Cookie 数据库被占用",
@@ -395,6 +400,7 @@
       return "作者保存目录准备失败";
     }
     const diagnostic = primaryJobDiagnosticCode(job);
+    if (diagnostic === "dedicated_login_unavailable") return cookieDiagnosticLabels[diagnostic];
     if (primaryJobIssueCode(job) === "cookie_unavailable" && diagnostic) {
       return `Chrome Cookie 读取失败：${cookieDiagnosticLabels[diagnostic]}`;
     }
@@ -1391,6 +1397,10 @@
 
   function localizeRuntimeMessage(value, job = null) {
     let text = asText(value);
+    if (diagnosticFromText(text) === "dedicated_login_unavailable") {
+      const detail = cookieDiagnosticMessages.dedicated_login_unavailable;
+      return `${detail.description}${detail.solution}诊断类别：dedicated_login_unavailable。`;
+    }
     const kuaishou = kuaishouMessage(text);
     if (kuaishou) return kuaishou;
     const instagram = instagramMessage(text);

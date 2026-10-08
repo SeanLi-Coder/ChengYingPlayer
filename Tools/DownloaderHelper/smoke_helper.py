@@ -129,6 +129,22 @@ def run_smoke(command, ffmpeg, ffprobe):
                 assert request(profile_endpoint)[0] == 403
                 assert request(profile_endpoint, token="wrong")[0] == 403
                 assert request(profile_endpoint, token=token, origin="https://example.invalid")[0] == 403
+                assert json.loads(request(profile_endpoint, token=token)[1])["status"] == "disabled"
+                login_endpoint = url + "api/native/login"
+                assert request(login_endpoint)[0] == 403
+                login = json.loads(request(login_endpoint, token=token)[1])
+                assert login["mode"] == "dedicated" and len(login["platforms"]) == 6
+                assert all(not entry["has_saved_session"] for entry in login["platforms"])
+                assert request(url + "native/login_sessions.js", token=token)[0] == 200
+                assert request(url + "native/login_sessions.css", token=token)[0] == 200
+                # A missing dedicated session rejects submission before website
+                # access, instead of scanning the user's daily Chrome profile.
+                rejected_status, rejected_body, _ = request(
+                    url + "api/jobs", token=token, method="POST",
+                    payload={"url": "https://www.douyin.com/video/1234567890123456789"},
+                )
+                assert rejected_status == 409
+                assert json.loads(rejected_body)["detail"]["code"] == "login_session_missing"
                 diagnostic_endpoint = url + "api/native/diagnostics"
                 assert request(diagnostic_endpoint)[0] == 403
                 status, body, headers = request(diagnostic_endpoint, token=token)

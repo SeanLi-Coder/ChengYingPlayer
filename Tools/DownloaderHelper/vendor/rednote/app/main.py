@@ -232,6 +232,8 @@ def _redact_public_value(value):
 
 def _public_job(job: DownloadJob) -> DownloadJob:
     public = job.model_copy(deep=True)
+    if isinstance(public.cookie_profile, str) and public.cookie_profile.startswith("cy-session:"):
+        public.cookie_profile = "Dedicated download login"
     public.source_url = _redact_public_url(public.source_url)
     if public.verification_url:
         public.verification_url = _redact_public_url(public.verification_url)
