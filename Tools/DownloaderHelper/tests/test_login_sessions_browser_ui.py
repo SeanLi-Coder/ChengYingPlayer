@@ -180,6 +180,26 @@ def open_page(page, site):
     expect(page.locator("body")).not_to_have_class("version-blocked")
 
 
+def open_with_held_login_request(page, site):
+    pending = []
+    # This fresh page sends the login request from its new document's deferred
+    # script. The load event alone does not synchronize Python's route callback.
+    # Keep the predicate synchronous: a Promise is truthy before it resolves.
+    page.add_init_script("window.__fixtureLoginRouteObserved = false;")
+
+    def hold_login_request(route):
+        pending.append(route)
+        page.evaluate("window.__fixtureLoginRouteObserved = true")
+
+    page.route("**/api/native/login", hold_login_request)
+    page.goto(site.origin)
+    observed = page.wait_for_function(
+        "window.__fixtureLoginRouteObserved === true", timeout=5000,
+    )
+    observed.dispose()
+    return pending
+
+
 def new_task(page):
     page.locator("#url-input").fill("https://www.douyin.com/video/123456")
     page.locator("#download-button").click()
@@ -360,9 +380,7 @@ def test_poll_only_while_open_and_pagehide_stops_all_actions(login_page, login_s
 
 def test_version_block_cancels_pending_and_rejects_late_result(login_page, login_site):
     page, site = login_page, login_site
-    pending = []
-    page.route("**/api/native/login", lambda route: pending.append(route))
-    page.goto(site.origin)
+    pending = open_with_held_login_request(page, site)
     expect(page.locator("#desktop-login-mode")).to_be_disabled()
     assert len(pending) == 1
     page.evaluate("document.body.classList.add('version-blocked')")
@@ -424,10 +442,8 @@ def test_general_settings_save_disables_authentication_changes(login_page, login
 
 def test_initial_request_timeout_can_be_retried_without_automatic_login(login_page, login_site):
     page, site = login_page, login_site
-    pending = []
     page.clock.install()
-    page.route("**/api/native/login", lambda route: pending.append(route))
-    page.goto(site.origin)
+    pending = open_with_held_login_request(page, site)
     assert len(pending) == 1
     page.clock.fast_forward(16000)
     expect(page.locator("#desktop-login-status")).to_contain_text("无法完成")
