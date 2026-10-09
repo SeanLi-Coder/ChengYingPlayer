@@ -2,7 +2,7 @@
 
 基线：`97b7137b6047780e251d875c1f00e31bf13a1078`，上一正式版 `v0.2.75` / build `86`。
 分支：`codex/restore-chrome-login`。本轮唯一发布者：Codex。
-目标候选：`v0.2.77` / build `88`；尚未发布。
+正式版：`v0.2.77` / build `88`，北京时间 2026-10-10 01:19:20 已发布并完成公开交付验证。
 
 ## 用户要求
 
@@ -46,7 +46,7 @@
 初次专项测试的错误导入与一个测试中误放断言已修复后重跑通过，未放宽生产检查。
 独立最终 review 无未解决阻断。没有读取真实账号、Cookie、钥匙串或用户设置。
 
-正式冻结组件、完整 App 构建与公开交付尚待完成，不能将候选写成已发布。
+以上为本机验证记录；正式冻结组件、完整 App 构建与公开交付结果见文末发布记录。
 
 ## 发布前阻断：暂停复位丢掉末次重绘
 
@@ -86,8 +86,37 @@ SHA-256 `2bdcbd6e80d3dd383d1676be907920aa7fb41195d990fb0e5d13f7417a280c3b`。
 - `CHENGYING_TEST_SOFTWARE_GL=1 .../python -B Tools/PlayerCloseTests/run.py --deps-dir build/scaler-lut-playback.uZAXpM`：
   真实生产图层、4K 软件解码反复关闭／重开 30 次，90 帧、61 个有效画面，退出 0；
   测试 App 精确注销与临时工作区清理成功；`build/restore-chrome-v77-real-close.log`。
+- 同一生产图层的非强制软件 GL 路径再通过 30 次关闭／重开（164 帧、143 个画面）；
+  此次解码仍为软件，日志虽名为 `build/restore-chrome-v77-real-close-hardware.log`，
+  不将它当成硬件解码证据。随后显式 `CLOSE_TEST_HWDEC=videotoolbox` 的独立运行也通过
+  30 次、132 帧／132 个画面，实际 decoder 集合为 `videotoolbox`，工作区清理成功；
+  正式硬解证据为 `build/restore-chrome-v77-real-close-videotoolbox.log`。
 - 版本递增后更新策略／交付／增量资产／公开验证工具 64 项、110 个 subtests 再次通过；
   `build/restore-chrome-v77-update-policy.log`。此前签名安装、下载模块和原生下载 UI
   结果仍针对相同未改的对应实现，冻结发行包另由后续完整 CI 验证。
 - 独立代码复审无未解决阻断；未将真实跨屏 shadow 路由称为已测试，也未盲目共享
   model／shadow 的瞬时 pending 状态。没有修改系统权限或正式安装。
+
+## 正式发布与公开交付
+
+- 发行提交：`775e5697a713df038d03490eeabaff142359efa3`；不可变标签 `v0.2.77` / build `88`。
+- 标签流水线 `37959784765`、主线 `37959784983`、拼写 `37959784876` 均成功。
+  两条构建的实际缩放／平移普通和受控延迟各 149 项通过，故障对照均记录
+  callback=1／FRAME=0、真实 VO 丢帧 0→1；没有跳过该检查。
+  完整 App、六种更新安装／重启、循环边界、打包转换／Dolby Vision／HDR10+ 剪辑和旋转检查均通过。
+- 正式发布时间：`2026-10-09T17:19:20Z`，北京时间 **2026-10-10 01:19:20**。
+  [公开发行页](https://github.com/SeanLi-Coder/ChengYingPlayer/releases/tag/v0.2.77)，八个资产完整，非草稿、非预发行。
+- 本机运行受管的 `other/verify_public_release.py --tag v0.2.77 --build 88`，
+  使用独立验证的 v0.2.75 基线及系统 CA 信任，退出 **0**。
+  证据目录：`build/ReleaseVerification.noindex/release-v0.2.77-public.jhezg6rc/`。
+  匿名 latest、客户端固定 feed、完整 DMG 和增量的实际下载大小／SHA-256、旧公钥验签均通过；
+  增量还原树与完整包相同，冻结 helper 身份为 0.2.77／88／
+  `48af0bac450b48b5ba58ae0efc6b333ea9b7480e593bdf73ffc24b06ec7ec517`。
+  自检明确返回 `removed-entry-and-legacy-identity-verified-offline`，不是旧专用窗口成功标记。
+  `volumes_detached`、`test_apps_cleaned` 均为 true。
+- 完整 DMG：168,743,968 字节，SHA-256
+  `b89d72d0fef4387444b1fdae22e86276be1714cb8e0b1757efc7fc6aa4f2c082`。
+  从 build 86 的增量：1,206,270 字节，SHA-256
+  `7313af0b4581a195d539bdf81076fd5528c01e528ff50fa73a0dae8382d34513`。
+- 未读取真实 Chrome Cookie、账号、钥匙串或用户配置，不宣称实站下载已重新验证；
+  未替换正式安装、自动授予权限或删除旧专用浏览器资料。
