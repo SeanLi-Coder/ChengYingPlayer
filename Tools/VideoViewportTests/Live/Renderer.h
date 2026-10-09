@@ -30,6 +30,7 @@ bool viewport_live_set_paused(bool paused);
 bool viewport_live_seek(double position);
 bool viewport_live_wait(double seconds);
 bool viewport_live_snapshot(ViewportLiveSnapshot *snapshot, double timeout);
+bool viewport_live_faults_exercised(void);
 void viewport_live_close(void);
 
 #endif

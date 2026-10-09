@@ -183,4 +183,5 @@ let allowedWrites = Set([MPVOption.Video.videoZoom, MPVOption.Video.videoPanX, M
 expect(!player.mpv.writes.isEmpty && Set(player.mpv.writes) == allowedWrites,
   "Production viewport actions write only the three presentation properties")
 expect(sought.frames > original.frames + 15, "Actual OpenGL output changed repeatedly throughout the test")
+expect(viewport_live_faults_exercised(), "Requested redraw faults were exercised rather than skipped")
 print("Video viewport live tests passed: \(checks) checks; \(sought.frames) actual rendered frames; \(hardware ? "VideoToolbox" : "software") decoding.")

@@ -304,7 +304,9 @@ jobs:
         run: CHENGYING_ALLOW_CI_GL_SKIP=1 PLAYBACK_SOAK_MODE=software PLAYBACK_SOAK_SECONDS=180 bash Tools/PlaybackSoakTests/run.sh
 
       - name: Test real video picture zoom and pan
-        run: CHENGYING_ALLOW_CI_GL_SKIP=1 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
+        run: |
+          CHENGYING_ALLOW_CI_GL_SKIP=1 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
+          CHENGYING_ALLOW_CI_GL_SKIP=1 CHENGYING_VIEWPORT_TEST_DROP_RESET_REDRAW=1 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
 
       - name: Build application
         run: >-

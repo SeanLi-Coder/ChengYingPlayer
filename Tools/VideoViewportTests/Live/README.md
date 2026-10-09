@@ -47,7 +47,7 @@ renderer or relax the watchdog or pixel expectations.
 
 Viewport snapshots observe both the requested mpv properties and the actual
 GPU marker until they agree with the existing two-pixel fixture expectations.
-Each observation has an eight-second deadline shared by all property queries
+Each observation has a twenty-second deadline shared by all property queries
 and the pixel readback; a late matching sample still fails. The whole-process
 ninety-second watchdog remains unchanged. No-op/clamped pan operations need not
 produce a new frame. Active-playback snapshots also observe the original time
@@ -77,6 +77,29 @@ On a renderer taking longer than the configured delay, the legacy sampler may
 already see the new pixels, so absence of that failure does not prove the old
 fixed wait safe. These controlled tests establish a sampling race, not the
 unique cause of a historical CI failure whose log lacks coordinates.
+
+The render driver also retains a callback until it services the render API.
+libmpv can move a pending paused redraw into its current frame after 200 ms,
+removing the FRAME update bit while the host is still busy. A callback therefore
+also triggers presentation, even if that bit has expired. The callback is consumed
+before update/render, so notifications arriving during either operation survive.
+Production `ViewLayer` has its own callback retention regression tests; this driver
+does not substitute for those tests or claim a full AppKit layer reproduction.
+
+The following controlled fault waits 400 ms after the final reset callback without
+servicing the render API. It requires a callback with no FRAME bit and an increased
+real VO drop count. The old gate must fail with a stale vertical position; the fixed
+gate must render the centered frame within the same pixel tolerance and deadline.
+
+```sh
+CHENGYING_VIEWPORT_TEST_DROP_RESET_REDRAW=1 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
+# Negative control: expected failure, never used to approve a release.
+CHENGYING_VIEWPORT_TEST_DROP_RESET_REDRAW=1 CHENGYING_VIEWPORT_TEST_LEGACY_REDRAW=1 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
+```
+
+For a separately verified playback build, set `CHENGYING_VIEWPORT_PLAYBACK_ROOT`
+to its directory containing `include/` and `lib/`. The test reports the selected
+library SHA-256 and actual loaded dylib path; it does not replace `deps/`.
 
 This is a bounded live renderer/bridge test, not a full application UI automation.
 It does not instantiate the complete application's `CAOpenGLLayer`, its actual

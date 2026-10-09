@@ -89,6 +89,10 @@ class ViewLayer: CAOpenGLLayer {
   /// When `true` drawing will proceed even if mpv indicates nothing needs to be done.
   @Atomic private var forceDraw = false
 
+  /// An update callback remains a redraw request even after mpv drops a late frame.
+  /// Keep it separate from `needsFlip`, which tracks whether AppKit drew during display.
+  @Atomic private var pendingRenderUpdate = false
+
   /// Indicates whether the view is being rendered as part of a live resizing operation.
   ///
   /// This flag is used to manage setting of the
@@ -173,7 +177,9 @@ class ViewLayer: CAOpenGLLayer {
       if !inLiveResize {
         isAsynchronous = false
       }
-      return forceDraw || videoView.player.mpv.shouldRenderUpdateFrame()
+      // Advanced-control dispatch must run even for an explicitly forced redraw.
+      let hasFrame = videoView.player.mpv.shouldRenderUpdateFrame()
+      return forceDraw || pendingRenderUpdate || hasFrame
     }
   }
 
@@ -186,6 +192,10 @@ class ViewLayer: CAOpenGLLayer {
       forceDraw = false
 
       let mpv = videoView.player.mpv!
+      // Consume before servicing dispatch and rendering. A callback raised by either
+      // operation belongs to the next queued display and must not be cleared here.
+      pendingRenderUpdate = false
+      _ = mpv.shouldRenderUpdateFrame()
 
       glClear(GLbitfield(GL_COLOR_BUFFER_BIT))
 
@@ -280,8 +290,14 @@ class ViewLayer: CAOpenGLLayer {
       // Neither canDraw nor draw(inCGLContext:) were called by AppKit, needs a skip render.
       // This can happen when IINA is playing in another space, as might occur when just playing
       // audio. See issue #5025.
-      if let renderContext = videoView.player.mpv.mpvRenderContext,
-         videoView.player.mpv.shouldRenderUpdateFrame() {
+      if let renderContext = videoView.player.mpv.mpvRenderContext {
+        let hadPendingUpdate = $pendingRenderUpdate.withLock { pending in
+          let previous = pending
+          pending = false
+          return previous
+        }
+        let hasFrame = videoView.player.mpv.shouldRenderUpdateFrame()
+        guard hadPendingUpdate || hasFrame else { return }
         var skip: CInt = 1
         withUnsafeMutablePointer(to: &skip) { skip in
           var params: [mpv_render_param] = [
@@ -295,6 +311,9 @@ class ViewLayer: CAOpenGLLayer {
   }
 
   func update(force: Bool = false) {
+    // The render queue may be occupied for longer than mpv's 200 ms frame deadline.
+    // Remember the notification immediately, without entering mpv or taking GL locks.
+    pendingRenderUpdate = true
     mpvGLQueue.async { [self] in
       if force { forceDraw = true }
       needsFlip = true

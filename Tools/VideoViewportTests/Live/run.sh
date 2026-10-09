@@ -10,10 +10,13 @@ if [[ "$mode" != hardware && "$mode" != software ]]; then
   exit 2
 fi
 ffmpeg="$project_root/deps/executable/ffmpeg"
-if [[ ! -x "$ffmpeg" || ! -f "$project_root/deps/lib/libmpv.2.dylib" ]]; then
+playback_root="${CHENGYING_VIEWPORT_PLAYBACK_ROOT:-$project_root/deps}"
+if [[ ! -x "$ffmpeg" || ! -f "$playback_root/lib/libmpv.2.dylib" ]]; then
   echo 'ERROR: The actual shipped playback libraries and source-built FFmpeg are required.' >&2
   exit 1
 fi
+playback_root="$(cd "$playback_root" && pwd -P)"
+/usr/bin/shasum -a 256 "$playback_root/lib/libmpv.2.dylib"
 
 echo 'Generating an isolated 4K viewport reference video.'
 "$ffmpeg" -hide_banner -loglevel error -nostdin -f lavfi \
@@ -36,7 +39,7 @@ echo 'Generating an isolated 4K viewport reference video.'
 ' "$project_root/iina/VideoTools/VideoToolsPlayerBridge.swift" > "$test_dir/ProductionViewport.swift"
 
 xcrun clang -fobjc-arc -Wno-deprecated-declarations -Wall -Wextra -Werror -O2 \
-  -I "$project_root/deps/include" \
+  -I "$playback_root/include" \
   -c "$project_root/Tools/VideoViewportTests/Live/Renderer.m" \
   -o "$test_dir/Renderer.o"
 xcrun swiftc -import-objc-header "$project_root/Tools/VideoViewportTests/Live/Renderer.h" \
@@ -46,8 +49,8 @@ xcrun swiftc -import-objc-header "$project_root/Tools/VideoViewportTests/Live/Re
   "$test_dir/ProductionViewport.swift" \
   "$project_root/Tools/VideoViewportTests/Live/Boundary.swift" \
   "$project_root/Tools/VideoViewportTests/Live/main.swift" \
-  "$test_dir/Renderer.o" "$project_root/deps/lib/libmpv.2.dylib" \
-  -framework OpenGL -framework AppKit -Xlinker -rpath -Xlinker "$project_root/deps/lib"
+  "$test_dir/Renderer.o" "$playback_root/lib/libmpv.2.dylib" \
+  -framework OpenGL -framework AppKit -Xlinker -rpath -Xlinker "$playback_root/lib"
 
 # An external watchdog also bounds a driver or player deadlock.
 bash "$project_root/Tools/RenderTestSupport/run_with_capability_policy.sh" "$mode" 'Actual video viewport OpenGL pixels' /usr/bin/perl -e '

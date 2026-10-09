@@ -4,6 +4,7 @@
 #include <OpenGL/CGLRenderers.h>
 #include <OpenGL/gl3.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -35,6 +36,9 @@ static char reply_string[128];
 static double test_readback_delay, readback_not_before, snapshot_deadline;
 static unsigned delayed_frame_count;
 static bool test_invert_pan_y;
+static bool test_drop_reset_redraw, test_legacy_redraw, delayed_reset;
+static bool check_dropped_notification;
+static double requested_zoom, requested_pan_y;
 
 static double now(void) {
   struct timespec value;
@@ -71,9 +75,20 @@ static void render(void) {
   // Query the render API on every pump instead of only after an update callback:
   // the callback can precede frame readiness, and a frame signalled once must not
   // be missed on a slow host, which left the loaded CI runner without a redraw.
-  atomic_store(&render_pending, false);
+  bool notified = atomic_exchange(&render_pending, false);
   [view.openGLContext makeCurrentContext];
-  if (!(mpv_render_context_update(renderer) & MPV_RENDER_UPDATE_FRAME)) return;
+  uint64_t flags = mpv_render_context_update(renderer);
+  if (check_dropped_notification) {
+    check_dropped_notification = false;
+    printf("DELAYED RESET: callback=%d; frame_flag=%d; legacy_gate=%d\n",
+           notified, !!(flags & MPV_RENDER_UPDATE_FRAME), test_legacy_redraw);
+    if (!require(notified && !(flags & MPV_RENDER_UPDATE_FRAME),
+                 "The controlled reset must outlive libmpv's pending-frame deadline")) return;
+  }
+  // libmpv may retire a paused redraw after 200 ms while the host is busy.
+  // Its callback still requests a presentation, using cur_frame if needed.
+  // Consume before update/render so a later callback survives for the next pump.
+  if (!(flags & MPV_RENDER_UPDATE_FRAME) && (!notified || test_legacy_redraw)) return;
   mpv_opengl_fbo target = {(int)framebuffer, WIDTH, HEIGHT, GL_RGBA8};
   int flip = 1, depth = 8;
   mpv_render_param parameters[] = {
@@ -150,7 +165,22 @@ static uint64_t request(void) {
 }
 
 static bool set_double(const char *name, double value) {
-  return check(mpv_set_property_async(player, request(), name, MPV_FORMAT_DOUBLE, &value), name) && await_reply();
+  if (!check(mpv_set_property_async(player, request(), name, MPV_FORMAT_DOUBLE, &value), name)) return false;
+  if (delayed_reset) {
+    delayed_reset = false;
+    double deadline = now() + 2;
+    while (!atomic_load(&render_pending) && now() < deadline) {
+      struct timespec interval = {0, 1000000};
+      nanosleep(&interval, NULL);
+    }
+    if (!require(atomic_load(&render_pending), "The controlled reset produced a render callback")) return false;
+    // Deliberately stop servicing the render API, not just pixel readback.
+    // The MPV core and VO threads continue processing the real final pan write.
+    struct timespec remaining = {0, 400000000};
+    while (nanosleep(&remaining, &remaining) != 0 && errno == EINTR) {}
+    check_dropped_notification = true;
+  }
+  return await_reply();
 }
 
 static bool read_value(const char *name, mpv_format format, double *value) {
@@ -167,6 +197,14 @@ bool viewport_live_wait(double seconds) {
 
 bool viewport_live_open(const char *path, bool hardware) {
   graphics_unavailable = false;
+  const char *drop_reset = getenv("CHENGYING_VIEWPORT_TEST_DROP_RESET_REDRAW");
+  const char *legacy_redraw = getenv("CHENGYING_VIEWPORT_TEST_LEGACY_REDRAW");
+  if (!require(!drop_reset || strcmp(drop_reset, "1") == 0,
+               "The reset redraw delay accepts only 1 when set") ||
+      !require(!legacy_redraw || (strcmp(legacy_redraw, "1") == 0 && drop_reset),
+               "The legacy redraw gate requires the controlled reset delay")) return false;
+  test_drop_reset_redraw = drop_reset != NULL;
+  test_legacy_redraw = legacy_redraw != NULL;
   const char *delay = getenv("CHENGYING_VIEWPORT_TEST_READBACK_DELAY");
   if (delay) {
     char *end = NULL;
@@ -226,6 +264,10 @@ bool viewport_live_open(const char *path, bool hardware) {
   original_frame = window.frame;
   if (!require(view.openGLContext != nil, "A real AppKit OpenGL context is required")) return false;
   printf("GPU: %s; FRAMEBUFFER: %dx%d; FORCED_SOFTWARE_GL: %d\n", glGetString(GL_RENDERER), WIDTH, HEIGHT, software_gl != NULL);
+  Dl_info library_info;
+  if (!require(dladdr((const void *)mpv_create, &library_info) != 0 && library_info.dli_fname,
+               "The loaded playback library identity is available")) return false;
+  printf("LOADED LIBMPV: %s\n", library_info.dli_fname);
   gl_library = dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_NOW | RTLD_LOCAL);
   if (!require(gl_library != NULL, "System OpenGL entry points are required")) return false;
   player = mpv_create();
@@ -307,6 +349,20 @@ bool viewport_live_get_double(const char *name, double *value) {
 }
 
 bool viewport_live_set_double(const char *name, double value) {
+  bool controlled_reset = false;
+  double prior_drops = 0;
+  if (test_drop_reset_redraw && strcmp(name, "video-pan-y") == 0 && value == 0 &&
+      requested_pan_y < -0.04 && requested_zoom == 0) {
+    // Finish the prior X redraw so the sole delayed callback belongs to Y.
+    if (!viewport_live_wait(0.1) ||
+        !require(!atomic_load(&render_pending), "The prior redraw completed before the reset fault") ||
+        !read_value("frame-drop-count", MPV_FORMAT_DOUBLE, &prior_drops)) return false;
+    controlled_reset = true;
+    delayed_reset = true;
+    test_drop_reset_redraw = false;
+  }
+  if (strcmp(name, "video-zoom") == 0) requested_zoom = value;
+  if (strcmp(name, "video-pan-y") == 0) requested_pan_y = value;
   if (strcmp(name, "video-zoom") == 0 || strcmp(name, "video-pan-x") == 0 ||
       strcmp(name, "video-pan-y") == 0) {
     if (test_readback_delay > 0) {
@@ -324,7 +380,14 @@ bool viewport_live_set_double(const char *name, double value) {
     }
     if (test_invert_pan_y && strcmp(name, "video-pan-y") == 0) value = -value;
   }
-  return set_double(name, value);
+  if (!set_double(name, value)) return false;
+  if (controlled_reset) {
+    double current_drops = 0;
+    if (!read_value("frame-drop-count", MPV_FORMAT_DOUBLE, &current_drops)) return false;
+    printf("RESET VO DROP COUNT: %.0f -> %.0f\n", prior_drops, current_drops);
+    return require(current_drops > prior_drops, "The real VO retired the delayed reset frame");
+  }
+  return true;
 }
 
 bool viewport_live_set_speed(double speed) {
@@ -397,6 +460,11 @@ bool viewport_live_snapshot(ViewportLiveSnapshot *snapshot, double timeout) {
   bool timely = now() <= snapshot_deadline;
   snapshot_deadline = 0;
   return result && require(timely, "The viewport sample exceeded its observation deadline");
+}
+
+bool viewport_live_faults_exercised(void) {
+  return require(!test_drop_reset_redraw && !delayed_reset && !check_dropped_notification,
+                 "Every requested reset fault was actually exercised");
 }
 
 void viewport_live_close(void) {

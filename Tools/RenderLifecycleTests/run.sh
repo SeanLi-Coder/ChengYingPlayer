@@ -3,6 +3,9 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "$0")/../.." && pwd)"
 source_root="${RENDER_LIFECYCLE_SOURCE_ROOT:-$project_root}"
+if [[ "${1:-all}" == all ]]; then
+  bash "$project_root/Tools/RenderLifecycleTests/run_updates.sh"
+fi
 test_dir="$(mktemp -d "${TMPDIR:-/tmp}/chengying-render-lifecycle.XXXXXX")"
 trap 'rm -rf "$test_dir"' EXIT
 
