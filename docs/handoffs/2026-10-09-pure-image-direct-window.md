@@ -2,7 +2,7 @@
 
 基线：`fb90a2430dc61a8e69b2ca715152d8a365799009`，正式版本 `v0.2.74` / build `85`。
 分支：`codex/pure-image-direct-window`。本轮唯一发布者：Codex。
-目标候选：`v0.2.75` / build `86`；尚未发布。
+正式版本：`v0.2.75` / build `86`，北京时间 **2026-10-09 17:40:15** 已发布。
 
 ## 用户要求与现场核实
 
@@ -58,4 +58,29 @@ Option 局部平移、窗口加减缩放、返回普通视图、比例不同的�
 不误平移图片，但合成后续事件不能驱动 WindowServer 移动窗口。双击最大化／恢复已通过
 实际窗口事件与 frame 检查；**物理鼠标拖窗、四边四角实拖及真实跨显示器拖动仍需人工确认**。
 没有为测试另造与生产不同的拖拽实现、申请辅助功能权限或把合成事件验收写成物理操作成功。
-完整发行验证待完成，不能将候选版本或本地检查写成已发布。
+
+## 正式发布与公开交付复核
+
+提交 `0beb25df34b9a0c6a6b81a0ee1f3e258a3d97103` 对应不可变标签 `v0.2.75`。
+标签流水线 `37907880848`、主线 `37907880889`、拼写 `37907880847` 全部通过。
+标签媒体检查用时 20m48s，完整 Apple Silicon 构建与回归 44m29s；实际升级安装／重启、
+4K 关闭／重开、静音打开、循环、旋转、打包 Dolby Vision／HDR10+ 剪辑均通过。
+发布 job `113761217719` 成功，正式 Release 包含八个资产，非 draft、非 prerelease。
+发布地址：[v0.2.75](https://github.com/SeanLi-Coder/ChengYingPlayer/releases/tag/v0.2.75)。
+
+本机通过仓库 `other/verify_public_release.py` 以已独立验证的 v0.2.74 / build 85 报告
+`build/ReleaseVerification.noindex/release-v0.2.74-public.3n2plauu` 与其可信 plist 为基线复核。
+只在验证进程内设 `NO_PROXY=*` 并启用系统 CA 的 truststore；未关闭 TLS、未改系统代理。
+结果位于 `build/ReleaseVerification.noindex/release-v0.2.75-public.8ywp3kft/verification.json`，
+退出 0：匿名 latest、客户端固定 feed、完整包与每个增量的字节／SHA、旧公钥验签、
+增量重建全树及代码签名一致、冻结 helper 身份与 HDR 剪辑自检全部通过。
+`volumes_detached` 与 `test_apps_cleaned` 均为 true；受管测试 App 已精确注销／清理，
+可信 plist 与报告独立保留，不依赖测试 App、不覆盖正式安装、不接触用户原图与偏好。
+下载器自检仅为合成离线检查，不代表本轮测试了真实账号或站点。
+
+- 完整 DMG：168,991,455 字节；SHA-256
+  `c8f2b84d9888cfea1f1ee2e8b975e1e5549ae517ea45c18f57c7638297b432b4`。
+- 从 build 85 的增量：1,223,898 字节；SHA-256
+  `019824601fcb7a3976008292627b0c658870d02702c0632545b51c8d5154de7c`。
+
+剩余人工验收为上述 WindowServer 物理拖动／边角／跨屏的实际操作验证；没有因此跳过其他发行检查。
