@@ -55,6 +55,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private var viewingChrome: [NSView] = []
   private var normalViewingConstraints: [NSLayoutConstraint] = []
   private var pureViewingConstraints: [NSLayoutConstraint] = []
+  private var pureViewingMinimumSizeConstraints: [NSLayoutConstraint] = []
   private(set) var isPureViewing = false
   private struct WindowAppearance {
     let fullSizeContent: Bool
@@ -75,6 +76,9 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private var normalFrameBeforeFullscreen: NSRect?
   private var fullscreenTransition = false
   private var pureViewingSizeLimit: NSSize?
+  private var pureViewingImageSize: NSSize?
+  private var pureViewingScreenFrame: NSRect?
+  private var sizingPureViewingWindow = false
   private(set) var files: [PlaylistFileMetadata] = []
   private(set) var selectedURL: URL?
   private(set) var frameIndex = 0
@@ -232,6 +236,10 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     body.alignment = .top
     content.addSubview(body)
     canvas.heightAnchor.constraint(equalTo: body.heightAnchor).isActive = true
+    pureViewingMinimumSizeConstraints = [
+      canvas.widthAnchor.constraint(greaterThanOrEqualToConstant: 64),
+      canvas.heightAnchor.constraint(greaterThanOrEqualToConstant: 64),
+    ]
     let sidebarHeight = sidebar.heightAnchor.constraint(equalTo: body.heightAnchor)
     sidebar.setHuggingPriority(.defaultLow, for: .vertical)
     scroll.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -976,10 +984,13 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
         autosaveName: window.frameAutosaveName)
       deferredNormalWindowGeometry = nil
       pureViewingSizeLimit = normalWindowGeometry?.frame.size
+      pureViewingImageSize = nil
+      pureViewingScreenFrame = nil
       // Pure-view dimensions must not replace the normal browser/editor's saved frame.
       window.setFrameAutosaveName("")
     }
     isPureViewing = enabled
+    if !enabled { NSLayoutConstraint.deactivate(pureViewingMinimumSizeConstraints) }
     NSLayoutConstraint.deactivate(enabled ? normalViewingConstraints : pureViewingConstraints)
     viewingChrome.forEach { $0.isHidden = enabled }
     NSLayoutConstraint.activate(enabled ? pureViewingConstraints : normalViewingConstraints)
@@ -1009,6 +1020,8 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       }
       normalWindowGeometry = nil
       pureViewingSizeLimit = nil
+      pureViewingImageSize = nil
+      pureViewingScreenFrame = nil
     }
     window.contentView?.layoutSubtreeIfNeeded()
     window.makeFirstResponder(canvas)
@@ -1026,20 +1039,25 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   /// Resize the window, never crop or stretch image pixels to hide letterboxing.
-  private func sizePureViewingWindowToImage() {
+  private func sizePureViewingWindowToImage(force: Bool = false) {
     guard isPureViewing, let window, let image = canvas.image,
-          !window.styleMask.contains(.fullScreen), !fullscreenTransition, !window.isMiniaturized else { return }
+          !window.styleMask.contains(.fullScreen), !fullscreenTransition, !window.isMiniaturized,
+          !sizingPureViewingWindow else { return }
     let dimensions = NSSize(width: image.width, height: image.height)
-    guard window.contentAspectRatio != dimensions else { return }
     let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+    guard force || pureViewingImageSize != dimensions || pureViewingScreenFrame != visible else { return }
     let limit = pureViewingSizeLimit ?? window.frame.size
     let scale = min(min(limit.width, visible.width) / dimensions.width,
                     min(limit.height, visible.height) / dimensions.height)
     guard scale.isFinite, scale > 0 else { return }
+    sizingPureViewingWindow = true
+    defer { sizingPureViewingWindow = false }
+    let old = window.frame
     var size = NSSize(width: dimensions.width * scale, height: dimensions.height * scale)
     // AppKit rounds window edges to points. Round the short side inward first so
     // a thin panorama does not gain a comparatively large blank strip.
-    if size.width >= 1 && size.height >= 1 {
+    let needsUsableViewport = size.width < 1 || size.height < 1
+    if !needsUsableViewport {
       if size.width < size.height {
         size.width = floor(size.width)
         size.height = size.width * dimensions.height / dimensions.width
@@ -1048,12 +1066,28 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
         size.width = size.height * dimensions.width / dimensions.height
       }
     }
-    // Extremely thin panoramas may need a smaller short side to remain on screen.
-    let minimumScale = min(size.width / dimensions.width, 64 / min(dimensions.width, dimensions.height))
-    window.contentMinSize = NSSize(width: dimensions.width * minimumScale,
-                                   height: dimensions.height * minimumScale)
-    window.contentAspectRatio = dimensions
-    let old = window.frame
+    if needsUsableViewport {
+      // AppKit rounds subpoint window edges to zero. Keep these exceptional
+      // images in a usable viewport, with honest letterboxing instead of cropping.
+      let minimum = NSSize(width: min(64, visible.width), height: min(64, visible.height))
+      pureViewingMinimumSizeConstraints[0].constant = minimum.width
+      pureViewingMinimumSizeConstraints[1].constant = minimum.height
+      NSLayoutConstraint.activate(pureViewingMinimumSizeConstraints)
+      window.contentResizeIncrements = NSSize(width: 1, height: 1)
+      window.contentMinSize = minimum
+      size.width = min(max(size.width, minimum.width), visible.width)
+      size.height = min(max(size.height, minimum.height), visible.height)
+    } else {
+      NSLayoutConstraint.deactivate(pureViewingMinimumSizeConstraints)
+      // Narrow but representable images can still follow their original ratio.
+      let minimumScale = min(size.width / dimensions.width, 64 / min(dimensions.width, dimensions.height))
+      window.contentMinSize = NSSize(width: dimensions.width * minimumScale,
+                                     height: dimensions.height * minimumScale)
+      window.contentAspectRatio = dimensions
+    }
+    // Track decoded dimensions independently of the fallback viewport's ratio.
+    pureViewingImageSize = dimensions
+    pureViewingScreenFrame = visible
     var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: size))
     frame.origin = CGPoint(x: old.midX - frame.width / 2, y: old.midY - frame.height / 2)
     frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
@@ -1415,7 +1449,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       restoreNormalWindowGeometry(geometry)
     } else if isPureViewing {
       window?.contentResizeIncrements = NSSize(width: 1, height: 1)
-      sizePureViewingWindowToImage()
+      sizePureViewingWindowToImage(force: true)
     }
   }
   func windowWillEnterFullScreen(_ notification: Notification) {
@@ -1436,6 +1470,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     let longestSide = max(window.frame.width, window.frame.height)
     pureViewingSizeLimit = NSSize(width: longestSide, height: longestSide)
   }
+  func windowDidChangeScreen(_ notification: Notification) { sizePureViewingWindowToImage() }
   func windowDidBecomeKey(_ notification: Notification) { refreshList() }
 }
 

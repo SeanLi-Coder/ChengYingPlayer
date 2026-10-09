@@ -364,6 +364,90 @@ struct RealImageViewerSmoke {
            abs(viewer.canvas.imageRect.height - viewer.canvas.bounds.height) < 0.001 &&
            imageWindow.contentAspectRatio == NSSize(width: 240, height: 480),
            "Failed fullscreen entry clears transition state and fits the newly decoded image")
+
+    let extremeShapes = [(131_072, 1), (1, 131_072)]
+    var extremeURLs: [URL] = []
+    for (index, shape) in extremeShapes.enumerated() {
+      let url = root.appendingPathComponent("subpoint-\(index).png")
+      write(url, type: "public.png", images: [image(CGColor(red: 0.2, green: 0.6, blue: 0.8, alpha: 1),
+                                                  width: shape.0, height: shape.1)])
+      extremeURLs.append(url)
+    }
+    let extremeBytes = try extremeURLs.map { try Data(contentsOf: $0) }
+    for (index, shape) in extremeShapes.enumerated() {
+      viewer.open(urls: [extremeURLs[index], shapeURLs[0]])
+      waitFor("An extreme real PNG decodes without changing its pixels") {
+        viewer.selectedURL == extremeURLs[index] && viewer.canvas.image?.width == shape.0 &&
+          viewer.canvas.image?.height == shape.1
+      }
+      pump()
+      expect(viewer.isPureViewing && imageWindow.frame.width >= 64 && imageWindow.frame.height >= 64 &&
+             viewer.canvas.bounds.width >= 64 && viewer.canvas.bounds.height >= 64,
+             "A subpoint source aspect uses a visible operable viewport instead of a zero-area window")
+      expect(imageWindow.contentAspectRatio == .zero,
+             "An unrepresentable aspect does not constrain future user drags to a zero-area frame")
+      expect(imageWindow.screen!.visibleFrame.insetBy(dx: -1, dy: -1).contains(imageWindow.frame),
+             "The extreme-aspect fallback remains on the current screen")
+      let rect = viewer.canvas.imageRect
+      expect(rect.width > 0 && rect.height > 0 &&
+             abs(rect.width / rect.height - CGFloat(shape.0) / CGFloat(shape.1)) < 0.001 &&
+             viewer.canvas.bounds.insetBy(dx: -0.001, dy: -0.001).contains(rect),
+             "The fallback letterboxes the complete extreme image without cropping or stretching")
+      imageWindow.setContentSize(NSSize(width: 1, height: 1))
+      pump()
+      expect(imageWindow.frame.width >= 64 && imageWindow.frame.height >= 64 &&
+             viewer.canvas.bounds.width >= 64 && viewer.canvas.bounds.height >= 64,
+             "Actual layout constraints keep a shrinking fallback viewport operable")
+      if index == 0 && ProcessInfo.processInfo.environment["IMAGE_VIEWER_TEST_FULLSCREEN"] == "1" {
+        var entered = false
+        var exited = false
+        let enterObserver = NotificationCenter.default.addObserver(forName: NSWindow.didEnterFullScreenNotification,
+          object: imageWindow, queue: .main) { _ in entered = true }
+        let exitObserver = NotificationCenter.default.addObserver(forName: NSWindow.didExitFullScreenNotification,
+          object: imageWindow, queue: .main) { _ in exited = true }
+        imageWindow.toggleFullScreen(nil)
+        waitFor("An extreme-aspect fallback can enter native fullscreen") { entered }
+        imageWindow.toggleFullScreen(nil)
+        waitFor("An extreme-aspect fallback can leave native fullscreen") { exited }
+        pump()
+        expect(viewer.isPureViewing && imageWindow.contentAspectRatio == .zero &&
+               imageWindow.frame.width >= 64 && imageWindow.frame.height >= 64,
+               "Native fullscreen exit reinstates the nonzero fallback rather than the source's subpoint aspect")
+        NotificationCenter.default.removeObserver(enterObserver)
+        NotificationCenter.default.removeObserver(exitObserver)
+      }
+      key(viewer, code: 53, characters: "\u{1b}")
+      pump()
+      expect(!viewer.isPureViewing && imageWindow.frame == savedFrame && imageWindow.frameAutosaveName == savedAutosave,
+             "Escape exits an extreme-aspect viewport and restores normal geometry and autosave")
+      key(viewer, code: 48, characters: "\t")
+      expect(viewer.isPureViewing && viewer.canvas.bounds.width >= 64 && viewer.canvas.bounds.height >= 64,
+             "Reentering pure viewing preserves the extreme-aspect safety viewport")
+    }
+    let repeatedExtremePages = root.appendingPathComponent("subpoint-pages.tiff")
+    let extremePage = image(CGColor(red: 0.2, green: 0.6, blue: 0.8, alpha: 1), width: 131_072, height: 1)
+    write(repeatedExtremePages, type: "public.tiff", images: [extremePage, extremePage])
+    viewer.open(urls: [repeatedExtremePages, shapeURLs[0]])
+    waitFor("A repeated extreme-size TIFF is ready") {
+      viewer.selectedURL == repeatedExtremePages && viewer.canvas.image?.width == 131_072 && viewer.nextFrameButton.isEnabled
+    }
+    imageWindow.setContentSize(NSSize(width: 320, height: 160))
+    pump()
+    let customFallbackFrame = imageWindow.frame
+    viewer.nextFrameButton.performClick(nil)
+    waitFor("A same-size extreme TIFF page is displayed") { viewer.frameIndex == 1 }
+    pump()
+    expect(imageWindow.frame == customFallbackFrame,
+           "Same decoded dimensions never reset a user-sized fallback viewport on frame delivery")
+    viewer.open(urls: [shapeURLs[0], repeatedExtremePages])
+    waitFor("A normal portrait opens after an extreme fallback") { viewer.canvas.image?.height == 480 }
+    pump()
+    expect(imageWindow.contentAspectRatio == NSSize(width: 240, height: 480) &&
+           abs(viewer.canvas.imageRect.width - viewer.canvas.bounds.width) < 0.001 &&
+           abs(viewer.canvas.imageRect.height - viewer.canvas.bounds.height) < 0.001,
+           "Returning to a representable image restores borderless aspect-locked viewing")
+    let viewedExtremeBytes = try extremeURLs.map { try Data(contentsOf: $0) }
+    expect(viewedExtremeBytes == extremeBytes, "Extreme image handling preserves every original PNG byte")
     key(viewer, code: 53, characters: "\u{1b}")
     pump()
     expect(imageWindow.frame == savedFrame && imageWindow.contentMinSize == savedMinimum &&
