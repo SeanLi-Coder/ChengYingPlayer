@@ -62,7 +62,19 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     let transparentTitlebar: Bool
     let buttons: [(NSWindow.ButtonType, Bool)]
   }
+  private struct WindowGeometry {
+    let frame: NSRect
+    let minimumContentSize: NSSize
+    let contentAspectRatio: NSSize
+    let contentResizeIncrements: NSSize
+    let autosaveName: NSWindow.FrameAutosaveName
+  }
   private var normalWindowAppearance: WindowAppearance?
+  private var normalWindowGeometry: WindowGeometry?
+  private var deferredNormalWindowGeometry: WindowGeometry?
+  private var normalFrameBeforeFullscreen: NSRect?
+  private var fullscreenTransition = false
+  private var pureViewingSizeLimit: NSSize?
   private(set) var files: [PlaylistFileMetadata] = []
   private(set) var selectedURL: URL?
   private(set) var frameIndex = 0
@@ -128,6 +140,11 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
   override func showWindow(_ sender: Any?) {
+    if let window, !window.styleMask.contains(.fullScreen), !fullscreenTransition,
+       let geometry = deferredNormalWindowGeometry {
+      deferredNormalWindowGeometry = nil
+      restoreNormalWindowGeometry(geometry)
+    }
     super.showWindow(sender)
     window?.makeFirstResponder(canvas)
   }
@@ -215,7 +232,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     body.alignment = .top
     content.addSubview(body)
     canvas.heightAnchor.constraint(equalTo: body.heightAnchor).isActive = true
-    sidebar.heightAnchor.constraint(equalTo: body.heightAnchor).isActive = true
+    let sidebarHeight = sidebar.heightAnchor.constraint(equalTo: body.heightAnchor)
     sidebar.setHuggingPriority(.defaultLow, for: .vertical)
     scroll.setContentHuggingPriority(.defaultLow, for: .vertical)
     folderBrowser.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -306,6 +323,14 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       body.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
       body.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
       body.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -12),
+      sidebarHeight,
+      top.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
+      top.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
+      top.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
+      top.heightAnchor.constraint(equalToConstant: 48),
+      footer.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
+      footer.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
+      footer.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
     ]
     pureViewingConstraints = [
       body.topAnchor.constraint(equalTo: content.topAnchor),
@@ -314,15 +339,6 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       body.bottomAnchor.constraint(equalTo: content.bottomAnchor),
     ]
     NSLayoutConstraint.activate(normalViewingConstraints)
-    NSLayoutConstraint.activate([
-      top.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
-      top.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
-      top.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
-      top.heightAnchor.constraint(equalToConstant: 48),
-      footer.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
-      footer.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
-      footer.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
-    ])
     canvas.onZoomChanged = { [weak self] value in
       self?.zoomLabel.stringValue = String(format: "%.0f%%", value * 100)
     }
@@ -579,6 +595,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
           self.framePending = false
           self.frameDuration = self.validDuration(duration)
           self.canvas.display(image, resetZoom: true)
+          self.sizePureViewingWindowToImage()
           if Preference.bool(for: .recordRecentFiles) { AppDelegate.shared.noteNewRecentDocumentURL(url) }
           self.infoLabel.stringValue = "\(info.width) × \(info.height) · \(info.formatName) · \(info.bitDepth)-bit\(info.hasAlpha ? " · 透明通道" : "")"
           if !self.isBusy { self.statusLabel.stringValue = "滚轮 / 双指缩放 · 拖动平移 · ← → 切换 · 0 适应 · 1 原始像素 · Tab 纯净看图 · Esc 退出" }
@@ -642,6 +659,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
           self.frameIndex = index
           self.frameDuration = self.validDuration(duration)
           self.canvas.display(image, resetZoom: false)
+          self.sizePureViewingWindowToImage()
           self.updateFrameControls()
           if self.isAnimating { self.scheduleFrame() }
         }
@@ -950,6 +968,16 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
         fullSizeContent: window.styleMask.contains(.fullSizeContentView),
         titleVisibility: window.titleVisibility, transparentTitlebar: window.titlebarAppearsTransparent,
         buttons: types.map { ($0, window.standardWindowButton($0)?.isHidden ?? false) })
+      normalWindowGeometry = deferredNormalWindowGeometry ?? WindowGeometry(
+        frame: window.styleMask.contains(.fullScreen) || fullscreenTransition
+          ? (normalFrameBeforeFullscreen ?? window.frame) : window.frame,
+        minimumContentSize: window.contentMinSize, contentAspectRatio: window.contentAspectRatio,
+        contentResizeIncrements: window.contentResizeIncrements,
+        autosaveName: window.frameAutosaveName)
+      deferredNormalWindowGeometry = nil
+      pureViewingSizeLimit = normalWindowGeometry?.frame.size
+      // Pure-view dimensions must not replace the normal browser/editor's saved frame.
+      window.setFrameAutosaveName("")
     }
     isPureViewing = enabled
     NSLayoutConstraint.deactivate(enabled ? normalViewingConstraints : pureViewingConstraints)
@@ -958,6 +986,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     canvas.isPureViewing = enabled
     if enabled {
       applyPureWindowAppearance()
+      sizePureViewingWindowToImage()
     } else if let appearance = normalWindowAppearance {
       if !appearance.fullSizeContent { window.styleMask.remove(.fullSizeContentView) }
       window.titleVisibility = appearance.titleVisibility
@@ -969,6 +998,17 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       }
       for (type, hidden) in appearance.buttons { window.standardWindowButton(type)?.isHidden = hidden }
       normalWindowAppearance = nil
+      if let geometry = normalWindowGeometry {
+        restoreResizePolicy(geometry)
+        window.contentMinSize = geometry.minimumContentSize
+        if window.styleMask.contains(.fullScreen) || fullscreenTransition {
+          deferredNormalWindowGeometry = geometry
+        } else {
+          restoreNormalWindowGeometry(geometry)
+        }
+      }
+      normalWindowGeometry = nil
+      pureViewingSizeLimit = nil
     }
     window.contentView?.layoutSubtreeIfNeeded()
     window.makeFirstResponder(canvas)
@@ -982,6 +1022,62 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     window.titlebarAppearsTransparent = true
     for type: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton, .documentIconButton] {
       window.standardWindowButton(type)?.isHidden = true
+    }
+  }
+
+  /// Resize the window, never crop or stretch image pixels to hide letterboxing.
+  private func sizePureViewingWindowToImage() {
+    guard isPureViewing, let window, let image = canvas.image,
+          !window.styleMask.contains(.fullScreen), !fullscreenTransition, !window.isMiniaturized else { return }
+    let dimensions = NSSize(width: image.width, height: image.height)
+    guard window.contentAspectRatio != dimensions else { return }
+    let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+    let limit = pureViewingSizeLimit ?? window.frame.size
+    let scale = min(min(limit.width, visible.width) / dimensions.width,
+                    min(limit.height, visible.height) / dimensions.height)
+    guard scale.isFinite, scale > 0 else { return }
+    var size = NSSize(width: dimensions.width * scale, height: dimensions.height * scale)
+    // AppKit rounds window edges to points. Round the short side inward first so
+    // a thin panorama does not gain a comparatively large blank strip.
+    if size.width >= 1 && size.height >= 1 {
+      if size.width < size.height {
+        size.width = floor(size.width)
+        size.height = size.width * dimensions.height / dimensions.width
+      } else {
+        size.height = floor(size.height)
+        size.width = size.height * dimensions.width / dimensions.height
+      }
+    }
+    // Extremely thin panoramas may need a smaller short side to remain on screen.
+    let minimumScale = min(size.width / dimensions.width, 64 / min(dimensions.width, dimensions.height))
+    window.contentMinSize = NSSize(width: dimensions.width * minimumScale,
+                                   height: dimensions.height * minimumScale)
+    window.contentAspectRatio = dimensions
+    let old = window.frame
+    var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: size))
+    frame.origin = CGPoint(x: old.midX - frame.width / 2, y: old.midY - frame.height / 2)
+    frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
+    frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
+    window.setFrame(frame, display: true)
+    window.contentView?.layoutSubtreeIfNeeded()
+  }
+
+  private func restoreNormalWindowGeometry(_ geometry: WindowGeometry) {
+    guard let window else { return }
+    restoreResizePolicy(geometry)
+    window.contentMinSize = geometry.minimumContentSize
+    // Re-enabling autosave may load an older frame. The current session's snapshot wins.
+    window.setFrameAutosaveName(geometry.autosaveName)
+    window.setFrame(window.constrainFrameRect(geometry.frame, to: window.screen), display: true)
+  }
+
+  private func restoreResizePolicy(_ geometry: WindowGeometry) {
+    guard let window else { return }
+    // AppKit reports zero for an unset ratio, but assigning 0:0 is not a valid reset.
+    if geometry.contentAspectRatio.width > 0 && geometry.contentAspectRatio.height > 0 {
+      window.contentAspectRatio = geometry.contentAspectRatio
+    } else {
+      window.contentResizeIncrements = geometry.contentResizeIncrements
     }
   }
 
@@ -1294,6 +1390,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     stopAnimation()
   }
   func windowDidDeminiaturize(_ notification: Notification) {
+    sizePureViewingWindowToImage()
     if wasAnimatingBeforeMiniaturize { startAnimation() }
     wasAnimatingBeforeMiniaturize = false
     if wasSlideshowRunningBeforeMiniaturize {
@@ -1305,12 +1402,39 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     }
   }
   func windowDidEnterFullScreen(_ notification: Notification) {
+    fullscreenTransition = false
     fullscreenButton.title = "退出全屏"
     applyPureWindowAppearance()
   }
   func windowDidExitFullScreen(_ notification: Notification) {
+    fullscreenTransition = false
     fullscreenButton.title = "全屏"
     applyPureWindowAppearance()
+    if let geometry = deferredNormalWindowGeometry {
+      deferredNormalWindowGeometry = nil
+      restoreNormalWindowGeometry(geometry)
+    } else if isPureViewing {
+      window?.contentResizeIncrements = NSSize(width: 1, height: 1)
+      sizePureViewingWindowToImage()
+    }
+  }
+  func windowWillEnterFullScreen(_ notification: Notification) {
+    if !isPureViewing { normalFrameBeforeFullscreen = window?.frame }
+    fullscreenTransition = true
+    if isPureViewing { window?.contentResizeIncrements = NSSize(width: 1, height: 1) }
+  }
+  func windowWillExitFullScreen(_ notification: Notification) { fullscreenTransition = true }
+  func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+    windowDidExitFullScreen(Notification(name: NSWindow.didExitFullScreenNotification, object: window))
+  }
+  func windowDidFailToExitFullScreen(_ window: NSWindow) {
+    fullscreenTransition = false
+    applyPureWindowAppearance()
+  }
+  func windowDidEndLiveResize(_ notification: Notification) {
+    guard isPureViewing, let window, !window.styleMask.contains(.fullScreen), !fullscreenTransition else { return }
+    let longestSide = max(window.frame.width, window.frame.height)
+    pureViewingSizeLimit = NSSize(width: longestSide, height: longestSide)
   }
   func windowDidBecomeKey(_ notification: Notification) { refreshList() }
 }

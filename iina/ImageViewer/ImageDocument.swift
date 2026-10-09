@@ -2,6 +2,8 @@ import Cocoa
 import CoreImage
 import ImageIO
 import PDFKit
+import UniformTypeIdentifiers
+import CoreServices
 
 /// Confined to the caller's serial decoding queue; decoded frames are not retained here.
 final class ImageDocument {
@@ -64,7 +66,7 @@ final class ImageDocument {
     height = (5...8).contains(orientation) ? rawWidth : rawHeight
     source = input; pdf = nil; vector = nil; frameCount = count
     hasAlpha = (properties[kCGImagePropertyHasAlpha as String] as? NSNumber)?.boolValue ?? false
-    let type = CGImageSourceGetType(input) as String? ?? ext
+    let type = CGImageSourceGetType(input) as String? ?? ""
     switch type {
     case "com.compuserve.gif": animationDictionary = "{GIF}"
     case "public.png": animationDictionary = "{PNG}"
@@ -88,7 +90,54 @@ final class ImageDocument {
     } else {
       loopCount = storedLoops ?? 0
     }
-    formatName = ext.uppercased() + (ext == "psd" ? " · 合成图" : "")
+    formatName = Self.formatSummary(typeIdentifier: type, filenameExtension: ext)
+  }
+
+  private static func formatSummary(typeIdentifier: String, filenameExtension: String) -> String {
+    // The decoder's content type is authoritative; an extension only checks naming consistency.
+    let knownTypes: [String: (name: String, extensions: Set<String>)] = [
+      "public.jpeg": ("JPEG", ["jpg", "jpeg", "jpe", "jfif"]),
+      "public.png": ("PNG", ["png", "apng"]),
+      "com.compuserve.gif": ("GIF", ["gif"]),
+      "public.tiff": ("TIFF", ["tif", "tiff"]),
+      "org.webmproject.webp": ("WebP", ["webp"]),
+      "public.heic": ("HEIC", ["heic", "heif"]),
+      "public.heif": ("HEIF", ["heic", "heif"]),
+      "public.heif-standard": ("HEIF", ["heic", "heif", "heics", "heifs"]),
+      "public.heics": ("HEIC 序列", ["heic", "heif", "heics", "heifs"]),
+      "public.avif": ("AVIF", ["avif", "avifs"]),
+      "public.avis": ("AVIF 序列", ["avif", "avifs"]),
+      "public.jpeg-xl": ("JPEG XL", ["jxl"]),
+      "com.microsoft.bmp": ("BMP", ["bmp", "dib"]),
+      "com.microsoft.ico": ("ICO", ["ico"]),
+      "com.apple.icns": ("ICNS", ["icns"]),
+      "com.adobe.photoshop-image": ("PSD · 合成图", ["psd"]),
+      "com.ilm.openexr-image": ("OpenEXR", ["exr"]),
+      "public.jpeg-2000": ("JPEG 2000", ["jp2", "j2k", "jpf", "jpx"]),
+      "com.truevision.tga-image": ("TGA", ["tga"]),
+      "public.radiance": ("Radiance HDR", ["hdr", "pic"]),
+    ]
+    let name: String
+    let extensions: Set<String>
+    if let known = knownTypes[typeIdentifier] {
+      name = known.name
+      extensions = known.extensions
+    } else if #available(macOS 11.0, *) {
+      let type = UTType(typeIdentifier)
+      name = type?.localizedDescription ?? (typeIdentifier.isEmpty ? "未知格式" : typeIdentifier)
+      extensions = Set((type?.tags[.filenameExtension] ?? []).map { $0.lowercased() })
+    } else if !typeIdentifier.isEmpty {
+      name = UTTypeCopyDescription(typeIdentifier as CFString)?.takeRetainedValue() as String? ?? typeIdentifier
+      let tags = UTTypeCopyAllTagsWithClass(typeIdentifier as CFString,
+                                          kUTTagClassFilenameExtension)?.takeRetainedValue() as? [String] ?? []
+      extensions = Set(tags.map { $0.lowercased() })
+    } else {
+      name = "未知格式"
+      extensions = []
+    }
+    guard !filenameExtension.isEmpty, !extensions.isEmpty,
+          !extensions.contains(filenameExtension.lowercased()) else { return name }
+    return "\(name) · 扩展名不符（.\(filenameExtension)）"
   }
 
   func frameDuration(at index: Int) -> TimeInterval {

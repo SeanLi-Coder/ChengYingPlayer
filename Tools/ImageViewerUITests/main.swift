@@ -177,6 +177,10 @@ let normalTitleVisibility = imageWindow.titleVisibility
 let normalTitlebarTransparency = imageWindow.titlebarAppearsTransparent
 let windowButtons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton, .documentIconButton]
 let normalButtonVisibility = windowButtons.map { imageWindow.standardWindowButton($0)?.isHidden }
+let normalWindowFrame = imageWindow.frame
+let normalMinimumContentSize = imageWindow.contentMinSize
+let normalAspectRatio = imageWindow.contentAspectRatio
+let normalAutosaveName = imageWindow.frameAutosaveName
 expect(viewer.pureViewingButton.isEnabled && !viewer.isPureViewing,
        "A decoded image offers pure viewing without enabling it automatically")
 viewer.pureViewingButton.performClick(nil)
@@ -196,10 +200,12 @@ expect(imageWindow.titleVisibility == .hidden && imageWindow.titlebarAppearsTran
 try capturePureViewing(viewer, "pure-minimum")
 expect(imageWindow.firstResponder === viewer.canvas && imageWindow.isKeyWindow,
        "Pure viewing keeps the canvas ready for keyboard navigation")
+print("Pure layout frame=\(imageWindow.frame) content=\(contentView.bounds) canvas=\(viewer.canvas.bounds) image=\(viewer.canvas.imageRect)")
 expect(viewer.canvas.fitsWindow &&
-       (abs(viewer.canvas.imageRect.width - viewer.canvas.bounds.width) < 0.5 ||
+       (abs(viewer.canvas.imageRect.width - viewer.canvas.bounds.width) < 0.5 &&
         abs(viewer.canvas.imageRect.height - viewer.canvas.bounds.height) < 0.5),
-       "Fit mode uses the newly available canvas area without normal viewing padding")
+       "Pure fit matches both window dimensions without letterboxing, stretching, or cropping")
+expect(imageWindow.frameAutosaveName.isEmpty, "Pure-view resizing cannot overwrite the normal saved frame")
 let pureMenu = viewingMenu(viewer)
 expect(pureMenu.items.first?.title.contains("退出") == true && pureMenu.items[1].title == "全屏",
        "Right-click exposes pure-view exit separately from macOS fullscreen")
@@ -214,6 +220,9 @@ expect(imageWindow.styleMask == normalStyle && imageWindow.titleVisibility == no
        "Exit restores the previous native window appearance")
 expect([viewer.pureViewingButton, viewer.sidebarPicker, viewer.nextButton, viewer.statusLabel]
   .allSatisfy { !$0.isHiddenOrHasHiddenAncestor }, "Exit restores all three chrome regions")
+expect(sameRect(imageWindow.frame, normalWindowFrame) && imageWindow.contentMinSize == normalMinimumContentSize &&
+       imageWindow.contentAspectRatio == normalAspectRatio && imageWindow.frameAutosaveName == normalAutosaveName,
+       "Exit restores the normal frame, size policy, and autosave identity")
 try capturePureViewing(viewer, "restored-minimum")
 
 viewer.canvas.setZoom(2)
@@ -293,6 +302,27 @@ if ProcessInfo.processInfo.environment["IMAGE_VIEWER_TEST_FULLSCREEN"] == "1" {
          restoredButtons == fullscreenButtonVisibility,
          "Both fullscreen transition orders restore the original window appearance")
   try capturePureViewing(viewer, "restored-after-fullscreen")
+  let beforeFullscreenClose = imageWindow.frame
+  let autosaveBeforeClose = imageWindow.frameAutosaveName
+  key(viewer, code: 48, characters: "\t")
+  imageWindow.toggleFullScreen(nil)
+  waitFor("Pure viewing enters fullscreen before closing") { enteredFullscreen == 4 }
+  viewer.cancelAndClose()
+  waitFor("A pure fullscreen viewer closes without retaining active image state") {
+    !imageWindow.isVisible && !viewer.isPureViewing && viewer.canvas.image == nil
+  }
+  viewer.open(urls: [url])
+  viewer.showWindow(nil)
+  imageWindow.makeKeyAndOrderFront(nil)
+  waitFor("A closed fullscreen viewer can load an image again") { viewer.canvas.image != nil }
+  if imageWindow.styleMask.contains(.fullScreen) { imageWindow.toggleFullScreen(nil) }
+  waitFor("Reopened viewing completes any pending fullscreen exit") {
+    !imageWindow.styleMask.contains(.fullScreen) && imageWindow.frameAutosaveName == autosaveBeforeClose
+  }
+  pump()
+  expect(!viewer.isPureViewing && sameRect(imageWindow.frame, beforeFullscreenClose) &&
+         imageWindow.contentMinSize == normalMinimumContentSize && imageWindow.contentAspectRatio == normalAspectRatio,
+         "Closing and reopening a pure fullscreen viewer restores normal geometry and autosave")
   NotificationCenter.default.removeObserver(enteredObserver)
   NotificationCenter.default.removeObserver(exitedObserver)
 } else {

@@ -32,12 +32,12 @@ struct RealImageViewerSmoke {
                                isARepeat: false, keyCode: code)!
     viewer.window!.sendEvent(event)
   }
-  static func image(_ color: CGColor) -> CGImage {
-    let context = CGContext(data: nil, width: 32, height: 24, bitsPerComponent: 8,
-                            bytesPerRow: 128, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+  static func image(_ color: CGColor, width: Int = 32, height: Int = 24) -> CGImage {
+    let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                            bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
     context.setFillColor(color)
-    context.fill(CGRect(x: 0, y: 0, width: 32, height: 24))
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
     return context.makeImage()!
   }
   static func write(_ url: URL, type: String, images: [CGImage], animation: Bool = false) {
@@ -238,6 +238,140 @@ struct RealImageViewerSmoke {
     }
     expect(!viewer.statusLabel.isHiddenOrHasHiddenAncestor && !viewer.sidebarPicker.isHiddenOrHasHiddenAncestor &&
            !viewer.pureViewingButton.isEnabled, "The real decode error stays visible with working browser controls")
+
+    // Use real ImageIO files with unrelated aspect ratios, not a fixed-size decode stub.
+    let shapes = [(240, 480), (480, 240), (1080, 1066), (600, 840), (16, 2048), (2048, 16), (1, 1), (8, 8)]
+    let shapeURLs = shapes.enumerated().map { index, size -> URL in
+      let url = root.appendingPathComponent("shape-\(index).png")
+      write(url, type: "public.png", images: [image(CGColor(red: 0.2, green: 0.6, blue: 0.8, alpha: 1),
+                                                  width: size.0, height: size.1)])
+      return url
+    }
+    let shapeBytes = try shapeURLs.map { try Data(contentsOf: $0) }
+    let imageWindow = viewer.window!
+    imageWindow.setContentSize(NSSize(width: 880, height: 620))
+    pump()
+    let savedFrame = imageWindow.frame
+    let savedMinimum = imageWindow.contentMinSize
+    let savedAspect = imageWindow.contentAspectRatio
+    let savedAutosave = imageWindow.frameAutosaveName
+    viewer.open(urls: shapeURLs)
+    waitFor("The portrait geometry fixture loads") { viewer.selectedURL == shapeURLs[0] && viewer.canvas.image != nil }
+    key(viewer, code: 48, characters: "\t")
+    for (index, shape) in shapes.enumerated() {
+      if index > 0 { key(viewer, code: 124, characters: "\u{f703}") }
+      waitFor("A real aspect-ratio fixture is decoded") {
+        viewer.selectedURL == shapeURLs[index] && viewer.canvas.image?.width == shape.0 &&
+          viewer.canvas.image?.height == shape.1
+      }
+      pump()
+      let rect = viewer.canvas.imageRect
+      let bounds = viewer.canvas.bounds
+      print("Pure shape \(shape.0)x\(shape.1): frame=\(imageWindow.frame) canvas=\(bounds) image=\(rect)")
+      expect(viewer.isPureViewing && viewer.canvas.fitsWindow &&
+             abs(rect.minX) < 0.51 && abs(rect.minY) < 0.51 &&
+             abs(rect.width - bounds.width) < 0.51 && abs(rect.height - bounds.height) < 0.51,
+             "Portrait, landscape, panorama and tiny images fill both pure-view axes")
+      expect(abs(rect.width / rect.height - CGFloat(shape.0) / CGFloat(shape.1)) < 0.001,
+             "Pure-view window geometry preserves source pixel aspect ratio")
+      expect(viewer.canvas.imageOffset == .zero && imageWindow.frameAutosaveName.isEmpty,
+             "New pure-view sources keep centered fit without changing normal autosave")
+      expect(imageWindow.contentAspectRatio == NSSize(width: shape.0, height: shape.1),
+             "Native interactive window resizing uses the current image's aspect ratio")
+      let visible = imageWindow.screen!.visibleFrame.insetBy(dx: -1, dy: -1)
+      expect(visible.contains(imageWindow.frame), "Extreme aspect ratios remain within the current screen")
+      guard let bitmap = viewer.canvas.bitmapImageRepForCachingDisplay(in: bounds) else {
+        expect(false, "The synthetic canvas can be rendered to pixels")
+        continue
+      }
+      viewer.canvas.cacheDisplay(in: bounds, to: bitmap)
+      // Ignore only the one-pixel antialias boundary of fractional point edges.
+      for x in [min(2, bitmap.pixelsWide / 2), bitmap.pixelsWide / 2, max(bitmap.pixelsWide - 3, bitmap.pixelsWide / 2)] {
+        for y in [min(2, bitmap.pixelsHigh / 2), bitmap.pixelsHigh / 2, max(bitmap.pixelsHigh - 3, bitmap.pixelsHigh / 2)] {
+          let pixel = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
+          expect(pixel != nil && pixel!.greenComponent > 0.45 && pixel!.blueComponent > 0.65,
+                 "Actual pure-view canvas corners, edges and center contain the fixture rather than black bars")
+        }
+      }
+      if index == 0 {
+        let originalFrame = imageWindow.frame
+        imageWindow.setContentSize(NSSize(width: bounds.width / 2, height: bounds.height / 2))
+        pump()
+        expect(viewer.canvas.bounds.width < 440 && viewer.canvas.bounds.height < 620,
+               "Pure viewing can actually shrink below the editor's former 880x620 minimum")
+        expect(abs(viewer.canvas.imageRect.width - viewer.canvas.bounds.width) < 0.001 &&
+               abs(viewer.canvas.imageRect.height - viewer.canvas.bounds.height) < 0.001,
+               "A window resize immediately refits both canvas axes instead of retaining stale image dimensions")
+        imageWindow.setFrame(originalFrame, display: true)
+        pump()
+      }
+      if shape.0 <= 8 {
+        let fittedZoom = viewer.canvas.zoom
+        key(viewer, code: 24, characters: "+")
+        expect(viewer.canvas.zoom >= fittedZoom, "Zoom-in never shrinks a tiny image from its larger fitted scale")
+        let beforeDecrease = viewer.canvas.zoom
+        key(viewer, code: 27, characters: "-")
+        expect(abs(viewer.canvas.zoom - beforeDecrease / 1.25) < 0.001,
+               "Zoom-out leaves a larger fitted scale continuously instead of snapping down to 64x")
+        let beforeExit = viewer.canvas.zoom
+        key(viewer, code: 53, characters: "\u{1b}")
+        key(viewer, code: 24, characters: "+")
+        expect(viewer.canvas.zoom >= beforeExit,
+               "Leaving pure view preserves oversized manual zoom without reversing the zoom-in action")
+        let normalZoom = viewer.canvas.zoom
+        key(viewer, code: 27, characters: "-")
+        expect(abs(viewer.canvas.zoom - normalZoom / 1.25) < 0.001,
+               "Manual zoom-out remains continuous after leaving tiny-image pure viewing")
+        key(viewer, code: 48, characters: "\t")
+        key(viewer, code: 29, characters: "0")
+      }
+    }
+
+    let variablePages = root.appendingPathComponent("mixed-orientation.tiff")
+    write(variablePages, type: "public.tiff", images: [image(CGColor(red: 1, green: 0.3, blue: 0.2, alpha: 1),
+                                                           width: 300, height: 600),
+                                                       image(CGColor(red: 0.2, green: 0.6, blue: 0.8, alpha: 1),
+                                                           width: 800, height: 200)])
+    viewer.open(urls: [variablePages, shapeURLs[0]])
+    waitFor("A real multi-page fixture starts in portrait orientation") {
+      viewer.selectedURL == variablePages && viewer.canvas.image?.height == 600
+    }
+    viewer.canvas.setZoom(2, anchor: CGPoint(x: viewer.canvas.bounds.midX + 17, y: viewer.canvas.bounds.midY - 9))
+    let pageZoom = viewer.canvas.zoom
+    let pageOffset = viewer.canvas.imageOffset
+    viewer.nextFrameButton.performClick(nil)
+    waitFor("A real TIFF page changes its pixel dimensions") { viewer.frameIndex == 1 && viewer.canvas.image?.width == 800 }
+    pump()
+    expect(viewer.canvas.zoom == pageZoom && viewer.canvas.imageOffset == pageOffset && !viewer.canvas.fitsWindow,
+           "Changing a TIFF page's orientation preserves manual zoom and pan")
+    expect(abs(viewer.canvas.bounds.width / viewer.canvas.bounds.height - 4) < 0.001,
+           "Multi-page navigation updates the pure-view window to the decoded page's actual aspect")
+    key(viewer, code: 29, characters: "0")
+    expect(viewer.canvas.fitsWindow && abs(viewer.canvas.imageRect.minX) < 0.001 &&
+           abs(viewer.canvas.imageRect.minY) < 0.001 &&
+           abs(viewer.canvas.imageRect.width - viewer.canvas.bounds.width) < 0.001 &&
+           abs(viewer.canvas.imageRect.height - viewer.canvas.bounds.height) < 0.001,
+           "Fit after a mixed-size page change removes every margin")
+
+    let beforeTransition = imageWindow.frame
+    viewer.windowWillEnterFullScreen(Notification(name: NSWindow.willEnterFullScreenNotification, object: imageWindow))
+    viewer.open(urls: [shapeURLs[0], variablePages])
+    waitFor("An image may finish decoding during a fullscreen transition") { viewer.canvas.image?.height == 480 }
+    expect(imageWindow.frame == beforeTransition, "A fullscreen transition prevents asynchronous decoding from resizing the window")
+    viewer.windowDidFailToEnterFullScreen(imageWindow)
+    pump()
+    expect(abs(viewer.canvas.imageRect.width - viewer.canvas.bounds.width) < 0.001 &&
+           abs(viewer.canvas.imageRect.height - viewer.canvas.bounds.height) < 0.001 &&
+           imageWindow.contentAspectRatio == NSSize(width: 240, height: 480),
+           "Failed fullscreen entry clears transition state and fits the newly decoded image")
+    key(viewer, code: 53, characters: "\u{1b}")
+    pump()
+    expect(imageWindow.frame == savedFrame && imageWindow.contentMinSize == savedMinimum &&
+           imageWindow.contentAspectRatio == savedAspect && imageWindow.frameAutosaveName == savedAutosave,
+           "Leaving tiny-image pure view restores the full normal editor geometry and autosave")
+    let viewedShapeBytes = try shapeURLs.map { try Data(contentsOf: $0) }
+    expect(viewedShapeBytes == shapeBytes,
+           "Window geometry and viewing never rewrite original image bytes")
     viewer.cancelAndClose()
     expect(viewer.window?.isVisible == false && viewer.canvas.image == nil, "Real viewer closes cleanly")
     print("Real image viewer smoke checks passed: \(checks)")

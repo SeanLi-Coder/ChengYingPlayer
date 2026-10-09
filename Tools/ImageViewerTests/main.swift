@@ -53,7 +53,48 @@ let originalBytes = try Data(contentsOf: still)
 let document = try ImageDocument(url: still)
 check(document.width == 32 && document.height == 24 && document.hasAlpha, "Original size and alpha are available")
 check(!document.isAnimated && document.frameCount == 1, "A still is not animated")
+check(document.formatName == "PNG", "The format summary uses the decoded PNG type")
 check(try document.frame(at: 0).colorSpace?.name == CGColorSpace.displayP3, "Original ICC profile is retained")
+let jpeg = write("format-original.jpg", type: "public.jpeg")
+let jpegBytes = try Data(contentsOf: jpeg)
+for (source, name, expected) in [
+  (still, "png-content.jpg", "PNG · 扩展名不符（.jpg）"),
+  (jpeg, "jpeg-content.png", "JPEG · 扩展名不符（.png）"),
+  (still, "png-content.psd", "PNG · 扩展名不符（.psd）"),
+] {
+  let copy = fixtures.appendingPathComponent(name)
+  try FileManager.default.copyItem(at: source, to: copy)
+  let copiedBytes = try Data(contentsOf: copy)
+  let copyDocument = try ImageDocument(url: copy)
+  check(copyDocument.formatName == expected, "Incorrect extensions report the actual encoded format: \(name)")
+  check(copyDocument.width == 32 && copyDocument.height == 24, "Mismatched naming does not block decoding: \(name)")
+  check(try Data(contentsOf: copy) == copiedBytes, "Format inspection never modifies a mismatched file: \(name)")
+}
+let aliasInputs: [(URL, [String], String)] = [
+  (jpeg, ["jpg", "jpeg", "jpe", "jfif", "JPEG"], "JPEG"),
+  (still, ["png", "apng", "PNG"], "PNG"),
+  (write("format-original.tiff", type: "public.tiff"), ["tif", "tiff", "TIF"], "TIFF"),
+]
+for (source, aliases, expected) in aliasInputs {
+  for (index, ext) in aliases.enumerated() {
+    let alias = fixtures.appendingPathComponent("valid-alias-\(source.lastPathComponent)-\(index).\(ext)")
+    try FileManager.default.copyItem(at: source, to: alias)
+    check(try ImageDocument(url: alias).formatName == expected, "Valid format aliases do not report a mismatch: \(ext)")
+  }
+}
+if (CGImageDestinationCopyTypeIdentifiers() as? [String] ?? []).contains("public.heic") {
+  let heic = write("format-original.heic", type: "public.heic")
+  let heicName = try ImageDocument(url: heic).formatName
+  check(heicName == "HEIC", "HEIC display names come from ImageIO")
+  for (index, ext) in ["heic", "heif", "HEIF"].enumerated() {
+    let alias = fixtures.appendingPathComponent("valid-alias-heic-\(index).\(ext)")
+    try FileManager.default.copyItem(at: heic, to: alias)
+    let aliasName = try ImageDocument(url: alias).formatName
+    check(["HEIC", "HEIF"].contains(aliasName), "HEIC/HEIF aliases remain valid: \(ext)")
+  }
+}
+check(try Data(contentsOf: still) == originalBytes && Data(contentsOf: jpeg) == jpegBytes,
+      "Content-based format diagnostics preserve every source byte")
 rejects("Out-of-range frame is rejected") { _ = try document.frame(at: -1) }
 for dimensions in [(0, 1), (-1, 24), (Int.max, Int.max), (131_072, 131_072)] {
   rejects("Untrusted dimensions are bounded") { try ImageDocument.validateDimensions(dimensions.0, dimensions.1) }

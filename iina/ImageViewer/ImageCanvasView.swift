@@ -2,6 +2,7 @@ import Cocoa
 
 /// Pixel dimensions remain independent of AppKit points and monitor scale.
 final class ImageCanvasView: NSView {
+  static let maximumZoom: CGFloat = 64
   private(set) var image: CGImage?
   private(set) var zoom: CGFloat = 1
   private(set) var imageOffset = CGPoint.zero
@@ -144,7 +145,8 @@ final class ImageCanvasView: NSView {
       let padding: CGFloat = isPureViewing ? 0 : 32
       zoom = min((max(bounds.width - padding, 1) * backingScale) / CGFloat(image.width),
                  (max(bounds.height - padding, 1) * backingScale) / CGFloat(image.height))
-      zoom = max(min(zoom, 64), 0.0001)
+      // A tiny image still fills a pure-view window; the limit is for manual zoom.
+      zoom = max(isPureViewing ? zoom : min(zoom, Self.maximumZoom), 0.0001)
     }
     needsDisplay = true
     onZoomChanged?(zoom)
@@ -154,7 +156,9 @@ final class ImageCanvasView: NSView {
 
   func setZoom(_ proposed: CGFloat, anchor: CGPoint? = nil) {
     guard image != nil, proposed.isFinite, proposed > 0, zoom.isFinite, zoom > 0 else { return }
-    let next = min(max(proposed, 0.0001), 64)
+    // Do not jump down to the manual cap when leaving a larger tiny-image fit.
+    let ceiling = max(Self.maximumZoom, zoom)
+    let next = min(max(proposed, 0.0001), ceiling)
     let point = anchor ?? CGPoint(x: bounds.midX, y: bounds.midY)
     guard point.x.isFinite, point.y.isFinite else { return }
     let centered = CGPoint(x: point.x - bounds.midX, y: point.y - bounds.midY)
@@ -171,6 +175,12 @@ final class ImageCanvasView: NSView {
 
   override func layout() {
     super.layout()
+    if fitsWindow { fitToWindow() }
+  }
+
+  override func setFrameSize(_ newSize: NSSize) {
+    super.setFrameSize(newSize)
+    // Auto Layout may resize a plain canvas without scheduling another layout pass.
     if fitsWindow { fitToWindow() }
   }
 
