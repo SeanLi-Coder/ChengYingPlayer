@@ -98,7 +98,7 @@ def install_session_ytdlp(downloader):
 
 
 class LoginPolicy:
-    """An independent preference never rewrites existing Chrome/task settings."""
+    """Read legacy login choices while retiring the dedicated-window default."""
 
     def __init__(self, data_dir: Path):
         self.path = data_dir / "login-policy.json"
@@ -107,7 +107,7 @@ class LoginPolicy:
         try:
             fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except FileNotFoundError:
-            return "dedicated"
+            return "chrome"
         except OSError:
             raise LoginPolicyError("login_settings_unavailable", 503) from None
         try:
@@ -120,7 +120,7 @@ class LoginPolicy:
                 raise ValueError
             if type(data["version"]) is not int or data["version"] != 1 or data["mode"] not in MODES:
                 raise ValueError
-            return data["mode"]
+            return "chrome" if data["mode"] == "dedicated" else data["mode"]
         except (OSError, ValueError, TypeError):
             raise LoginPolicyError("login_settings_unavailable", 503) from None
 
@@ -143,6 +143,25 @@ class LoginPolicy:
             if temporary is not None:
                 with contextlib.suppress(OSError):
                     temporary.unlink(missing_ok=True)
+
+
+def restore_chrome_settings(engine, policy):
+    """Transfer an explicit anonymous opt-out before retiring its old policy.
+
+    Persisting cookie-off first makes a failed/interrupted migration fail closed.
+    Existing task snapshots and every other user preference remain unchanged.
+    Once retired, the regular settings checkbox is the only source of truth.
+    """
+    if policy is None:
+        return
+    with engine._CONFIG_LOCK:
+        if policy.mode() != "anonymous":
+            return
+        config = engine.get_config().model_copy(deep=True)
+        if config.use_chrome_cookies:
+            config.use_chrome_cookies = False
+            engine.update_config(config)
+        policy.save("chrome")
 
 
 def install_session_cookies(sessions):

@@ -13,7 +13,7 @@
   const MAX_RESPONSE_BYTES = 64 * 1024;
   const scanMessages = Object.freeze({
     chrome_data_directory_missing: "没有找到 Chrome 用户资料。请先在 Chrome 中建立用户配置并访问目标网站，再刷新列表。",
-    cookie_permission_denied: "目前无法读取 Chrome 配置目录。请检查 macOS 文件访问权限后刷新，不要删除浏览器资料。",
+    cookie_permission_denied: "目前无法读取 Chrome 配置目录。请手动检查 macOS 文件访问权限；若更新后完全磁盘访问权限已开启仍无效，请移除旧 ChengYing 项并添加“应用程序”中的当前版本，重启播放器后刷新。不要删除浏览器资料。",
     cookie_storage_failed: "读取 Chrome 配置目录失败。请检查本机存储是否可用后刷新。",
     profile_scan_limit: "Chrome 配置过多，本次无法完整核实。请检查浏览器配置后刷新；程序不会猜测账号。",
     unavailable: "无法核实 Chrome 用户配置。请点击“刷新配置列表”重试，当前选择不会被替换。"

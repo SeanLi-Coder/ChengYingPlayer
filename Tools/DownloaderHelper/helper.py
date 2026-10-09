@@ -183,7 +183,6 @@ def main(argv=None):
     restore_proxy_transports = None
     restore_js_runtime = None
     restore_session_cookies = None
-    login_sessions = None
     sys.stdout = sys.stderr
     # Private task/config files; this does not alter files in the user's source repo.
     os.umask(0o077)
@@ -222,7 +221,7 @@ def main(argv=None):
         from diagnostic_log import install_diagnostic_log
         from js_runtime import install_js_runtime
         from login_auth import LoginPolicy, install_session_cookies
-        from login_sessions import LoginSessions
+        from login_sessions import LegacyLoginSnapshots
         from proxy_config import ProxySettings
         from proxy_transport import install_proxy_transports
 
@@ -230,9 +229,7 @@ def main(argv=None):
         proxy_settings = ProxySettings(args.data_dir, engine.manager)
         restore_js_runtime = install_js_runtime()
         restore_proxy_transports = install_proxy_transports(proxy_settings.proxy_url)
-        login_sessions = LoginSessions(args.data_dir, proxy_settings.proxy_url)
-        proxy_settings.additional_activity = login_sessions.active
-        restore_session_cookies = install_session_cookies(login_sessions)
+        restore_session_cookies = install_session_cookies(LegacyLoginSnapshots(args.data_dir))
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(("127.0.0.1", 0))
         listener.listen(128)
@@ -251,7 +248,6 @@ def main(argv=None):
             origin=origin,
             assets=ROOT / "static",
             proxy_settings=proxy_settings,
-            login_sessions=login_sessions,
             login_policy=LoginPolicy(args.data_dir),
         )
         import uvicorn
@@ -298,7 +294,6 @@ def main(argv=None):
                 ):
                     await asyncio.sleep(0.1)
                 controller.request()
-                await asyncio.to_thread(login_sessions.close)
                 # Cancel work before Uvicorn drains long-lived SSE connections.
                 await asyncio.to_thread(engine.manager.shutdown, False, True)
                 server.should_exit = True
@@ -313,10 +308,6 @@ def main(argv=None):
                     await watcher
 
         asyncio.run(serve())
-        if not login_sessions.close():
-            emit({"type": "failed", "code": "login_shutdown_failed",
-                  "message": "The private login window could not be closed safely."})
-            return 2
         emit({"type": "stopped", "protocol_version": 1})
         return 0
     except Exception as exc:  # noqa: BLE001 -- Keep private diagnostics out of the IPC channel.
@@ -339,15 +330,6 @@ def main(argv=None):
             controller.request()
         if engine is not None:
             engine.manager.shutdown(wait=True, cancel_running=True)
-        if login_sessions is not None:
-            # Keep the parent-owned shutdown watchdog armed until the login
-            # worker is confirmed closed. Never report a successful drain while
-            # a daemon thread can still operate on browser state.
-            while not login_sessions.close(timeout=1.0):
-                if controller is None:
-                    os._exit(2)
-                controller.request()
-                controller.finished.wait(0.1)
         if restore_session_cookies is not None:
             restore_session_cookies()
         if restore_proxy_transports is not None:

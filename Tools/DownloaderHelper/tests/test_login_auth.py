@@ -8,6 +8,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 from http.cookiejar import Cookie
 from pathlib import Path
@@ -25,6 +26,7 @@ from login_auth import (
     install_session_requests,
     install_session_ytdlp,
     mark_session_cookies,
+    restore_chrome_settings,
 )
 
 
@@ -119,11 +121,11 @@ def token(platform, revision="a"):
     return "cy-session:" + platform + ":" + revision * 32
 
 
-def test_policy_defaults_to_dedicated_without_rewriting_legacy_settings(tmp_path):
+def test_policy_defaults_to_chrome_without_rewriting_legacy_settings(tmp_path):
     legacy = tmp_path / "config.json"
     legacy.write_text('{"use_chrome_cookies":true,"chrome_profile":"Profile 3"}')
     before = legacy.read_bytes()
-    assert LoginPolicy(tmp_path).mode() == "dedicated"
+    assert LoginPolicy(tmp_path).mode() == "chrome"
     assert legacy.read_bytes() == before
     assert not (tmp_path / "login-policy.json").exists()
 
@@ -131,7 +133,7 @@ def test_policy_defaults_to_dedicated_without_rewriting_legacy_settings(tmp_path
 @pytest.mark.parametrize("mode", ["dedicated", "chrome", "anonymous"])
 def test_policy_is_private_persistent_and_independent_of_app_version(tmp_path, mode):
     LoginPolicy(tmp_path).save(mode)
-    assert LoginPolicy(tmp_path).mode() == mode
+    assert LoginPolicy(tmp_path).mode() == ("chrome" if mode == "dedicated" else mode)
     assert (tmp_path / "login-policy.json").stat().st_mode & 0o777 == 0o600
     assert list(tmp_path.glob(".login-policy-*")) == []
 
@@ -178,6 +180,151 @@ def test_failed_policy_atomic_save_retains_previous_bytes(tmp_path, monkeypatch)
         policy.save("dedicated")
     assert policy.path.read_bytes() == before
     assert list(tmp_path.glob(".login-policy-*")) == []
+
+
+def migration_engine(tmp_path, enabled=True):
+    from pydantic import BaseModel
+
+    class Config(BaseModel):
+        use_chrome_cookies: bool
+        chrome_profile: str = "Profile 3"
+        download_dir: str
+
+    config = Config(use_chrome_cookies=enabled, download_dir=str(tmp_path / "media"))
+    writes = []
+
+    def save(value):
+        nonlocal config
+        writes.append(value.model_dump())
+        config = value.model_copy(deep=True)
+        return config
+
+    return SimpleNamespace(_CONFIG_LOCK=threading.RLock(), get_config=lambda: config.model_copy(deep=True),
+                           update_config=save, writes=writes)
+
+
+@pytest.mark.parametrize("mode", [None, "dedicated", "chrome"])
+@pytest.mark.parametrize("enabled", [True, False])
+def test_normal_policy_retirement_preserves_config_without_any_write(tmp_path, mode, enabled):
+    policy = LoginPolicy(tmp_path)
+    if mode:
+        policy.save(mode)
+    engine = migration_engine(tmp_path, enabled)
+    original = engine.get_config()
+    policy_bytes = policy.path.read_bytes() if policy.path.exists() else None
+    restore_chrome_settings(engine, policy)
+    assert engine.get_config() == original
+    assert engine.writes == []
+    assert (policy.path.read_bytes() if policy.path.exists() else None) == policy_bytes
+
+
+def test_anonymous_migration_persists_cookie_off_before_retiring_policy(tmp_path, monkeypatch):
+    policy = LoginPolicy(tmp_path)
+    policy.save("anonymous")
+    engine = migration_engine(tmp_path)
+    old = engine.get_config()
+    original_save = policy.save
+
+    def guarded_save(mode):
+        assert engine.get_config().use_chrome_cookies is False
+        assert engine.writes == [{**old.model_dump(), "use_chrome_cookies": False}]
+        original_save(mode)
+
+    monkeypatch.setattr(policy, "save", guarded_save)
+    restore_chrome_settings(engine, policy)
+    assert policy.mode() == "chrome"
+    assert engine.get_config().chrome_profile == old.chrome_profile
+    assert engine.get_config().download_dir == old.download_dir
+    restore_chrome_settings(engine, LoginPolicy(tmp_path))
+    assert len(engine.writes) == 1
+
+
+def test_failed_config_migration_keeps_explicit_anonymous_policy(tmp_path, monkeypatch):
+    policy = LoginPolicy(tmp_path)
+    policy.save("anonymous")
+    engine = migration_engine(tmp_path)
+    original = engine.get_config()
+
+    def fail(value):
+        raise OSError("Synthetic save failure")
+
+    monkeypatch.setattr(engine, "update_config", fail)
+    with pytest.raises(OSError):
+        restore_chrome_settings(engine, policy)
+    assert policy.mode() == "anonymous"
+    assert engine.get_config() == original
+
+
+def test_interrupted_policy_retirement_stays_cookie_off_and_can_resume(tmp_path, monkeypatch):
+    policy = LoginPolicy(tmp_path)
+    policy.save("anonymous")
+    engine = migration_engine(tmp_path)
+
+    def fail(mode):
+        raise LoginPolicyError("login_settings_unavailable", 503)
+
+    monkeypatch.setattr(policy, "save", fail)
+    with pytest.raises(LoginPolicyError):
+        restore_chrome_settings(engine, policy)
+    assert policy.mode() == "anonymous"
+    assert engine.get_config().use_chrome_cookies is False
+    restore_chrome_settings(engine, LoginPolicy(tmp_path))
+    assert policy.mode() == "chrome"
+    assert engine.get_config().use_chrome_cookies is False
+    assert len(engine.writes) == 1
+
+
+def test_corrupt_policy_never_defaults_to_cookie_on_during_migration(tmp_path):
+    policy = LoginPolicy(tmp_path)
+    policy.path.write_text('{"version":1,"mode":"unknown"}')
+    engine = migration_engine(tmp_path)
+    with pytest.raises(LoginPolicyError):
+        restore_chrome_settings(engine, policy)
+    assert engine.writes == []
+
+
+def test_legacy_reader_is_read_only_lazy_and_has_no_browser_actions(tmp_path):
+    from login_sessions import LegacyLoginSnapshots, LoginSessionError, LoginSessions
+
+    reader = LegacyLoginSnapshots(tmp_path)
+    assert list(tmp_path.iterdir()) == []
+    for name in ("start", "finish", "_store", "current_token", "status", "close"):
+        assert not hasattr(reader, name)
+    with pytest.raises(LoginSessionError) as missing:
+        reader.cookie_jar(token("douyin"))
+    assert missing.value.code == "login_session_missing"
+    assert list(tmp_path.iterdir()) == []
+    writer = LoginSessions(tmp_path, lambda: None)
+    try:
+        writer._store("douyin", [{"name": "sessionid", "value": "synthetic-first",
+            "domain": ".douyin.com", "path": "/", "expires": -1,
+            "httpOnly": True, "secure": True, "sameSite": "Lax"}])
+        first = writer.current_token("douyin")
+        writer._store("douyin", [{"name": "sessionid", "value": "synthetic-second",
+            "domain": ".douyin.com", "path": "/", "expires": -1,
+            "httpOnly": True, "secure": True, "sameSite": "Lax"}])
+    finally:
+        assert writer.close()
+    before = {str(path.relative_to(tmp_path)): (path.read_bytes(), path.stat().st_mtime_ns)
+              for path in tmp_path.rglob("*.json")}
+    assert [cookie.value for cookie in reader.cookie_jar(first)] == ["synthetic-first"]
+    after = {str(path.relative_to(tmp_path)): (path.read_bytes(), path.stat().st_mtime_ns)
+             for path in tmp_path.rglob("*.json")}
+    assert before == after
+
+
+@pytest.mark.parametrize("component", ["login-sessions", "login-sessions/douyin", "login-sessions/douyin/snapshots"])
+def test_legacy_reader_rejects_linked_directories_without_writing(tmp_path, component):
+    from login_sessions import LegacyLoginSnapshots, LoginSessionError
+
+    target = tmp_path / "target"
+    target.mkdir(mode=0o700)
+    link = tmp_path / component
+    link.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    link.symlink_to(target, target_is_directory=True)
+    with pytest.raises(LoginSessionError):
+        LegacyLoginSnapshots(tmp_path).cookie_jar(token("douyin"))
+    assert list(target.iterdir()) == []
 
 
 @pytest.mark.parametrize("platform", ["xiaohongshu", "douyin", "kuaishou", "instagram", "youtube", "bilibili"])

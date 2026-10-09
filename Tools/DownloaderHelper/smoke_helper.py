@@ -106,6 +106,8 @@ def run_smoke(command, ffmpeg, ffprobe):
                 )
                 status, body, headers = request(url, token=token)
                 assert status == 200 and b"/native/desktop.js" in body
+                assert b"/native/chrome_profiles.js" in body
+                assert b"/native/login_sessions" not in body
                 assert "快手".encode() in body
                 assert token.encode() not in body
                 assert "frame-ancestors 'none'" in headers["content-security-policy"]
@@ -129,22 +131,18 @@ def run_smoke(command, ffmpeg, ffprobe):
                 assert request(profile_endpoint)[0] == 403
                 assert request(profile_endpoint, token="wrong")[0] == 403
                 assert request(profile_endpoint, token=token, origin="https://example.invalid")[0] == 403
-                assert json.loads(request(profile_endpoint, token=token)[1])["status"] == "disabled"
-                login_endpoint = url + "api/native/login"
-                assert request(login_endpoint)[0] == 403
-                login = json.loads(request(login_endpoint, token=token)[1])
-                assert login["mode"] == "dedicated" and len(login["platforms"]) == 6
-                assert all(not entry["has_saved_session"] for entry in login["platforms"])
-                assert request(url + "native/login_sessions.js", token=token)[0] == 200
-                assert request(url + "native/login_sessions.css", token=token)[0] == 200
-                # A missing dedicated session rejects submission before website
-                # access, instead of scanning the user's daily Chrome profile.
-                rejected_status, rejected_body, _ = request(
-                    url + "api/jobs", token=token, method="POST",
-                    payload={"url": "https://www.douyin.com/video/1234567890123456789"},
-                )
-                assert rejected_status == 409
-                assert json.loads(rejected_body)["detail"]["code"] == "login_session_missing"
+                # Authenticated inventory is tested against a synthetic root in
+                # profile_smoke; do not scan a real browser from this harness.
+                for endpoint, method, payload in (
+                    ("api/native/login", "GET", None),
+                    ("api/native/login/mode", "PUT", {"mode": "dedicated"}),
+                    ("api/native/login/douyin/open", "POST", {}),
+                    ("api/native/login/douyin/save", "POST", {}),
+                ):
+                    assert request(url + endpoint, method=method, payload=payload)[0] == 403
+                    assert request(url + endpoint, token=token, method=method, payload=payload)[0] == 404
+                for resource in ("native/login_sessions.js", "native/login_sessions.css"):
+                    assert request(url + resource, token=token)[0] == 404
                 diagnostic_endpoint = url + "api/native/diagnostics"
                 assert request(diagnostic_endpoint)[0] == 403
                 status, body, headers = request(diagnostic_endpoint, token=token)

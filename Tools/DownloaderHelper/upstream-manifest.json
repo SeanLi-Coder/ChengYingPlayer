@@ -111,7 +111,7 @@
     {
       "path": "app/static/app.js",
       "upstream_sha256": "c88f22bce27cd49ad5f289155f2d0a6ee6bfe2f7aab0fee54a22307dd5bbcbb8",
-      "vendored_sha256": "f014157369df8bed107a9fda5c4f1611470ccbdee4ef0f9e0cdf040b8422e7b9"
+      "vendored_sha256": "6431192cdb39a122ed1da5c6d20f677b0d6311928b6fda8025c5e144f52f8f63"
     },
     {
       "path": "app/static/favicon.svg",

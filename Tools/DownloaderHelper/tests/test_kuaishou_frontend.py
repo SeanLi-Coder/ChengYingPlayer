@@ -115,7 +115,7 @@ def test_live_discovery_progress_reports_verified_items_not_an_invented_total():
 
 
 COOKIE_DIAGNOSTIC_CASES = [
-    ("dedicated_login_unavailable", "独立下载登录需要重新准备"),
+    ("dedicated_login_unavailable", "专用登录窗口功能已移除"),
     ("cookie_decryption_failed", "钥匙串"),
     ("cookie_permission_denied", "完全磁盘访问权限"),
     ("cookie_database_locked", "被占用或锁定"),
@@ -180,7 +180,7 @@ def test_job_title_names_the_specific_cookie_reason(diagnostic):
     }
     title = run_ui(f"window.testAPI.issueTitleForJob({json.dumps(job)})")
     if diagnostic == "dedicated_login_unavailable":
-        assert title == "独立下载登录需要重新准备"
+        assert title == "旧专用登录任务需要重新创建"
         return
     assert title.startswith("Chrome Cookie 读取失败：")
     assert title != "Chrome Cookie 读取失败"
@@ -200,6 +200,20 @@ def test_cookie_diagnostic_is_recovered_from_a_persisted_message():
     assert run_ui(f"window.testAPI.cookieDiagnosticCode({json.dumps(job)})") is None
     title = run_ui(f"window.testAPI.issueTitleForJob({json.dumps(job)})")
     assert "被占用" in title
+
+
+def test_retired_login_diagnostic_uses_new_chrome_tasks_without_rebinding():
+    result = run_ui(
+        "window.testAPI.composeIssueMessage('cookie_unavailable',"
+        "'Diagnostic: dedicated_login_unavailable.', {platform:'douyin'},"
+        "'dedicated_login_unavailable')"
+    )
+    assert "专用登录窗口功能已移除" in result
+    assert "日常 Chrome" in result and "对应 Profile" in result
+    assert "从原链接新建任务" in result
+    assert "旧任务不会自动改用其他账号" in result
+    assert "手动配置 macOS 权限" in result
+    assert "保存登录" not in result and "下载登录面板" not in result
 
 
 def test_backend_cookie_diagnostic_whitelist_has_matching_ui_guidance():

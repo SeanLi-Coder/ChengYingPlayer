@@ -591,3 +591,45 @@ class LoginSessions:
                 os.close(self._root_fd)
                 self._root_fd = -1
             return True
+
+
+class LegacyLoginSnapshots:
+    """Read only the exact immutable snapshot already bound to a legacy task.
+
+    No browser worker, directory creation, current-session lookup, or login
+    action is exposed. Missing or inaccessible state fails at that task's read,
+    never by switching to another Chrome profile or an anonymous session.
+    """
+
+    def __init__(self, data_dir: Path):
+        self._data_dir = Path(data_dir)
+        self._lock = threading.RLock()
+
+    @contextlib.contextmanager
+    def _directory(self, platform: str, child: str | None = None):
+        descriptors = []
+        try:
+            if not self._data_dir.is_absolute():
+                raise LoginSessionError("login_storage_unavailable", 503)
+            parent = os.open(self._data_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            descriptors.append(parent)
+            parent_info = os.fstat(parent)
+            if parent_info.st_uid != os.getuid() or parent_info.st_mode & 0o022:
+                raise LoginSessionError("login_storage_unavailable", 503)
+            components = ["login-sessions", _platform(platform)]
+            if child is not None:
+                if child != "snapshots":
+                    raise LoginSessionError("login_session_invalid", 422)
+                components.append(child)
+            for name in components:
+                descriptor = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptors[-1])
+                descriptors.append(descriptor)
+                info = os.fstat(descriptor)
+                if info.st_uid != os.getuid() or info.st_mode & 0o077:
+                    raise LoginSessionError("login_storage_unavailable", 503)
+            yield descriptors[-1]
+        finally:
+            for descriptor in reversed(descriptors):
+                os.close(descriptor)
+
+    cookie_jar = LoginSessions.cookie_jar

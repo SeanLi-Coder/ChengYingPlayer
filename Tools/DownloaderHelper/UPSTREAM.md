@@ -25,7 +25,23 @@ and pytest caches are ignored; they are not source or redistribution assets.
 
 ## Deliberate patches
 
-### 原生专用登录边界（2026-10-09）
+### 专用登录入口退役（2026-10-09，v0.2.76）
+
+用户要求恢复日常 Chrome Cookie 开关与 Profile 选择。原生宿主不再注册专用登录的
+open/save/mode/status API，不注入或分发该面板的 JS/CSS；新任务和视频总结恢复 Chrome 配置。
+旧策略为 dedicated 或缺省时不再要求专用会话。明确 anonymous 的设置须先安全持久化
+Cookie 关闭选择，再退役旧策略，不能因升级或两个配置文件的交错读取意外带上登录身份。
+总结的独立进程也必须遵守此读取／迁移顺序，之后用户可通过原 Cookie 开关明确修改选择。
+
+不删除旧浏览器目录、不可变快照、下载历史或媒体。只为已有 cy-session 任务保留只读
+快照适配，不再创建会启动 Chrome 的登录服务；原平台和修订不可变，失效或格式错误时
+拒绝换号、拒绝回退日常 Chrome／匿名。旧任务需要更新登录时明确提示保存 Chrome 设置并
+从原链接新建任务。原生 Profile 枚举、Cookie 一致性、代理、安全诊断及脱敏边界继续保留。
+正式冻结自检与公开包验证同时要求撤除入口和旧身份兼容的新结果，不把旧专用窗口自检当作本轮验收。
+
+### 原生专用登录边界（2026-10-09，历史实现）
+
+以下记录 v0.2.72–v0.2.75 的原实现，供核查遗留任务身份；不表示 v0.2.76 仍提供专用窗口。
 
 `login_sessions.py` 管理独立 Chrome 窗口，只用播放器数据目录中的专用 `user_data_dir`，
 不读取日常 Chrome、Local State 或钥匙串，也不自动授予文件访问权限。用户显式打开、手动登录、

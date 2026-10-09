@@ -162,8 +162,8 @@
   // local path, cookie value or token can be echoed here.
   const cookieDiagnosticMessages = {
     dedicated_login_unavailable: {
-      description: "独立下载登录需要重新准备：任务绑定的登录资料已失效、缺失或无法读取；这不需要日常 Chrome 的完全磁盘访问权限。",
-      solution: "在下载登录面板打开对应网站，手动登录后点击“保存登录”，再从原链接新建任务。旧任务保留原来的登录身份，不会自动换号。"
+      description: "旧任务绑定的专用登录资料已失效、缺失或无法读取；专用登录窗口功能已移除。",
+      solution: "在日常 Chrome 登录目标网站，然后在下载设置中开启“自动读取 Chrome Cookie”、选择并保存对应 Profile，再从原链接新建任务。旧任务不会自动改用其他账号；若系统拒绝读取，请手动配置 macOS 权限。"
     },
     cookie_decryption_failed: {
       description: "Chrome Cookie 未能解密：可能未取得钥匙串密钥，或部分 Cookie 已损坏。此提示本身不能证明钥匙串拒绝授权，也不代表账号已退出。",
@@ -171,7 +171,7 @@
     },
     cookie_permission_denied: {
       description: "系统拒绝了读取 Chrome Cookie 文件的权限。这是本机权限问题，不是登录失效，也不是网站验证码。",
-      solution: "在“系统设置 → 隐私与安全性 → 完全磁盘访问权限”中为本程序开启权限（已开启时先关闭再打开），然后完全退出并重新启动本程序后重试。"
+      solution: "在“系统设置 → 隐私与安全性 → 完全磁盘访问权限”中为本程序开启权限，然后完全退出并重新启动本程序。若更新后开关已开启但仍拒绝读取，请移除旧 ChengYing 项，再添加“应用程序”中的当前版本。程序不会自动授予权限，也不要删除 Chrome 资料。"
     },
     cookie_database_locked: {
       description: "Chrome Cookie 数据库正被占用或锁定，程序无法安全读取。这不代表账号退出，也不是站点验证。",
@@ -212,7 +212,7 @@
   };
 
   const cookieDiagnosticLabels = {
-    dedicated_login_unavailable: "独立下载登录需要重新准备",
+    dedicated_login_unavailable: "旧专用登录任务需要重新创建",
     cookie_decryption_failed: "Chrome Cookie 解密失败",
     cookie_permission_denied: "文件读取权限被拒绝",
     cookie_database_locked: "Cookie 数据库被占用",

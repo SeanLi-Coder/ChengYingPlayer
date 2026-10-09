@@ -73,12 +73,13 @@ def _check() -> dict[str, object]:
         "static/diagnostics.css",
         "static/chrome_profiles.js",
         "static/chrome_profiles.css",
-        "static/login_sessions.js",
-        "static/login_sessions.css",
         "upstream-manifest.json",
     ):
         if not (runtime_root / relative).is_file():
             raise RuntimeError(f"Missing desktop adapter resource: {relative}")
+    for relative in ("static/login_sessions.js", "static/login_sessions.css"):
+        if (runtime_root / relative).exists():
+            raise RuntimeError("A removed dedicated-login interface was bundled")
     if not Path(certifi.where()).is_file():
         raise RuntimeError("The bundled HTTPS certificate bundle is unavailable")
     if requests.Session is None or yt_dlp.YoutubeDL is None:

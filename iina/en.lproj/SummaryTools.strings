@@ -5,8 +5,8 @@
 "source.label" = "Video source URL";
 "start" = "Start summary";
 "cancel" = "Cancel / pause";
-"download_center" = "Website proxy and login…";
-"download_center.hint" = "Configure source-website access in Download Center. Model files use the system network configuration, not this website proxy.";
+"download_center" = "Website proxy and Chrome cookies…";
+"download_center.hint" = "Select a signed-in Chrome profile in Download Center, or explicitly turn cookies off. Configure system file permissions manually. Model files use the system network configuration, not this website proxy.";
 "quit.title" = "A local AI task is still running";
 "quit.detail" = "Quitting will stop the current subtitle, summary, or model task. Partial model downloads are retained, but unfinished processing may need to restart.";
 "quit.continue" = "Continue task";

@@ -10,4 +10,4 @@ from login_smoke import verify_login_runtime
 
 
 def test_login_runtime():
-    assert verify_login_runtime() == "isolated-revisions-and-restart-verified-offline"
+    assert verify_login_runtime() == "removed-entry-and-legacy-identity-verified-offline"

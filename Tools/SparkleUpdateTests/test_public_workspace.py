@@ -170,6 +170,17 @@ class PublicHelperTests(unittest.TestCase):
         application.assert_called_once_with(self.app, self.info)
         self.assertFalse(self.app.exists())
 
+    def test_login_retirement_result_is_required_and_retained(self):
+        summary, _, _ = self.invoke()
+        self.assertEqual(summary["dedicated_login"], verifier.LOGIN_SELF_TEST)
+        self.output.unlink()
+        for value in (None, True, {}, "isolated-revisions-and-restart-verified-offline"):
+            with self.subTest(value=value):
+                self.result["dedicated_login"] = value
+                with self.assertRaisesRegex(ValueError, "retired login entry"):
+                    self.invoke()
+                self.assertFalse(self.output.exists())
+
     def test_incomplete_hdr10plus_smoke_blocks_public_success(self):
         with (
             patch.object(verifier, "run", side_effect=[

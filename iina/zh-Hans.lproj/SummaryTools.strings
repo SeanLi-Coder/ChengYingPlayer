@@ -5,8 +5,8 @@
 "source.label" = "视频来源链接";
 "start" = "开始总结";
 "cancel" = "取消／暂停";
-"download_center" = "网站代理与登录…";
-"download_center.hint" = "在下载中心配置视频来源网站的访问方式。模型文件使用系统网络配置，不使用这里的网站代理。";
+"download_center" = "网站代理与 Chrome Cookie…";
+"download_center.hint" = "在下载中心选择已登录的 Chrome Profile，或明确关闭 Cookie；系统文件权限需手动配置。模型文件使用系统网络配置，不使用这里的网站代理。";
 "quit.title" = "本地 AI 任务仍在进行";
 "quit.detail" = "退出会停止当前字幕、总结或模型任务。模型下载进度会保留，但尚未完成的处理可能需要重新开始。";
 "quit.continue" = "继续任务";

@@ -964,139 +964,64 @@ if DownloadCenterService.supportsRuntime {
   check(fullPageValue("window.fixtureErrors.length") as? Int == 0,
         "All real proxy interactions finish without page errors or unhandled promise rejections")
 
-  // Reuse this owned loopback process and WebKit window for a separate auth
-  // phase. Only synthetic API state changes; no browser account is opened.
-  func loginFixture(_ payload: String? = nil) {
-    let options = payload.map { "{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(\($0))}" } ?? "{cache:'no-store'}"
-    _ = fullPageValue("""
-      window.fixtureLoginDone = false;
-      fetch('/api/fixture/login-mode', \(options)).then(response => response.json()).then(data => {
-        window.fixtureLoginSnapshot = data; window.fixtureLoginDone = true;
-      }); undefined
-      """)
-    waitForPage("The authenticated synthetic login fixture request completes", "window.fixtureLoginDone === true")
-  }
-  loginFixture("{enabled:true}")
-  let profileReadsBeforeDedicated = fullPageValue("window.fixtureLoginSnapshot.profile_reads") as! Int
-  _ = fullPageValue("window.fixtureLoginReloadMarker = true; undefined")
+  // A fresh document must not resurrect the removed login window, even when
+  // settings and tasks have survived a previous version. Keep all probes local.
+  _ = fullPageValue("window.fixtureChromeReloadMarker = true; undefined")
   fullController.webView.reload()
-  waitForPage("A fresh WK document loads the dedicated login panel without the legacy profile adapter", """
-    !window.fixtureLoginReloadMarker && document.querySelector('#desktop-login-mode')
-      && !document.querySelector('#desktop-login-mode').disabled
-      && document.querySelector('#desktop-login-mode').value === 'dedicated'
-      && !document.querySelector('#desktop-chrome-profile')
+  waitForPage("Reload restores Chrome controls without a dedicated login panel", """
+    !window.fixtureChromeReloadMarker && document.querySelector('#desktop-chrome-profile')
+      && !document.querySelector('#desktop-chrome-profile').disabled
+      && document.querySelector('#desktop-chrome-cookies').checked
+      && !document.querySelector('#desktop-login-panel')
+      && !document.querySelector('[src*="login_sessions"]')
+      && !document.querySelector('[href*="login_sessions"]')
+    """)
+  check(fullPageValue("""
+    window.fixtureRequests.every(request => !request.path.startsWith('/api/native/login'))
+      && document.querySelectorAll('[id^="desktop-login-"]').length === 0
+    """) as? Bool == true,
+        "Loading native settings never reads a login policy or launches a dedicated browser")
+  _ = fullPageValue("""
+    window.fixtureRemovedLoginDone = false;
+    Promise.all([
+      fetch('/api/native/login'),
+      fetch('/api/native/login/mode', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mode:'dedicated'})}),
+      fetch('/api/native/login/douyin/open', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}),
+      fetch('/native/login_sessions.js'), fetch('/native/login_sessions.css')
+    ]).then(responses => {
+      window.fixtureRemovedLoginStatuses = responses.map(response => response.status);
+      window.fixtureRemovedLoginDone = true;
+    }); undefined
+    """)
+  waitForPage("Removed login endpoints finish without launching a fixture browser", "window.fixtureRemovedLoginDone === true")
+  check(fullPageValue("window.fixtureRemovedLoginStatuses.every(status => status === 404)") as? Bool == true,
+        "A stale page cannot use removed login APIs or reload obsolete static resources")
+  _ = fullPageValue("""
+    document.querySelector('#desktop-chrome-cookies').checked=false;
+    document.querySelector('#desktop-chrome-cookies').dispatchEvent(new Event('change',{bubbles:true}));
+    document.querySelector('#save-settings-button').click(); undefined
+    """)
+  waitForPage("Cookie-off saves through the original settings form without a separate login mode", """
+    !document.querySelector('#desktop-chrome-profile-refresh').disabled
+      && document.querySelector('#desktop-chrome-profile-status').textContent.includes('已保存关闭 Cookie')
+    """)
+  profileFixture()
+  check(fullPageValue("!window.fixtureProfileSnapshot.use_chrome_cookies && window.fixtureProfileSnapshot.selected_profile === null && window.fixtureProfileSnapshot.config_writes === 5") as? Bool == true,
+        "Explicit Cookie-off preserves the selected profile and unrelated settings")
+  _ = fullPageValue("window.fixtureChromeReloadMarker = true; undefined")
+  fullController.webView.reload()
+  waitForPage("Cookie-off survives a new native document while Chrome controls remain accessible", """
+    !window.fixtureChromeReloadMarker && document.querySelector('#desktop-chrome-profile')
+      && !document.querySelector('#desktop-chrome-profile').disabled
+      && !document.querySelector('#desktop-chrome-cookies').checked
+      && !document.querySelector('#desktop-login-panel')
       && document.querySelector('#download-dir').value === '/tmp/Fixture proxy settings'
     """)
   check(fullPageValue("""
-    document.querySelectorAll('.desktop-login-platform').length === 6
-      && getComputedStyle(document.querySelector('#chrome-cookies').closest('.switch-row')).display === 'none'
-      && getComputedStyle(document.querySelector('#chrome-profile').closest('.field-label')).display === 'none'
-      && getComputedStyle(document.querySelector('#download-dir').closest('.field-label')).display !== 'none'
-      && document.querySelector('#desktop-login-panel').parentElement === document.querySelector('#settings-form').parentElement
-      && !document.querySelector('#settings-form').contains(document.querySelector('#desktop-login-panel'))
+    window.fixtureRequests.every(request => !request.external && !request.path.startsWith('/api/native/login'))
+      && window.fixtureErrors.length === 0 && window.fixtureBeaconCalls === 0
     """) as? Bool == true,
-        "Dedicated login shows all platforms and hides only daily Chrome controls without nesting forms")
-  loginFixture()
-  check(fullPageValue("window.fixtureLoginSnapshot.profile_reads === \(profileReadsBeforeDedicated) && window.fixtureLoginSnapshot.opens === 0 && window.fixtureLoginSnapshot.saves === 0 && window.fixtureLoginSnapshot.writes === 0 && window.fixtureLoginSnapshot.jobs === 2") as? Bool == true,
-        "Opening dedicated login neither scans daily Chrome nor opens login windows, writes state, or starts downloads")
-  _ = fullPageValue("document.querySelector('#desktop-login-douyin-open').click(); undefined")
-  waitForPage("An explicit platform button opens only its synthetic dedicated session", """
-    !document.querySelector('#desktop-login-douyin-save').disabled
-      && document.querySelector('#desktop-login-mode').disabled
-      && document.querySelector('#desktop-login-instagram-open').disabled
-      && document.querySelector('#desktop-login-douyin-status').textContent.includes('完成登录')
-    """)
-  _ = fullPageValue("document.querySelector('#url-input').value='https://www.douyin.com/video/123456'; document.querySelector('#download-form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})); undefined")
-  waitForPage("A new job cannot race a still-open login window", "document.querySelector('#form-error').textContent.includes('保存登录')")
-  loginFixture()
-  check(fullPageValue("window.fixtureLoginSnapshot.opens === 1 && window.fixtureLoginSnapshot.saves === 0 && window.fixtureLoginSnapshot.jobs === 2") as? Bool == true,
-        "Opening a dedicated window is not silently treated as a saved account or a submitted job")
-  _ = fullPageValue("document.querySelector('#desktop-login-douyin-save').click(); undefined")
-  waitForPage("Explicit saving displays local persistence without claiming website acceptance", """
-    !document.querySelector('#desktop-login-mode').disabled
-      && document.querySelector('#desktop-login-douyin-status').textContent.includes('下载时确认')
-    """)
-  _ = fullPageValue("document.querySelector('#download-dir').value='/tmp/Fixture dedicated login'; document.querySelector('#save-settings-button').click(); undefined")
-  waitForPage("The original directory form still saves with daily Chrome controls hidden", "document.querySelector('#settings-saved').textContent === '已保存' && !document.querySelector('#save-settings-button').disabled")
-  loginFixture()
-  check(fullPageValue("""
-    window.fixtureLoginSnapshot.saves === 1 && window.fixtureLoginSnapshot.config_writes === 5
-      && window.fixtureLoginSnapshot.config.chrome_profile === null
-      && window.fixtureLoginSnapshot.config.use_chrome_cookies === true
-      && window.fixtureLoginSnapshot.config.download_dir === '/tmp/Fixture dedicated login'
-      && window.fixtureLoginSnapshot.profile_reads === \(profileReadsBeforeDedicated)
-    """) as? Bool == true,
-        "Saving a directory preserves the original legacy configuration and never writes a session token into it")
-  loginFixture("{fail_mode:true}")
-  _ = fullPageValue("""
-    document.querySelector('#download-dir').value='/tmp/Fixture unsaved directory';
-    document.querySelector('#desktop-login-mode').value='anonymous';
-    document.querySelector('#desktop-login-mode').dispatchEvent(new Event('change',{bubbles:true}));
-    document.querySelector('#desktop-login-save-mode').click(); undefined
-    """)
-  waitForPage("A rejected login-mode save preserves the native page and unsaved settings", """
-    document.querySelector('#desktop-login-status').textContent.includes('输入已保留')
-      && document.querySelector('#desktop-login-status').textContent.includes('还有登录操作')
-      && document.querySelector('#download-dir').value === '/tmp/Fixture unsaved directory'
-      && document.querySelector('#desktop-login-mode').value === 'anonymous'
-      && !document.body.textContent.includes('fixture-secret')
-    """)
-  loginFixture("{fail_mode:false}")
-  _ = fullPageValue("document.querySelector('#desktop-login-refresh').click(); undefined")
-  waitForPage("Refreshing after uncertain save preserves the explicit login-mode draft", """
-    !document.querySelector('#desktop-login-save-mode').disabled
-      && document.querySelector('#desktop-login-mode').value === 'anonymous'
-      && document.querySelector('#desktop-login-status').textContent.includes('尚未保存')
-    """)
-  _ = fullPageValue("window.fixtureLoginReloadMarker=true; document.querySelector('#desktop-login-save-mode').click(); undefined")
-  waitForPage("Only a confirmed explicit anonymous-mode save reloads the WebKit document", """
-    !window.fixtureLoginReloadMarker && document.querySelector('#desktop-login-mode')
-      && !document.querySelector('#desktop-login-mode').disabled
-      && document.querySelector('#desktop-login-mode').value === 'anonymous'
-      && document.querySelector('.desktop-login-platforms').hidden
-      && document.querySelector('#download-dir').value === '/tmp/Fixture dedicated login'
-      && !document.querySelector('#desktop-chrome-profile')
-    """)
-  for mode in ["chrome", "dedicated"] {
-    _ = fullPageValue("window.fixtureLoginReloadMarker=true; document.querySelector('#desktop-login-mode').value='\(mode)'; document.querySelector('#desktop-login-mode').dispatchEvent(new Event('change',{bubbles:true})); document.querySelector('#desktop-login-save-mode').click(); undefined")
-    waitForPage("An explicit \(mode) mode save is reflected by a fresh native document", """
-      !window.fixtureLoginReloadMarker && document.querySelector('#desktop-login-mode')
-        && !document.querySelector('#desktop-login-mode').disabled
-        && document.querySelector('#desktop-login-mode').value === '\(mode)'
-      """)
-    if mode == "chrome" {
-      waitForPage("Only explicit legacy mode loads the real Chrome profile controls", """
-        document.querySelector('#desktop-chrome-profile') && !document.querySelector('#desktop-chrome-profile').disabled
-          && document.querySelector('#desktop-chrome-profile').value === ''
-          && document.querySelector('#desktop-chrome-cookies').checked
-        """)
-    } else {
-      check(fullPageValue("document.querySelector('#desktop-login-douyin-status').textContent.includes('下载时确认') && !document.querySelector('#desktop-chrome-profile')") as? Bool == true,
-            "Returning to dedicated mode retains the saved per-platform session and removes legacy UI")
-    }
-  }
-  loginFixture()
-  check(fullPageValue("""
-    window.fixtureLoginSnapshot.writes === 3 && window.fixtureLoginSnapshot.saves === 1
-      && window.fixtureLoginSnapshot.jobs === 2 && window.fixtureLoginSnapshot.config_writes === 5
-      && window.fixtureRequests.every(request => !request.external) && window.fixtureErrors.length === 0
-      && window.fixtureBeaconCalls === 0
-    """) as? Bool == true,
-        "Login-mode round trips preserve settings and jobs without external requests, page errors, or uploads")
-  _ = fullPageValue("document.querySelector('#desktop-login-panel').scrollIntoView({block:'start'}); undefined")
-  check(fullPageValue("""
-    (() => { const panel=document.querySelector('#desktop-login-panel');
-      return panel.scrollWidth <= panel.clientWidth + 1 && panel.getBoundingClientRect().width > 200;
-    })()
-    """) as? Bool == true, "The actual WebKit login panel fits its native settings column")
-  _ = fullPageValue("document.body.classList.add('version-blocked'); undefined")
-  waitForPage("A live version mismatch disables all dedicated login actions", """
-    [...document.querySelector('#desktop-login-panel').querySelectorAll('button,select')].every(control=>control.disabled)
-    """)
-  _ = fullPageValue("document.querySelector('#desktop-login-douyin-open').dispatchEvent(new Event('click')); document.querySelector('#desktop-login-refresh').dispatchEvent(new Event('click')); undefined")
-  loginFixture()
-  check(fullPageValue("window.fixtureLoginSnapshot.opens === 1 && window.fixtureLoginSnapshot.writes === 3 && window.fixtureLoginSnapshot.saves === 1") as? Bool == true,
-        "Programmatic events cannot bypass the version gate to open or mutate dedicated login")
+        "Restored Chrome settings introduce no external requests, login traffic, errors, or uploads")
   fullController.close()
   fullService.shutdown()
   wait("The final native fixture process exits before its owned app workspace is retired", timeout: 8) {

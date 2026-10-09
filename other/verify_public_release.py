@@ -34,7 +34,7 @@ from verify_appcast import (
 
 COOKIE_SELF_TEST = "macos-v10-aes-and-fixed-diagnostics-verified-offline"
 PROFILE_SELF_TEST = "synthetic-directories-and-explicit-selection-verified-offline"
-LOGIN_SELF_TEST = "isolated-revisions-and-restart-verified-offline"
+LOGIN_SELF_TEST = "removed-entry-and-legacy-identity-verified-offline"
 
 
 def run(arguments, timeout=300, *, env=None):
@@ -98,7 +98,7 @@ def verify_public_helper(app, info, expected_tree, output, expected_helper_build
     require(result.get("chrome_profiles") == PROFILE_SELF_TEST,
             "Public helper missed the offline Chrome-profile selection verification.")
     require(result.get("dedicated_login") == LOGIN_SELF_TEST,
-            "Public helper missed the private login persistence verification.")
+            "Public helper missed the retired login entry and legacy identity verification.")
     require(result.get("diagnostic_log") == "bounded-redacted-export-verified-offline",
             "Public helper did not pass the new diagnostic privacy verification.")
     identity = result.get("diagnostic_identity", {})
