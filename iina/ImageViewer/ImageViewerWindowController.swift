@@ -79,6 +79,15 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private var pureViewingImageSize: NSSize?
   private var pureViewingScreenFrame: NSRect?
   private var sizingPureViewingWindow = false
+  private struct NormalViewport {
+    let source: UUID
+    let dimensions: NSSize
+    let state: ImageCanvasView.ViewportState
+  }
+  private var normalViewport: NormalViewport?
+  private var pureWindowRestoreFrame: NSRect?
+  private var pureWindowDragTimer: Timer?
+  private var isDraggingPureWindow = false
   private(set) var files: [PlaylistFileMetadata] = []
   private(set) var selectedURL: URL?
   private(set) var frameIndex = 0
@@ -354,6 +363,9 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     canvas.onToggleAnimation = { [weak self] in self?.toggleAnimation() }
     canvas.onToggleSlideshow = { [weak self] in self?.toggleSlideshow() }
     canvas.onTogglePureViewing = { [weak self] in self?.togglePureViewing() }
+    canvas.onMoveWindow = { [weak self] event in self?.movePureWindow(with: event) }
+    canvas.onToggleWindowMaximization = { [weak self] in self?.togglePureWindowMaximization() }
+    canvas.onResizeWindow = { [weak self] factor in self?.resizePureWindow(by: factor) ?? true }
     canvas.onExitPureViewing = { [weak self] in
       guard let self, self.isPureViewing else { return false }
       self.setPureViewing(false)
@@ -971,6 +983,10 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     guard enabled != isPureViewing, let window, !enabled || canEnterPureViewing else { return }
     // Do not replace the entire style mask: AppKit owns the current fullscreen state.
     if enabled {
+      if let image = canvas.image {
+        normalViewport = NormalViewport(source: sourceGeneration,
+          dimensions: NSSize(width: image.width, height: image.height), state: canvas.viewportState)
+      }
       let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton, .documentIconButton]
       normalWindowAppearance = WindowAppearance(
         fullSizeContent: window.styleMask.contains(.fullSizeContentView),
@@ -989,6 +1005,8 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       // Pure-view dimensions must not replace the normal browser/editor's saved frame.
       window.setFrameAutosaveName("")
     }
+    stopPureWindowDrag()
+    pureWindowRestoreFrame = nil
     isPureViewing = enabled
     if !enabled { NSLayoutConstraint.deactivate(pureViewingMinimumSizeConstraints) }
     NSLayoutConstraint.deactivate(enabled ? normalViewingConstraints : pureViewingConstraints)
@@ -996,6 +1014,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     NSLayoutConstraint.activate(enabled ? pureViewingConstraints : normalViewingConstraints)
     canvas.isPureViewing = enabled
     if enabled {
+      canvas.fitToWindow()
       applyPureWindowAppearance()
       sizePureViewingWindowToImage()
     } else if let appearance = normalWindowAppearance {
@@ -1024,6 +1043,15 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       pureViewingScreenFrame = nil
     }
     window.contentView?.layoutSubtreeIfNeeded()
+    if !enabled {
+      if let snapshot = normalViewport, snapshot.source == sourceGeneration, let image = canvas.image,
+         snapshot.dimensions == NSSize(width: image.width, height: image.height) {
+        canvas.restoreViewport(snapshot.state)
+      } else {
+        canvas.fitToWindow()
+      }
+      normalViewport = nil
+    }
     window.makeFirstResponder(canvas)
     updateControls()
   }
@@ -1042,11 +1070,11 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private func sizePureViewingWindowToImage(force: Bool = false) {
     guard isPureViewing, let window, let image = canvas.image,
           !window.styleMask.contains(.fullScreen), !fullscreenTransition, !window.isMiniaturized,
-          !sizingPureViewingWindow else { return }
+          !sizingPureViewingWindow, !isDraggingPureWindow, !window.inLiveResize else { return }
     let dimensions = NSSize(width: image.width, height: image.height)
     let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
     guard force || pureViewingImageSize != dimensions || pureViewingScreenFrame != visible else { return }
-    let limit = pureViewingSizeLimit ?? window.frame.size
+    let limit = pureWindowRestoreFrame != nil ? visible.size : (pureViewingSizeLimit ?? window.frame.size)
     let scale = min(min(limit.width, visible.width) / dimensions.width,
                     min(limit.height, visible.height) / dimensions.height)
     guard scale.isFinite, scale > 0 else { return }
@@ -1065,6 +1093,10 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
         size.height = floor(size.height)
         size.width = size.height * dimensions.width / dimensions.height
       }
+      // Align both edges to whole points. Letting AppKit round two fractional
+      // origins independently can add a full point of blank space on a large fit.
+      size.width = size.width.rounded()
+      size.height = size.height.rounded()
     }
     if needsUsableViewport {
       // AppKit rounds subpoint window edges to zero. Keep these exceptional
@@ -1089,11 +1121,77 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     pureViewingImageSize = dimensions
     pureViewingScreenFrame = visible
     var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: size))
-    frame.origin = CGPoint(x: old.midX - frame.width / 2, y: old.midY - frame.height / 2)
+    frame.origin = CGPoint(x: (old.midX - frame.width / 2).rounded(), y: (old.midY - frame.height / 2).rounded())
     frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
     frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
     window.setFrame(frame, display: true)
     window.contentView?.layoutSubtreeIfNeeded()
+  }
+
+  private var canChangePureWindow: Bool {
+    guard isPureViewing, let window, canvas.image != nil else { return false }
+    return !closed && !window.styleMask.contains(.fullScreen) && !fullscreenTransition &&
+      !window.isMiniaturized && !window.inLiveResize && !UpdateWorkAdmission.shared.isBlocked
+  }
+
+  private func movePureWindow(with event: NSEvent) {
+    guard canChangePureWindow, let window else { return }
+    stopPureWindowDrag()
+    isDraggingPureWindow = true
+    // AppKit returns immediately and may consume mouseUp. Observe button release
+    // only during this native drag, without installing a global event monitor.
+    let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] timer in
+      guard let self else { timer.invalidate(); return }
+      if NSEvent.pressedMouseButtons & 1 == 0 {
+        self.stopPureWindowDrag()
+        self.sizePureViewingWindowToImage()
+      }
+    }
+    pureWindowDragTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
+    window.performDrag(with: event)
+  }
+
+  private func stopPureWindowDrag() {
+    pureWindowDragTimer?.invalidate()
+    pureWindowDragTimer = nil
+    isDraggingPureWindow = false
+  }
+
+  @objc private func togglePureWindowMaximization() {
+    // A second mouseDown already ends the previous click; do not wait for the
+    // release timer to notice a fast double-click's first mouseUp.
+    stopPureWindowDrag()
+    guard canChangePureWindow, let window else { return }
+    let restore = pureWindowRestoreFrame
+    if let restore {
+      pureWindowRestoreFrame = nil
+      pureViewingSizeLimit = restore.size
+    } else {
+      pureWindowRestoreFrame = window.frame
+    }
+    canvas.fitToWindow()
+    sizePureViewingWindowToImage(force: true)
+    let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+    let center = restore ?? visible
+    var frame = window.frame
+    frame.origin = CGPoint(x: (center.midX - frame.width / 2).rounded(), y: (center.midY - frame.height / 2).rounded())
+    frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
+    frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
+    window.setFrame(frame, display: true)
+  }
+
+  private func resizePureWindow(by factor: CGFloat) -> Bool {
+    if window?.styleMask.contains(.fullScreen) == true && !fullscreenTransition { return false }
+    guard canChangePureWindow, !isDraggingPureWindow, let window, factor.isFinite, factor > 0 else { return true }
+    pureWindowRestoreFrame = nil
+    // Preserve the image ratio and keep the window usable even after many '-' presses.
+    let minimumFactor = min(1, 64 / max(min(window.frame.width, window.frame.height), 1))
+    let scale = max(factor, minimumFactor)
+    pureViewingSizeLimit = NSSize(width: window.frame.width * scale, height: window.frame.height * scale)
+    canvas.fitToWindow()
+    sizePureViewingWindowToImage(force: true)
+    return true
   }
 
   private func restoreNormalWindowGeometry(_ geometry: WindowGeometry) {
@@ -1127,6 +1225,10 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     add(isPureViewing ? "退出纯净看图（Esc / Tab）" : "纯净看图（Tab）", #selector(togglePureViewing),
         enabled: isPureViewing || canEnterPureViewing)
     add(window?.styleMask.contains(.fullScreen) == true ? "退出全屏" : "全屏", #selector(toggleImageFullscreen))
+    if isPureViewing {
+      add(pureWindowRestoreFrame == nil ? "最大适合屏幕（双击图片）" : "恢复窗口大小（双击图片）",
+          #selector(togglePureWindowMaximization), enabled: canChangePureWindow)
+    }
     menu.addItem(.separator())
     add("适应窗口（0）", #selector(fit), enabled: canvas.image != nil)
     add("原始像素（1）", #selector(actualSize), enabled: canvas.image != nil)
@@ -1385,6 +1487,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     window?.close()
   }
   private func tearDown() {
+    stopPureWindowDrag()
     setPureViewing(false)
     guard !closed else { return }
     closed = true
@@ -1417,6 +1520,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
   func windowWillClose(_ notification: Notification) { tearDown() }
   func windowDidMiniaturize(_ notification: Notification) {
+    stopPureWindowDrag()
     let wasRunning = slideshow.isRunning
     stopSlideshow()
     wasSlideshowRunningBeforeMiniaturize = wasRunning
@@ -1453,11 +1557,15 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     }
   }
   func windowWillEnterFullScreen(_ notification: Notification) {
+    stopPureWindowDrag()
     if !isPureViewing { normalFrameBeforeFullscreen = window?.frame }
     fullscreenTransition = true
     if isPureViewing { window?.contentResizeIncrements = NSSize(width: 1, height: 1) }
   }
-  func windowWillExitFullScreen(_ notification: Notification) { fullscreenTransition = true }
+  func windowWillExitFullScreen(_ notification: Notification) {
+    stopPureWindowDrag()
+    fullscreenTransition = true
+  }
   func windowDidFailToEnterFullScreen(_ window: NSWindow) {
     windowDidExitFullScreen(Notification(name: NSWindow.didExitFullScreenNotification, object: window))
   }
@@ -1468,7 +1576,10 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   func windowDidEndLiveResize(_ notification: Notification) {
     guard isPureViewing, let window, !window.styleMask.contains(.fullScreen), !fullscreenTransition else { return }
     let longestSide = max(window.frame.width, window.frame.height)
+    pureWindowRestoreFrame = nil
     pureViewingSizeLimit = NSSize(width: longestSide, height: longestSide)
+    canvas.fitToWindow()
+    sizePureViewingWindowToImage()
   }
   func windowDidChangeScreen(_ notification: Notification) { sizePureViewingWindowToImage() }
   func windowDidBecomeKey(_ notification: Notification) { refreshList() }

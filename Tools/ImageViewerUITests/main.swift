@@ -68,6 +68,18 @@ func viewingMenu(_ viewer: ImageViewerWindowController) -> NSMenu {
                                eventNumber: 0, clickCount: 1, pressure: 1)!
   return viewer.canvas.menu(for: event)!
 }
+@discardableResult
+func mouse(_ viewer: ImageViewerWindowController, type: NSEvent.EventType = .leftMouseDown,
+           point: CGPoint? = nil, clicks: Int = 1, modifiers: NSEvent.ModifierFlags = []) -> NSEvent {
+  let canvas = viewer.canvas
+  let location = canvas.convert(point ?? CGPoint(x: canvas.bounds.midX, y: canvas.bounds.midY), to: nil)
+  let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: modifiers,
+                               timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: viewer.window!.windowNumber, context: nil,
+                               eventNumber: 0, clickCount: clicks, pressure: type == .leftMouseUp ? 0 : 1)!
+  viewer.window!.sendEvent(event)
+  return event
+}
 func sendMenuItem(_ item: NSMenuItem) {
   expect(item.isEnabled && item.action != nil, "Requested canvas menu action is available")
   NSApp.sendAction(item.action!, to: item.target, from: item)
@@ -240,12 +252,77 @@ let manualOffset = viewer.canvas.imageOffset
 expect(manualOffset != .zero && !viewer.canvas.fitsWindow, "Mouse dragging establishes a manual image position")
 key(viewer, code: 48, characters: "\t")
 pump()
-expect(viewer.isPureViewing && viewer.canvas.zoom == manualZoom && viewer.canvas.imageOffset == manualOffset &&
-       !viewer.canvas.fitsWindow, "Tab enters pure viewing without resetting manual zoom or pan")
+expect(viewer.isPureViewing && viewer.canvas.fitsWindow && viewer.canvas.imageOffset == .zero &&
+       abs(viewer.canvas.imageRect.width - viewer.canvas.bounds.width) < 0.51 &&
+       abs(viewer.canvas.imageRect.height - viewer.canvas.bounds.height) < 0.51,
+       "Pure viewing starts with the whole image fitted rather than inheriting an inspection offset")
+let directFrame = imageWindow.frame
+let originalMoveHandler = viewer.canvas.onMoveWindow
+var forwardedMouseDown: NSEvent?
+viewer.canvas.onMoveWindow = { event in forwardedMouseDown = event; originalMoveHandler?(event) }
+let nativeDown = mouse(viewer)
+mouse(viewer, type: .leftMouseDragged,
+      point: CGPoint(x: viewer.canvas.bounds.midX + 30, y: viewer.canvas.bounds.midY - 20))
+mouse(viewer, type: .leftMouseUp)
+pump(0.15)
+expect(forwardedMouseDown === nativeDown && viewer.canvas.imageOffset == .zero && viewer.canvas.fitsWindow,
+       "Window-routed left drag delegates the original event to AppKit without accidentally panning the image")
+viewer.canvas.onMoveWindow = originalMoveHandler
+// Synthetic AppKit events cannot drive WindowServer movement without event-injection permission.
+// Native drag dispatch is covered here; physical edge/corner resizing remains a manual acceptance check.
+expect(imageWindow.styleMask.contains([.titled, .resizable]) &&
+       !imageWindow.isMovableByWindowBackground && imageWindow.contentAspectRatio == NSSize(width: 240, height: 120),
+       "The native titled resizable window retains its aspect-locked edges and corners")
+mouse(viewer, modifiers: [.option])
+mouse(viewer, type: .leftMouseDragged,
+      point: CGPoint(x: viewer.canvas.bounds.midX + 30, y: viewer.canvas.bounds.midY - 20), modifiers: [.option])
+mouse(viewer, type: .leftMouseUp, modifiers: [.option])
+expect(viewer.canvas.imageOffset == CGPoint(x: 30, y: -20) && !viewer.canvas.fitsWindow &&
+       sameRect(imageWindow.frame, directFrame), "Option-drag explicitly pans image details without moving the window")
+mouse(viewer)
+mouse(viewer, type: .leftMouseUp)
+mouse(viewer, clicks: 2)
+mouse(viewer, type: .leftMouseUp, clicks: 2)
+pump()
+let visiblePureScreen = imageWindow.screen!.visibleFrame
+expect(viewer.canvas.fitsWindow && viewer.canvas.imageOffset == .zero &&
+       visiblePureScreen.insetBy(dx: -1, dy: -1).contains(imageWindow.frame) &&
+       (abs(imageWindow.frame.width - visiblePureScreen.width) < 2 ||
+        abs(imageWindow.frame.height - visiblePureScreen.height) < 2),
+       "A window-routed double click maximizes the complete image inside the current screen")
+expect(viewingMenu(viewer).items[2].title.contains("恢复"), "The right-click menu exposes maximum-fit restoration")
+let maximizedFrame = imageWindow.frame
+pump(0.15)
+expect(imageWindow.frame == maximizedFrame, "A stale native-drag release timer cannot undo fast double-click maximization")
+mouse(viewer, clicks: 2)
+mouse(viewer, type: .leftMouseUp, clicks: 2)
+pump()
+expect(sameRect(imageWindow.frame, directFrame), "A second double click restores the previous pure-view frame")
+key(viewer, code: 27, characters: "-")
+expect(imageWindow.frame.width < directFrame.width && viewer.canvas.fitsWindow && viewer.canvas.imageOffset == .zero,
+       "Pure-view minus resizes the image window while preserving centered fit")
+key(viewer, code: 24, characters: "+")
+expect(abs(imageWindow.frame.width - directFrame.width) < 3 && viewer.canvas.fitsWindow,
+       "Pure-view plus increases the proportional image window rather than magnifying into a black canvas")
+mouse(viewer, clicks: 2)
+mouse(viewer, type: .leftMouseUp, clicks: 2)
+imageWindow.setContentSize(NSSize(width: directFrame.width / 2, height: directFrame.height / 2))
+viewer.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: imageWindow))
+expect(viewingMenu(viewer).items[2].title.contains("最大") && viewer.canvas.fitsWindow &&
+       abs(viewer.canvas.imageRect.width - viewer.canvas.bounds.width) < 0.51 &&
+       abs(viewer.canvas.imageRect.height - viewer.canvas.bounds.height) < 0.51,
+       "A native resize completion retires the previous maximum-fit restore frame and refits the image")
 key(viewer, code: 53, characters: "\u{1b}")
 pump()
 expect(!viewer.isPureViewing && viewer.canvas.zoom == manualZoom && viewer.canvas.imageOffset == manualOffset &&
        imageWindow.firstResponder === viewer.canvas, "Escape restores chrome and retains zoom, pan, and canvas focus")
+let syntheticOtherScale = ImageCanvasView.ViewportState(zoom: manualZoom, offset: manualOffset,
+                                                       fitsWindow: false, backingScale: viewer.canvas.backingScale * 2)
+viewer.canvas.restoreViewport(syntheticOtherScale)
+expect(viewer.canvas.zoom == manualZoom && viewer.canvas.imageOffset == CGPoint(x: manualOffset.x * 2, y: manualOffset.y * 2),
+       "Restoring a viewport across backing scales preserves pixel zoom and converts point offsets")
+viewer.canvas.restoreViewport(ImageCanvasView.ViewportState(zoom: manualZoom, offset: manualOffset,
+                                                           fitsWindow: false, backingScale: viewer.canvas.backingScale))
 sendMenuItem(viewingMenu(viewer).items[0])
 expect(viewer.isPureViewing, "Right-click can also enter pure viewing")
 key(viewer, code: 48, characters: "\t")
@@ -279,6 +356,17 @@ if ProcessInfo.processInfo.environment["IMAGE_VIEWER_TEST_FULLSCREEN"] == "1" {
   expect(viewer.isPureViewing && imageWindow.styleMask.contains(.fullScreen) &&
          sameRect(viewer.canvas.convert(viewer.canvas.bounds, to: contentView), contentView.bounds),
          "Pure viewing remains edge-to-edge after a native fullscreen transition")
+  let fullFrame = imageWindow.frame
+  let fullZoom = viewer.canvas.zoom
+  key(viewer, code: 27, characters: "-")
+  expect(imageWindow.frame == fullFrame && !viewer.canvas.fitsWindow &&
+         abs(viewer.canvas.zoom - fullZoom / 1.25) < 0.001,
+         "Pure native fullscreen falls back to local zoom because its window cannot be resized")
+  key(viewer, code: 29, characters: "0")
+  mouse(viewer, clicks: 2)
+  mouse(viewer, type: .leftMouseUp, clicks: 2)
+  expect(imageWindow.frame == fullFrame && viewer.canvas.fitsWindow,
+         "Double-click maximization does not interfere with native fullscreen")
   key(viewer, code: 53, characters: "\u{1b}")
   expect(!viewer.isPureViewing && imageWindow.styleMask.contains(.fullScreen),
          "Escape exits pure viewing while preserving actual macOS fullscreen")

@@ -7,18 +7,32 @@ final class ImageCanvasView: NSView {
   private(set) var zoom: CGFloat = 1
   private(set) var imageOffset = CGPoint.zero
   private(set) var fitsWindow = true
+  struct ViewportState {
+    let zoom: CGFloat
+    let offset: CGPoint
+    let fitsWindow: Bool
+    let backingScale: CGFloat
+  }
+  var viewportState: ViewportState {
+    ViewportState(zoom: zoom, offset: imageOffset, fitsWindow: fitsWindow, backingScale: backingScale)
+  }
   var onZoomChanged: ((CGFloat) -> Void)?
   var onNavigate: ((Int) -> Void)?
   var onToggleAnimation: (() -> Void)?
   var onToggleSlideshow: (() -> Void)?
   var onTogglePureViewing: (() -> Void)?
   var onExitPureViewing: (() -> Bool)?
+  var onMoveWindow: ((NSEvent) -> Void)?
+  var onToggleWindowMaximization: (() -> Void)?
+  var onResizeWindow: ((CGFloat) -> Bool)?
   var contextMenuProvider: (() -> NSMenu)?
   var isPureViewing = false {
     didSet {
       needsLayout = true
       needsDisplay = true
-      setAccessibilityHelp(isPureViewing ? "Tab 或 Esc 退出纯净看图；右键显示操作菜单。" : nil)
+      pansImage = false
+      window?.invalidateCursorRects(for: self)
+      setAccessibilityHelp(isPureViewing ? "拖动图片移动窗口；双击最大适合屏幕；拖动边缘调整大小；Option 拖动查看局部；Tab 或 Esc 退出。" : nil)
     }
   }
   var onDropURLs: (([URL]) -> Void)?
@@ -63,6 +77,7 @@ final class ImageCanvasView: NSView {
   private var cropHasDragged = false
   private var dragOrigin = CGPoint.zero
   private var dragOffset = CGPoint.zero
+  private var pansImage = false
   private var previousBackingScale: CGFloat = 1
 
   override var acceptsFirstResponder: Bool { true }
@@ -153,6 +168,16 @@ final class ImageCanvasView: NSView {
   }
 
   func actualSize() { setZoom(1, anchor: CGPoint(x: bounds.midX, y: bounds.midY)) }
+
+  func restoreViewport(_ state: ViewportState) {
+    if state.fitsWindow { fitToWindow(); return }
+    let ratio = state.backingScale / backingScale
+    zoom = state.zoom
+    imageOffset = CGPoint(x: state.offset.x * ratio, y: state.offset.y * ratio)
+    fitsWindow = false
+    needsDisplay = true
+    onZoomChanged?(zoom)
+  }
 
   func setZoom(_ proposed: CGFloat, anchor: CGPoint? = nil) {
     guard image != nil, proposed.isFinite, proposed > 0, zoom.isFinite, zoom > 0 else { return }
@@ -301,7 +326,14 @@ final class ImageCanvasView: NSView {
 
   override func resetCursorRects() {
     super.resetCursorRects()
-    guard cropEnabled else { return }
+    guard cropEnabled else {
+      if isPureViewing {
+        // Leave all native resize edges and corners to AppKit.
+        let interior = bounds.insetBy(dx: 8, dy: 8)
+        if !interior.isEmpty { addCursorRect(interior, cursor: .openHand) }
+      }
+      return
+    }
     guard cropInteractionEnabled else { addCursorRect(bounds, cursor: .arrow); return }
     addCursorRect(bounds, cursor: .crosshair)
     guard let rect = cropRectInView else { return }
@@ -318,12 +350,21 @@ final class ImageCanvasView: NSView {
   }
 
   override func magnify(with event: NSEvent) {
+    if isPureViewing && !event.modifierFlags.contains(.option) {
+      resizeWindowOrZoom(by: max(1 + event.magnification, 0.01), anchor: convert(event.locationInWindow, from: nil))
+      return
+    }
     setZoom(zoom * max(1 + event.magnification, 0.01),
             anchor: convert(event.locationInWindow, from: nil))
   }
 
   override func scrollWheel(with event: NSEvent) {
     let delta = event.scrollingDeltaY
+    if isPureViewing && !event.modifierFlags.contains(.option) {
+      guard delta.isFinite, delta != 0 else { return }
+      resizeWindowOrZoom(by: exp(min(max(delta * 0.02, -1), 1)), anchor: convert(event.locationInWindow, from: nil))
+      return
+    }
     if event.modifierFlags.contains(.command) || !event.hasPreciseScrollingDeltas {
       guard delta.isFinite, delta != 0 else { return }
       setZoom(zoom * exp(min(max(delta * 0.02, -1), 1)),
@@ -339,15 +380,25 @@ final class ImageCanvasView: NSView {
 
   override func mouseDown(with event: NSEvent) {
     window?.makeFirstResponder(self)
+    pansImage = false
     if cropEnabled {
       guard cropInteractionEnabled else { return }
       beginCropDrag(with: event)
       return
     }
     if event.clickCount == 2 {
+      if isPureViewing && !event.modifierFlags.contains(.option) {
+        onToggleWindowMaximization?()
+        return
+      }
       if fitsWindow { actualSize() } else { fitToWindow() }
       return
     }
+    if isPureViewing && !event.modifierFlags.contains(.option) {
+      onMoveWindow?(event)
+      return
+    }
+    pansImage = true
     dragOrigin = convert(event.locationInWindow, from: nil)
     dragOffset = imageOffset
   }
@@ -361,6 +412,7 @@ final class ImageCanvasView: NSView {
       updateCropDrag(at: point)
       return
     }
+    guard pansImage else { return }
     imageOffset = CGPoint(x: dragOffset.x + point.x - dragOrigin.x,
                           y: dragOffset.y + point.y - dragOrigin.y)
     fitsWindow = false
@@ -368,6 +420,7 @@ final class ImageCanvasView: NSView {
   }
 
   override func mouseUp(with event: NSEvent) {
+    pansImage = false
     if cropEnabled {
       if cropInteractionEnabled && cropHasDragged { updateCropDrag(at: convert(event.locationInWindow, from: nil)) }
       cropDrag = nil
@@ -443,14 +496,22 @@ final class ImageCanvasView: NSView {
     case 49: onToggleAnimation?()
     default:
       switch event.charactersIgnoringModifiers {
-      case "+", "=": setZoom(zoom * 1.25)
-      case "-": setZoom(zoom / 1.25)
+      case "+", "=":
+        resizeWindowOrZoom(by: 1.25)
+      case "-":
+        resizeWindowOrZoom(by: 1 / 1.25)
       case "0": fitToWindow()
       case "1": actualSize()
       case "s", "S": onToggleSlideshow?()
       default: super.keyDown(with: event)
       }
     }
+  }
+
+  private func resizeWindowOrZoom(by factor: CGFloat, anchor: CGPoint? = nil) {
+    if isPureViewing && onResizeWindow?(factor) == true { return }
+    // Native fullscreen cannot resize its window; retain local inspection there.
+    setZoom(zoom * factor, anchor: anchor)
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {

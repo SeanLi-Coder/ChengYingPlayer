@@ -32,6 +32,28 @@ struct RealImageViewerSmoke {
                                isARepeat: false, keyCode: code)!
     viewer.window!.sendEvent(event)
   }
+  static func doubleClick(_ viewer: ImageViewerWindowController) {
+    let canvas = viewer.canvas
+    for (type, count) in [(NSEvent.EventType.leftMouseDown, 1), (.leftMouseUp, 1),
+                           (.leftMouseDown, 2), (.leftMouseUp, 2)] {
+      let event = NSEvent.mouseEvent(with: type,
+        location: canvas.convert(CGPoint(x: canvas.bounds.midX, y: canvas.bounds.midY), to: nil),
+        modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: viewer.window!.windowNumber, context: nil, eventNumber: 0,
+        clickCount: count, pressure: type == .leftMouseUp ? 0 : 1)!
+      viewer.window!.sendEvent(event)
+    }
+  }
+  static func captureWindow(_ viewer: ImageViewerWindowController, name: String) throws {
+    guard let path = ProcessInfo.processInfo.environment["IMAGE_PURE_VIEW_SCREENSHOT_DIR"] else { return }
+    let capture = Process()
+    capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+    capture.arguments = ["-x", "-l", String(viewer.window!.windowNumber), "-o",
+                         URL(fileURLWithPath: path).appendingPathComponent(name + ".png").path]
+    try capture.run()
+    capture.waitUntilExit()
+    expect(capture.terminationStatus == 0, "Only the synthetic image fixture window is captured")
+  }
   static func image(_ color: CGColor, width: Int = 32, height: Int = 24) -> CGImage {
     let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
                             bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -257,6 +279,7 @@ struct RealImageViewerSmoke {
     let savedAutosave = imageWindow.frameAutosaveName
     viewer.open(urls: shapeURLs)
     waitFor("The portrait geometry fixture loads") { viewer.selectedURL == shapeURLs[0] && viewer.canvas.image != nil }
+    viewer.canvas.setZoom(2, anchor: CGPoint(x: 20, y: 30))
     key(viewer, code: 48, characters: "\t")
     for (index, shape) in shapes.enumerated() {
       if index > 0 { key(viewer, code: 124, characters: "\u{f703}") }
@@ -305,19 +328,40 @@ struct RealImageViewerSmoke {
         imageWindow.setFrame(originalFrame, display: true)
         pump()
       }
+      if index == 2 {
+        let unmaximized = imageWindow.frame
+        doubleClick(viewer)
+        pump(0.15)
+        print("Pure maximum 1080x1066: frame=\(imageWindow.frame) canvas=\(viewer.canvas.bounds) image=\(viewer.canvas.imageRect) fit=\(viewer.canvas.fitsWindow) screen=\(imageWindow.screen!.visibleFrame)")
+        expect(viewer.canvas.fitsWindow && imageWindow.screen!.visibleFrame.insetBy(dx: -1, dy: -1).contains(imageWindow.frame) &&
+               abs(viewer.canvas.imageRect.width - viewer.canvas.bounds.width) < 0.51 &&
+               abs(viewer.canvas.imageRect.height - viewer.canvas.bounds.height) < 0.51,
+               "The 1080x1066 fixture maximizes via actual window event routing without stretching or margins")
+        try captureWindow(viewer, name: "pure-1080x1066-maximized")
+        doubleClick(viewer)
+        pump()
+        expect(abs(imageWindow.frame.minX - unmaximized.minX) < 1 &&
+               abs(imageWindow.frame.minY - unmaximized.minY) < 1 &&
+               abs(imageWindow.frame.width - unmaximized.width) < 1 &&
+               abs(imageWindow.frame.height - unmaximized.height) < 1,
+               "Double-click restoration preserves the previous near-square pure window")
+      }
       if shape.0 <= 8 {
         let fittedZoom = viewer.canvas.zoom
         key(viewer, code: 24, characters: "+")
         expect(viewer.canvas.zoom >= fittedZoom, "Zoom-in never shrinks a tiny image from its larger fitted scale")
         let beforeDecrease = viewer.canvas.zoom
         key(viewer, code: 27, characters: "-")
-        expect(abs(viewer.canvas.zoom - beforeDecrease / 1.25) < 0.001,
-               "Zoom-out leaves a larger fitted scale continuously instead of snapping down to 64x")
-        let beforeExit = viewer.canvas.zoom
+        expect(abs(viewer.canvas.zoom - beforeDecrease / 1.25) * CGFloat(shape.0) / viewer.canvas.backingScale < 1.1 &&
+               viewer.canvas.fitsWindow,
+               "Tiny-image zoom-out resizes its fitted window continuously instead of snapping down to 64x")
         key(viewer, code: 53, characters: "\u{1b}")
+        expect(viewer.canvas.fitsWindow && viewer.canvas.imageOffset == .zero,
+               "Leaving pure view after changing source does not restore another image's manual viewport")
+        let beforeNormalZoom = viewer.canvas.zoom
         key(viewer, code: 24, characters: "+")
-        expect(viewer.canvas.zoom >= beforeExit,
-               "Leaving pure view preserves oversized manual zoom without reversing the zoom-in action")
+        expect(viewer.canvas.zoom >= beforeNormalZoom,
+               "Ordinary tiny-image zoom-in remains monotonic after a pure-view session")
         let normalZoom = viewer.canvas.zoom
         key(viewer, code: 27, characters: "-")
         expect(abs(viewer.canvas.zoom - normalZoom / 1.25) < 0.001,
@@ -336,6 +380,9 @@ struct RealImageViewerSmoke {
     waitFor("A real multi-page fixture starts in portrait orientation") {
       viewer.selectedURL == variablePages && viewer.canvas.image?.height == 600
     }
+    let portraitRestoreEnvelope = imageWindow.frame
+    doubleClick(viewer)
+    pump()
     viewer.canvas.setZoom(2, anchor: CGPoint(x: viewer.canvas.bounds.midX + 17, y: viewer.canvas.bounds.midY - 9))
     let pageZoom = viewer.canvas.zoom
     let pageOffset = viewer.canvas.imageOffset
@@ -346,6 +393,14 @@ struct RealImageViewerSmoke {
            "Changing a TIFF page's orientation preserves manual zoom and pan")
     expect(abs(viewer.canvas.bounds.width / viewer.canvas.bounds.height - 4) < 0.001,
            "Multi-page navigation updates the pure-view window to the decoded page's actual aspect")
+    doubleClick(viewer)
+    pump()
+    expect(viewer.canvas.fitsWindow &&
+           abs(viewer.canvas.bounds.width / viewer.canvas.bounds.height - 4) < 0.001 &&
+           imageWindow.frame.width <= portraitRestoreEnvelope.width + 1 &&
+           imageWindow.frame.height <= portraitRestoreEnvelope.height + 1 &&
+           imageWindow.screen!.visibleFrame.insetBy(dx: -1, dy: -1).contains(imageWindow.frame),
+           "Maximize restoration after a page change fits the new aspect into the old envelope on screen")
     key(viewer, code: 29, characters: "0")
     expect(viewer.canvas.fitsWindow && abs(viewer.canvas.imageRect.minX) < 0.001 &&
            abs(viewer.canvas.imageRect.minY) < 0.001 &&
