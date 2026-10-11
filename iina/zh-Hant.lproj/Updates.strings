@@ -31,5 +31,7 @@
 "busy.videoTask" = "影片剪輯或匯出工作仍在執行。";
 "busy.subtitles" = "字幕處理或模型準備仍在執行。";
 "busy.images" = "圖片工作或幻燈片仍在執行。";
+"busy.files" = "檔案複製或移動仍在進行。";
+"busy.fileMove" = "檔案移動仍在進行。";
 "busy.downloads" = "下載工作或瀏覽器請求仍在執行。";
 "busy.unknown" = "暫時無法確認工作狀態，更新會繼續安全等待。";

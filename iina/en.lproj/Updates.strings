@@ -31,5 +31,7 @@
 "busy.videoTask" = "A video editing or export task is still running.";
 "busy.subtitles" = "A local AI subtitle, video summary, model preparation, or summary export is still running.";
 "busy.images" = "An image task or slideshow is still running.";
+"busy.files" = "A file copy or move is still running.";
+"busy.fileMove" = "Files are still being moved.";
 "busy.downloads" = "A download or browser request is still running.";
 "busy.unknown" = "Task status could not be confirmed. The update will wait safely.";

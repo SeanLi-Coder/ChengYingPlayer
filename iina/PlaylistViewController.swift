@@ -355,7 +355,13 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
       folderBrowser.bottomAnchor.constraint(equalTo: container.bottomAnchor)
     ])
     folderBrowser.canNavigate = { [weak self] in
-      self?.player?.info.state.active == true && !UpdateWorkAdmission.shared.isBlocked
+      self?.player?.info.state.active == true && MediaFileActions.pendingOperationCount == 0 &&
+        !UpdateWorkAdmission.shared.isBlocked
+    }
+    folderBrowser.protectedFileURLs = { [weak self] in
+      guard let player = self?.player, player.info.state.active, let url = player.info.currentURL,
+            url.isFileURL else { return [] }
+      return [url]
     }
     folderBrowser.onOpenFile = { [weak self] url in
       guard let self, let player = self.player, player.info.state.active,

@@ -15,8 +15,19 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   let canvas = ImageCanvasView(frame: .zero)
-  let tableView = NSTableView()
-  let folderBrowser = MediaFolderBrowserView(extensions: Set(ImageFileSupport.extensions).union(Utility.playableFileExt))
+  let tableView = FileListTableView()
+  private(set) lazy var fileActions = MediaFileActions(
+    tableView: tableView,
+    selectedURLs: { [weak self] in self?.fileURLs(for: self?.tableView.selectedRowIndexes ?? []) ?? [] },
+    URLsForRows: { [weak self] in self?.fileURLs(for: $0) ?? [] },
+    destinationURL: { [weak self] in self?.directoryURL ?? self?.selectedURL?.deletingLastPathComponent() },
+    canOperate: { [weak self] in self?.canBrowse == true },
+    protectedURLs: { [weak self] in self?.protectedFileURLs ?? [] },
+    presentation: { [weak self] message, error in self?.presentFileTransferStatus(message, error: error) },
+    pasteboard: filePasteboard)
+  private var transferObserver: NSObjectProtocol?
+  let folderBrowser: MediaFolderBrowserView
+  private let filePasteboard: NSPasteboard
   let sidebarPicker = NSSegmentedControl(labels: ["文件夹", "图片列表"], trackingMode: .selectOne, target: nil, action: nil)
   private var imageListView: NSView?
   private var browserFiles: [PlaylistFileMetadata] = []
@@ -90,6 +101,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private var isDraggingPureWindow = false
   private(set) var files: [PlaylistFileMetadata] = []
   private(set) var selectedURL: URL?
+  private var selectedCanonicalURL: URL?
   private(set) var frameIndex = 0
   private(set) var isAnimating = false
   private(set) var isBusy = false
@@ -140,8 +152,12 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   private var cachedOrder: [Int] = []
   private let maximumFrameBytes = 64 * 1024 * 1024
 
-  init(urls: [URL], directoryURL: URL? = nil, defaults: UserDefaults = .standard) {
+  init(urls: [URL], directoryURL: URL? = nil, defaults: UserDefaults = .standard,
+       filePasteboard: NSPasteboard = .general) {
     self.defaults = defaults
+    self.filePasteboard = filePasteboard
+    folderBrowser = MediaFolderBrowserView(extensions: Set(ImageFileSupport.extensions).union(Utility.playableFileExt),
+                                          pasteboard: filePasteboard)
     super.init(window: nil)
     if let saved = defaults.object(forKey: Self.intervalPreference) as? NSNumber {
       slideshow.setInterval(saved.doubleValue, now: CACurrentMediaTime())
@@ -151,6 +167,10 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     open(urls: urls, directoryURL: directoryURL)
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  deinit {
+    if let transferObserver { NotificationCenter.default.removeObserver(transferObserver) }
+  }
 
   override func showWindow(_ sender: Any?) {
     if let window, !window.styleMask.contains(.fullScreen), !fullscreenTransition,
@@ -219,6 +239,10 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     tableView.dataSource = self
     tableView.delegate = self
     tableView.allowsEmptySelection = true
+    tableView.allowsMultipleSelection = true
+    _ = fileActions
+    transferObserver = NotificationCenter.default.addObserver(forName: .mediaFilesTransferred,
+      object: nil, queue: .main) { [weak self] notification in self?.filesTransferred(notification) }
     tableView.setAccessibilityLabel("同目录图片与 Finder 标签")
     let scroll = NSScrollView()
     scroll.documentView = tableView
@@ -259,6 +283,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     }
     folderBrowser.onOpenFile = { [weak self] url in self?.openBrowserFile(url) }
     folderBrowser.canNavigate = { [weak self] in self?.canBrowse == true }
+    folderBrowser.protectedFileURLs = { [weak self] in self?.protectedFileURLs ?? [] }
     updateSidebarVisibility()
     let navigation = stack([previousButton, nextButton, spacer(), previousFrameButton,
                             frameLabel, nextFrameButton, animationButton])
@@ -409,7 +434,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   func open(urls: [URL], directoryURL requestedDirectory: URL? = nil) {
-    guard !UpdateWorkAdmission.shared.isBlocked, !isBusy else { return }
+    guard !UpdateWorkAdmission.shared.isBlocked, MediaFileActions.pendingOperationCount == 0, !isBusy else { return }
     let accepted = urls.filter {
       $0.isFileURL && ImageFileSupport.isImageURL($0) &&
         (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != true
@@ -494,7 +519,52 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   private var canBrowse: Bool {
-    !closed && !isEditingImage && !isBusy && !UpdateWorkAdmission.shared.isBlocked && window?.attachedSheet == nil
+    !closed && !isEditingImage && !isBusy && MediaFileActions.pendingOperationCount == 0 &&
+      !UpdateWorkAdmission.shared.isBlocked && window?.attachedSheet == nil
+  }
+
+  private var protectedFileURLs: [URL] {
+    guard !closed else { return [] }
+    if slideshow.isRunning || wasSlideshowRunningBeforeMiniaturize {
+      return files.map(\.url) + (selectedURL.map { [$0] } ?? [])
+    }
+    guard isEditingImage || isBusy, let selectedURL else { return [] }
+    return [selectedURL]
+  }
+
+  private func presentFileTransferStatus(_ message: String, error: Bool) {
+    statusLabel.stringValue = message
+    statusLabel.toolTip = message
+    guard error, !closed, let window, window.isVisible, window.attachedSheet == nil else { return }
+    // Decoding a relocated image can finish later; keep transfer failures visible.
+    let alert = NSAlert()
+    alert.messageText = playlistBrowserString("file-actions.title")
+    alert.informativeText = message
+    alert.alertStyle = .warning
+    alert.addButton(withTitle: playlistBrowserString("file-actions.ok"))
+    alert.beginSheetModal(for: window)
+  }
+
+  private func fileURLs(for rows: IndexSet) -> [URL] {
+    rows.compactMap { files.indices.contains($0) ? files[$0].url : nil }
+  }
+
+  private func filesTransferred(_ notification: Notification) {
+    guard !closed, let report = notification.userInfo?["report"] as? MediaFileTransfer.Report,
+          !report.successes.isEmpty else { return }
+    if notification.userInfo?["operation"] as? MediaFileTransfer.Operation == .move {
+      files = files.map { item in
+        report.relocatedURL(item.url).map { PlaylistFileMetadata.read(from: $0) } ?? item
+      }
+      if let directoryURL, let moved = report.relocatedURL(directoryURL) { self.directoryURL = moved }
+      if let selectedURL, let moved = report.relocatedURL(selectedURL, canonicalURL: selectedCanonicalURL) {
+        // Reopen the relocated document; never keep a stale source for later conversion.
+        stopSlideshow()
+        if directoryURL != nil { directoryURL = moved.deletingLastPathComponent() }
+        load(moved)
+      }
+    }
+    refreshList()
   }
 
   private func sameLocation(_ lhs: URL?, _ rhs: URL?) -> Bool {
@@ -578,6 +648,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
     frameGeneration = UUID()
     let generation = sourceGeneration
     selectedURL = url
+    selectedCanonicalURL = url.standardizedFileURL.resolvingSymlinksInPath()
     NotificationCenter.default.post(name: .chengyingImageSourceChanged, object: self)
     frameIndex = 0
     completedLoops = 0
@@ -702,7 +773,8 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
 
   @objc private func toggleImageEditing() {
     guard !closed, !isBusy, !framePending, !editPreviewPending,
-          !UpdateWorkAdmission.shared.isBlocked, window?.attachedSheet == nil else { return }
+          !UpdateWorkAdmission.shared.isBlocked, MediaFileActions.pendingOperationCount == 0,
+          window?.attachedSheet == nil else { return }
     if isEditingImage { stopImageEditing(); return }
     guard let image = canvas.image, let details else { return }
     setPureViewing(false)
@@ -874,7 +946,8 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
       if canvas.image == nil && !framePending { setPureViewing(false) }
       return
     }
-    guard !closed, !isBusy, !isListing, files.count > 1, window?.attachedSheet == nil,
+    guard !UpdateWorkAdmission.shared.isOpeningMediaBlocked,
+          !closed, !isBusy, !isListing, files.count > 1, window?.attachedSheet == nil,
           window?.isMiniaturized != true else { return }
     slideshow.start(now: CACurrentMediaTime(), imageIsReady: details != nil && canvas.image != nil)
     updateControls()
@@ -1361,6 +1434,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   func tableViewSelectionDidChange(_ notification: Notification) {
     guard !selectingRow, files.indices.contains(tableView.selectedRow) else { return }
     guard canBrowse else { selectCurrentRow(); return }
+    guard tableView.numberOfSelectedRows == 1 else { return }
     let url = files[tableView.selectedRow].url
     if url != selectedURL { load(url) }
   }
@@ -1375,7 +1449,8 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   @objc private func confirmConversion() {
-    guard !UpdateWorkAdmission.shared.isBlocked, !isBusy, !editPreviewPending, !framePending,
+    guard !UpdateWorkAdmission.shared.isBlocked, MediaFileActions.pendingOperationCount == 0,
+          !isBusy, !editPreviewPending, !framePending,
           let url = selectedURL, let details, formats.indices.contains(formatPicker.indexOfSelectedItem),
           let window, window.attachedSheet == nil else { return }
     guard window.makeFirstResponder(canvas) else { return }
@@ -1429,7 +1504,7 @@ final class ImageViewerWindowController: NSWindowController, NSWindowDelegate,
   }
 
   func beginConversion(url: URL, format: ImageConversionFormat, frameIndex: Int?, editPlan: ImageEditPlan? = nil) {
-    guard !UpdateWorkAdmission.shared.isBlocked else { return }
+    guard !UpdateWorkAdmission.shared.isBlocked, MediaFileActions.pendingOperationCount == 0 else { return }
     guard !isBusy, !closed else { return }
     guard let updateActivity = UpdateWorkAdmission.shared.beginActivity(reason: "busy.images") else { return }
     setPureViewing(false)

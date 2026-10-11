@@ -132,6 +132,8 @@ jobs:
           bash Tools/PlaylistPresentationTests/run.sh
           bash Tools/PlaylistFilterTests/run.sh
           bash Tools/MediaFolderBrowserTests/run.sh
+          bash Tools/MediaFileTransferTests/run.sh
+          bash Tools/MediaFileActionsTests/run.sh
 
       - name: Test native image viewing and conversion
         run: |
@@ -514,8 +516,9 @@ jobs:
 
       - name: Test native update interface and state transitions
         timeout-minutes: 5
-        run: >-
-          SPARKLE_FRAMEWORK_DIR="$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64"
+        run: |
+          python3 -B Tools/AppUpdateTests/test_runner.py
+          export SPARKLE_FRAMEWORK_DIR="$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64"
           bash Tools/AppUpdateTests/run.sh
 
       - name: Test real signed update installation and relaunch

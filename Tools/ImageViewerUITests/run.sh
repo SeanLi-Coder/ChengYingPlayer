@@ -12,6 +12,9 @@ xcrun swiftc -o "$test_dir/ImageViewerUITests" \
   "$project_root/iina/PlaylistFileMetadata.swift" \
   "$project_root/iina/ChengYingStyle.swift" \
   "$project_root/iina/PlaylistPresentation.swift" \
+  "$project_root/iina/MediaFileTransfer.swift" \
+  "$project_root/iina/MediaFileActions.swift" \
+  "$project_root/iina/MediaPlaylistRelocation.swift" \
   "$project_root/iina/MediaFolderBrowserView.swift" \
   "$project_root/iina/ImageViewer/ImageEditing.swift" \
   "$project_root/iina/ImageViewer/ImageCropGeometry.swift" \
@@ -30,6 +33,9 @@ xcrun swiftc -o "$test_dir/RealImageViewerSmoke" \
   "$project_root/iina/PlaylistFileMetadata.swift" \
   "$project_root/iina/ChengYingStyle.swift" \
   "$project_root/iina/PlaylistPresentation.swift" \
+  "$project_root/iina/MediaFileTransfer.swift" \
+  "$project_root/iina/MediaFileActions.swift" \
+  "$project_root/iina/MediaPlaylistRelocation.swift" \
   "$project_root/iina/MediaFolderBrowserView.swift" \
   "$project_root/iina/ImageViewer/ImageFileSupport.swift" \
   "$project_root/iina/ImageViewer/ImageDocument.swift" \
@@ -51,6 +57,9 @@ xcrun swiftc -typecheck -target x86_64-apple-macosx10.15 \
   "$project_root/iina/PlaylistFileMetadata.swift" \
   "$project_root/iina/ChengYingStyle.swift" \
   "$project_root/iina/PlaylistPresentation.swift" \
+  "$project_root/iina/MediaFileTransfer.swift" \
+  "$project_root/iina/MediaFileActions.swift" \
+  "$project_root/iina/MediaPlaylistRelocation.swift" \
   "$project_root/iina/MediaFolderBrowserView.swift" \
   "$project_root/iina/ImageViewer/ImageFileSupport.swift" \
   "$project_root/iina/ImageViewer/ImageDocument.swift" \

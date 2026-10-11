@@ -114,6 +114,9 @@ def main():
             target = workspace / version
             target.mkdir()
             sources = [str(PROJECT_ROOT / source) for source in source_paths]
+            if version == "current":
+                sources.extend(str(PROJECT_ROOT / source) for source in (
+                    "iina/MediaFileTransfer.swift", "iina/MediaFileActions.swift", "iina/MediaPlaylistRelocation.swift"))
             for relative in modified_paths:
                 text = (subprocess.check_output(["git", "show", f"{base}:{relative}"], cwd=PROJECT_ROOT, text=True)
                         if version == "baseline" else (PROJECT_ROOT / relative).read_text())

@@ -31,6 +31,12 @@ final class UpdateWorkAdmission {
     return owner != nil
   }
 
+  /// A move may relocate an input path; copying never blocks playback admission.
+  var isOpeningMediaBlocked: Bool {
+    lock.lock(); defer { lock.unlock() }
+    return owner != nil || activities.values.contains("busy.fileMove")
+  }
+
   var hasDrainingProcesses: Bool {
     lock.lock(); defer { lock.unlock() }
     return !drains.isEmpty

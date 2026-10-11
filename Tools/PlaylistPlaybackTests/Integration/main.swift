@@ -10,7 +10,10 @@ func check(_ condition: @autoclosure () -> Bool, _ description: String) {
   checks += 1
 }
 
-guard let handle = mpv_create() else { fatalError("Unable to create the actual libmpv core") }
+let handle: OpaquePointer = {
+  guard let handle = mpv_create() else { fatalError("Unable to create the actual libmpv core") }
+  return handle
+}()
 defer { mpv_terminate_destroy(handle) }
 for (key, value) in ["vo": "null", "ao": "null", "pause": "yes", "idle": "yes", "keep-open": "yes", "terminal": "no"] {
   check(mpv_set_option_string(handle, key, value) >= 0, "Configure headless libmpv: \(key)")
@@ -109,4 +112,41 @@ check(snapshot()!.first(where: \.isPlaying)?.entryID == currentID, "Active sorti
 check(number("ab-loop-a") == 2 && number("ab-loop-b") == 8, "Active sorting retains A/B looping")
 check(!runningEvents.contains(MPV_EVENT_START_FILE) && !runningEvents.contains(MPV_EVENT_END_FILE)
       && !runningEvents.contains(MPV_EVENT_FILE_LOADED), "Active sorting does not recreate the video decoder")
+
+check(mpv_set_property_string(handle, "pause", "yes") >= 0, "Pause the fixture for deterministic admission checks")
+let queue = PlaylistAdmissionPlayer()
+let originalCount = snapshot()!.count
+let copyLease = UpdateWorkAdmission.shared.beginActivity(reason: "busy.files")!
+queue.appendToPlaylist(path)
+queue.addToPlaylist(paths: [path], at: 1)
+check(snapshot()!.count == originalCount + 2 && queue.notifications == 2,
+      "Copying permits both production queue append and ordered insertion")
+UpdateWorkAdmission.shared.endActivity(copyLease)
+
+let moveLease = UpdateWorkAdmission.shared.beginActivity(reason: "busy.fileMove")!
+let protectedIDs = snapshot()!.map(\.entryID)
+queue.appendToPlaylist(path, silent: true)
+queue.addToPlaylist(paths: [path], at: 0)
+check(snapshot()!.map(\.entryID) == protectedIDs && queue.notifications == 2,
+      "Moving rejects background append and explicit queue insertion without emitting a change")
+queue.addToPlaylist(paths: [path], at: 0, isFileRelocation: true)
+let relocated = snapshot()!
+check(relocated.count == protectedIDs.count + 1 && Array(relocated.dropFirst()).map(\.entryID) == protectedIDs,
+      "Explicit relocation repair can insert while the move admission lease is held")
+check(relocated.first(where: \.isPlaying)?.entryID == currentID,
+      "Relocation insertion preserves the active decoder entry")
+UpdateWorkAdmission.shared.endActivity(moveLease)
+queue.appendToPlaylist(path)
+check(snapshot()!.count == protectedIDs.count + 2,
+      "Move completion restores normal queue admission")
+
+let installation = UUID()
+check(UpdateWorkAdmission.shared.acquire(installation), "Idle admission can be reserved for installation")
+let beforeInstall = snapshot()!.map(\.entryID)
+queue.appendToPlaylist(path)
+queue.addToPlaylist(paths: [path])
+check(snapshot()!.map(\.entryID) == beforeInstall, "Installation still rejects both ordinary queue additions")
+UpdateWorkAdmission.shared.release(installation)
+check(UpdateWorkAdmission.shared.activeReasons.isEmpty && !UpdateWorkAdmission.shared.isOpeningMediaBlocked,
+      "Queue admission checks release every activity lease and installation barrier")
 print("PASS: \(checks) live libmpv playback checks")

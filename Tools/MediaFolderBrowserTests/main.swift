@@ -77,7 +77,9 @@ try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince
 try setTags(["Review\n6", "Keep\n2"], at: file2)
 try setTags(["FolderTag\n4"], at: folder2)
 
-let browser = MediaFolderBrowserView(extensions: ["png", "mp4"])
+let filePasteboard = NSPasteboard.withUniqueName()
+defer { filePasteboard.releaseGlobally() }
+let browser = MediaFolderBrowserView(extensions: ["png", "mp4"], pasteboard: filePasteboard)
 browser.appearance = NSAppearance(named: .aqua)
 browser.wantsLayer = true
 browser.layer?.backgroundColor = NSColor.white.cgColor
@@ -196,6 +198,66 @@ waitFor("Empty directory loads") { !browser.isLoading }
 expect(browser.loadError == nil && browser.visibleEntries.isEmpty && !browser.statusLabel.isHidden,
        "An empty directory displays an explicit empty state")
 expect(callbacks.last?.0 == folder10 && callbacks.last?.1.isEmpty == true, "Successful empty folder publishes an empty snapshot")
+
+browser.showDirectory(directory)
+waitFor("Copy source directory loads") { !browser.isLoading }
+let copiedRows = IndexSet(browser.visibleEntries.indices.filter { [file2, file10].contains(browser.visibleEntries[$0].url) })
+browser.tableView.selectRowIndexes(copiedRows, byExtendingSelection: false)
+browser.refresh()
+waitFor("Multi-selection refresh completes") { !browser.isLoading }
+expect(browser.tableView.selectedRowIndexes == copiedRows, "Refresh preserves multi-selection by file identity")
+window.makeFirstResponder(browser.tableView)
+browser.tableView.copy(nil)
+let destinationBrowser = MediaFolderBrowserView(extensions: ["png", "mp4"], pasteboard: filePasteboard)
+let destinationWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 540),
+                                styleMask: [.titled], backing: .buffered, defer: false)
+destinationWindow.contentView = destinationBrowser
+destinationWindow.orderFront(nil)
+destinationBrowser.showDirectory(folder10)
+waitFor("Copy destination loads") { !destinationBrowser.isLoading }
+destinationWindow.makeFirstResponder(destinationBrowser.tableView)
+destinationBrowser.tableView.paste(nil)
+waitFor("Native multi-file paste refreshes destination") {
+  MediaFileActions.pendingOperationCount == 0 && !destinationBrowser.isLoading && destinationBrowser.mediaFiles.count == 2
+}
+let pastedBytes = try Data(contentsOf: folder10.appendingPathComponent("2.png"))
+let sourceBytes = try Data(contentsOf: file2)
+expect(pastedBytes == sourceBytes,
+       "File-table copy preserves source bytes")
+expect(FileManager.default.fileExists(atPath: file2.path), "Copy retains the original")
+destinationBrowser.tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+let moving = destinationBrowser.visibleEntries[0].url
+destinationBrowser.tableView.cut(nil)
+expect(FileManager.default.fileExists(atPath: moving.path), "Cut alone never deletes files")
+browser.showDirectory(folder2)
+waitFor("Move destination loads") { !browser.isLoading }
+window.makeFirstResponder(browser.tableView)
+browser.tableView.paste(nil)
+waitFor("Cut paste refreshes both folder windows") {
+  MediaFileActions.pendingOperationCount == 0 && !browser.isLoading && !destinationBrowser.isLoading &&
+    destinationBrowser.mediaFiles.count == 1 && browser.mediaFiles.count == 2
+}
+expect(!FileManager.default.fileExists(atPath: moving.path) &&
+       FileManager.default.fileExists(atPath: folder2.appendingPathComponent(moving.lastPathComponent).path),
+       "Cut paste moves the actual file and removes its old listing")
+expect(UpdateWorkAdmission.shared.activeReasons.isEmpty, "Completed transfers release the update activity lease")
+let alias = root.appendingPathComponent("MediaAlias", isDirectory: true)
+try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: directory)
+let aliasSource = try file("Media/alias-refresh.png")
+browser.showDirectory(directory)
+waitFor("The canonical browser loads an alias transfer source") {
+  !browser.isLoading && browser.visibleEntries.contains { $0.url == aliasSource }
+}
+let aliasReport = MediaFileTransfer.execute(
+  sources: [try MediaFileTransfer.Source(url: alias.appendingPathComponent(aliasSource.lastPathComponent))],
+  destination: try MediaFileTransfer.Source(url: folder2), operation: .move)
+expect(aliasReport.successes.count == 1, "Moving through a parent alias succeeds")
+NotificationCenter.default.post(name: .mediaFilesTransferred, object: nil,
+  userInfo: ["report": aliasReport, "operation": MediaFileTransfer.Operation.move])
+waitFor("An alias transfer refreshes the canonical source listing") {
+  !browser.isLoading && !browser.visibleEntries.contains { $0.url == aliasSource }
+}
+destinationWindow.orderOut(nil)
 window.orderOut(nil)
 if ProcessInfo.processInfo.environment["CHENGYING_PERFORMANCE_BENCHMARK"] == "1" {
   let performanceDirectory = try folder("Performance")

@@ -18,6 +18,9 @@ xcrun swiftc -target arm64-apple-macos12 -o "$test_dir/ChromeIntegrationTests" \
   "$project_root/iina/MediaInfo/MediaInfoModels.swift" \
   "$project_root/iina/PlaylistFileMetadata.swift" \
   "$project_root/iina/PlaylistPresentation.swift" \
+  "$project_root/iina/MediaFileTransfer.swift" \
+  "$project_root/iina/MediaFileActions.swift" \
+  "$project_root/iina/MediaPlaylistRelocation.swift" \
   "$project_root/iina/MediaFolderBrowserView.swift" \
   "$project_root/iina/ImageViewer/ImageFileSupport.swift" \
   "$project_root/iina/Updates/UpdateWorkAdmission.swift" \

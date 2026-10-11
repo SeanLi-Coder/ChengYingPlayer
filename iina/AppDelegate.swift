@@ -48,6 +48,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var isTerminating = false
   private var videoToolsShortcutMonitor: Any?
   private var videoToolsMenuObservers: [NSObjectProtocol] = []
+  private var fileTransferObserver: NSObjectProtocol?
   private var trackingMenuCount = 0
 
   /// Longest time to wait for asynchronous shutdown tasks to finish before giving up on waiting and proceeding with termination.
@@ -294,6 +295,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   deinit {
+    if let fileTransferObserver { NotificationCenter.default.removeObserver(fileTransferObserver) }
     ObjcUtils.silenced {
       for key in self.observedPrefKeys {
         UserDefaults.standard.removeObserver(self, forKeyPath: key.rawValue)
@@ -303,6 +305,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ aNotification: Notification) {
     Logger.log("App launched")
+    MediaFileActions.additionalProtectedURLs = {
+      PlayerCore.playerCores.flatMap { player -> [URL] in
+        guard player.info.state.active || player.info.state == .stopping else { return [] }
+        player.playlistMutationLock.lock()
+        defer { player.playlistMutationLock.unlock() }
+        let current = player.info.currentURL.flatMap { $0.isFileURL ? $0 : nil }
+        let queue = (player.playlistSnapshot() ?? player.info.playlist).compactMap { item -> URL? in
+          guard !item.isNetworkResource, item.filename.hasPrefix("/") else { return nil }
+          return URL(fileURLWithPath: item.filename)
+        }
+        return queue + (current.map { [$0] } ?? [])
+      }
+    }
+    MediaFileActions.additionalAdmission = {
+      VideoToolsTaskManager.shared.snapshot?.isActive != true &&
+        !VideoToolsRotationCoordinator.hasPendingUpdateWork && SubtitleToolsService.shared.task?.isActive != true
+    }
+    fileTransferObserver = NotificationCenter.default.addObserver(forName: .mediaFilesTransferred,
+      object: nil, queue: .main) { notification in
+      guard notification.userInfo?["operation"] as? MediaFileTransfer.Operation == .move,
+            let report = notification.userInfo?["report"] as? MediaFileTransfer.Report else { return }
+      for player in PlayerCore.playerCores where player.info.state.active {
+        player.playlistMutationLock.lock()
+        defer { player.playlistMutationLock.unlock() }
+        let repaired = MediaPlaylistRelocation.apply(report: report, snapshot: {
+          player.playlistSnapshot()?.map {
+            MediaPlaylistRelocation.Entry(entryID: $0.entryID, filename: $0.filename, isCurrent: $0.isCurrent)
+          }
+        }, insert: { player.addToPlaylist(paths: [$0], at: $1, isFileRelocation: true) },
+           remove: { player.playlistRemove($0) })
+        if !repaired {
+          Logger.log("A concurrent playlist change prevented file reference reconciliation", level: .warning)
+        }
+      }
+    }
 
     if !isReady {
       getReady()
@@ -424,6 +461,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   /// - Returns: `false` if the application should not be terminated when its last window is closed; otherwise, `true` to
   ///     terminate the application.
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    guard MediaFileActions.pendingOperationCount == 0 else { return false }
     guard !ImageViewerCoordinator.shared.isBusy else { return false }
     guard SubtitleToolsService.shared.task?.isActive != true else { return false }
     // A download task is independent of player-window lifetime.
@@ -439,6 +477,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard MediaFileActions.pendingOperationCount == 0 else {
+      let alert = NSAlert()
+      alert.messageText = playlistBrowserString("file-actions.quit.title")
+      alert.informativeText = playlistBrowserString("file-actions.quit.detail")
+      alert.runModal()
+      return .terminateCancel
+    }
     guard updateCoordinator.shouldAllowTerminationForUpdate() else { return .terminateCancel }
     guard SummaryToolsLifecycle.mayTerminate(task: SubtitleToolsService.shared.task, confirmation: {
       let alert = NSAlert()

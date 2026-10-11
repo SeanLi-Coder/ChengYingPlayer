@@ -24,9 +24,13 @@ def main():
             resources.mkdir(parents=True)
             shutil.copy2(PROJECT_ROOT / "iina" / f"{language}.lproj" / "PlaylistBrowser.strings", resources)
         sources = [
+            "iina/Updates/UpdateWorkAdmission.swift",
             "iina/PlaylistFileMetadata.swift",
             "iina/PlaylistPresentation.swift",
             "iina/ChengYingStyle.swift",
+            "iina/MediaFileTransfer.swift",
+            "iina/MediaFileActions.swift",
+            "iina/MediaPlaylistRelocation.swift",
             "iina/MediaFolderBrowserView.swift",
             "Tools/MediaFolderBrowserTests/main.swift",
         ]

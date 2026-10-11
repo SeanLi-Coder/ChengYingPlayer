@@ -13,6 +13,7 @@ xcrun swiftc -o "$test_dir/PlaylistPlaybackTests" \
 "$test_dir/PlaylistPlaybackTests" "$project_root"
 
 if [[ -f "$project_root/deps/lib/libmpv.2.dylib" ]] && command -v ffmpeg >/dev/null 2>&1; then
+  xcrun swift "$project_root/Tools/PlaylistPlaybackTests/extract.swift" "$project_root" "$test_dir"
   ffmpeg -hide_banner -loglevel error -f lavfi -i 'testsrc2=size=320x180:rate=24' \
     -f lavfi -i 'anullsrc=r=48000:cl=stereo' -t 20 -c:v mpeg4 -q:v 5 -c:a aac \
     "$test_dir/playback.mp4"
@@ -22,6 +23,9 @@ if [[ -f "$project_root/deps/lib/libmpv.2.dylib" ]] && command -v ffmpeg >/dev/n
     "$project_root/iina/MPVNode.swift" \
     "$project_root/iina/MPVPlaylistItem.swift" \
     "$project_root/iina/PlaylistPlaybackPolicy.swift" \
+    "$project_root/iina/Updates/UpdateWorkAdmission.swift" \
+    "$project_root/Tools/PlaylistPlaybackTests/Integration/AdmissionBoundary.swift" \
+    "$test_dir/PlayerAdmission.swift" \
     "$project_root/Tools/PlaylistPlaybackTests/Integration/main.swift" \
     "$project_root/deps/lib/libmpv.2.dylib" \
     -Xlinker -rpath -Xlinker "$project_root/deps/lib"

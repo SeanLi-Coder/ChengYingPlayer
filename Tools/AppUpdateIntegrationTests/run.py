@@ -10,7 +10,7 @@ import os
 import plistlib
 import shutil
 import subprocess
-import tempfile
+import sys
 import threading
 import time
 import uuid
@@ -19,6 +19,10 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT / "other"))
+from test_app_workspace import TestAppWorkspace
+
 SPARKLE_XML = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 DELTA_SCENARIOS = {
     "delta-upgrade",
@@ -119,7 +123,7 @@ def main():
     if installed_app := os.environ.get("SPARKLE_INSTALLED_APP"):
         framework_source = Path(installed_app) / "Contents/Frameworks/Sparkle.framework"
     run("codesign", "--verify", "--deep", "--strict", str(framework_source))
-    with tempfile.TemporaryDirectory(prefix="chengying-upgrade-e2e-") as temporary:
+    with TestAppWorkspace(prefix="chengying-upgrade-e2e-") as temporary:
         work = Path(temporary).resolve()
         hosted = work / "hosted"
         hosted.mkdir()

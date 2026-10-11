@@ -13,6 +13,11 @@ struct RealImageViewerSmoke {
     let deadline = Date().addingTimeInterval(interval)
     while Date() < deadline {
       while let event = NSApp.nextEvent(matching: .any, until: Date(), inMode: .default, dequeue: true) {
+        // Test gestures are sent directly to the fixture window below. Discard real
+        // desktop clicks so a user click cannot strand an unattended test in AppKit's
+        // native resize/drag tracking loop while its fixture changes size underneath it.
+        if [.leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown, .rightMouseUp,
+            .rightMouseDragged, .otherMouseDown, .otherMouseUp, .otherMouseDragged].contains(event.type) { continue }
         NSApp.sendEvent(event)
       }
       NSApp.updateWindows()
@@ -34,15 +39,38 @@ struct RealImageViewerSmoke {
   }
   static func doubleClick(_ viewer: ImageViewerWindowController) {
     let canvas = viewer.canvas
+    let window = viewer.window!
+    print("Double-click preparation: active=\(NSApp.isActive) key=\(window.isKeyWindow) liveResize=\(window.inLiveResize) frame=\(window.frame)")
+    // Direct NSWindow dispatch still applies AppKit's inactive-window first-click
+    // policy. Establish native activation before measuring a synthetic gesture.
+    window.makeKeyAndOrderFront(nil)
+    NSApp.activate(ignoringOtherApps: true)
+    waitFor("The double-click fixture is active and key before event dispatch") {
+      NSApp.isActive && window.isKeyWindow
+    }
+    window.contentView?.layoutSubtreeIfNeeded()
+    let pureViewing = viewer.isPureViewing && canvas.isPureViewing
+    let originalToggle = canvas.onToggleWindowMaximization
+    var toggleCalls = 0
+    canvas.onToggleWindowMaximization = {
+      toggleCalls += 1
+      print("Double-click toggle \(toggleCalls): active=\(NSApp.isActive) key=\(window.isKeyWindow) liveResize=\(window.inLiveResize) before=\(window.frame)")
+      originalToggle?()
+      print("Double-click toggle \(toggleCalls) after=\(window.frame)")
+    }
+    defer { canvas.onToggleWindowMaximization = originalToggle }
+    print("Double-click dispatch: pure=\(pureViewing) active=\(NSApp.isActive) key=\(window.isKeyWindow) liveResize=\(window.inLiveResize) frame=\(window.frame)")
     for (type, count) in [(NSEvent.EventType.leftMouseDown, 1), (.leftMouseUp, 1),
                            (.leftMouseDown, 2), (.leftMouseUp, 2)] {
       let event = NSEvent.mouseEvent(with: type,
         location: canvas.convert(CGPoint(x: canvas.bounds.midX, y: canvas.bounds.midY), to: nil),
         modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-        windowNumber: viewer.window!.windowNumber, context: nil, eventNumber: 0,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 0,
         clickCount: count, pressure: type == .leftMouseUp ? 0 : 1)!
-      viewer.window!.sendEvent(event)
+      window.sendEvent(event)
     }
+    expect(toggleCalls == (pureViewing ? 1 : 0),
+           "A window-routed double-click delivers exactly one pure-window toggle")
   }
   static func captureWindow(_ viewer: ImageViewerWindowController, name: String) throws {
     guard let path = ProcessInfo.processInfo.environment["IMAGE_PURE_VIEW_SCREENSHOT_DIR"] else { return }
@@ -334,6 +362,8 @@ struct RealImageViewerSmoke {
         pump(0.15)
         print("Pure maximum 1080x1066: frame=\(imageWindow.frame) canvas=\(viewer.canvas.bounds) image=\(viewer.canvas.imageRect) fit=\(viewer.canvas.fitsWindow) screen=\(imageWindow.screen!.visibleFrame)")
         expect(viewer.canvas.fitsWindow && imageWindow.screen!.visibleFrame.insetBy(dx: -1, dy: -1).contains(imageWindow.frame) &&
+               (abs(imageWindow.frame.width - imageWindow.screen!.visibleFrame.width) < 2 ||
+                abs(imageWindow.frame.height - imageWindow.screen!.visibleFrame.height) < 2) &&
                abs(viewer.canvas.imageRect.width - viewer.canvas.bounds.width) < 0.51 &&
                abs(viewer.canvas.imageRect.height - viewer.canvas.bounds.height) < 0.51,
                "The 1080x1066 fixture maximizes via actual window event routing without stretching or margins")

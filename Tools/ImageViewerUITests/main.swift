@@ -9,6 +9,9 @@ func pump(_ duration: TimeInterval = 0.02) {
   let end = Date().addingTimeInterval(duration)
   while Date() < end {
     while let event = NSApp.nextEvent(matching: .any, until: Date(), inMode: .default, dequeue: true) {
+      // Synthetic gestures use direct window routing; ignore unrelated desktop clicks.
+      if [.leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown, .rightMouseUp,
+          .rightMouseDragged, .otherMouseDown, .otherMouseUp, .otherMouseDragged].contains(event.type) { continue }
       NSApp.sendEvent(event)
     }
     NSApp.updateWindows()
@@ -909,5 +912,103 @@ expect(browserViewer.selectedURL == nil && browserViewer.files.isEmpty && browse
        browserViewer.window?.representedURL == nil,
        "Reopening an empty folder does not reuse a stale image selection or title")
 browserViewer.cancelAndClose()
+
+let transferRoot = root.appendingPathComponent("FileActions", isDirectory: true)
+let transferSource = transferRoot.appendingPathComponent("Source", isDirectory: true)
+let transferDestination = transferRoot.appendingPathComponent("Destination", isDirectory: true)
+try FileManager.default.createDirectory(at: transferSource, withIntermediateDirectories: true)
+try FileManager.default.createDirectory(at: transferDestination, withIntermediateDirectories: true)
+let transferImage = transferSource.appendingPathComponent("move-image.png")
+let transferOther = transferSource.appendingPathComponent("other.png")
+try Data([0]).write(to: transferImage)
+try Data([0]).write(to: transferOther)
+let filePasteboard = NSPasteboard.withUniqueName()
+defer { filePasteboard.releaseGlobally() }
+let fileViewer = ImageViewerWindowController(urls: [transferImage], defaults: defaults, filePasteboard: filePasteboard)
+fileViewer.showWindow(nil)
+waitFor("Transfer image and sibling list load") { fileViewer.canvas.image != nil && fileViewer.files.count == 2 }
+fileViewer.sidebarPicker.selectedSegment = 1
+NSApp.sendAction(fileViewer.sidebarPicker.action!, to: fileViewer.sidebarPicker.target, from: fileViewer.sidebarPicker)
+fileViewer.tableView.selectRowIndexes(IndexSet(integersIn: 0..<2), byExtendingSelection: false)
+expect(fileViewer.tableView.numberOfSelectedRows == 2 && fileViewer.selectedURL == transferImage,
+       "Multi-selection does not open a different image or collapse the selection")
+let otherRow = fileViewer.files.firstIndex(where: { $0.url == transferOther })!
+let otherMenu = fileViewer.fileActions.menu(for: IndexSet(integer: otherRow))
+expect(fileViewer.selectedURL == transferImage && fileViewer.tableView.numberOfSelectedRows == 2 && otherMenu.items.count >= 4,
+       "Right-clicking another image produces file actions without changing the active image")
+fileViewer.tableView.selectRowIndexes(IndexSet(integer: fileViewer.files.firstIndex(where: { $0.url == transferImage })!),
+                                     byExtendingSelection: false)
+fileViewer.window?.makeFirstResponder(fileViewer.tableView)
+fileViewer.tableView.cut(nil)
+let transferBrowser = MediaFolderBrowserView(extensions: ["png"], pasteboard: filePasteboard)
+let transferWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 540),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+transferWindow.contentView = transferBrowser
+transferWindow.orderFront(nil)
+transferBrowser.showDirectory(transferDestination)
+waitFor("Image move destination loads") { !transferBrowser.isLoading }
+NSApp.sendAction(fileViewer.slideshowButton.action!, to: fileViewer.slideshowButton.target, from: fileViewer.slideshowButton)
+expect(fileViewer.isSlideshowRunning, "Slideshow starts before testing transfer protection")
+transferWindow.makeFirstResponder(transferBrowser.tableView)
+transferBrowser.tableView.paste(nil)
+expect(MediaFileActions.pendingOperationCount == 0 && FileManager.default.fileExists(atPath: transferImage.path),
+       "An active slideshow protects its current and upcoming source files from moving")
+NSApp.sendAction(fileViewer.slideshowButton.action!, to: fileViewer.slideshowButton.target, from: fileViewer.slideshowButton)
+expect(!fileViewer.isSlideshowRunning, "Stopping slideshow releases its source protection")
+transferBrowser.tableView.paste(nil)
+let relocatedImage = transferDestination.appendingPathComponent(transferImage.lastPathComponent)
+waitFor("Moving the displayed image reopens its actual new location") {
+  MediaFileActions.pendingOperationCount == 0 && fileViewer.selectedURL == relocatedImage &&
+    fileViewer.canvas.image != nil && !transferBrowser.isLoading
+}
+expect(!FileManager.default.fileExists(atPath: transferImage.path) &&
+       FileManager.default.fileExists(atPath: relocatedImage.path), "Image cut paste moves the real file")
+expect(fileViewer.window?.representedURL == relocatedImage && !fileViewer.files.contains { $0.url == transferImage },
+       "No ghost source path remains in image metadata or the list after a move")
+expect(fileViewer.folderBrowser.directoryURL == transferSource,
+       "A transfer does not unexpectedly navigate an independent folder browser")
+transferWindow.orderOut(nil)
+fileViewer.cancelAndClose()
+
+let aliasParent = transferRoot.appendingPathComponent("SourceAlias", isDirectory: true)
+try FileManager.default.createSymbolicLink(at: aliasParent, withDestinationURL: transferSource)
+let aliasImage = aliasParent.appendingPathComponent(transferOther.lastPathComponent)
+let aliasViewer = ImageViewerWindowController(urls: [aliasImage], defaults: defaults, filePasteboard: filePasteboard)
+aliasViewer.showWindow(nil)
+waitFor("Image opened through a parent alias loads") { aliasViewer.canvas.image != nil }
+let canonicalSourceBrowser = MediaFolderBrowserView(extensions: ["png"], pasteboard: filePasteboard)
+transferWindow.contentView = canonicalSourceBrowser
+transferWindow.orderFront(nil)
+canonicalSourceBrowser.showDirectory(transferSource, selectedURL: transferOther)
+waitFor("Canonical source selection loads") { !canonicalSourceBrowser.isLoading }
+transferWindow.makeFirstResponder(canonicalSourceBrowser.tableView)
+canonicalSourceBrowser.tableView.cut(nil)
+transferWindow.contentView = transferBrowser
+transferWindow.makeFirstResponder(transferBrowser.tableView)
+transferBrowser.tableView.paste(nil)
+let aliasDestination = transferDestination.appendingPathComponent(transferOther.lastPathComponent)
+waitFor("A canonical move relocates an image opened through a parent alias") {
+  MediaFileActions.pendingOperationCount == 0 && aliasViewer.selectedURL == aliasDestination &&
+    aliasViewer.canvas.image != nil
+}
+expect(!FileManager.default.fileExists(atPath: aliasImage.path) &&
+       aliasViewer.window?.representedURL == aliasDestination,
+       "An alias-backed viewer does not keep a dangling image path after a move")
+aliasViewer.sidebarPicker.selectedSegment = 1
+NSApp.sendAction(aliasViewer.sidebarPicker.action!, to: aliasViewer.sidebarPicker.target, from: aliasViewer.sidebarPicker)
+waitFor("Relocated image list refreshes") { aliasViewer.files.contains { $0.url == aliasDestination } }
+aliasViewer.tableView.selectRowIndexes(IndexSet(integer: aliasViewer.files.firstIndex { $0.url == aliasDestination }!),
+                                      byExtendingSelection: false)
+aliasViewer.window?.makeFirstResponder(aliasViewer.tableView)
+aliasViewer.tableView.copy(nil)
+aliasViewer.tableView.paste(nil)
+waitFor("Image file operation failures remain in a visible sheet") {
+  MediaFileActions.pendingOperationCount == 0 && aliasViewer.window?.attachedSheet != nil
+}
+expect(aliasViewer.statusLabel.toolTip?.isEmpty == false && FileManager.default.fileExists(atPath: aliasDestination.path),
+       "Transfer failure retains its complete diagnostic and leaves the image unchanged")
+dismissSheet(aliasViewer)
+transferWindow.orderOut(nil)
+aliasViewer.cancelAndClose()
 
 print("Image viewer UI checks passed: \(checks)")

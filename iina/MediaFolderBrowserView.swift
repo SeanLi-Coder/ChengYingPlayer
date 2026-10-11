@@ -17,6 +17,7 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
   /// Hosts can defer activation while an edit or application update is protected.
   /// `force` refreshes a snapshot but never bypasses this admission check.
   var canNavigate: (() -> Bool)?
+  var protectedFileURLs: (() -> [URL])?
 
   private(set) var directoryURL: URL?
   private(set) var visibleEntries: [Entry] = []
@@ -32,19 +33,39 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
   private(set) var sortAscending = true
   private(set) var tagFilter: PlaylistTagFilter = .all
 
-  let tableView = NSTableView()
+  let tableView = FileListTableView()
+  private(set) lazy var fileActions = MediaFileActions(
+    tableView: tableView,
+    selectedURLs: { [weak self] in self?.urls(for: self?.tableView.selectedRowIndexes ?? []) ?? [] },
+    URLsForRows: { [weak self] in self?.urls(for: $0) ?? [] },
+    destinationURL: { [weak self] in self?.directoryURL },
+    canOperate: { [weak self] in
+      guard let self else { return false }
+      return !self.isLoading && self.hasLoadedDirectory && (self.canNavigate?() ?? true)
+    },
+    protectedURLs: { [weak self] in self?.protectedFileURLs?() ?? [] },
+    presentation: { [weak self] message, _ in
+      self?.transferStatusLabel.stringValue = message
+      self?.transferStatusLabel.toolTip = message
+      self?.transferStatusLabel.isHidden = false
+      self?.folderLabel.alphaValue = 0
+    }, pasteboard: filePasteboard)
   let parentButton = NSButton()
   let folderLabel = NSTextField(labelWithString: "")
   let statusLabel = NSTextField(wrappingLabelWithString: "")
+  let transferStatusLabel = NSTextField(wrappingLabelWithString: "")
   let sortControls = PlaylistSortControls()
   let tagFilterControls = PlaylistTagFilterControls()
 
   private let supportedExtensions: Set<String>
+  private let filePasteboard: NSPasteboard
   private let scrollView = NSScrollView()
   private var entries: [Entry] = []
   private var sortedDirectories: [Entry] = []
   private var sortedFiles: [Entry] = []
   private var selectedURL: URL?
+  private var selectionURLs = Set<URL>()
+  private var transferObserver: NSObjectProtocol?
   private var hasLoadedDirectory = false
   private var loadGeneration: UInt64 = 0
   private var pendingLoad: MediaFolderLoadCancellation?
@@ -52,19 +73,28 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
   private static let loadQueue = DispatchQueue(label: "io.chengying.media-folder-browser",
                                                qos: .userInitiated, attributes: .concurrent)
 
-  init(extensions: Set<String>) {
+  init(extensions: Set<String>, pasteboard: NSPasteboard = .general) {
     supportedExtensions = Set(extensions.map { $0.lowercased() })
+    filePasteboard = pasteboard
     super.init(frame: .zero)
     configureView()
+    _ = fileActions
+    transferObserver = NotificationCenter.default.addObserver(forName: .mediaFilesTransferred,
+      object: nil, queue: .main) { [weak self] notification in self?.filesTransferred(notification) }
     updateControls()
   }
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-  deinit { pendingLoad?.cancel() }
+  deinit {
+    pendingLoad?.cancel()
+    if let transferObserver { NotificationCenter.default.removeObserver(transferObserver) }
+  }
 
   func showDirectory(_ url: URL, selectedURL: URL? = nil, force: Bool = false) {
     guard canNavigate?() ?? true else { return }
+    transferStatusLabel.isHidden = true
+    folderLabel.alphaValue = 1
     let directory = url.standardizedFileURL
     if directoryURL == directory, !force, isLoading || hasLoadedDirectory {
       if let selectedURL { selectFile(selectedURL) }
@@ -78,6 +108,7 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
     pendingLoad = cancellation
     directoryURL = directory
     self.selectedURL = selectedURL?.standardizedFileURL
+    selectionURLs = Set(self.selectedURL.map { [$0] } ?? [])
     entries = []
     sortedDirectories = []
     sortedFiles = []
@@ -86,8 +117,10 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
     hasLoadedDirectory = false
     isLoading = true
     loadError = nil
+    restoringSelection = true
     tableView.reloadData()
     tableView.deselectAll(nil)
+    restoringSelection = false
     updateControls()
 
     let extensions = supportedExtensions
@@ -118,12 +151,37 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
 
   func selectFile(_ url: URL?) {
     selectedURL = url?.standardizedFileURL
+    selectionURLs = Set(selectedURL.map { [$0] } ?? [])
     restoreSelection()
   }
 
   func refresh() {
     guard let directoryURL else { return }
+    let selection = selectionURLs
     showDirectory(directoryURL, selectedURL: selectedURL, force: true)
+    selectionURLs = selection
+  }
+
+  private func urls(for rows: IndexSet) -> [URL] {
+    rows.compactMap { visibleEntries.indices.contains($0) ? visibleEntries[$0].url : nil }
+  }
+
+  private func filesTransferred(_ notification: Notification) {
+    guard let directoryURL, let report = notification.userInfo?["report"] as? MediaFileTransfer.Report,
+          !report.successes.isEmpty else { return }
+    if notification.userInfo?["operation"] as? MediaFileTransfer.Operation == .move,
+       let movedDirectory = report.relocatedURL(directoryURL) {
+      showDirectory(movedDirectory, selectedURL: selectedURL.flatMap { report.relocatedURL($0) }, force: true)
+    } else if report.successes.contains(where: {
+      let current = directoryURL.standardizedFileURL.resolvingSymlinksInPath()
+      let source = ($0.canonicalSource ?? $0.source).deletingLastPathComponent()
+        .standardizedFileURL.resolvingSymlinksInPath()
+      let destination = $0.destination.deletingLastPathComponent()
+        .standardizedFileURL.resolvingSymlinksInPath()
+      return source == current || destination == current
+    }) {
+      refresh()
+    }
   }
 
   /// Invalidate results immediately; the next showDirectory call can retry the load.
@@ -190,7 +248,7 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
     tableView.rowHeight = 58
     tableView.intercellSpacing = NSSize(width: 0, height: 2)
     tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-    tableView.allowsMultipleSelection = false
+    tableView.allowsMultipleSelection = true
     tableView.allowsEmptySelection = true
     tableView.backgroundColor = .clear
     tableView.dataSource = self
@@ -208,7 +266,12 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
     statusLabel.textColor = .secondaryLabelColor
     statusLabel.alignment = .center
     statusLabel.maximumNumberOfLines = 0
-    for view in [header, sortControls, tagFilterControls, scrollView, statusLabel] as [NSView] {
+    transferStatusLabel.font = .systemFont(ofSize: 11)
+    transferStatusLabel.textColor = .secondaryLabelColor
+    transferStatusLabel.maximumNumberOfLines = 2
+    transferStatusLabel.lineBreakMode = .byTruncatingTail
+    transferStatusLabel.isHidden = true
+    for view in [header, sortControls, tagFilterControls, scrollView, statusLabel, transferStatusLabel] as [NSView] {
       view.translatesAutoresizingMaskIntoConstraints = false
       addSubview(view)
     }
@@ -231,6 +294,11 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
       scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
       scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      // Reuse the path header for transient feedback; small sidebars keep a full file row.
+      transferStatusLabel.leadingAnchor.constraint(equalTo: parentButton.trailingAnchor, constant: 8),
+      transferStatusLabel.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+      transferStatusLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+      transferStatusLabel.heightAnchor.constraint(lessThanOrEqualTo: header.heightAnchor),
       statusLabel.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor, constant: 16),
       statusLabel.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor, constant: -16),
       statusLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
@@ -275,9 +343,10 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
   private func restoreSelection() {
     restoringSelection = true
     defer { restoringSelection = false }
-    if let selectedURL, let row = visibleEntries.firstIndex(where: { $0.url.standardizedFileURL == selectedURL }) {
-      tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-      tableView.scrollRowToVisible(row)
+    let rows = IndexSet(visibleEntries.indices.filter { selectionURLs.contains(visibleEntries[$0].url.standardizedFileURL) })
+    if let first = rows.first {
+      tableView.selectRowIndexes(rows, byExtendingSelection: false)
+      tableView.scrollRowToVisible(first)
     } else {
       tableView.deselectAll(nil)
     }
@@ -341,8 +410,14 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
   func numberOfRows(in tableView: NSTableView) -> Int { visibleEntries.count }
 
   func tableViewSelectionDidChange(_ notification: Notification) {
-    guard !restoringSelection, visibleEntries.indices.contains(tableView.selectedRow) else { return }
+    guard !restoringSelection else { return }
+    guard visibleEntries.indices.contains(tableView.selectedRow) else {
+      selectedURL = nil
+      selectionURLs = []
+      return
+    }
     selectedURL = visibleEntries[tableView.selectedRow].url.standardizedFileURL
+    selectionURLs = Set(urls(for: tableView.selectedRowIndexes).map(\.standardizedFileURL))
   }
 
   func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {

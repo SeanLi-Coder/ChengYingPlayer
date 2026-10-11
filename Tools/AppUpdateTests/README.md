@@ -10,6 +10,15 @@ bash Tools/AppUpdateTests/run.sh
 
 Set `APP_UPDATE_TEST_LANGUAGE=zh-Hans` (or `zh-Hant`) to inspect localized layouts.
 
+The runner owns a unique `TestAppWorkspace` below `build/ReleaseVerification.noindex/`.
+It unregisters only this run's disposable application, verifies that registration
+is gone, and removes its temporary files. Cleanup failure fails the suite and
+retains the workspace for inspection. Set `APP_UPDATE_SNAPSHOT_DIR` to keep the
+screenshots outside that workspace; otherwise screenshots are temporary too.
+
+Run `python3 -B Tools/AppUpdateTests/test_runner.py` for the runner's isolated
+negative-control and diagnostic-handling regressions (no application is launched).
+
 The suite compiles every coordinator/user-driver/window/policy production file
 against Sparkle's real protocol and invokes its download, extraction, readiness,
 error, and termination-retry callbacks. Activity and time are injected so races

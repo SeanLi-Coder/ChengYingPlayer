@@ -245,6 +245,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
 
   @discardableResult
   func handleKeyBinding(_ keyBinding: KeyMapping) -> Bool {
+    guard !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return true }
     if keyBinding.isIINACommand {
       // - IINA command
       if let iinaCommand = IINACommand(rawValue: keyBinding.rawAction) {

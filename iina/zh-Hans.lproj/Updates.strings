@@ -31,5 +31,7 @@
 "busy.videoTask" = "视频剪辑或导出任务仍在运行。";
 "busy.subtitles" = "本地 AI 字幕、视频总结、模型准备或总结导出仍在运行。";
 "busy.images" = "图片任务或幻灯片仍在运行。";
+"busy.files" = "文件复制或移动仍在进行。";
+"busy.fileMove" = "文件移动仍在进行。";
 "busy.downloads" = "下载任务或浏览器请求仍在运行。";
 "busy.unknown" = "暂时无法确认任务状态，更新会继续安全等待。";
