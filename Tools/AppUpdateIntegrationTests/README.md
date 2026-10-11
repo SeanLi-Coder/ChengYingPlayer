@@ -26,12 +26,46 @@ CI also sets `SPARKLE_INSTALLED_APP` to the built application so the test uses t
 exact embedded and signed framework that will ship. It compiles against the pinned
 Sparkle headers and links the copied framework at runtime.
 
-This creates a uniquely identified, disposable AppKit app under a private temporary
-directory, and runs the production update user driver against a localhost signed
+This creates a uniquely identified, disposable AppKit app in a `TestAppWorkspace`
+under the current user's private temporary directory, beneath
+`ChengYingTests.noindex/build/ReleaseVerification.noindex/`, and runs the production
+update user driver against a localhost signed
 feed and DMG. The two fixture versions use the production hardened-runtime
 entitlements. Assertions require download, signature verification, the idle
 countdown and admission barrier, on-disk replacement, and a real version-2 process
 relaunch. The installed replacement is also code-signature verified.
+
+The runner calls `poll()` on the original direct child while waiting for the
+replacement journal. This reaps a normally exited fixture immediately: leaving
+it as a zombie can prevent Sparkle from observing termination and proceeding.
+The deadline remains 120 seconds; a clean original exit is not evidence of a
+successful update, and a nonzero exit fails immediately. The existing download,
+signature, replacement, data-retention, and exact-relaunch assertions remain mandatory.
+
+The integration fixture deliberately uses this private temporary parent instead
+of the repository's default `build/ReleaseVerification.noindex/`. A repository
+under Desktop or Documents is TCC protected. Sparkle's independently launched
+installer and replacement do not inherit the command-line parent's permission;
+they can wait for a Desktop/Documents authorization prompt after the old app has
+already exited. That is distinct from the zombie-process case above. No TCC
+settings or permissions are changed by this test. Each parent directory must be
+owned by the current user, inaccessible to other users, and not a symbolic link.
+The same managed ownership marker, exact LaunchServices unregistration, process
+and mount checks, cleanup verification, and failure preservation remain in force.
+
+Run the deterministic process-lifecycle regression without AppKit or Sparkle:
+
+```sh
+python3 -B Tools/AppUpdateIntegrationTests/test_waiter.py
+```
+
+It creates an exited but unreaped command-line child and a separate PID watcher.
+The negative control cannot proceed while that zombie remains. The production
+waiter releases the watcher by reaping the same child, using the same deadline
+and without extending a timeout. Additional checks reject crashes, require real
+journal evidence after clean exits, and do not terminate a still-running child.
+They also check private `.noindex` workspace construction and reject redirected
+or nonprivate existing directories, without creating an application bundle.
 
 ## Incremental installation and fallback
 
@@ -88,7 +122,9 @@ relaunch. The runner independently checks that no support file is changed, added
 or removed. The rejection scenarios verify preferences before their orderly exit
 without resetting them.
 
-The random preference domain is deleted only during test cleanup. No real
+The random preference domain is deleted only after a verified successful update
+or a verified safe rejection. On test failure it is preserved for diagnosis, so a
+late replacement does not encounter artificial preference loss from cleanup. No real
 ChengYing preference domain, user model, browser profile, or user media is read,
 modified, copied, or removed. This fixture verifies installation retention; the
 separate native preference tests exercise production first-launch migrations.

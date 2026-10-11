@@ -9,8 +9,10 @@ import http.server
 import os
 import plistlib
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -107,6 +109,44 @@ def corrupt_payload(path):
         raise RuntimeError("The negative fixture did not preserve the archive length.")
 
 
+def wait_for_fixture_result(process, journal, timeout=120, *, clock=time.monotonic, sleep=time.sleep):
+    """Reap the old fixture while waiting for independent installer/relaunch evidence."""
+    deadline = clock() + timeout
+    while clock() < deadline:
+        # An exited direct child remains a zombie until its parent reaps it.
+        # Sparkle must observe that process disappear before replacing/relaunching it.
+        # Reaping is not success: only the fixture journal can prove the new launch.
+        returncode = process.poll()
+        events = journal.read_text() if journal.exists() else ""
+        if returncode not in (None, 0):
+            raise RuntimeError(f"The original update fixture exited with status {returncode}.")
+        if "replacement-relaunched" in events or "failure:" in events:
+            return events
+        sleep(0.1)
+    raise RuntimeError("Timed out waiting for the real updater to relaunch.")
+
+
+def cleanup_fixture_preferences(identifier, verified_terminal):
+    # A failed wait may still have a late replacement process. Preserve its
+    # synthetic preferences so cleanup cannot manufacture a retention failure.
+    if not verified_terminal:
+        print("Preserving the synthetic fixture preferences for failure diagnosis.")
+        return
+    subprocess.run(["defaults", "delete", identifier], capture_output=True, check=False)
+
+
+def integration_workspace_parent():
+    """Keep independently relaunched fixtures outside TCC-protected project folders."""
+    parent = Path(tempfile.gettempdir()).resolve()
+    for name in ("ChengYingTests.noindex", "build", "ReleaseVerification.noindex"):
+        parent = parent / name
+        parent.mkdir(mode=0o700, exist_ok=True)
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise RuntimeError("The integration-test workspace parent must be a private owned directory.")
+    return parent
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -123,7 +163,7 @@ def main():
     if installed_app := os.environ.get("SPARKLE_INSTALLED_APP"):
         framework_source = Path(installed_app) / "Contents/Frameworks/Sparkle.framework"
     run("codesign", "--verify", "--deep", "--strict", str(framework_source))
-    with TestAppWorkspace(prefix="chengying-upgrade-e2e-") as temporary:
+    with TestAppWorkspace(prefix="chengying-upgrade-e2e-", dir=integration_workspace_parent()) as temporary:
         work = Path(temporary).resolve()
         hosted = work / "hosted"
         hosted.mkdir()
@@ -403,18 +443,12 @@ def main():
             process = subprocess.Popen(
                 [str(content / "MacOS/UpdateFixture")], stdout=log, stderr=log
             )
+            verified_terminal = False
             try:
-                deadline = time.monotonic() + 120
-                while time.monotonic() < deadline:
-                    events = journal.read_text() if journal.exists() else ""
-                    if "replacement-relaunched" in events or "failure:" in events:
-                        break
-                    time.sleep(0.1)
-                else:
-                    raise RuntimeError(
-                        "Timed out waiting for the real updater to relaunch."
-                    )
+                events = wait_for_fixture_result(process, journal)
                 print(events)
+                if scenario not in REJECTED_SCENARIOS and "failure:" in events:
+                    raise RuntimeError("The replacement fixture reported a failure.")
                 if snapshot(support) != original_support:
                     raise RuntimeError(
                         "The update changed external settings, history, bookmarks, or model files."
@@ -500,6 +534,7 @@ def main():
                         "PASS: Valid signed feed, same-length tampered DMG rejected; "
                         "installed version 1 unchanged, no restart, and no acquired gate."
                     )
+                    verified_terminal = True
                     return
                 for required in (
                     "launched:1:",
@@ -539,6 +574,7 @@ def main():
                     "PASS: Signed feed, verified payload, visible download, idle barrier, real replacement, "
                     "one relaunch, and preserved preferences, settings, bookmarks, history, and models."
                 )
+                verified_terminal = True
             except BaseException:
                 print(log_path.read_text(errors="replace"))
                 if journal.exists():
@@ -549,9 +585,7 @@ def main():
                     process.terminate()
                 process.wait(timeout=15)
                 # The unique fixture domain never shares the real app's preferences.
-                subprocess.run(
-                    ["defaults", "delete", identifier], capture_output=True, check=False
-                )
+                cleanup_fixture_preferences(identifier, verified_terminal)
                 server.shutdown()
                 server.server_close()
 

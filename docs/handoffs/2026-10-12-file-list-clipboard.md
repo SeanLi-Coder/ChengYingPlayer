@@ -48,8 +48,11 @@
   包含别名路径、幻灯片保护和不会被解码完成覆盖的错误提示。可选原生全屏切换未启用。
 - `bash Tools/AppUpdateTests/run.sh`（指定现有 Sparkle framework）：143 项通过；runner 负对照另有 7 项通过。
 - `bash Tools/ImageSlideshowUITests/run.sh`：131 项通过。
-- `Tools/AppUpdateIntegrationTests/run.py` 的完整包场景已通过：真实签名、可见下载、空闲等待、
-  实际替换并仅重启一次，合成偏好、书签、历史、模型保持一致；受管测试 App 清理成功。
+- `Tools/AppUpdateIntegrationTests/run.py` 的六个真实场景全部通过：`upgrade`、`tampered-dmg`、
+  `delta-upgrade`、`tampered-delta`、`mismatched-delta`、`tampered-delta-and-dmg`。
+  包含真实签名、可见下载、空闲等待、实际替换并仅重启一次，增量单独请求、损坏／基础树不匹配
+  后回退，以及完整包也被篡改时拒绝安装。合成偏好、书签、历史、模型保持一致；受管测试 App
+  精确注销及清理均成功，完整六场景运行退出 0。进程等待／隔离目录回归另有 12 项通过。
 - 播放队列原有测试：两种语言各 361 项 presentation、109 项 controller，以及 25 项引用操作通过。
 - ImageRouting 56、PlaybackLifecycle 76、PlaybackUIPerformance 32、PlaybackMode 126 项及进程间设置恢复通过。
 - 更新 policy／delivery／delta／public workspace：64 项、110 子测试通过；
@@ -60,7 +63,16 @@
 恰好一次 toggle 和真正最大化断言，未修改生产图片几何，也未放宽恢复尺寸要求。
 播放队列后台追加在移动期间保守拒绝且不排队回放；路径修复有唯一显式入口，不影响普通复制时的播放。
 
-候选版本为 `v0.2.78` / build `89`；剩余增量／拒绝安装和发行验证结果将在发布前补齐。
+更新测试迁入受管目录后，本机曾在安装重启阶段超时。排查区分两类测试风险：等待器缺少
+`poll()`，可能留下已退出但尚未回收的直接子进程；而新的失败日志明确显示 Sparkle 更新器和
+重启进程受到 Desktop 目录的 TCC 授权提示阻塞。补充回收不能单独解决后者，不以偶然重跑通过
+掩盖权限依赖。等待器保留原 120 秒时限，正常退出不等于安装成功；失败时保留合成设置与证据，
+避免清理先删除偏好而制造假丢失。后续验证仍使用 `TestAppWorkspace` 的完整所有权、进程、挂载及
+精确注销检查，但安装测试放到用户私有临时目录的 `build/ReleaseVerification.noindex` 中。
+未修改生产更新器或系统权限；失败测试目录在核实无进程和挂载后仅精确注销测试 App，原证据与
+清理失败标记保留，不删除用户应用或全局注册数据库。
+
+候选版本为 `v0.2.78` / build `89`；剩余完整构建和公开发行验证结果将在发布前补齐。
 以上不等于正式版本已发布。
 本机只有 Command Line Tools，没有完整 Xcode，完整 App 编译与打包依赖已有 GitHub Actions 门禁。
 

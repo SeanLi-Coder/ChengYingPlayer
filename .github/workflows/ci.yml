@@ -524,6 +524,7 @@ jobs:
       - name: Test real signed update installation and relaunch
         timeout-minutes: 15
         run: |
+          python3 -B Tools/AppUpdateIntegrationTests/test_waiter.py
           export SPARKLE_TEST_ROOT="$RUNNER_TEMP/SourcePackages/artifacts/sparkle/Sparkle"
           export SPARKLE_INSTALLED_APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app"
           python -B Tools/AppUpdateIntegrationTests/run.py
