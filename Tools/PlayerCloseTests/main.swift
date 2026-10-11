@@ -23,10 +23,68 @@ var position: Double?
 var diagnosticLog = Data()
 var diagnosticLogTruncated = false
 var diagnosticReplies: [UInt64: Int32] = [:]
-func pump(_ seconds: Double) {
-  let end = Date().addingTimeInterval(seconds)
-  while Date() < end {
+var loadRound = -1
+var expectedLoadedFiles = 0
+var loadStartedAt = ProcessInfo.processInfo.systemUptime
+var lifecycleEvents: [[String: Any]] = []
+var discardedLifecycleEvents = 0
+var startedFiles = 0
+var endedFiles = 0
+var lastEndReason: Int32?
+var lastEndError: Int32?
+
+func recordLifecycleEvent(_ event: mpv_event) {
+  let relevant = [MPV_EVENT_START_FILE, MPV_EVENT_FILE_LOADED, MPV_EVENT_PLAYBACK_RESTART,
+                  MPV_EVENT_END_FILE, MPV_EVENT_COMMAND_REPLY, MPV_EVENT_QUEUE_OVERFLOW]
+  guard relevant.contains(event.event_id) else { return }
+  var entry: [String: Any] = ["event": String(cString: mpv_event_name(event.event_id)),
+                            "round": loadRound, "elapsed": ProcessInfo.processInfo.systemUptime - loadStartedAt,
+                            "error": event.error, "reply_userdata": event.reply_userdata]
+  if event.event_id == MPV_EVENT_START_FILE { startedFiles += 1 }
+  if event.event_id == MPV_EVENT_END_FILE,
+     let result = event.data?.assumingMemoryBound(to: mpv_event_end_file.self).pointee {
+    endedFiles += 1
+    lastEndReason = Int32(result.reason.rawValue)
+    lastEndError = result.error
+    entry["end_reason"] = lastEndReason
+    entry["end_error"] = result.error
+  }
+  if lifecycleEvents.count == 128 {
+    lifecycleEvents.removeFirst()
+    discardedLifecycleEvents += 1
+  }
+  lifecycleEvents.append(entry)
+}
+
+func captureLoadFailureDiagnostics(_ reason: String) {
+  let summary: [String: Any] = ["diagnostic_only": true, "reason": reason, "round": loadRound,
+    "elapsed": ProcessInfo.processInfo.systemUptime - loadStartedAt,
+    "expected_loaded": expectedLoadedFiles, "loaded": loadedFiles,
+    "started": startedFiles, "ended": endedFiles, "restarts": playbackRestarts,
+    "last_end_reason": lastEndReason.map { $0 as Any } ?? NSNull(),
+    "last_end_error": lastEndError.map { $0 as Any } ?? NSNull(),
+    "discarded_lifecycle_events": discardedLifecycleEvents, "events": lifecycleEvents,
+    "log_truncated": diagnosticLogTruncated]
+  if let compact = try? JSONSerialization.data(withJSONObject: summary, options: [.sortedKeys]) {
+    print("LOAD_FAILURE: \(String(decoding: compact, as: UTF8.self))")
+  } else {
+    print("LOAD_FAILURE: round=\(loadRound), expected=\(expectedLoadedFiles), loaded=\(loadedFiles)")
+  }
+  if let directory = failureDiagnosticDirectory {
+    do {
+      try JSONSerialization.data(withJSONObject: summary, options: [.prettyPrinted, .sortedKeys])
+        .write(to: directory.appendingPathComponent("load-failure.json"), options: .atomic)
+      try diagnosticLog.write(to: directory.appendingPathComponent("load-failure.log"), options: .atomic)
+    } catch {
+      print("LOAD_FAILURE: unable to persist load failure diagnostics")
+    }
+  }
+  fflush(stdout)
+}
+
+func drainMPVEvents() {
     while let event = mpv_wait_event(player.mpv.mpv, 0), event.pointee.event_id != MPV_EVENT_NONE {
+      recordLifecycleEvent(event.pointee)
       if event.pointee.event_id == MPV_EVENT_LOG_MESSAGE,
          let message = event.pointee.data?.assumingMemoryBound(to: mpv_event_log_message.self).pointee {
         let text = "[\(String(cString: message.prefix))] \(String(cString: message.level)): \(String(cString: message.text))"
@@ -50,9 +108,16 @@ func pump(_ seconds: Double) {
       }
       if event.pointee.event_id == MPV_EVENT_END_FILE,
          let result = event.pointee.data?.assumingMemoryBound(to: mpv_event_end_file.self).pointee {
+        if result.reason == MPV_END_FILE_REASON_ERROR { captureLoadFailureDiagnostics("decode-error") }
         precondition(result.reason != MPV_END_FILE_REASON_ERROR, "The generated media must decode successfully")
       }
     }
+}
+
+func pump(_ seconds: Double) {
+  let end = Date().addingTimeInterval(seconds)
+  while Date() < end {
+    drainMPVEvents()
     RunLoop.main.run(until: Date().addingTimeInterval(0.005))
   }
 }
@@ -137,11 +202,16 @@ for index in 0..<30 {
   delegate.preview = index % 2 == 0
   let initialRestarts = playbackRestarts
   position = nil
+  loadRound = index
+  expectedLoadedFiles = index + 1
+  loadStartedAt = ProcessInfo.processInfo.systemUptime
   player.mpv.command(["loadfile", media])
   player.mpv.setString("pause", "no")
-  let loadDeadline = Date().addingTimeInterval(3)
-  while loadedFiles <= index && Date() < loadDeadline { pump(0.01) }
-  precondition(loadedFiles == index + 1, "Every reopened file must complete loading before its close probe")
+  let loadPassed = PlayerCloseLoadWaiter.wait(expected: expectedLoadedFiles, timeout: 3,
+    loaded: { loadedFiles }, clock: { ProcessInfo.processInfo.systemUptime }, pump: pump, drain: drainMPVEvents)
+  let loadElapsed = ProcessInfo.processInfo.systemUptime - loadStartedAt
+  if !loadPassed { captureLoadFailureDiagnostics("file-loaded-not-observed") }
+  precondition(loadPassed, "Every reopened file must complete loading before its close probe")
   let initialFrames = ObservedLayer.frames
   let initialPictures = ObservedLayer.pictureFrames
   let initialPosition = position ?? 0
@@ -153,7 +223,7 @@ for index in 0..<30 {
   let frameDelta = ObservedLayer.frames - initialFrames
   let pictureDelta = ObservedLayer.pictureFrames - initialPictures
   let readyAfter = Date().timeIntervalSince(readinessStarted)
-  print("READY: \(index), loaded=\(loadedFiles), frames=\(frameDelta), pictures=\(pictureDelta), restarts=\(playbackRestarts - initialRestarts), position=\(position ?? -1), wait=\(String(format: "%.3f", readyAfter))s, canDraw=\(ObservedLayer.acceptedReadinessChecks)/\(ObservedLayer.readinessChecks), visible=\(window.isVisible), bounds=\(video.videoLayer.bounds)")
+  print("READY: \(index), loaded=\(loadedFiles), frames=\(frameDelta), pictures=\(pictureDelta), restarts=\(playbackRestarts - initialRestarts), position=\(position ?? -1), loadWait=\(String(format: "%.3f", loadElapsed))s, wait=\(String(format: "%.3f", readyAfter))s, canDraw=\(ObservedLayer.acceptedReadinessChecks)/\(ObservedLayer.readinessChecks), visible=\(window.isVisible), bounds=\(video.videoLayer.bounds)")
   fflush(stdout)
   let readinessPassed = frameDelta >= 2 && pictureDelta >= 2 && playbackRestarts > initialRestarts &&
     (position ?? 0) > initialPosition + 0.01

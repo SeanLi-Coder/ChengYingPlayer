@@ -294,7 +294,9 @@ jobs:
 
       - name: Test real rendering while closing and reopening 4K video windows
         timeout-minutes: 10
-        run: CHENGYING_TEST_SOFTWARE_GL=1 python3 -B Tools/PlayerCloseTests/run.py
+        run: |
+          python3 -B Tools/PlayerCloseTests/test_load_waiter.py
+          CHENGYING_TEST_SOFTWARE_GL=1 python3 -B Tools/PlayerCloseTests/run.py
 
       - name: Test silent video opening before audio output
         run: PATH="$PWD/deps/executable:$PATH" bash Tools/SilentVideoOpenTests/run.sh

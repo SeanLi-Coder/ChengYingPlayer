@@ -139,7 +139,8 @@ with verified_workspace() as directory:
     sources = ["iina/Atomic.swift", "iina/Lock.swift", "iina/ReadWriteAtomic.swift",
                "iina/ReadWriteLock.swift", "iina/MPVOption.swift",
                "Tools/PlayerCloseTests/GLPassDiagnostics.swift",
-               "Tools/PlayerCloseTests/Boundary.swift", "Tools/PlayerCloseTests/main.swift"]
+               "Tools/PlayerCloseTests/Boundary.swift", "Tools/PlayerCloseTests/LoadWaiter.swift",
+               "Tools/PlayerCloseTests/main.swift"]
     subprocess.run(["xcrun", "swiftc", "-suppress-warnings", "-o", str(executable),
                     *[str(ROOT / path) for path in sources],
                     str(layer),
@@ -179,7 +180,7 @@ with verified_workspace() as directory:
             (output_dir / "native.log").write_text(output)
             report["attempts"].append({"number": number, "mode": mode, "exit_code": native_code, "timed_out": timed_out,
                                        "passed": native_code == 0 and not timed_out,
-                                       "outcome": [line for line in output.splitlines() if line.startswith(("MPE_CONTROL", "READY:", "PASS:", "FAILURE_DIAGNOSTICS:")) or "Precondition failed:" in line]})
+                                       "outcome": [line for line in output.splitlines() if line.startswith(("MPE_CONTROL", "READY:", "PASS:", "FAILURE_DIAGNOSTICS:", "LOAD_FAILURE:")) or "Precondition failed:" in line]})
             (report_dir / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
             print(f"DIAGNOSTIC_RESULT: attempt={number}, exit={native_code}, timed_out={timed_out}", flush=True)
             if args.mpe_diagnostic_matrix and (native_code == 78 or "MPE_CONTROL_INVALID:" in output):

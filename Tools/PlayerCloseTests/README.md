@@ -56,6 +56,17 @@ of synchronous close/shutdown overhead; the CI step allows ten minutes so that
 compilation and mandatory workspace cleanup can finish before its outer deadline.
 The independent deterministic priority-lock probe retains its one-second
 acquisition bound and ten-second process watchdog.
+The file-load deadline uses a monotonic clock; this stabilizes elapsed-time
+measurement without extending the three-second budget. Before the strict
+`loadedFiles == expected` assertion, a final nonblocking mpv event drain consumes
+events already queued by the last run-loop turn. It does not sleep, pump another
+turn, infer success from a property, or excuse missing/duplicate load events.
+`python3 -B Tools/PlayerCloseTests/test_load_waiter.py` compiles a Foundation-only
+command-line regression using the same waiter and an injected clock/event queue.
+Its negative control reproduces the old loop missing an already queued event;
+the positive control and genuine-missing/duplicate cases verify the correction
+without a display or an app bundle. This establishes a test-oracle defect, not
+the cause of any historical CI failure without corresponding runtime evidence.
 `Tools/RenderLifecycleTests/run.sh` separately verifies the real
 Core Animation shadow constructor shares both display and priority ownership,
 plus CGL reference balancing, callback shutdown, Intel typechecking, and ASan.
@@ -116,6 +127,16 @@ not captures of the original Core Animation output; a separately requested
 software screenshot is a decoded-source control. No user video or account data
 is involved. The first-ready, failure and final JSON/log snapshots are retained
 outside the disposable app workspace.
+
+File-load failures always emit a bounded `LOAD_FAILURE:` JSON summary to stdout
+before failing. It includes the round, actual monotonic elapsed time, expected
+and observed load counts, start/end/restart counts, last end reason/error, and at
+most 128 lifecycle events copied before the next mpv event read invalidates them.
+When `--failure-diagnostics` is selected, `load-failure.json` and
+`load-failure.log` also persist in that attempt's report directory. This path
+does not seek, take screenshots, render, or pump more events, and cannot change
+the failed result into success. The ordinary CI gate remains uninstrumented;
+its bounded console record is available in the job log.
 
 `summary.json` separates `execution_passed` from overall `passed`. While the owned
 workspace still needs cleanup, `passed` remains false and `cleanup.status` is
