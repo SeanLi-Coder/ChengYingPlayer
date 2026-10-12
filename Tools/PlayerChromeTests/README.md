@@ -8,25 +8,26 @@ The native harness compiles the production `PlayerEdgeControlsView`,
 `MainWindowController.xib` and reconstructs the real fragment constraint trees,
 including the timeline label minimum widths, slider margins, button dimensions,
 and the volume slider's required width. The fixture applies the same compact
-bottom-mode spacing as the window integration: transport button gaps of 16 and
-timeline top/bottom margins of 3. The seek slider uses a standard `NSSlider`;
+bottom-mode timeline top/bottom margins of 3. The removed transport group stays
+in its original stack and never enters the edge view. The seek slider uses a standard `NSSlider`;
 this harness does not simulate the playback engine, A–B looping, or the
 production `PlaySliderCell` drawing.
 
 Checks cover:
 
 - Exact layouts at widths 285, 320, 379, 380, 381, 640, and 1920, including the
-  actual minimum playback-window width and both sides of the centered-transport
-  transition, without conflicting or ambiguous constraints. Repeated narrow/wide
-  resizing verifies that the original play button returns to the video center;
-  narrow windows yield only the space needed by the right-aligned volume controls.
+  actual minimum playback-window width, without conflicting or ambiguous constraints.
+  Repeated narrow/wide resizing verifies that the transport group never reappears,
+  while timeline and right-aligned volume retain their native geometry.
 - Real-window screenshots in light/dark appearances and explicit 1×/2×
   rendering densities. Pixel sizes follow actual content bounds if the CI
   screen constrains the window; exact-width layout checks run separately.
 - Original control identity, target/action, keyboard equivalent, seek and volume
-  values, transport/mute button delivery, and clean removal from the previous
-  `NSStackView`. Every transport/volume control retains its native hit surface.
-- Click-through empty video space, clickable slider bounds, and hidden/faded
+  values, mute button delivery, and clean removal of reused fragments from the
+  previous `NSStackView`. The removed transport retains its original identity,
+  action and keyboard equivalent outside the footer; volume controls keep their hit surfaces.
+- Actual video-surface hit testing through the now-empty center and left footer,
+  clickable slider bounds, and hidden/faded
   controls not intercepting mouse input.
 - Dynamic toolbar width and runtime accessibility updates. Reduce Transparency
   is verified by comparing pixels over two different video backgrounds, not

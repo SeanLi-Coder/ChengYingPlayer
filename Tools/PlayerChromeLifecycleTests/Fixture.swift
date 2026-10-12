@@ -192,14 +192,16 @@ class ChromeFixture: NSResponder {
     window = fixture
     let root = NSView(frame: NSRect(x: 0, y: 0, width: 650, height: 480))
     fixture.contentView = root
-    let views = [fragSliderView, fragControlView, fragVolumeView, fragToolbarView, titleBarView, sideBarView,
+    let views = [fragSliderView, fragVolumeView, fragToolbarView, titleBarView, sideBarView,
                  subPopoverView, cornerControls!, playSlider, timePreviewWhenSeek, thumbnailPeekView]
     views.forEach { root.addSubview($0) }
     standardWindowButtons.forEach { titleBarView.addSubview($0) }
     titleBarView.addSubview(titleTextField!)
     sideBarView.isHidden = true
+    // Bottom mode retains transport state without attaching its buttons to the window.
+    fragControlView.isHidden = true
     titleBarHeightConstraint.constant = 30
-    fadeableViews = [fragSliderView, fragControlView, fragVolumeView, titleBarView, cornerControls!] + standardWindowButtons
+    fadeableViews = [fragSliderView, fragVolumeView, titleBarView, cornerControls!] + standardWindowButtons
   }
   required init?(coder: NSCoder) { fatalError("Not used") }
   func exitPIP() { pipExits += 1 }

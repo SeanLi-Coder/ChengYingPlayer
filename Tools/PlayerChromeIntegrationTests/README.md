@@ -33,6 +33,19 @@ sidebar entirely below the toolbar and above the footer, and enough actual
 playlist viewport height for at least one row. It also rejects unexpected window
 growth caused by a sidebar's optional preferred-height constraint.
 
+Bottom mode must contain only the original timeline and volume fragments; the
+play/pause and previous/next group is hidden and detached, and native hit testing
+at its former center reaches the video surface. Timeline and volume stay
+clickable through narrow/fullscreen-layout and repeated mode transitions.
+Floating/top modes must restore the same transport group to their legacy stacks,
+with its visible buttons, target/actions, single action delivery, and keyboard
+equivalent intact. Returning to bottom must remove it again without destroying it.
+Visibility assertions here stop at the original fragment: the `showUI` test double
+does not implement complete titlebar visibility or fade timers. Native button
+clicks run in a separate wide-window round trip because `performClick` pumps the
+AppKit run loop; those animations must not change the exact-size layout matrix
+through the legacy floating fixture's optional 560-point width constraint.
+
 The native AppKit window may be constrained by the CI screen. Tests compare
 content geometry to actual bounds and separately assert that small requested
 windows expand only to the documented compact-mode minimum.

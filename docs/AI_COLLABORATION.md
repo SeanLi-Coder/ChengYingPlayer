@@ -12,6 +12,27 @@
 这是澄影视界播放器，不是独立的 Local Video Cutter 项目。
 文档中的历史观察截至 **2026-09-25**；开始前以当前源码、用户新要求和实际测试为准。
 
+## 2026-10-12 移除底部中间按钮（v0.2.82 候选，尚未发布）
+
+用户取消底部中间的播放／暂停、快进、后退按钮。底部 `PlayerEdgeControlsView` 仅挂载原进度条
+与右侧音量，不保留透明按钮热区；保留原 XIB/outlet 供状态同步及显式选择的旧 top/floating 布局。
+空格、左右跳转、上下音量、菜单、A/B 和每文件静音策略不变，播放依赖不变。
+补底部控件／模式切换／自动隐藏的原生正反对照，不将此界面精简表述为播放内核替换。
+候选版本 `v0.2.82` / build `93`，本轮唯一发布者为 Codex；发布状态待完整 CI 和公开更新验证。
+
+本地验证：`bash Tools/PlayerChromeTests/run.sh` 632 项、
+`bash Tools/PlayerChromeIntegrationTests/run.sh` 865 项、
+`bash Tools/PlayerChromeLifecycleTests/run.sh` 185 项与全屏源码检查 4 项、
+`bash Tools/PlayerChromeInteractionTests/run.sh` 40 项通过，640／285 点截图目视核查正常。
+集成测试首轮新增的按钮点击驱动事件循环，改变旧浮动 fixture 窗口尺寸；旧 `showUI` 替身
+也未管理 titlebar 显隐。已将点击检查移至独立宽窗用例，并将旧模式显隐断言限定在原 fragment
+内；原尺寸、侧栏、无障碍检查与容差保留。首轮 17 项失败及修正后日志均保留。
+`bash Tools/VideoToolsTests/run.sh` 首次与其他原生 GUI 并行时在中文窗口激活检查失败；
+停止其他 GUI 测试后独占串行执行，三种语言各 942 项 UI／快捷键和 132 项任务检查通过，
+未修改该测试、生产预览逻辑或激活断言。记录位于本机 `build/transport-removal-native.Q2IfcR/`。
+更新策略／交付／增量／runner 60 项、真实 Sparkle 签名 23 项、原生 updater 143 项通过；
+完整签名安装回归仍由正式标签流水线执行。未替换本机安装或修改用户设置。
+
 ## 2026-10-12 Movist 内核、界面与交互参考（v0.2.81 已发布）
 
 用户明确要求播放内核也参考 Movist Pro，不仅参考外观，不能把保留现有内核设为先验限制。

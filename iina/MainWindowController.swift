@@ -1055,9 +1055,11 @@ class MainWindowController: PlayerWindowController {
     case .bottom:
       fragControlView.setVisibilityPriority(.notVisible, for: fragControlViewLeftView)
       fragControlView.setVisibilityPriority(.notVisible, for: fragControlViewRightView)
+      // Retain the original controls for state updates and legacy OSC layouts,
+      // but keep transport buttons out of the minimal video footer.
+      fragControlView.isHidden = true
       guard let content = window?.contentView else { return }
-      let footer = PlayerEdgeControlsView(timeline: fragSliderView, transport: fragControlView,
-                                          volume: fragVolumeView)
+      let footer = PlayerEdgeControlsView(timeline: fragSliderView, volume: fragVolumeView)
       let corner = PlayerCornerControlsView(toolbar: fragToolbarView)
       content.addSubview(footer, positioned: .above, relativeTo: controlBarBottom)
       content.addSubview(corner, positioned: .above, relativeTo: sideBarView)

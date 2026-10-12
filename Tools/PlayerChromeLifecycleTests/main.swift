@@ -197,6 +197,59 @@ withFixture { controller in
 }
 
 withFixture { controller in
+  let transport = controller.fragControlView
+  let oldTransportPoint = NSPoint(x: transport.frame.midX, y: transport.frame.midY)
+  check(transport.superview == nil && transport.window == nil && transport.isHidden,
+        "Bottom mode retains the transport fragment off-window and hidden")
+  check(controller.controlInteractionViews.contains { $0 === transport },
+        "The detached transport still exercises the production shared interaction list")
+  controller.window!.testPointer = oldTransportPoint
+  check(!PlayerChromePolicy.contains(oldTransportPoint, in: transport, window: controller.window) &&
+        !controller.pointerIsOverControls,
+        "The former center-button position does not remain an invisible control hit target")
+  mouseMove(controller, point: oldTransportPoint)
+  ChromeAnimations.drain()
+  check(controller.hideControlTimer?.isValid == true,
+        "Moving through the former transport area schedules idle hiding instead of suppressing it")
+  controller.hideUIAndCursor()
+  ChromeAnimations.drain()
+  check(controller.animationState == .hidden && controller.fragSliderView.isHidden &&
+        controller.fragVolumeView.isHidden && ChromeInput.cursorHides == [true],
+        "Idle hiding over the former transport area conceals the remaining chrome and cursor")
+  mouseMove(controller, point: oldTransportPoint)
+  ChromeAnimations.drain()
+  check(controller.animationState == .shown && !controller.fragSliderView.isHidden &&
+        !controller.fragVolumeView.isHidden && controller.hideControlTimer?.isValid == true,
+        "Pointer activity restores timeline and volume while keeping their idle timer")
+  check(transport.superview == nil && transport.window == nil && transport.isHidden,
+        "Restoring chrome does not resurrect the retained transport fragment")
+
+  // Positive control: the same frame must protect legacy controls when attached.
+  controller.oscPosition = .floating
+  transport.isHidden = false
+  controller.window!.contentView!.addSubview(transport)
+  controller.fadeableViews.append(transport)
+  check(PlayerChromePolicy.contains(oldTransportPoint, in: transport, window: controller.window) &&
+        controller.pointerIsOverControls && !controller.hideUI(),
+        "The same retained transport is an active hover guard when a legacy layout reattaches it")
+  mouseMove(controller, point: oldTransportPoint)
+  check(controller.hideControlTimer == nil,
+        "A visible legacy transport still suspends idle hiding during pointer interaction")
+  controller.oscPosition = .bottom
+  transport.removeFromSuperview()
+  transport.isHidden = true
+  controller.fadeableViews.removeAll { $0 === transport }
+  mouseMove(controller, point: oldTransportPoint)
+  ChromeAnimations.drain()
+  check(!controller.pointerIsOverControls && controller.hideControlTimer?.isValid == true,
+        "Detaching the same transport for bottom mode releases the hover guard")
+  controller.hideUIAndCursor()
+  ChromeAnimations.drain()
+  check(controller.animationState == .hidden && ChromeInput.cursorHides == [true, true],
+        "Idle chrome and cursor hiding work again after a legacy-to-bottom transport round trip")
+}
+
+withFixture { controller in
   let guards: [(String, () -> Void, () -> Void)] = [
     ("interactive editing mode", { controller.isInInteractiveMode = true }, { controller.isInInteractiveMode = false }),
     ("floating-control dragging", { controller.controlBarFloating.isDragging = true }, { controller.controlBarFloating.isDragging = false }),

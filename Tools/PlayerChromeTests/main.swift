@@ -91,11 +91,14 @@ let play = fixture.view("gxw-pJ-Lcg") as! NSButton
 play.keyEquivalent = " "
 let oldStack = NSStackView(views: [timeline, transport, volume, toolbar])
 var accessibility = PlayerControlsAccessibility(reduceTransparency: false, increaseContrast: false)
-let edge = PlayerEdgeControlsView(timeline: timeline, transport: transport, volume: volume, accessibility: { accessibility })
+let edge = PlayerEdgeControlsView(timeline: timeline, volume: volume, accessibility: { accessibility })
 let corner = PlayerCornerControlsView(toolbar: toolbar, accessibility: { accessibility })
-check(oldStack.views.isEmpty, "Reparenting removes all original stack ownership")
-check(timeline.superview === edge && transport.superview === edge && volume.superview === edge && toolbar.superview === corner,
-      "The original control instances are reused, not recreated")
+check(oldStack.views.count == 1 && oldStack.views.first === transport,
+      "Reparenting removes only the timeline, volume and toolbar from their original stack")
+check(timeline.superview === edge && volume.superview === edge && toolbar.superview === corner,
+      "The retained edge-control instances are reused, not recreated")
+check(transport.superview === oldStack && !transport.isDescendant(of: edge),
+      "The edge view does not take ownership of the removed transport controls")
 check(timeline is TimeLabelOverflowedView && timeline.alignmentRectInsets.top == 6,
       "The timeline retains the production alignment-inset behavior")
 check(nativeControls.allSatisfy { $0.target === recorder && $0.action == #selector(ActionRecorder.record(_:)) },
@@ -125,17 +128,15 @@ func validateLayout(_ label: String) {
   check(approximately(timelineAlignment.minX, 8) && approximately(timelineAlignment.minY, 4) &&
         approximately(timelineAlignment.width, edge.bounds.width - 16) && approximately(timelineAlignment.height, 22),
         "\(label): the 22-point timeline spans the bottom with eight-point side insets")
-  check(approximately(transport.frame.width, 132) && approximately(volume.frame.width, 104),
-        "\(label): XIB-required transport and volume widths remain intact")
-  let idealCenter = edge.bounds.midX
-  let maximumCenter = volume.frame.minX - 12 - transport.frame.width / 2
-  check(approximately(transport.frame.midX, min(idealCenter, maximumCenter)) && transport.frame.minX >= 7.4,
-        "\(label): transport centers in the video, yielding only enough room for right-side volume")
-  let playCenter = play.convert(NSPoint(x: play.bounds.midX, y: play.bounds.midY), to: edge)
-  check(approximately(playCenter.x, transport.frame.midX) && approximately(volume.frame.maxX, edge.bounds.width - 8),
-        "\(label): the actual play button is centered in its group and volume stays right-aligned")
-  check(transport.frame.maxX + 12 <= volume.frame.minX && transport.frame.minY >= timeline.frame.maxY - 1,
-        "\(label): compact controls do not overlap at the actual window width")
+  check(approximately(volume.frame.width, 104) && approximately(volume.frame.maxX, edge.bounds.width - 8) &&
+        approximately(volume.frame.midY, 43),
+        "\(label): the native volume keeps its width, vertical position and right alignment")
+  check(volume.frame.minX >= 7.4 && volume.frame.minY >= timeline.frame.maxY - 1,
+        "\(label): volume stays within the window without overlapping the timeline")
+  check(edge.subviews.count == 2 && edge.subviews.contains { $0 === timeline } && edge.subviews.contains { $0 === volume },
+        "\(label): the footer contains only timeline and volume fragments")
+  check(["10x-bg-xlj", "gxw-pJ-Lcg", "EIi-qd-glM"].allSatisfy { !fixture.view($0).isDescendant(of: edge) },
+        "\(label): previous, play/pause and next buttons are absent from the footer")
   let slider = fixture.view("eBP-6g-bAT")
   check(slider.frame.height >= 16 && slider.frame.width > 120 && timeline.bounds.contains(slider.frame),
         "\(label): the native timeline slider keeps its clickable height without clipping")
@@ -145,13 +146,16 @@ func validateLayout(_ label: String) {
   check(approximately(corner.frame.width, toolbar.frame.width + 12) && corner.frame.width < 200,
         "\(label): the icon strip hugs its contents instead of becoming a large panel")
   check(!edge.hasAmbiguousLayout && !corner.hasAmbiguousLayout && !timeline.hasAmbiguousLayout &&
-        !transport.hasAmbiguousLayout && !volume.hasAmbiguousLayout,
+        !volume.hasAmbiguousLayout,
         "\(label): all production layout containers resolve unambiguously")
-  let gap = NSPoint(x: (transport.frame.maxX + volume.frame.minX) / 2, y: transport.frame.midY)
-  check(edge.hitTest(edge.convert(gap, to: canvas)) == nil, "\(label): empty footer space passes clicks to the video")
+  for x in [CGFloat(8), edge.bounds.midX, volume.frame.minX - 1] {
+    let gap = edge.convert(NSPoint(x: x, y: 43), to: canvas)
+    check(edge.hitTest(gap) == nil && canvas.hitTest(gap) === canvas,
+          "\(label): empty footer point \(x) passes through to the actual video surface")
+  }
   let sliderCenter = slider.convert(NSPoint(x: slider.bounds.midX, y: slider.bounds.midY), to: canvas)
   check(edge.hitTest(sliderCenter) === slider, "\(label): seeking still reaches the existing native slider")
-  for id in ["10x-bg-xlj", "gxw-pJ-Lcg", "EIi-qd-glM", "2py-h1-0km", "SAG-kc-FAt"] {
+  for id in ["2py-h1-0km", "SAG-kc-FAt"] {
     let control = fixture.view(id)
     let point = control.convert(NSPoint(x: control.bounds.midX, y: control.bounds.midY), to: canvas)
     check(edge.hitTest(point) === control && !control.isHiddenOrHasHiddenAncestor,
@@ -169,7 +173,7 @@ for width: CGFloat in [285, 320, 379, 380, 381, 640, 1920] {
     window.setContentSize(requested)
     RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     check(canvas.bounds.width <= requested.width + 0.6,
-          "Window \(Int(width)): optional transport centering cannot enlarge the requested window width")
+          "Window \(Int(width)): the footer cannot enlarge the requested window width")
     validateLayout("Window \(Int(width)) \(appearance.rawValue)")
     for scale: CGFloat in [1, 2] {
       _ = try snapshot(canvas, name: "chrome-\(Int(width))-\(appearance == .aqua ? "light" : "dark")-\(Int(scale))x",
@@ -182,7 +186,7 @@ for width: CGFloat in [640, 285, 381, 320, 1920, 379, 380, 285, 640] {
   canvas.setFrameSize(NSSize(width: width, height: 360))
   validateLayout("Resize round trip \(Int(width))")
 }
-for id in ["10x-bg-xlj", "gxw-pJ-Lcg", "EIi-qd-glM", "2py-h1-0km"] {
+for id in ["2py-h1-0km"] {
   let button = fixture.view(id) as! NSButton
   button.performClick(nil)
   check(recorder.actions.last == button.tag, "Repositioned button \(id) still invokes its original action")

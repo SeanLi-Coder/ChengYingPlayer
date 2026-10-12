@@ -7,6 +7,19 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) {
   if condition() { print("PASS: \(message)") } else { failures += 1; print("FAIL: \(message)") }
 }
 func near(_ left: CGFloat, _ right: CGFloat) -> Bool { abs(left - right) < 0.6 }
+final class TransportActionRecorder: NSObject {
+  var actions: [Int] = []
+  @objc func record(_ sender: NSControl) { actions.append(sender.tag) }
+}
+func isVisibleWithin(_ view: NSView, fragment: NSView) -> Bool {
+  var candidate: NSView? = view
+  while let current = candidate {
+    if current.isHidden || current.alphaValue < 0.99 { return false }
+    if current === fragment { return true }
+    candidate = current.superview
+  }
+  return false
+}
 func snapshot(_ content: NSView, name: String) throws {
   content.window?.displayIfNeeded()
   RunLoop.current.run(until: Date().addingTimeInterval(0.03))
@@ -36,7 +49,16 @@ func heightGeometry(_ controller: LayoutController, stage: String) {
         "maximum=\(controller.maximumPlaylistHeight) preferred=\(controller.preferredPlaylistHeight) " +
         "physicalScreen=\(controller.window?.screen?.visibleFrame ?? .zero)")
 }
-let originals = [controller.fragSliderView!, controller.fragControlView!, controller.fragToolbarView!, controller.fragVolumeView!]
+let visibleEdgeOriginals = [controller.fragSliderView!, controller.fragToolbarView!, controller.fragVolumeView!]
+let originalTransport = controller.fragControlView!
+let transportRecorder = TransportActionRecorder()
+let transportButtons = ["10x-bg-xlj", "gxw-pJ-Lcg", "EIi-qd-glM"].map { fixture.view($0) as! NSButton }
+for (index, button) in transportButtons.enumerated() {
+  button.target = transportRecorder
+  button.action = #selector(TransportActionRecorder.record(_:))
+  button.tag = index
+}
+transportButtons[1].keyEquivalent = " "
 let playlistFixture = try ChromeFixture(xib: URL(fileURLWithPath: CommandLine.arguments[2]))
 let playlist = try PlaylistLayoutController(fixture: playlistFixture)
 controller.playlistView = playlist
@@ -109,13 +131,27 @@ for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), N
               "\(label): the real setup method pins the footer to the bottom")
         let transport = controller.fragControlView!
         let volume = controller.fragVolumeView!
-        let expectedCenter = min(footer.bounds.midX, volume.frame.minX - 12 - transport.frame.width / 2)
-        check(near(transport.frame.midX, expectedCenter) && transport.frame.minX >= 7.4 &&
-              transport.frame.maxX + 11.4 <= volume.frame.minX && near(volume.frame.maxX, footer.bounds.width - 8),
-              "\(label): transport recenters after legacy modes without hiding or overlapping volume")
+        check(transport === originalTransport && transport.superview == nil && transport.isHidden &&
+              transportButtons.allSatisfy { !$0.isDescendant(of: content) },
+              "\(label): bottom mode retains but detaches and hides all three transport buttons")
+        check(footer.subviews.count == 2 && controller.fragSliderView.superview === footer && volume.superview === footer &&
+              near(volume.frame.width, 104) && near(volume.frame.maxX, footer.bounds.width - 8) && near(volume.frame.midY, 43),
+              "\(label): the footer contains only the original timeline and right-aligned volume")
+        let blankCenter = footer.convert(NSPoint(x: footer.bounds.midX, y: 43), to: content)
+        check(footer.hitTest(blankCenter) == nil && content.hitTest(blankCenter) === controller.videoView,
+              "\(label): the removed center buttons leave no mouse-intercepting surface")
+        let seekPoint = controller.playSlider.convert(
+          NSPoint(x: controller.playSlider.bounds.midX, y: controller.playSlider.bounds.midY), to: content)
+        check(footer.hitTest(seekPoint) === controller.playSlider,
+              "\(label): the original timeline remains directly clickable after mode transitions")
+        let volumeSlider = fixture.view("SAG-kc-FAt")
+        let volumePoint = volumeSlider.convert(NSPoint(x: volumeSlider.bounds.midX, y: volumeSlider.bounds.midY), to: content)
+        check(footer.hitTest(volumePoint) === volumeSlider,
+              "\(label): the original volume slider remains directly clickable after mode transitions")
         check(near(corner.frame.maxX, content.bounds.maxX - 8) && near(corner.frame.maxY, content.bounds.maxY - (fullscreen ? 10 : 28)),
               "\(label): the real setup method pins toolbar at the upper-right")
-        check(originals.allSatisfy { $0.isDescendant(of: content) }, "\(label): every original fragment returns after legacy-mode round trips")
+        check(visibleEdgeOriginals.allSatisfy { $0.isDescendant(of: content) },
+              "\(label): every retained edge fragment returns after legacy-mode round trips")
         let buttons = controller.fragToolbarView.views.compactMap { $0 as? NSButton }
         print("TOOLBAR \(label): frame=\(controller.fragToolbarView.frame) hidden=\(controller.fragToolbarView.isHidden) " +
               "ancestorHidden=\(controller.fragToolbarView.isHiddenOrHasHiddenAncestor) alpha=\(controller.fragToolbarView.alphaValue) " +
@@ -125,8 +161,8 @@ for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), N
               "\(label): every rebuilt toolbar button has visible native geometry")
         check(buttons.allSatisfy { !$0.isHiddenOrHasHiddenAncestor && $0.alphaValue > 0.99 },
               "\(label): a legacy detached toolbar cannot remain hidden inside the new corner strip")
-        check(originals.allSatisfy { !$0.isHiddenOrHasHiddenAncestor && $0.alphaValue > 0.99 },
-              "\(label): every reused top-level fragment clears legacy stack hidden state")
+        check(visibleEdgeOriginals.allSatisfy { !$0.isHiddenOrHasHiddenAncestor && $0.alphaValue > 0.99 },
+              "\(label): every visible reused fragment clears legacy stack hidden state")
         check(controller.fragToolbarView.frame.height >= 24 && controller.fragToolbarView.detachedViews.isEmpty &&
               buttons.allSatisfy { controller.fragToolbarView.bounds.contains($0.alignmentRect(forFrame: $0.frame)) },
               "\(label): rebuilt icons remain inside a nonzero toolbar instead of clipping outside an empty stack")
@@ -170,6 +206,17 @@ for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), N
       } else {
         check(controller.edgeControls == nil && controller.cornerControls == nil,
               "\(label): legacy modes remove both edge containers")
+        check(controller.fragControlView === originalTransport && !originalTransport.isHidden &&
+              originalTransport.superview === (position == .floating ? controller.oscFloatingTopView : controller.oscTopMainView),
+              "\(label): legacy mode restores the same transport to its native stack")
+        check(transportButtons.allSatisfy { isVisibleWithin($0, fragment: originalTransport) },
+              "\(label): legacy transport buttons and their fragment ancestors clear bottom-mode hidden state")
+        for button in transportButtons {
+          check(button.target === transportRecorder && button.action == #selector(TransportActionRecorder.record(_:)),
+                "\(label): legacy transport \(button.tag) preserves its original target and action")
+        }
+        check(transportButtons[1].keyEquivalent == " ",
+              "\(label): the legacy play button retains its keyboard equivalent")
         check(controller.originalSidebarVerticalConstraints.allSatisfy(\.isActive),
               "\(label): legacy full-height sidebar constraints are restored")
         let legacyFolderHeight = playlist.folderBrowser.tableView.enclosingScrollView!.contentView.bounds.height
@@ -177,6 +224,27 @@ for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), N
         check(legacyFolderHeight >= playlist.folderBrowser.tableView.rowHeight,
               "\(label): returning from edge mode to a legacy layout keeps at least one visible folder row")
       }
+    }
+  }
+}
+// Native button animation pumps the run loop, so exercise its delivery separately
+// from the exact-size matrix and the legacy floating fixture's optional width.
+controller.fsState.isFullscreen = false
+window.setContentSize(NSSize(width: 900, height: 900))
+for position in [Preference.OSCPosition.bottom, .floating, .top, .bottom, .floating, .top, .bottom] {
+  controller.setupOnScreenController(withPosition: position)
+  content.layoutSubtreeIfNeeded()
+  if position == .bottom {
+    check(controller.fragControlView === originalTransport && originalTransport.superview == nil && originalTransport.isHidden,
+          "Native action round trip returns the retained transport to detached bottom-mode state")
+  } else {
+    for button in transportButtons {
+      let previousCount = transportRecorder.actions.count
+      check(isVisibleWithin(button, fragment: originalTransport),
+            "Native \(position) transport \(button.tag) remains visible inside its restored fragment")
+      button.performClick(nil)
+      check(transportRecorder.actions.count == previousCount + 1 && transportRecorder.actions.last == button.tag,
+            "Native \(position) transport \(button.tag) dispatches exactly one action after restoration")
     }
   }
 }

@@ -97,54 +97,38 @@ final class PlayerEdgeControlsView: NSView {
   static let preferredHeight: CGFloat = 62
 
   let timeline: NSView
-  let transport: NSView
   let volume: NSView
 
   private let accessibility: () -> PlayerControlsAccessibility
   private var accessibilityObserver: NSObjectProtocol?
 
-  init(timeline: NSView, transport: NSView, volume: NSView,
+  init(timeline: NSView, volume: NSView,
        accessibility: @escaping () -> PlayerControlsAccessibility = { .current }) {
     self.timeline = timeline
-    self.transport = transport
     self.volume = volume
     self.accessibility = accessibility
     super.init(frame: .zero)
     translatesAutoresizingMaskIntoConstraints = false
     appearance = NSAppearance(named: .darkAqua)
     userInterfaceLayoutDirection = .leftToRight
-    for fragment in [timeline, transport, volume] {
+    for fragment in [timeline, volume] {
       if let stack = fragment.superview as? NSStackView { stack.removeView(fragment) }
       fragment.removeFromSuperview()
       fragment.translatesAutoresizingMaskIntoConstraints = false
       addSubview(fragment)
     }
-    for fragment in [transport, volume] {
-      fragment.setContentHuggingPriority(.required, for: .horizontal)
-      fragment.setContentHuggingPriority(.required, for: .vertical)
-    }
-    // Center the original transport group when space permits. In narrow windows
-    // it may move left, but neither the buttons nor the volume slider may overlap
-    // or be detached to satisfy the visual preference.
-    let transportCenter = transport.centerXAnchor.constraint(equalTo: centerXAnchor)
-    // AppKit window sizing must outrank centering; a high priority here would
-    // enlarge a narrow window instead of allowing the controls to shift left.
-    transportCenter.priority = .defaultLow
-    transportCenter.identifier = "edge-transport-centered"
+    volume.setContentHuggingPriority(.required, for: .horizontal)
+    volume.setContentHuggingPriority(.required, for: .vertical)
     NSLayoutConstraint.activate([
       heightAnchor.constraint(equalToConstant: Self.preferredHeight),
       timeline.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
       timeline.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
       timeline.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
       timeline.heightAnchor.constraint(equalToConstant: 22),
-      transport.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 8),
-      transportCenter,
-      transport.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -43),
-      transport.heightAnchor.constraint(lessThanOrEqualToConstant: 28),
       volume.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-      volume.centerYAnchor.constraint(equalTo: transport.centerYAnchor),
+      volume.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -43),
       volume.heightAnchor.constraint(lessThanOrEqualToConstant: 28),
-      volume.leadingAnchor.constraint(greaterThanOrEqualTo: transport.trailingAnchor, constant: 12),
+      volume.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 8),
     ])
     accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
       forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
@@ -152,7 +136,7 @@ final class PlayerEdgeControlsView: NSView {
     ) { [weak self] _ in self?.needsDisplay = true }
   }
 
-  required init?(coder: NSCoder) { fatalError("Use init(timeline:transport:volume:)") }
+  required init?(coder: NSCoder) { fatalError("Use init(timeline:volume:)") }
 
   deinit {
     if let accessibilityObserver {
