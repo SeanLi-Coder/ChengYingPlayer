@@ -36,9 +36,9 @@ struct NativePlaybackSnapshot {
   enum Phase { case playing, paused, ended, failed }
   var phase: Phase
   var position: Double
-  var duration: Double {
-    preconditionFailure("Preview EOF restoration is outside the lifecycle boundary")
-  }
+  // Controlled snapshots describe a four-second synthetic timeline, not a
+  // decoded source; production now preserves this bound during a handoff.
+  var duration: Double = 4
 }
 enum CaptureResult { case ready(NativePlaybackSnapshot), unavailable, superseded }
 final class NativePlaybackSession {

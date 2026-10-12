@@ -413,8 +413,8 @@ MPV handle 销毁可能在同步 shutdown 通知返回后，因而只诊断指�
 
 - 正常 native 首次 admission 不由上述预览测试证明；后续独立首开修补和 287 项证据见下节，
   完整 App 的极早键盘／nib 操作仍须单独验证。
-- native→MPV 过渡时连续旋转快捷键可能在 retiring／预览恢复期间丢掉累计动作；原 MPV
-  rotation coordinator 能排队不代表过渡层已将每次按键送达。本轮未改此行为。
+- native→MPV 过渡时连续旋转快捷键的累计动作另有后续修补，见下方旋转交接章节；
+  原 MPV coordinator 能排队或抽取方法测试通过，不等于完整 App 交接验收。
 - 既有暂停图像不可读与固定 A/B 回绕截止偶发失败仍未定位。新增诊断和本次专项通过
   不能取消旧失败记录，也不能据此切默认后端或发布稳定包。
 
@@ -476,6 +476,51 @@ driver SHA-256 为 `b75335b7f58d3a06c07e3d8a6f13a55b840cba65b16d13c89929f7ae6256
 源码 hash 核对一致。既有 110 秒 driver／150 秒进程期限不变，增加分阶段耗时诊断。
 **完整 App 92 项尚未运行**；正在运行的 `38319384831` 仍冻结于先前的 75 项提交。
 本机未安装或执行测试 App；MPV 恢复属性不代表物理屏幕画质、音频同步或 M4 硬解验收。
+
+## 旋转交接与取消所有权（后续修补，尚未完整 App 验收）
+
+快捷键和工具面板统一进入 Core 的永久旋转入口。同一媒体在 preview restore、clock capture、
+renderer draining 和 MPV loading 期间累计方向；首次请求只产生一次兼容转换，匹配的恢复
+位置完成后只向原有 rotation coordinator 提交一次。没有保存／重放 NSEvent，也没有以
+已经导出的文件为输入再压一遍。累计值采用有界模四运算，不随按键次数增长。
+同路径重开也生成新的 media epoch；旧 ticket、旧失败回调和旧 timer 不能消费新请求。
+
+初版取消整个 restore 的方案虽通过早期 94 项测试，独立审查发现 `.stopping` 阶段的
+`pause()` 会被状态门禁忽略，随后无恢复记录的同文件 reload 可能默认播放，故没有采用。
+后续实现分离旋转 action 与同文件播放恢复：取消只撤销待导出动作；暂停／继续和三类
+seek 保留最后操作，内部恢复 seek 只豁免精确匹配的 restore ID。drain/loading 不向关闭中
+的 transport 写命令；恢复后才应用最新目标与暂停。用户重新开片、停止或退出会清除全部。
+取消后新按键在 drain/loading 被拒绝，MPV 已 loaded 后才作为独立的新 coordinator 请求，
+不能复活旧 action 或改写原恢复目标。原 busy 错误保留，不被入口覆盖成“没有本地视频”。
+
+冻结 Core SHA-256 `db1727d3e7ff1c6e13193b251479bc86b014de1b2ad6a6dc048dc14a44c4e7c7`；
+Window `502c2d0647cd2e72d3b7380d4a1ef16ef0216d9fc247fd79883e8f5713950b10`。
+新增 `Tools/VideoToolsRotationIntentTests` 直接编译生产有界状态值；
+`Tools/NativeRotationHandoffTests` 机械抽取实际 Core／窗口／面板入口和三个生命周期子块，
+实际 coordinator 处理提交，但 native capture、renderer shutdown、MPV events 与导出服务
+明确为受控边界。它不是实际导出文件、完整 nib、OS 键盘注入或真实渲染验收。
+此切片保留采点时的 volume／rate／viewport，不增加交接中修改这些值的新能力。
+新增 CI 使用普通／TSan 正负测试并保留失败证据，不改变默认后端、安装或发布条件。
+
+最终交接专项普通／ASan／TSan **各 176/0**，分别为
+`build/rotation-handoff-tests.TxAsZN/`、`4hJYRw/`、`apcGmZ/`。
+四个撤销保护的单变量负控在三种模式均按预期退出 1，对应 **4／10／2／48 个失败**，
+不能把 crash、编译失败或看门狗终止当作有效负控。输入源码稳定性校验通过，生成源码
+单独记录 SHA；root 复核正负结果和 sanitizer 日志没有新增异常。未改变各用例期限。
+helper 最终普通／ASan／TSan 各 **50,051/0**（包含 50,000 次固定混合输入压力迭代，
+不是五万个不同功能），保留原 coordinator **77/0** 与 ownership **4/0**；两负控各有
+一项明确失败、退出 1。证据 `build/rotation-intent-tests.rNicH0/`、`snTVEp/`、`lFND5E/`。
+失败退出采证另验证非法模式仍退出 2；受控 runner 在首次生成源码后退出 7，仍保留原
+退出码、输入校验和生成 manifest，未把采证成功冒充测试成功。
+
+冻结源码下的旧功能回归：ControlledCore **41/0**＋两有效负控、Lifecycle **76/0**
+（含 ASan／旧系统 typecheck）、SeekTiming **37/0**、Navigation **317/0**、Live build-only；
+NativeClip **235/0**、A/B **151/0**、Route **287/0**；原 VideoTools 英文 **942/0**、
+coordinator **77/0**、task manager **132/0**；旧 viewport 中英各 **1098/0**、新 viewport
+**172/0**。stale compatibility 与 viewport route 单变量负控分别在 **235 项中失败 5 项**、
+**172 项中失败 7 项**，均退出 1。原断言未删除；fixture 仅新增实际调用的接口与明确边界，MPV-only 路径不
+伪造 native 成功。日志和五个生产文件前后稳定 hash 位于
+`build/rotation-legacy-final.vg4hNP/`；本轮 Live 只是编译，不冒充新增的实播结果。
 
 ## 实现文件
 

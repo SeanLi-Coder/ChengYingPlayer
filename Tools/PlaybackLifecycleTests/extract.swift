@@ -23,12 +23,16 @@ let invalidateThumbnails = player.contains("  private func invalidateThumbnails(
   ? section(player, "  private func invalidateThumbnails() {", "  func generateThumbnails() {") : ""
 let thumbnailGenerationFallback = declarations.contains("var thumbnailGeneration:")
   ? "" : "@Atomic var thumbnailGeneration: UInt = 0"
+let rotationFields = section(player, "  private var permanentRotationIntent", "\n  /// Both window shortcuts")
+let rotationMethods = section(player, "  @discardableResult\n  func cancelPendingPermanentRotation(", "  /// An abandoned rotation action")
 let playerSource = """
 import Foundation
 
 final class PlayerUnderTest: PlayerFixture {
 \(declarations)
 \(thumbnailGenerationFallback)
+\(rotationFields)
+\(rotationMethods)
 \(start)
 \(stop)
 \(shutdown)

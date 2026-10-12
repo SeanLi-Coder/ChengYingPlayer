@@ -29,6 +29,12 @@ func coreMethod(_ start: String) -> String {
 let eofGetter = source.split(separator: "\n").first { $0.contains("var playbackAtEOF: Bool") }!
 let playbackGetters = ["  var nativeInitialPlaybackPending: Bool {", "  var playbackIsPaused: Bool {"].map(coreMethod).joined(separator: "\n")
 let commands = ["  func pause()", "  func resume()", "  func seek(absoluteSecond:"].map(coreMethod).joined(separator: "\n")
+let rotationFieldsStart = source.range(of: "  private var permanentRotationIntent")!.lowerBound
+let rotationFieldsEnd = source.range(of: "\n  /// Both window shortcuts", range: rotationFieldsStart..<source.endIndex)!.lowerBound
+let rotationFields = String(source[rotationFieldsStart..<rotationFieldsEnd])
+let rotationMethods = ["  @discardableResult\n  func cancelPendingPermanentRotation(", "  private func resetPermanentRotationMedia(",
+  "  private var pendingRotationPlaybackRestore:", "  @discardableResult\n  private func updatePendingRotationRestore(",
+  "  private func ownsPermanentRotationRequest("].map(coreMethod).joined(separator: "\n")
 let compatibilityMembersEnd = source.range(of: "  private var playbackTransport:", range: end..<source.endIndex)!.lowerBound
 let compatibilityMembers = String(source[end..<compatibilityMembersEnd])
 var compatibilityMethods = ["  func requireMPVCompatibility(", "  private func retireNativePlayback("].map(coreMethod).joined(separator: "\n")
@@ -43,6 +49,8 @@ let generated = """
 import Foundation
 import AVFoundation
 final class PlayerCore {
+\(rotationFields)
+\(rotationMethods)
   struct Info { var videoDuration: VideoTime?; var state = PlayerState.idle; var currentURL: URL? }
   var info = Info()
   var nativeTransport: NativePlaybackTransport?

@@ -157,6 +157,119 @@ class PlayerCore: NSObject {
   /// Video tool previews use this to avoid restoring state into a different media load.
   private(set) var videoToolsMediaGeneration: UInt64 = 0
   var videoToolsLoopRecovery = VideoToolsLoopRecovery()
+  private var permanentRotationIntent = VideoToolsRotationIntent()
+  private var permanentRotationTimeout: Timer?
+
+  var hasPendingPermanentRotation: Bool { permanentRotationIntent.hasPending }
+
+  /// Both window shortcuts and the tools panel submit here. Only rotations are
+  /// accumulated while a single same-media compatibility transition is in flight.
+  @discardableResult
+  func requestPermanentRotation(clockwiseQuarterTurns: Int) -> Bool {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard clockwiseQuarterTurns != 0, !nativeTerminationRequested,
+          info.state != .shuttingDown, info.state != .shutDown,
+          !isInMiniPlayer, !UpdateWorkAdmission.shared.isHelperRestartBlocked,
+          let url = info.currentURL, url.isFileURL else { return false }
+    if permanentRotationIntent.hasPending {
+      guard permanentRotationIntent.inputURL == url.standardizedFileURL else { return false }
+      if case .accumulated = permanentRotationIntent.append(clockwiseQuarterTurns: clockwiseQuarterTurns) {
+        return true
+      }
+      return false
+    }
+    guard info.state.loaded else { return false }
+    if !isUsingNativePlayback {
+      return deliverPermanentRotation(clockwiseQuarterTurns: clockwiseQuarterTurns, inputURL: url)
+    }
+    permanentRotationIntent.resetMedia(to: url)
+    guard case .begin(let ticket) = permanentRotationIntent.append(clockwiseQuarterTurns: clockwiseQuarterTurns) else { return false }
+    let timeout = Timer(timeInterval: 20, repeats: false) { [weak self] _ in
+      guard let self, self.cancelPendingPermanentRotation(requestID: ticket.requestID) else { return }
+      self.sendOSD(.custom(NSLocalizedString("playback.compatibility_restore_failed", comment: "Compatibility handoff failed")))
+    }
+    permanentRotationTimeout = timeout
+    // A backstop for a closing renderer or failed media load that never reports a
+    // terminal callback. The existing shorter capture/restore limits still apply.
+    RunLoop.main.add(timeout, forMode: .common)
+    let completeRotation = { [weak self] in
+      guard let self, !self.isUsingNativePlayback, self.info.state.loaded,
+            let currentURL = self.info.currentURL,
+            let submission = self.permanentRotationIntent.consume(ticket: ticket, currentURL: currentURL) else { return }
+      self.permanentRotationTimeout?.invalidate()
+      self.permanentRotationTimeout = nil
+      _ = self.deliverPermanentRotation(clockwiseQuarterTurns: submission.clockwiseQuarterTurns,
+                                       inputURL: submission.ticket.inputURL)
+    }
+    mainWindow.quickSettingView.cancelPendingAutomaticVideoToolsPreview()
+    requireMPVCompatibility(reason: "Permanent rotation preview", rotationRequestID: ticket.requestID,
+                            completion: completeRotation)
+    return true
+  }
+
+  private func deliverPermanentRotation(clockwiseQuarterTurns: Int, inputURL: URL) -> Bool {
+    guard !isUsingNativePlayback, info.state.loaded,
+          info.currentURL?.standardizedFileURL == inputURL.standardizedFileURL else { return false }
+    mainWindow.showSettingsSidebar(tab: .tools, hideIfAlreadyShown: false)
+    return mainWindow.quickSettingView.applyPermanentRotation(clockwiseQuarterTurns: clockwiseQuarterTurns,
+                                                              inputURL: inputURL)
+  }
+
+  /// This only cancels not-yet-delivered intent, never an existing export task.
+  @discardableResult
+  func cancelPendingPermanentRotation(requestID: UUID? = nil) -> Bool {
+    guard let ticket = permanentRotationIntent.pendingTicket,
+          requestID == nil || requestID == ticket.requestID else { return false }
+    permanentRotationIntent.cancel()
+    permanentRotationTimeout?.invalidate()
+    permanentRotationTimeout = nil
+    if var restore = nativeCompatibilityRestore, restore.rotationRequestID == ticket.requestID {
+      restore.rotationRequestID = nil
+      restore.completion = {}
+      nativeCompatibilityRestore = restore
+    }
+    return true
+  }
+
+  private func resetPermanentRotationMedia(to url: URL?) {
+    cancelPendingPermanentRotation()
+    if nativeCompatibilityRestore?.rotationMediaEpoch != nil { nativeCompatibilityRestore = nil }
+    permanentRotationIntent.resetMedia(to: url)
+  }
+
+  /// An abandoned rotation action may still own same-media playback restoration.
+  /// The independent epoch prevents same-path user reopen from inheriting it.
+  private var pendingRotationPlaybackRestore: NativeCompatibilityRestore? {
+    guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown,
+          let restore = nativeCompatibilityRestore, restore.url == info.currentURL,
+          restore.rotationMediaEpoch != nil,
+          restore.rotationMediaEpoch == permanentRotationIntent.mediaEpoch else { return nil }
+    return restore
+  }
+
+  @discardableResult
+  private func updatePendingRotationRestore(paused: Bool? = nil, position: Double? = nil) -> Bool {
+    guard var restore = pendingRotationPlaybackRestore else { return false }
+    if let position {
+      guard position.isFinite else { return true }
+      let range = VideoToolsLoopRange(start: restore.loopA, end: restore.loopB, duration: restore.duration)
+      let ceiling = restore.duration.flatMap { $0.isFinite && $0 > 0 ? $0.nextDown : nil } ?? Double.greatestFiniteMagnitude
+      restore.position = range?.clamped(position) ?? min(max(0, position), ceiling)
+    }
+    if let paused { restore.paused = paused }
+    nativeCompatibilityRestore = restore
+    // While draining/loading, only retain intent. Once the real mpv load is
+    // ready, retarget its exact seek but keep it paused until the matching restart.
+    if position != nil, restore.waitingForSeek, !isUsingNativePlayback, info.state.loaded {
+      playbackTransport.seek(.init(value: restore.position, reference: .absoluteSeconds, exact: true))
+    }
+    return true
+  }
+
+  private func ownsPermanentRotationRequest(_ id: UUID?) -> Bool {
+    guard let id else { return true }
+    return permanentRotationIntent.pendingTicket?.requestID == id
+  }
 
   var touchBarSupport: TouchBarSupport {
     get {
@@ -315,6 +428,7 @@ class PlayerCore: NSObject {
   func requestNativePreview(start: Double, end: Double,
                             completion: @escaping (NativePreviewResult) -> Void) {
     dispatchPrecondition(condition: .onQueue(.main))
+    cancelPendingPermanentRotation()
     guard let range = VideoToolsLoopRange(start: start, end: end, duration: info.videoDuration?.second),
           let interval = try? NativePlaybackInterval(start: range.start, end: range.end),
           let transport = nativeTransport, nativeReady, !nativeRetiring, info.state.loaded,
@@ -480,14 +594,17 @@ class PlayerCore: NSObject {
   private struct NativeCompatibilityRestore {
     let id = UUID()
     let url: URL
-    let position: Double
+    var position: Double
     let volume: Double
     let rate: Double
-    let paused: Bool
+    var paused: Bool
+    var duration: Double? = nil
     var loopA: Double? = nil
     var loopB: Double? = nil
     var viewport = VideoToolsViewport(zoom: 0, panX: 0, panY: 0)
-    let completion: () -> Void
+    var rotationRequestID: UUID? = nil
+    var rotationMediaEpoch: UUID? = nil
+    var completion: () -> Void
     var waitingForSeek = false
   }
   private var nativeCompatibilityRestore: NativeCompatibilityRestore?
@@ -522,7 +639,8 @@ class PlayerCore: NSObject {
       info.state.active && (!nativeReady || info.state == .loaded)
   }
   var playbackIsPaused: Bool {
-    nativeInitialPlaybackPending ? (nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)) : playbackTransport.isPaused
+    if let restore = pendingRotationPlaybackRestore { return restore.paused }
+    return nativeInitialPlaybackPending ? (nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)) : playbackTransport.isPaused
   }
   var playbackPosition: Double? { playbackTransport.position }
   var playbackAtEOF: Bool { playbackTransport.isAtEOF || (isUsingNativePlayback && nativeRestoredPreviewEOF) }
@@ -553,6 +671,7 @@ class PlayerCore: NSObject {
   func requestNativeLoopAction(_ action: NativeLoopAction,
                                completion: @escaping (NativeLoopActionResult) -> Void = { _ in }) {
     dispatchPrecondition(condition: .onQueue(.main))
+    cancelPendingPermanentRotation()
     guard nativeTransport != nil, nativeReady, !nativeRetiring, info.state.loaded else {
       completion(.unavailable); return
     }
@@ -904,6 +1023,7 @@ class PlayerCore: NSObject {
   }
 
   private func beginNativeOpen(_ url: URL, request: UInt64) {
+    resetPermanentRotationMedia(to: url)
     cancelNativeLoopRequests()
     nativeLoopA = nil; nativeLoopB = nil
     nativeViewport = VideoToolsViewport(zoom: 0, panX: 0, panY: 0)
@@ -1021,22 +1141,29 @@ class PlayerCore: NSObject {
 
   /// Compatibility actions execute only after the same media has reached its
   /// restored mpv seek position. A subsequent open/stop discards the action.
-  func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
+  func requireMPVCompatibility(reason: String, rotationRequestID: UUID? = nil, completion: @escaping () -> Void) {
     dispatchPrecondition(condition: .onQueue(.main))
-    guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
+    guard ownsPermanentRotationRequest(rotationRequestID) else { return }
+    if rotationRequestID == nil { cancelPendingPermanentRotation() }
+    let discardRotation = { [weak self] in
+      if let rotationRequestID { self?.cancelPendingPermanentRotation(requestID: rotationRequestID) }
+    }
+    guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { discardRotation(); return }
     guard let transport = nativeTransport, let url = info.currentURL else { completion(); return }
-    guard !nativeRetiring else { return }
+    guard !nativeRetiring else { discardRotation(); return }
     if nativePreviewInProgress {
       let route = playbackEventRoute.revision
       let generation = videoToolsMediaGeneration
       finishNativePreview { [weak self, weak transport] result in
         guard let self, let transport, self.nativeTransport === transport,
               self.playbackEventRoute.revision == route, self.videoToolsMediaGeneration == generation,
-              !self.nativePreviewInProgress else { return }
-        if case .applied = result { self.requireMPVCompatibility(reason: reason, completion: completion) }
+              !self.nativePreviewInProgress,
+              self.ownsPermanentRotationRequest(rotationRequestID) else { discardRotation(); return }
+        if case .applied = result { self.requireMPVCompatibility(reason: reason, rotationRequestID: rotationRequestID, completion: completion) }
         else if case .unavailable = result {
+          discardRotation()
           self.sendOSD(.custom(NSLocalizedString("playback.compatibility_restore_failed", comment: "Preview restore failed")))
-        }
+        } else { discardRotation() }
       }
       return
     }
@@ -1058,7 +1185,8 @@ class PlayerCore: NSObject {
               self.playbackEventRoute.revision == request,
               self.videoToolsMediaGeneration == generation, !self.nativeRetiring,
               (!initiallyReady && self.nativeInitialPlaybackPending || self.nativePreviewIntentRevision == previewIntent),
-              !self.nativePreviewInProgress else { return }
+              !self.nativePreviewInProgress,
+              self.ownsPermanentRotationRequest(rotationRequestID) else { discardRotation(); return }
         var restore: NativeCompatibilityRestore?
         switch result {
         case .ready(let snapshot):
@@ -1066,6 +1194,7 @@ class PlayerCore: NSObject {
             volume: transport.volumePercent, rate: transport.rate,
             paused: self.nativeInitialPlaybackPending ?
               (self.nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)) : transport.isPaused,
+            duration: snapshot.duration,
             completion: completion)
         case .unavailable:
           if self.nativeReady {
@@ -1076,6 +1205,7 @@ class PlayerCore: NSObject {
               self.sendOSD(.custom(NSLocalizedString("playback.compatibility_restore_failed",
                 value: "Could not restore the playback position. Please retry the requested action.",
                 comment: "Compatibility backend handoff timed out")))
+              discardRotation()
               return
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self, weak transport] in
@@ -1083,20 +1213,26 @@ class PlayerCore: NSObject {
                     self.playbackEventRoute.revision == request,
                     self.videoToolsMediaGeneration == generation, !self.nativeRetiring,
                     (!initiallyReady && self.nativeInitialPlaybackPending || self.nativePreviewIntentRevision == previewIntent),
-                    !self.nativePreviewInProgress else { return }
+                    !self.nativePreviewInProgress,
+                    self.ownsPermanentRotationRequest(rotationRequestID) else { discardRotation(); return }
               capture()
             }
             return
           }
           restore = NativeCompatibilityRestore(url: url, position: 0, volume: 0, rate: 1,
             paused: self.nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen), completion: completion)
-        case .superseded: return
+        case .superseded: discardRotation(); return
         }
         restore?.loopA = self.nativeLoopA
         restore?.loopB = self.nativeLoopB
         restore?.viewport = self.nativeViewport
+        restore?.rotationRequestID = rotationRequestID
+        restore?.rotationMediaEpoch = rotationRequestID == nil ? nil : self.permanentRotationIntent.mediaEpoch
+        // Publish an owned restore before asynchronous retirement, so navigation
+        // can discard it without a captured local value reinstalling it later.
+        if rotationRequestID != nil { self.nativeCompatibilityRestore = restore }
         self.retireNativePlayback {
-          self.nativeCompatibilityRestore = restore
+          if rotationRequestID == nil { self.nativeCompatibilityRestore = restore }
           self.mpv.prepareForFirstMPVMediaLoad()
           self.advancePlaybackRoute(acceptsMPV: true)
           self.openMainWindow(path: url.path, url: url, isNetwork: false, allowNative: false)
@@ -1145,6 +1281,7 @@ class PlayerCore: NSObject {
       log("Ignoring a remote media URL in the local player", level: .warning)
       return
     }
+    resetPermanentRotationMedia(to: url)
     guard info.state != .stopping || nativeRetiring else {
       // The mpv core is currently processing an asynchronous stop command. To avoid the complexity
       // of coordinating two mpv commands executing at the same time, wait until the stop command
@@ -1216,6 +1353,8 @@ class PlayerCore: NSObject {
     if count == 0 {
       return 0
     }
+
+    resetPermanentRotationMedia(to: playableFiles.first)
 
     if nativeTransport != nil {
       // Retire the whole request before issuing any MPV playlist commands.
@@ -1301,6 +1440,7 @@ class PlayerCore: NSObject {
   private func openMainWindow(path: String, url: URL, isNetwork: Bool, allowNative: Bool = true) {
     guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
     if allowNative {
+      resetPermanentRotationMedia(to: url)
       nativeCompatibilityRestore = nil
       advancePlaybackRoute(acceptsMPV: nativeTransport == nil)
       if nativeTransport != nil {
@@ -1330,6 +1470,10 @@ class PlayerCore: NSObject {
     info.videoWidth = nil
     let _ = mainWindow.window
     guard mainWindow.videoView.configurePlaybackSurface() else {
+      if let requestID = nativeCompatibilityRestore?.rotationRequestID {
+        cancelPendingPermanentRotation(requestID: requestID)
+      }
+      nativeCompatibilityRestore = nil
       log("Could not prepare the compatibility playback surface", level: .error)
       Utility.showAlert("error_open")
       return
@@ -1468,6 +1612,7 @@ class PlayerCore: NSObject {
   ///     down was in progress and will call this method again to continue the process of shutting down..
   func shutdown() {
     guard !nativeTerminationRequested else { return }
+    resetPermanentRotationMedia(to: nil)
     if nativeTransport != nil {
       guard info.state != .shutDown, !(nativeRetiring && info.state == .shuttingDown) else { return }
       nativeTerminationRequested = true
@@ -1515,6 +1660,7 @@ class PlayerCore: NSObject {
   ///     windows of vulnerability that can not be fully closed. IINA has no choice but to support a mpv initiated shutdown as best it
   ///     can.
   func mpvHasShutdown() {
+    resetPermanentRotationMedia(to: nil)
     invalidateThumbnails()
     let isMPVInitiated = info.state != .shuttingDown
     let suffix = isMPVInitiated ? " (initiated by mpv)" : ""
@@ -1589,7 +1735,7 @@ class PlayerCore: NSObject {
   // MARK: - MPV commands
 
   func togglePause(_ set: Bool? = nil) {
-    if isUsingNativePlayback { playbackIsPaused ? resume() : pause() }
+    if isUsingNativePlayback || pendingRotationPlaybackRestore != nil { playbackIsPaused ? resume() : pause() }
     else { info.state == .paused ? resume() : pause() }
   }
 
@@ -1603,6 +1749,8 @@ class PlayerCore: NSObject {
   ///     asleep. Thus `setFlag` **must not** be called if the `mpv` core is idle or stopping. See issue
   ///     [#4520](https://github.com/iina/iina/issues/4520)
   func pause() {
+    cancelPendingPermanentRotation()
+    if updatePendingRotationRestore(paused: true) { return }
     guard info.state.active else { return }
     if isUsingNativePlayback {
       invalidateNativePreviewRequest()
@@ -1617,6 +1765,8 @@ class PlayerCore: NSObject {
   ///     the `pauseChanged` method, this method calls `displayActive` to provide more time for the display link to start up.
   func resume() {
     guard !UpdateWorkAdmission.shared.isBlocked else { return }
+    cancelPendingPermanentRotation()
+    if updatePendingRotationRestore(paused: false) { return }
     if isUsingNativePlayback {
       invalidateNativePreviewRequest()
       if nativeInitialPlaybackPending { nativeInitialPauseIntent = false; return }
@@ -1658,6 +1808,7 @@ class PlayerCore: NSObject {
     // Closing a window while the native output is draining must not replace
     // the terminal completion which will quit the idle compatibility core.
     guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
+    resetPermanentRotationMedia(to: nil)
     nativeCompatibilityRestore = nil
     if nativeTransport != nil {
       invalidateThumbnails()
@@ -1724,6 +1875,13 @@ class PlayerCore: NSObject {
 
   func seek(percent: Double, forceExact: Bool = false) {
     guard percent.isFinite else { return }
+    cancelPendingPermanentRotation()
+    if let restore = pendingRotationPlaybackRestore {
+      if let duration = restore.duration, duration.isFinite, duration > 0 {
+        updatePendingRotationRestore(position: duration * min(max(percent, 0), 100) / 100)
+      }
+      return
+    }
     if isUsingNativePlayback { cancelNativePreview(restoreLoop: true); cancelNativeLoopRequests() }
     if videoToolsLoopRange != nil, let duration = info.videoDuration?.second, duration > 0 {
       seek(absoluteSecond: duration * percent / 100)
@@ -1744,6 +1902,11 @@ class PlayerCore: NSObject {
 
   func seek(relativeSecond: Double, option: Preference.SeekOption) {
     guard relativeSecond.isFinite else { return }
+    cancelPendingPermanentRotation()
+    if let restore = pendingRotationPlaybackRestore {
+      updatePendingRotationRestore(position: restore.position + relativeSecond)
+      return
+    }
     if isUsingNativePlayback { cancelNativePreview(restoreLoop: true); cancelNativeLoopRequests() }
     if !isUsingNativePlayback, videoToolsLoopRange != nil, let position = videoToolsLoopRecovery.pendingTarget ?? videoToolsCurrentTime {
       seek(absoluteSecond: position + relativeSecond)
@@ -1775,8 +1938,13 @@ class PlayerCore: NSObject {
     useExactSeekForCurrentFile = true
   }
 
-  func seek(absoluteSecond: Double) {
+  func seek(absoluteSecond: Double, preservingRotationHandoff restoreID: UUID? = nil) {
     guard absoluteSecond.isFinite else { return }
+    let ownsRestore = restoreID != nil && nativeCompatibilityRestore?.id == restoreID
+    if !ownsRestore {
+      cancelPendingPermanentRotation()
+      if updatePendingRotationRestore(position: absoluteSecond) { return }
+    }
     if isUsingNativePlayback {
       cancelNativePreview(restoreLoop: true)
       cancelNativeLoopRequests()
@@ -1826,6 +1994,7 @@ class PlayerCore: NSObject {
   }
 
   func frameStep(backwards: Bool) {
+    cancelPendingPermanentRotation()
     if isUsingNativePlayback {
       requireMPVCompatibility(reason: "frame_step") { [weak self] in self?.frameStep(backwards: backwards) }
       return
@@ -2485,6 +2654,7 @@ class PlayerCore: NSObject {
   /// - Parameter pos: Position of the entry in the playlist to be played.
   func playFileInPlaylist(_ pos: Int) {
     guard !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return }
+    resetPermanentRotationMedia(to: nil)
     if isUsingNativePlayback {
       requireMPVCompatibility(reason: "playlist_selection") { [weak self] in self?.playFileInPlaylist(pos) }
       return
@@ -2514,6 +2684,7 @@ class PlayerCore: NSObject {
   /// - Parameter nextMedia: When `true` play the next entry in the playlist; otherwise play the previous entry.
   func navigateInPlaylist(nextMedia: Bool) {
     guard !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return }
+    resetPermanentRotationMedia(to: nil)
     if isUsingNativePlayback {
       requireMPVCompatibility(reason: "playlist_navigation") { [weak self] in self?.navigateInPlaylist(nextMedia: nextMedia) }
       return
@@ -2532,6 +2703,7 @@ class PlayerCore: NSObject {
 
   @discardableResult
   func playChapter(_ pos: Int) -> MPVChapter? {
+    cancelPendingPermanentRotation()
     log("Seeking to chapter \(pos)", level: .verbose)
     let chapters = info.chapters
     guard pos < chapters.count else {
@@ -2939,6 +3111,10 @@ class PlayerCore: NSObject {
     info.currentURL = path.contains("://") ?
       URL(string: path.addingPercentEncoding(withAllowedCharacters: .urlAllowed) ?? path) :
       URL(fileURLWithPath: path)
+    let ownedRotationReload = nativeCompatibilityRestore?.url == info.currentURL &&
+      nativeCompatibilityRestore?.rotationMediaEpoch != nil &&
+      nativeCompatibilityRestore?.rotationMediaEpoch == permanentRotationIntent.mediaEpoch
+    if !ownedRotationReload { resetPermanentRotationMedia(to: info.currentURL) }
     info.isNetworkResource = !info.currentURL!.isFileURL
     postNotification(.chengyingMediaSourceChanged)
 
@@ -3093,10 +3269,13 @@ class PlayerCore: NSObject {
       playbackTransport.setVolumePercent(restore.volume)
       restoreNativeLoopToMPV(start: restore.loopA, end: restore.loopB)
       videoToolsRestoreViewportToMPV(restore.viewport)
-      seek(absoluteSecond: restore.position)
+      seek(absoluteSecond: restore.position, preservingRotationHandoff: restore.id)
       let restoreID = restore.id
       DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
         guard let self, self.nativeCompatibilityRestore?.id == restoreID else { return }
+        if let requestID = self.nativeCompatibilityRestore?.rotationRequestID {
+          self.cancelPendingPermanentRotation(requestID: requestID)
+        }
         self.nativeCompatibilityRestore = nil
         self.log("Native compatibility restoration timed out; pending action was not executed", level: .error)
         self.sendOSD(.custom(NSLocalizedString("playback.compatibility_restore_failed",
@@ -3107,6 +3286,7 @@ class PlayerCore: NSObject {
   }
 
   func fileEnded(_ dueToStopCommand: Bool) {
+    if nativeCompatibilityRestore?.rotationMediaEpoch != nil { resetPermanentRotationMedia(to: nil) }
     // The preview unload hook may restore an old snapshot after stop() has cleared the loop.
     // Clear again once unloading finishes so no loop options leak into an idle or reused core.
     videoToolsClearLoop()

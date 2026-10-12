@@ -15,6 +15,8 @@ func method(_ source: String, _ start: String) -> String {
   section(source, start, "\n  }") + "\n  }"
 }
 let members = section(core, "  enum NativeLoopAction {", "  private struct NativeCompatibilityRestore {")
+let rotationFields = section(core, "  private var permanentRotationIntent", "\n  /// Both window shortcuts")
+let compatibilityFields = section(core, "  private struct NativeCompatibilityRestore {", "  private var playbackTransport:")
 var controls = section(core, "  var playbackLoopA: Double? {", "\n  var receivedEndFileWhileLoading:")
 let negative = ProcessInfo.processInfo.environment["NATIVE_AB_NEGATIVE_CONTROL"]
 precondition(negative == nil || ["stale-capture", "reentrant-cancel", "pause-intent"].contains(negative!), "Unknown negative control")
@@ -29,7 +31,10 @@ if negative == "reentrant-cancel" {
   controls = controls.replacingOccurrences(of: deferred, with: "      cancelled.forEach { $0.completion(.superseded) }")
 }
 let methods = ["  func abLoop()", "  func syncAbLoop()", "  func seek(absoluteSecond:",
-  "  func seek(relativeSecond:", "  func seek(percent:", "  func togglePause(", "  private func applyLoopMode("]
+  "  func seek(relativeSecond:", "  func seek(percent:", "  func togglePause(", "  private func applyLoopMode(",
+  "  @discardableResult\n  func cancelPendingPermanentRotation(", "  private func resetPermanentRotationMedia(",
+  "  private var pendingRotationPlaybackRestore:", "  @discardableResult\n  private func updatePendingRotationRestore(",
+  "  private func ownsPermanentRotationRequest("]
   .map { method(core, $0) }.joined(separator: "\n")
 let markerProperties = section(core, "  /// The A loop point established", "\n  var isABLoopActive:")
 let boundary = try String(contentsOf: root.appendingPathComponent("Tools/NativeABLoopTests/PlayerBoundary.txt"), encoding: .utf8)
@@ -38,6 +43,8 @@ import AppKit
 import AVFoundation
 final class PlayerCore {
 \(boundary)
+\(rotationFields)
+\(compatibilityFields)
 \(members)
 \(controls)
 \(markerProperties)

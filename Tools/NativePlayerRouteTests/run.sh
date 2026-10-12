@@ -20,6 +20,7 @@ source_files=(
   iina/VideoTools/VideoToolsPlayerBridge.swift iina/Atomic.swift iina/Lock.swift
   iina/ReadWriteAtomic.swift iina/ReadWriteLock.swift iina/MPVOption.swift iina/MPVProperty.swift
   iina/PlayerState.swift iina/VideoTools/VideoToolsLoopPolicy.swift iina/VideoTools/VideoToolsShortcuts.swift
+  iina/VideoTools/VideoToolsRotationIntent.swift
   iina/PlaybackBackend/PlaybackTransport.swift iina/PlaybackBackend/NativePlaybackTransport.swift
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift
   iina/NativePlayback/NativePlaybackSession.swift iina/NativePlayback/NativePlaybackSurface.swift
@@ -39,6 +40,7 @@ xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm6
   iina/Atomic.swift iina/Lock.swift iina/ReadWriteAtomic.swift iina/ReadWriteLock.swift \
   iina/MPVOption.swift iina/MPVProperty.swift iina/PlayerState.swift \
   iina/VideoTools/VideoToolsLoopPolicy.swift iina/VideoTools/VideoToolsShortcuts.swift \
+  iina/VideoTools/VideoToolsRotationIntent.swift \
   iina/PlaybackBackend/PlaybackTransport.swift iina/PlaybackBackend/NativePlaybackTransport.swift \
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift \
   iina/NativePlayback/NativePlaybackSession.swift iina/NativePlayback/NativePlaybackSurface.swift \

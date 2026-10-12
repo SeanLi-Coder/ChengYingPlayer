@@ -217,6 +217,30 @@ final class MPVController {
 
 final class PlayerCore: NSObject {
   var isUsingNativePlayback = false
+  let hasPendingPermanentRotation = false
+  // This live fixture only exercises preview and seek, never rotation handoff.
+  struct RotationIntentBoundary { let hasPending = false; let pendingTicket: RotationTicketBoundary? = nil }
+  struct RotationTicketBoundary { let requestID: UUID }
+  struct RotationRestoreBoundary { let id: UUID; let rotationRequestID: UUID? }
+  let permanentRotationIntent = RotationIntentBoundary()
+  let nativeCompatibilityRestore: RotationRestoreBoundary? = nil
+  var pendingRotationPlaybackRestore: RotationRestoreBoundary? {
+    precondition(nativeCompatibilityRestore == nil && !hasPendingPermanentRotation)
+    return nil
+  }
+  @discardableResult
+  func updatePendingRotationRestore(paused: Bool? = nil, position: Double? = nil) -> Bool {
+    precondition(pendingRotationPlaybackRestore == nil)
+    return false
+  }
+  @discardableResult
+  func cancelPendingPermanentRotation(requestID: UUID? = nil) -> Bool {
+    precondition(!hasPendingPermanentRotation && !permanentRotationIntent.hasPending && nativeCompatibilityRestore == nil)
+    return false
+  }
+  func requestPermanentRotation(clockwiseQuarterTurns: Int) -> Bool {
+    preconditionFailure("Rotation is outside the live MPV clip test boundary")
+  }
   // The actual MPV path remains under test; native preview is not simulated here.
   enum NativePreviewResult { case applied, unavailable, superseded }
   let nativePreviewInProgress = false

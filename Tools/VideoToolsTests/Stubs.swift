@@ -7,7 +7,21 @@ enum Preference {
   static func set(_ value: String, for key: Key) { values[key] = value }
 }
 
-final class MainWindowController: NSObject {}
+final class RotationSettingsBoundary {
+  weak var tools: VideoToolsViewController?
+  func cancelPendingAutomaticVideoToolsPreview() {
+    preconditionFailure("Unexpected native rotation handoff in legacy video tools")
+  }
+  func applyPermanentRotation(clockwiseQuarterTurns: Int, inputURL: URL) -> Bool {
+    guard let tools else { preconditionFailure("Missing real tools controller") }
+    return tools.applyPermanentRotation(clockwiseQuarterTurns: clockwiseQuarterTurns, inputURL: inputURL)
+  }
+}
+final class MainWindowController: NSObject {
+  enum Tab { case tools }
+  let quickSettingView = RotationSettingsBoundary()
+  func showSettingsSidebar(tab: Tab, hideIfAlreadyShown: Bool) {}
+}
 final class FlippedView: NSView { override var isFlipped: Bool { true } }
 final class VideoTime { var second: Double; init(_ second: Double) { self.second = second } }
 enum PlayerState { case loaded, idle, shuttingDown, shutDown; var loaded: Bool { self == .loaded } }
@@ -59,6 +73,14 @@ final class MPVController {
 enum OSDMessage { case custom(String) }
 final class PlayerCore: NSObject {
   var isUsingNativePlayback = false
+  let nativeTerminationRequested = false
+  let isInMiniPlayer = false
+  var permanentRotationIntent = VideoToolsRotationIntent()
+  var permanentRotationTimeout: Timer?
+  var hasPendingPermanentRotation: Bool { permanentRotationIntent.hasPending }
+  struct RotationRestoreBoundary { var rotationRequestID: UUID?; var completion: () -> Void }
+  var nativeCompatibilityRestore: RotationRestoreBoundary?
+  var mainWindow: MainWindowController!
   // This suite exercises the legacy tools. Native preview has its own real-session suite.
   enum NativePreviewResult { case applied, unavailable, superseded }
   let nativePreviewInProgress = false
@@ -82,7 +104,7 @@ final class PlayerCore: NSObject {
   func captureNativePreviewPosition(completion: @escaping (Double?) -> Void) {
     preconditionFailure("Unexpected native preview in legacy video tool tests")
   }
-  func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
+  func requireMPVCompatibility(reason: String, rotationRequestID: UUID? = nil, completion: @escaping () -> Void) {
     preconditionFailure("Unexpected native route in legacy video tool tests")
   }
   var nativeViewport: VideoToolsViewport { preconditionFailure("Unexpected native viewport in legacy video tool tests") }

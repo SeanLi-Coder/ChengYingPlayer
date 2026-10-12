@@ -24,7 +24,7 @@ let fileLoaded = method(core, "  func fileLoaded()")
 guard let reset = fileLoaded.range(of: "videoToolsResetViewport()")?.lowerBound,
       let sameMedia = fileLoaded.range(of: "if var restore = nativeCompatibilityRestore, restore.url == info.currentURL")?.lowerBound,
       let restore = fileLoaded.range(of: "videoToolsRestoreViewportToMPV(restore.viewport)")?.lowerBound,
-      let seek = fileLoaded.range(of: "seek(absoluteSecond: restore.position)")?.lowerBound else {
+      let seek = fileLoaded.range(of: "seek(absoluteSecond: restore.position, preservingRotationHandoff: restore.id)")?.lowerBound else {
   fatalError("Production compatibility viewport restoration landmarks changed")
 }
 precondition(reset < sameMedia && sameMedia < restore && restore < seek,
@@ -41,7 +41,15 @@ if negative == "pan-y" {
 if negative == "legacy-route" {
   let original = "case .consume, .speedUp, .speedDown, .zoomIn, .zoomOut,\n           .panLeft, .panRight, .panUp, .panDown, .resetViewport:"
   precondition(keyboard.components(separatedBy: original).count == 2)
-  keyboard = keyboard.replacingOccurrences(of: original, with: "case .consume, .speedUp, .speedDown:")
+  // Keep the production switch exhaustive; mutate only the viewport route.
+  keyboard = keyboard.replacingOccurrences(of: original, with: original + """
+
+        if [VideoToolsShortcuts.Action.zoomIn, .zoomOut, .panLeft, .panRight,
+            .panUp, .panDown, .resetViewport].contains(action) {
+          player.requireMPVCompatibility(reason: "Viewport negative control") {}
+          return true
+        }
+""")
 }
 let generated = """
 import AppKit

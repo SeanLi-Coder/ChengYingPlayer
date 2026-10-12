@@ -38,6 +38,10 @@ final class MainWindowBoundary {
   func showSettingsSidebar(tab: Tab, hideIfAlreadyShown: Bool) {}
 }
 class CoreBoundary {
+  let hasPendingPermanentRotation = false
+  func requestPermanentRotation(clockwiseQuarterTurns: Int) -> Bool {
+    preconditionFailure("Rotation is outside the focused viewport boundary")
+  }
   var nativeTransport: NSObject? = NSObject()
   var nativeReady = true
   var nativeRetiring = false

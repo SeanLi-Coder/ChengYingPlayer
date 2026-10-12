@@ -504,7 +504,8 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     // pass already scheduled or started must survive that second pass.
     let previewInFlight = automaticPreviewPending || previewTimer != nil || hasPreview || nativePreviewPending || nativeAnchorPending
     if sourceChanged || (force && !previewInFlight) {
-      let shouldPreview = automaticPreviewPending || (sourceChanged && playbackControlsVisible && selectedOperation == .clip)
+      let shouldPreview = player?.hasPendingPermanentRotation != true &&
+        (automaticPreviewPending || (sourceChanged && playbackControlsVisible && selectedOperation == .clip))
       if sourceChanged { validationMessage = nil }
       stopPreview(updateButton: true)
       observedSourceURL = newURL
@@ -553,18 +554,20 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   func requestPermanentRotation(clockwiseQuarterTurns: Int) {
     _ = view
-    if let player, player.isUsingNativePlayback {
-      cancelScheduledPreview()
-      automaticPreviewPending = false
-      player.requireMPVCompatibility(reason: "Permanent rotation preview") { [weak self] in
-        self?.requestPermanentRotation(clockwiseQuarterTurns: clockwiseQuarterTurns)
-      }
-      return
-    }
-    guard let player, let inputURL = currentLocalMediaURL else {
+    guard player?.requestPermanentRotation(clockwiseQuarterTurns: clockwiseQuarterTurns) == true else {
       showValidationError(NSLocalizedString("videotools.error.no_local_video", comment: "Open a local video first"))
       return
     }
+  }
+
+  /// Called only after PlayerCore consumes any pending compatibility intent.
+  @discardableResult
+  /// Returns whether the action was handled, including a displayed task error;
+  /// it does not report successful export or task completion.
+  func applyPermanentRotation(clockwiseQuarterTurns: Int, inputURL: URL) -> Bool {
+    _ = view
+    guard let player, !player.isUsingNativePlayback, player.info.state.loaded,
+          currentLocalMediaURL?.standardizedFileURL == inputURL.standardizedFileURL else { return false }
     stopPreview(updateButton: true, restorePlaybackState: false)
     if rotationCoordinator == nil {
       rotationMediaGeneration = player.videoToolsMediaGeneration
@@ -584,7 +587,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       updatePlaybackControls()
     } catch {
       showValidationError(error.localizedDescription)
+      // The action was handled: preserve this specific error instead of letting
+      // the forwarding entry point replace it with "Open a local video first".
+      return true
     }
+    return true
   }
 
   /// Keyboard markers own their loop independently of this panel's temporary preview.
@@ -635,11 +642,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       cancelScheduledPreview()
       return
     }
-    if selectedOperation == .rotate, let player, player.isUsingNativePlayback {
+    if selectedOperation == .rotate, let player, player.isUsingNativePlayback, !player.hasPendingPermanentRotation {
       player.requireMPVCompatibility(reason: "Rotation tools") { [weak self] in self?.updatePlaybackControls() }
       return
     }
-    if becameVisible, selectedOperation == .clip, !hasPreview {
+    if becameVisible, selectedOperation == .clip, !hasPreview, player?.hasPendingPermanentRotation != true {
       nativeAutomaticIntent = player?.nativePreviewIntentRevision
       anchorUntouchedRangeToCurrentPosition()
       automaticPreviewPending = true
@@ -913,6 +920,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   func controlTextDidChange(_ notification: Notification) {
+    player?.cancelPendingPermanentRotation()
     guard let field = notification.object as? NSTextField,
           field === startField || field === endField else { return }
     automaticPreviewPending = false
@@ -969,6 +977,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func scheduleRangePreview() {
+    guard player?.hasPendingPermanentRotation != true else { return }
     cancelScheduledPreview()
     guard selectedOperation == .clip || selectedOperation == .frames else { return }
     guard validatedRange(showError: false) != nil else {

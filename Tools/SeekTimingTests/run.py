@@ -45,6 +45,22 @@ final class TimingController {
 """ + members + "\n}\n" + """
 final class SeekCore {
   let isUsingNativePlayback = false
+  let hasPendingPermanentRotation = false
+  struct RotationRestoreBoundary { let position: Double }
+  var pendingRotationPlaybackRestore: RotationRestoreBoundary? {
+    precondition(!hasPendingPermanentRotation)
+    return nil
+  }
+  @discardableResult
+  func updatePendingRotationRestore(paused: Bool? = nil, position: Double? = nil) -> Bool {
+    precondition(pendingRotationPlaybackRestore == nil)
+    return false
+  }
+  @discardableResult
+  func cancelPendingPermanentRotation(requestID: UUID? = nil) -> Bool {
+    precondition(!hasPendingPermanentRotation)
+    return false
+  }
   func cancelNativePreview(restoreLoop: Bool) {
     preconditionFailure("Unexpected native preview in MPV timing tests")
   }

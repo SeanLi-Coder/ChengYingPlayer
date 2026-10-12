@@ -22,6 +22,7 @@ xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm6
   iina/NativePlayback/NativePlaybackSession.swift \
   iina/VideoTools/VideoToolsPlayerBridge.swift iina/VideoTools/VideoToolsLoopPolicy.swift \
   iina/VideoTools/VideoToolsShortcuts.swift \
+  iina/VideoTools/VideoToolsRotationIntent.swift \
   "$test_dir/Production.swift" Tools/NativeABLoopTests/Boundary.swift Tools/NativeABLoopTests/main.swift \
   "$test_dir/decoder.o" deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib \
   deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib \

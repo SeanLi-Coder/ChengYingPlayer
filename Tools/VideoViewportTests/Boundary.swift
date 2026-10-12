@@ -81,6 +81,10 @@ final class MainWindowBoundary {
 }
 
 final class PlayerCore {
+  let hasPendingPermanentRotation = false
+  func requestPermanentRotation(clockwiseQuarterTurns: Int) -> Bool {
+    preconditionFailure("Rotation routing is outside the legacy viewport fixture")
+  }
   var isUsingNativePlayback = false
   func captureNativePreviewPosition(completion: @escaping (Double?) -> Void) {
     preconditionFailure("Unexpected native preview in legacy viewport tests")

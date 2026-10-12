@@ -424,9 +424,21 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     let responder = window.firstResponder
     let isTextInput = responder is NSText || responder is NSTextField || responder is NSTextInputClient
     guard let action = VideoToolsShortcuts.resolve(
-      event, hasMedia: player.info.state.loaded, isTextInput: isTextInput,
+      event, hasMedia: player.info.state.loaded || player.hasPendingPermanentRotation, isTextInput: isTextInput,
       isModal: NSApp.modalWindow != nil || window.attachedSheet != nil
     ) else { return false }
+    // A handoff temporarily clears loaded state. Only its already-owned rotation
+    // intent can accept more presses; other shortcuts retain the loaded gate.
+    if !player.info.state.loaded {
+      switch action {
+      case .rotateLeft, .rotateRight: break
+      case .consume where event.keyCode == 37 || event.keyCode == 15: return true
+      default: return false
+      }
+    }
+    if action == .rotateLeft || action == .rotateRight {
+      return player.requestPermanentRotation(clockwiseQuarterTurns: action == .rotateLeft ? -1 : 1)
+    }
     if player.isUsingNativePlayback {
       switch action {
       case .consume, .speedUp, .speedDown, .zoomIn, .zoomOut,
@@ -448,11 +460,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
           }
         }
         return true
-      default:
-        player.requireMPVCompatibility(reason: "This video tool needs the compatibility backend") { [weak self] in
-          _ = self?.handleVideoToolsShortcutEvent(event)
-        }
-        return true
+      case .rotateLeft, .rotateRight: return false
       }
     }
     switch action {
@@ -472,9 +480,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       )
       player.setSpeed(speed)
     case .rotateLeft, .rotateRight:
-      guard !player.isInMiniPlayer else { return false }
-      player.mainWindow.showSettingsSidebar(tab: .tools, hideIfAlreadyShown: false)
-      player.mainWindow.quickSettingView.performVideoToolsShortcut(action)
+      return false
     case .setA, .setB:
       if player.mainWindow.quickSettingView.performVideoToolsShortcut(action) {
         player.sendOSD(.abLoop(player.info.abLoopStatus))
@@ -892,8 +898,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
   }
 
   @IBAction func playButtonAction(_ sender: NSButton) {
-    if player.isUsingNativePlayback { player.togglePause() }
-    else { player.info.state == .paused ? player.resume() : player.pause() }
+    player.togglePause()
   }
 
   @IBAction func muteButtonAction(_ sender: NSButton) {

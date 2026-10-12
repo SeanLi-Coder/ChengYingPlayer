@@ -129,6 +129,18 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     videoToolsViewController?.cancelPendingAutomaticPreview()
   }
 
+  func cancelPendingAutomaticVideoToolsPreview() {
+    videoToolsViewController?.cancelPendingAutomaticPreview()
+  }
+
+  @discardableResult
+  func applyPermanentRotation(clockwiseQuarterTurns: Int, inputURL: URL) -> Bool {
+    _ = view
+    guard let videoToolsViewController else { return false }
+    return videoToolsViewController.applyPermanentRotation(clockwiseQuarterTurns: clockwiseQuarterTurns,
+                                                           inputURL: inputURL)
+  }
+
   @discardableResult
   func performVideoToolsShortcut(_ action: VideoToolsShortcuts.Action) -> Bool {
     _ = view

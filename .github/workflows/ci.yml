@@ -474,6 +474,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+      - name: Test native rotation handoff ownership and cancellation
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 6
+        run: |
+          bash Tools/VideoToolsRotationIntentTests/run.sh
+          ROTATION_INTENT_SANITIZER=thread bash Tools/VideoToolsRotationIntentTests/run.sh
+          bash Tools/NativeRotationHandoffTests/run.sh
+          ROTATION_HANDOFF_SANITIZER=thread bash Tools/NativeRotationHandoffTests/run.sh
+
+      - name: Preserve native rotation handoff evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-rotation-handoff-evidence-${{ github.sha }}
+          path: |
+            build/rotation-intent-tests.*/*.log
+            build/rotation-intent-tests.*/*.sha256
+            build/rotation-intent-tests.*/base-commit.txt
+            build/rotation-intent-tests.*/mode.txt
+            build/rotation-handoff-tests.*/*.log
+            build/rotation-handoff-tests.*/*.sha256
+            build/rotation-handoff-tests.*/base-commit.txt
+            build/rotation-handoff-tests.*/mode.txt
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Test native playback in the complete application window
         if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
         timeout-minutes: 20

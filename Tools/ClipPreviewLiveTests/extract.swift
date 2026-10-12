@@ -23,7 +23,7 @@ func method(_ signature: String) -> String {
 }
 
 // Playback commands and loop recovery remain the actual production implementations.
-let methods = ["pause()", "resume()", "seek(absoluteSecond: Double)",
+let methods = ["pause()", "resume()", "seek(absoluteSecond:",
                "videoToolsEnforceLoopBounds(playbackRestarted: Bool = false)"]
 let extracted = "import Cocoa\nextension PlayerCore {\n" + methods.map(method).joined(separator: "\n") + "\n}\n"
 try extracted.write(to: output.appendingPathComponent("PlayerMethods.swift"), atomically: true, encoding: .utf8)

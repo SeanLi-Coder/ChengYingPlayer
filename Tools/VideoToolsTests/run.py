@@ -83,8 +83,25 @@ def main():
             actual_controller = str(baseline_path)
         common = ["iina/Updates/UpdateWorkAdmission.swift", "iina/VideoTools/VideoToolsModels.swift",
                   "iina/VideoTools/VideoToolsRotationCoordinator.swift"]
+        rotation_core = root / "RotationCore.swift"
+        subprocess.run(["xcrun", "swift", str(PROJECT_ROOT / "Tools/VideoToolsTests/extract.swift"),
+                        str(PROJECT_ROOT), str(rotation_core)], check=True)
+        # Older controller baselines never route through Core. Keep their real
+        # request implementation, and fail loudly if a new delivery is attempted.
+        rotation_baseline = []
+        if baseline is not None and "  func applyPermanentRotation(" not in baseline:
+            boundary = root / "LegacyRotationBoundary.swift"
+            boundary.write_text('''import Foundation
+extension VideoToolsViewController {
+  func applyPermanentRotation(clockwiseQuarterTurns: Int, inputURL: URL) -> Bool {
+    preconditionFailure("Unexpected Core delivery into a pre-handoff controller baseline")
+  }
+}
+''')
+            rotation_baseline.append(str(boundary))
         executable = bundle("NativeControlsTests")
         compile_sources(executable, [*common, "Tools/VideoToolsTests/Stubs.swift", "iina/ChengYingStyle.swift",
+            "iina/VideoTools/VideoToolsRotationIntent.swift", str(rotation_core), *rotation_baseline,
             "iina/MediaInfo/MediaInfoModels.swift", "iina/VideoTools/VideoToolsShortcuts.swift",
             "iina/VideoTools/VideoToolsLoopPolicy.swift", "iina/VideoTools/VideoToolsPlayerBridge.swift",
             actual_controller, "Tools/VideoToolsTests/ShortcutTests.swift", "Tools/VideoToolsTests/LoopPolicyTests.swift",

@@ -28,6 +28,9 @@ let methods = [
   "  func notifyWindowVideoSizeChanged()", "  func getMediaTitle(",
   "  func syncAbLoop()",
   "  func pause()", "  func resume()", "  func togglePause(",
+  "  @discardableResult\n  func cancelPendingPermanentRotation(", "  private func resetPermanentRotationMedia(",
+  "  private var pendingRotationPlaybackRestore:", "  @discardableResult\n  private func updatePendingRotationRestore(",
+  "  private func ownsPermanentRotationRequest(",
 ].map { signature -> String in
   let body = method(signature)
   if negative == "skip-native-title-update", signature == "  private func receiveNativeSnapshot(" {
@@ -54,6 +57,7 @@ let methods = [
   return body
 }.joined(separator: "\n\n")
 var declarations = section("  private var nativeTransport:", "  var receivedEndFileWhileLoading:")
+declarations += section("  private var permanentRotationIntent", "\n  /// Both window shortcuts")
 if negative == "ignore-opening-getter" {
   let original = "nativeInitialPlaybackPending ? (nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)) : playbackTransport.isPaused"
   precondition(declarations.components(separatedBy: original).count == 2, "Opening getter negative landmark changed")
