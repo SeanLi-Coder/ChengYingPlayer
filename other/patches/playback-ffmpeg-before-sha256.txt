@@ -1,0 +1,7 @@
+698e28a0c6bf6e2065d466efa7bea3a75be2e8160a0f28f1edc2e15e2e885c99  ffmpeg-7.1.5/configure
+22c639032c988a8064ff886aed02c1c81c460d7b192656412e5a5ac031511ab2  ffmpeg-7.1.5/libavcodec/Makefile
+f0afc380c97de9391c91b5fbad92e7cbe410fb2131ba34d568841d19281bcfeb  ffmpeg-7.1.5/libavcodec/av1dec.c
+bc37bdf09325fa1c22356d4692139593a7d3db9657aeb5cdd7f6d2e9922766e6  ffmpeg-7.1.5/libavcodec/av1dec.h
+c7e0109b6c222d634bfa21c2f3f3d2151bad879d68ae754514ef9e69caeaa966  ffmpeg-7.1.5/libavcodec/hwaccels.h
+526997416693596f1c415c653f22049f09f96b42974c90fff5bd3d470d295c1c  ffmpeg-7.1.5/libavcodec/videotoolbox.c
+bad1b26211fc4f22d914e0f422960a5a53389ee0e9d7fa817fba8ddca1155dd1  ffmpeg-7.1.5/libavcodec/vt_internal.h

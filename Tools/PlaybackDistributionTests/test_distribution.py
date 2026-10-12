@@ -68,6 +68,35 @@ class DistributionTests(unittest.TestCase):
             self.record.joinpath(f"patch-{label}-sha256.txt").write_text(
                 "".join(f"{digest}  {name}\n" for name, digest in hashes.items())
             )
+        self.ffmpeg_record = self.record / "ffmpeg-av1-backport"
+        self.ffmpeg_patch_records, ffmpeg_before, ffmpeg_after = VERIFY.locked_patches("playback-ffmpeg")
+        self.ffmpeg_original_sources = {
+            name: f"Synthetic original FFmpeg source: {name}\n".encode()
+            for name in ffmpeg_before
+        }
+        self.ffmpeg_modified_sources = {
+            name: f"Synthetic modified FFmpeg source: {name}\n".encode()
+            for name in ffmpeg_after
+        }
+        self.ffmpeg_before = {name: hashlib.sha256(data).hexdigest()
+                              for name, data in self.ffmpeg_original_sources.items()}
+        self.ffmpeg_after = {name: hashlib.sha256(data).hexdigest()
+                             for name, data in self.ffmpeg_modified_sources.items()}
+        for name, data in self.ffmpeg_modified_sources.items():
+            destination = self.ffmpeg_record / "patched-sources" / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
+        self.ffmpeg_record.joinpath("patches").mkdir()
+        for value in self.ffmpeg_patch_records.values():
+            self.ffmpeg_record.joinpath("patches", value[2]).write_bytes(
+                ROOT.joinpath("other/patches", value[2]).read_bytes())
+        self.ffmpeg_record.joinpath("patches.tsv").write_text(
+            "".join("\t".join(value) + "\n" for value in self.ffmpeg_patch_records.values()))
+        for label, hashes in (("before", self.ffmpeg_before), ("after", self.ffmpeg_after)):
+            self.ffmpeg_record.joinpath(f"patch-{label}-sha256.txt").write_text(
+                "".join(f"{digest}  {name}\n" for name, digest in hashes.items()))
+        self.ffmpeg_record.joinpath("patch-added-files.txt").write_text(
+            "ffmpeg-7.1.5/libavcodec/videotoolbox_av1.c\n")
         # These tiny local archives are deliberately synthetic source-lock boundaries.
         # Production always obtains the real pinned records from repository-owned scripts.
         for (
@@ -78,7 +107,7 @@ class DistributionTests(unittest.TestCase):
             _digest,
         ) in VERIFY.locked_sources().values():
             archive = self.cache / filename
-            root = f"{component}-{version}"
+            root = VERIFY.source_archive_root((component, version))
             notices = {
                 "LICENCE"
                 if component == "libunibreak"
@@ -96,7 +125,7 @@ class DistributionTests(unittest.TestCase):
                     destination = self.record / "licenses" / root / name
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     destination.write_bytes(contents)
-                for name, contents in self.original_patch_sources.items():
+                for name, contents in {**self.original_patch_sources, **self.ffmpeg_original_sources}.items():
                     if name.split("/")[0] != root:
                         continue
                     entry = tarfile.TarInfo(name)
@@ -129,6 +158,9 @@ class DistributionTests(unittest.TestCase):
         )
         self.record.joinpath("config_components.h").write_text(
             "#define CONFIG_H264_DECODER 1\n"
+            "#define CONFIG_AV1_DECODER 1\n"
+            "#define CONFIG_AV1_VIDEOTOOLBOX_HWACCEL 1\n"
+            "#define CONFIG_LIBDAV1D_DECODER 1\n"
         )
         self.record.joinpath("ffmpeg-config.mak").write_text(
             "FFMPEG_CONFIGURATION=--disable-autodetect --enable-shared --disable-static --enable-libdav1d --enable-videotoolbox --enable-gpl --enable-version3\n"
@@ -227,7 +259,61 @@ class DistributionTests(unittest.TestCase):
             source_cache=self.cache,
             runner=runner or self.native_boundary,
             patch_spec=(self.patch_records, self.patch_before, self.patch_after),
+            ffmpeg_patch_spec=(self.ffmpeg_patch_records, self.ffmpeg_before, self.ffmpeg_after),
         )
+
+    def test_ffmpeg_backport_is_required(self):
+        self.ffmpeg_record.joinpath("patches.tsv").unlink()
+        with self.assertRaisesRegex(ValueError, "Missing or linked build-record"):
+            self.verify()
+
+    def test_ffmpeg_added_file_marker_must_be_exact(self):
+        for marker in ("\n", "", "ffmpeg-7.1.5/libavcodec/videotoolbox_av1.c\nextra.c\n"):
+            with self.subTest(marker=marker):
+                self.ffmpeg_record.joinpath("patch-added-files.txt").write_text(marker)
+                with self.assertRaises(ValueError):
+                    self.verify()
+
+    def test_ffmpeg_added_file_cannot_be_linked_or_empty(self):
+        destination = self.ffmpeg_record / "patched-sources" / next(iter(VERIFY.FFMPEG_ADDED_SOURCES))
+        destination.write_bytes(b"")
+        with self.assertRaisesRegex(ValueError, "source files"):
+            self.verify()
+        destination.unlink()
+        destination.symlink_to(self.ffmpeg_record / "patches.tsv")
+        with self.assertRaisesRegex(ValueError, "Linked patch entry"):
+            self.verify()
+
+    def test_ffmpeg_added_file_must_be_absent_from_original_archive(self):
+        component = "playback-ffmpeg"
+        record = self.sources[component]
+        archive = self.cache / record[2]
+        with tarfile.open(archive, "r:gz") as stream:
+            members = [(entry, stream.extractfile(entry).read()) for entry in stream]
+        with tarfile.open(archive, "w:gz") as stream:
+            for entry, data in members:
+                stream.addfile(entry, io.BytesIO(data))
+            # Even a zero-byte substitute must be rejected as a false addition.
+            stream.addfile(tarfile.TarInfo(next(iter(VERIFY.FFMPEG_ADDED_SOURCES))), io.BytesIO(b""))
+        self.sources[component] = (*record[:-1], VERIFY.digest_file(archive))
+        self.write_sources()
+        with self.assertRaisesRegex(ValueError, "must be absent"):
+            self.verify()
+
+    def test_av1_hardware_and_software_components_are_required(self):
+        path = self.record / "config_components.h"
+        original = path.read_text()
+        for component in ("AV1_DECODER", "AV1_VIDEOTOOLBOX_HWACCEL", "LIBDAV1D_DECODER"):
+            with self.subTest(component=component):
+                path.write_text(original.replace(f"CONFIG_{component} 1", f"CONFIG_{component} 0"))
+                with self.assertRaisesRegex(ValueError, "Required AV1 playback component"):
+                    self.verify()
+
+    def test_ffmpeg_locked_new_source_is_the_only_added_file(self):
+        patches, before, after = VERIFY.locked_patches("playback-ffmpeg")
+        self.assertEqual(set(after) - set(before), VERIFY.FFMPEG_ADDED_SOURCES)
+        self.assertEqual(set(before) - set(after), set())
+        self.assertEqual(list(patches), ["ffmpeg-av1-videotoolbox"])
 
     def test_missing_patch_manifest_is_rejected(self):
         self.record.joinpath("patches.tsv").unlink()

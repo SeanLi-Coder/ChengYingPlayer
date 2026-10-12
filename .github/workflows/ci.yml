@@ -113,6 +113,7 @@ jobs:
           bash Tools/WindowLifecycleTests/run.sh
           bash Tools/AutoFileMatchingTests/run.sh
           bash Tools/PlaybackUIPerformanceTests/run.sh
+          python3 -B Tools/SeekTimingTests/run.py
 
       - name: Test simplified player features
         run: |
@@ -260,6 +261,14 @@ jobs:
         timeout-minutes: 5
         run: bash Tools/ScreenshotPreferenceTests/run.sh
 
+      - name: Test AV1 playback support and fallback with the actual linked libraries
+        timeout-minutes: 5
+        run: bash Tools/AV1PlaybackTests/run.sh
+
+      - name: Test automatic seek sampling with actual libmpv events
+        timeout-minutes: 5
+        run: python3 -B Tools/SeekTimingTests/run.py --live
+
       - name: Test real rotation at EOF, stop, and file replacement
         timeout-minutes: 5
         run: bash Tools/PlaybackRotationTests/run.sh
@@ -296,6 +305,7 @@ jobs:
         timeout-minutes: 10
         run: |
           python3 -B Tools/PlayerCloseTests/test_load_waiter.py
+          python3 -B Tools/PlayerCloseTests/test_window_lifecycle.py
           CHENGYING_TEST_SOFTWARE_GL=1 python3 -B Tools/PlayerCloseTests/run.py
 
       - name: Test silent video opening before audio output

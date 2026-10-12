@@ -123,13 +123,22 @@ final class PlayerEdgeControlsView: NSView {
       fragment.setContentHuggingPriority(.required, for: .horizontal)
       fragment.setContentHuggingPriority(.required, for: .vertical)
     }
+    // Center the original transport group when space permits. In narrow windows
+    // it may move left, but neither the buttons nor the volume slider may overlap
+    // or be detached to satisfy the visual preference.
+    let transportCenter = transport.centerXAnchor.constraint(equalTo: centerXAnchor)
+    // AppKit window sizing must outrank centering; a high priority here would
+    // enlarge a narrow window instead of allowing the controls to shift left.
+    transportCenter.priority = .defaultLow
+    transportCenter.identifier = "edge-transport-centered"
     NSLayoutConstraint.activate([
       heightAnchor.constraint(equalToConstant: Self.preferredHeight),
       timeline.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
       timeline.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
       timeline.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
       timeline.heightAnchor.constraint(equalToConstant: 22),
-      transport.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+      transport.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 8),
+      transportCenter,
       transport.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -43),
       transport.heightAnchor.constraint(lessThanOrEqualToConstant: 28),
       volume.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),

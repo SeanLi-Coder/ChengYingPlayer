@@ -83,6 +83,28 @@ the pinned libplacebo and bundled FFmpeg, reproduces the unpatched HLG failure,
 then checks synthetic Dolby Vision/HLG, PQ and SDR metadata through fallback,
 attribute copies, and AVFrame round-trips under ASan/UBSan.
 
+## FFmpeg playback AV1 VideoToolbox backport
+
+On 2026-10-12, ChengYingPlayer maintainers backported upstream commit
+[`f9c5c5358cfef3847674c6f3b3ded9611ebc5647`](https://github.com/FFmpeg/FFmpeg/commit/f9c5c5358cfef3847674c6f3b3ded9611ebc5647)
+to playback FFmpeg 7.1.5. Runtime hunks are unchanged; the upstream development
+branch's minor-version increment is omitted. The public FFmpeg 61 ABI and the
+five mpv patches above are retained. Original copyright and LGPL-2.1-or-later
+notices remain in the new `videotoolbox_av1.c` source.
+
+`other/playback_ffmpeg_patches.sh` independently verifies the patch bytes,
+original and modified file hashes, and exact added-file list before copying the
+record to `playback-build-record/ffmpeg-av1-backport`. The new file must be absent
+from the original source, including any empty file or dangling link. The source
+archive and in-application `Legal/Playback` contain this complete record; the
+original verified FFmpeg archive is not changed. The independent FFmpeg CLI
+used by video-editing and downloading tools is unaffected.
+
+The application admits AV1 hardware decoding only when both the actual linked
+FFmpeg decoder exposes the VideoToolbox configuration and macOS reports support.
+Software fallback remains available. An M2 software result does not establish
+actual M3/M4 hardware decoding or performance.
+
 ## FFmpeg media-tool modifications
 
 On 2026-10-05 ChengYingPlayer maintainers modified the verified FFmpeg 9.0.1

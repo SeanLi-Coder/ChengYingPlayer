@@ -77,6 +77,7 @@ install -m 644 "$PROJECT_ROOT/Tools/DownloaderHelper/runtime-artifacts.json" \
   printf '%s\n' "DownloadCenter-WHEEL-MANIFEST.json identifies pinned runtime wheels. Their verified sources and runtime source manifest are in third-party-sources/download-runtime/."
   printf '%s\n' "playback-build-record/ contains the exact source, configuration, toolchain and library checksums for this release build. The App inside the matching Apple-Silicon.dmg is the installable artifact."
   printf '%s\n' "Playback patches in other/patches/ are applied automatically, in locked order, by other/build_playback_libraries.sh; playback-build-record/ preserves their exact bytes and original/modified source hashes."
+  printf '%s\n' "The FFmpeg AV1 VideoToolbox backport is independently locked in other/patches/playback-ffmpeg-patches.tsv. playback-build-record/ffmpeg-av1-backport/ contains its patch, original/modified hashes, explicit added-file list and modified sources; the original FFmpeg source archive is unchanged."
   printf '%s\n' "Media patches in other/patches/media-patches.tsv are applied automatically by other/build_media_binaries.sh; media-build-record/ preserves their exact bytes, original/modified FFmpeg source, configuration and executable checksums before application signing."
   # Expand PWD when the recipient follows these instructions, not during packaging.
   # shellcheck disable=SC2016

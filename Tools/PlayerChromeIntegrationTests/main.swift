@@ -107,6 +107,12 @@ for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), N
         print("LAYOUT \(label): content=\(content.bounds) footer=\(footer.frame) corner=\(corner.frame) sidebar=\(controller.sideBarView.frame)")
         check(near(footer.frame.minY, 0) && near(footer.frame.height, 62) && near(footer.frame.width, content.bounds.width),
               "\(label): the real setup method pins the footer to the bottom")
+        let transport = controller.fragControlView!
+        let volume = controller.fragVolumeView!
+        let expectedCenter = min(footer.bounds.midX, volume.frame.minX - 12 - transport.frame.width / 2)
+        check(near(transport.frame.midX, expectedCenter) && transport.frame.minX >= 7.4 &&
+              transport.frame.maxX + 11.4 <= volume.frame.minX && near(volume.frame.maxX, footer.bounds.width - 8),
+              "\(label): transport recenters after legacy modes without hiding or overlapping volume")
         check(near(corner.frame.maxX, content.bounds.maxX - 8) && near(corner.frame.maxY, content.bounds.maxY - (fullscreen ? 10 : 28)),
               "\(label): the real setup method pins toolbar at the upper-right")
         check(originals.allSatisfy { $0.isDescendant(of: content) }, "\(label): every original fragment returns after legacy-mode round trips")

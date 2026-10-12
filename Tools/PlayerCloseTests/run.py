@@ -19,6 +19,8 @@ from other.test_app_workspace import CleanupError, TestAppWorkspace
 def validate_execution_environment(environment, *, diagnostic_mode):
     if environment.get("CLOSE_TEST_GL_PASS_DIAGNOSTICS") == "1" and not diagnostic_mode:
         raise ValueError("CLOSE_TEST_GL_PASS_DIAGNOSTICS=1 requires --failure-diagnostics")
+    if environment.get("CLOSE_TEST_RENDER_STATE_ONLY") == "1" and not diagnostic_mode:
+        raise ValueError("CLOSE_TEST_RENDER_STATE_ONLY=1 requires --failure-diagnostics")
     if "CLOSE_TEST_MPE_CONTROL" in environment:
         raise ValueError("Unset CLOSE_TEST_MPE_CONTROL; only --mpe-diagnostic-matrix selects MPE states")
     loader_overrides = sorted(name for name in environment
@@ -140,6 +142,7 @@ with verified_workspace() as directory:
                "iina/ReadWriteLock.swift", "iina/MPVOption.swift",
                "Tools/PlayerCloseTests/GLPassDiagnostics.swift",
                "Tools/PlayerCloseTests/Boundary.swift", "Tools/PlayerCloseTests/LoadWaiter.swift",
+               "Tools/PlayerCloseTests/WindowLifecycle.swift",
                "Tools/PlayerCloseTests/main.swift"]
     subprocess.run(["xcrun", "swiftc", "-suppress-warnings", "-o", str(executable),
                     *[str(ROOT / path) for path in sources],

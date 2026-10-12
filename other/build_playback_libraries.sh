@@ -15,6 +15,8 @@ source "$SCRIPT_DIR/third_party_sources.sh"
 source "$SCRIPT_DIR/playback_sources.sh"
 # shellcheck source=other/playback_patches.sh
 source "$SCRIPT_DIR/playback_patches.sh"
+# shellcheck source=other/playback_ffmpeg_patches.sh
+source "$SCRIPT_DIR/playback_ffmpeg_patches.sh"
 # shellcheck source=other/build_subtitle_libraries.sh
 source "$SCRIPT_DIR/build_subtitle_libraries.sh"
 
@@ -65,6 +67,7 @@ while IFS=$'\t' read -r name _; do
 done < <(playback_source_records)
 
 apply_playback_patches "$WORK_DIR" "$RECORD_DIR"
+apply_playback_ffmpeg_patches "$WORK_DIR" "$RECORD_DIR"
 
 echo "Building isolated static subtitle libraries..."
 build_subtitle_libraries "$PREFIX"
@@ -130,6 +133,12 @@ cd "$WORK_DIR/ffmpeg-$PLAYBACK_FFMPEG_VERSION"
 make -j"$PARALLELISM"
 make install
 cp config.h config_components.h "$RECORD_DIR/"
+for component in AV1_DECODER AV1_VIDEOTOOLBOX_HWACCEL LIBDAV1D_DECODER; do
+  if ! grep -qx "#define CONFIG_${component} 1" config_components.h; then
+    echo "Required AV1 playback component is disabled: $component" >&2
+    exit 1
+  fi
+done
 cp ffbuild/config.mak "$RECORD_DIR/ffmpeg-config.mak"
 
 echo "Building libmpv $PLAYBACK_MPV_VERSION with native Apple playback..."

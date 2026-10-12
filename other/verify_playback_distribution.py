@@ -36,6 +36,7 @@ SDK_DIRECTORIES = {
     "libswscale",
 }
 SHA256 = re.compile(r"[0-9a-f]{64}")
+FFMPEG_ADDED_SOURCES = frozenset({"ffmpeg-7.1.5/libavcodec/videotoolbox_av1.c"})
 LIBRARIES = {
     "libmpv.2.dylib",
     "libavcodec.61.dylib",
@@ -158,9 +159,10 @@ def checksum_records(path):
     return records
 
 
-def locked_patches():
+def locked_patches(prefix="playback"):
     root = PROJECT_ROOT / "other" / "patches"
-    patches = parse_sources(read_text(root / "playback-patches.tsv"))
+    require(prefix in {"playback", "playback-ffmpeg"}, "Unknown playback patch lock.")
+    patches = parse_sources(read_text(root / f"{prefix}-patches.tsv"))
     for _name, _component, filename, _origin, expected in patches.values():
         require(
             digest_file(root / filename) == expected,
@@ -168,12 +170,17 @@ def locked_patches():
         )
     return (
         patches,
-        checksum_records(root / "playback-before-sha256.txt"),
-        checksum_records(root / "playback-after-sha256.txt"),
+        checksum_records(root / f"{prefix}-before-sha256.txt"),
+        checksum_records(root / f"{prefix}-after-sha256.txt"),
     )
 
 
-def validate_patches(record, source_cache, sources, patch_spec=None):
+def source_archive_root(source):
+    component, version, *_ = source
+    return f"{'ffmpeg' if component == 'playback-ffmpeg' else component}-{version}"
+
+
+def validate_patches(record, source_cache, sources, patch_spec=None, *, added_files=frozenset()):
     patches, before, after = locked_patches() if patch_spec is None else patch_spec
     recorded = parse_sources(read_text(record / "patches.tsv"))
     require(
@@ -182,7 +189,8 @@ def validate_patches(record, source_cache, sources, patch_spec=None):
     )
     require(
         before
-        and set(before) == set(after)
+        and not set(before).intersection(added_files)
+        and set(before) | added_files == set(after)
         and checksum_records(record / "patch-before-sha256.txt") == before
         and checksum_records(record / "patch-after-sha256.txt") == after,
         "Playback patched-source checksums differ from the current locks.",
@@ -218,7 +226,7 @@ def validate_patches(record, source_cache, sources, patch_spec=None):
     )
     for root in roots:
         candidates = [
-            value for value in sources.values() if f"{value[0]}-{value[1]}" == root
+            value for value in sources.values() if source_archive_root(value) == root
         ]
         require(len(candidates) == 1, f"Unresolved patched source component: {root}")
         component, _version, filename, _url, digest = candidates[0]
@@ -236,6 +244,10 @@ def validate_patches(record, source_cache, sources, patch_spec=None):
         with tarfile.open(archive, mode="r:*") as contents:
             for member in contents:
                 name = member.name.removeprefix("./")
+                require(
+                    name not in added_files,
+                    f"FFmpeg added source must be absent from the original archive: {name}",
+                )
                 if name not in wanted:
                     continue
                 require(
@@ -254,6 +266,29 @@ def validate_patches(record, source_cache, sources, patch_spec=None):
             found == wanted,
             f"Playback patch original source checksums do not match {component}.",
         )
+
+
+def validate_ffmpeg_patches(record, source_cache, sources, patch_spec=None):
+    root = PROJECT_ROOT / "other/patches"
+    marker = read_text(root / "playback-ffmpeg-added-files.txt")
+    require(
+        marker == "ffmpeg-7.1.5/libavcodec/videotoolbox_av1.c\n",
+        "Unexpected FFmpeg added-source lock.",
+    )
+    patched_record = record / "ffmpeg-av1-backport"
+    require(
+        patched_record.is_dir() and not patched_record.is_symlink(),
+        "Missing or linked FFmpeg playback backport record.",
+    )
+    require(
+        read_text(patched_record / "patch-added-files.txt") == marker,
+        "FFmpeg added-source record differs from the explicit lock.",
+    )
+    validate_patches(
+        patched_record, source_cache, sources,
+        locked_patches("playback-ffmpeg") if patch_spec is None else patch_spec,
+        added_files=FFMPEG_ADDED_SOURCES,
+    )
 
 
 def validate_configuration(record):
@@ -292,7 +327,12 @@ def validate_configuration(record):
             re.search(rf"^#define {name} {enabled}$", config, re.MULTILINE),
             f"Unexpected FFmpeg build option: {name}",
         )
-    read_text(record / "config_components.h")
+    components = read_text(record / "config_components.h")
+    for name in ("AV1_DECODER", "AV1_VIDEOTOOLBOX_HWACCEL", "LIBDAV1D_DECODER"):
+        require(
+            re.search(rf"^#define CONFIG_{name} 1$", components, re.MULTILINE),
+            f"Required AV1 playback component is disabled: {name}",
+        )
     ffmpeg = read_text(record / "ffmpeg-config.mak")
     for option in (
         "--disable-autodetect",
@@ -546,6 +586,7 @@ def verify_distribution(
     source_cache=None,
     runner=native_command,
     patch_spec=None,
+    ffmpeg_patch_spec=None,
 ):
     dependencies = dependencies.resolve(strict=True)
     record = dependencies / "playback-build-record"
@@ -563,6 +604,7 @@ def verify_distribution(
         os.environ.get("SOURCE_CACHE_DIR", str(dependencies / "sources"))
     )
     validate_patches(record, cache.resolve(strict=True), expected, patch_spec)
+    validate_ffmpeg_patches(record, cache.resolve(strict=True), expected, ffmpeg_patch_spec)
     validate_configuration(record)
     validate_headers(dependencies, record)
     validate_libraries(dependencies, record, runner)

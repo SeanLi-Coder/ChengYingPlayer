@@ -915,19 +915,19 @@ class PlayerCore: NSObject {
       mpv.command(.seek, args: ["\(relativeSecond)", "relative+exact"], checkError: false)
 
     case .auto:
-      // for each file , try use exact and record interval first
-      if !triedUsingExactSeekForCurrentFile {
-        mpv.recordedSeekTimeListener = { [unowned self] interval in
-          // if seek time < 0.05, then can use exact
-          self.useExactSeekForCurrentFile = interval < 0.05
-        }
-        mpv.needRecordSeekTime = true
-        triedUsingExactSeekForCurrentFile = true
-      }
-      let seekMode = useExactSeekForCurrentFile ? "relative+exact" : "relative"
-      mpv.command(.seek, args: ["\(relativeSecond)", seekMode], checkError: false)
+      // The first probe must actually be exact, even after a slow previous file.
+      let firstProbe = !triedUsingExactSeekForCurrentFile
+      triedUsingExactSeekForCurrentFile = true
+      let seekMode = firstProbe || useExactSeekForCurrentFile ? "relative+exact" : "relative"
+      mpv.command(.seek, args: ["\(relativeSecond)", seekMode], checkError: false,
+                  seekTimingGeneration: firstProbe ? videoToolsMediaGeneration : nil)
 
     }
+  }
+
+  func resetAutoSeekForNewMedia() {
+    triedUsingExactSeekForCurrentFile = false
+    useExactSeekForCurrentFile = true
   }
 
   func seek(absoluteSecond: Double) {
@@ -2137,7 +2137,7 @@ class PlayerCore: NSObject {
     }
     info.videoPosition = VideoTime(pos)
     info.videoRemaining = VideoTime(remaining)
-    triedUsingExactSeekForCurrentFile = false
+    resetAutoSeekForNewMedia()
     checkUnsyncedWindowOptions()
     // generate thumbnails if window has loaded video
     if mainWindow.isVideoLoaded {

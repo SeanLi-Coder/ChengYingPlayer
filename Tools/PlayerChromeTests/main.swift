@@ -127,6 +127,13 @@ func validateLayout(_ label: String) {
         "\(label): the 22-point timeline spans the bottom with eight-point side insets")
   check(approximately(transport.frame.width, 132) && approximately(volume.frame.width, 104),
         "\(label): XIB-required transport and volume widths remain intact")
+  let idealCenter = edge.bounds.midX
+  let maximumCenter = volume.frame.minX - 12 - transport.frame.width / 2
+  check(approximately(transport.frame.midX, min(idealCenter, maximumCenter)) && transport.frame.minX >= 7.4,
+        "\(label): transport centers in the video, yielding only enough room for right-side volume")
+  let playCenter = play.convert(NSPoint(x: play.bounds.midX, y: play.bounds.midY), to: edge)
+  check(approximately(playCenter.x, transport.frame.midX) && approximately(volume.frame.maxX, edge.bounds.width - 8),
+        "\(label): the actual play button is centered in its group and volume stays right-aligned")
   check(transport.frame.maxX + 12 <= volume.frame.minX && transport.frame.minY >= timeline.frame.maxY - 1,
         "\(label): compact controls do not overlap at the actual window width")
   let slider = fixture.view("eBP-6g-bAT")
@@ -144,9 +151,15 @@ func validateLayout(_ label: String) {
   check(edge.hitTest(edge.convert(gap, to: canvas)) == nil, "\(label): empty footer space passes clicks to the video")
   let sliderCenter = slider.convert(NSPoint(x: slider.bounds.midX, y: slider.bounds.midY), to: canvas)
   check(edge.hitTest(sliderCenter) === slider, "\(label): seeking still reaches the existing native slider")
+  for id in ["10x-bg-xlj", "gxw-pJ-Lcg", "EIi-qd-glM", "2py-h1-0km", "SAG-kc-FAt"] {
+    let control = fixture.view(id)
+    let point = control.convert(NSPoint(x: control.bounds.midX, y: control.bounds.midY), to: canvas)
+    check(edge.hitTest(point) === control && !control.isHiddenOrHasHiddenAncestor,
+          "\(label): control \(id) keeps its original clickable native surface")
+  }
 }
 
-for width: CGFloat in [285, 320, 640, 1920] {
+for width: CGFloat in [285, 320, 379, 380, 381, 640, 1920] {
   // First exercise exact requested geometry independently of the available CI screen.
   canvas.setFrameSize(NSSize(width: width, height: max(180, width * 9 / 16)))
   validateLayout("Exact \(Int(width))")
@@ -155,6 +168,8 @@ for width: CGFloat in [285, 320, 640, 1920] {
     let requested = NSSize(width: width, height: max(180, width * 9 / 16))
     window.setContentSize(requested)
     RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    check(canvas.bounds.width <= requested.width + 0.6,
+          "Window \(Int(width)): optional transport centering cannot enlarge the requested window width")
     validateLayout("Window \(Int(width)) \(appearance.rawValue)")
     for scale: CGFloat in [1, 2] {
       _ = try snapshot(canvas, name: "chrome-\(Int(width))-\(appearance == .aqua ? "light" : "dark")-\(Int(scale))x",
@@ -163,8 +178,24 @@ for width: CGFloat in [285, 320, 640, 1920] {
   }
 }
 
-play.performClick(nil)
-check(recorder.actions.last == play.tag, "The reused play button still invokes its original action")
+for width: CGFloat in [640, 285, 381, 320, 1920, 379, 380, 285, 640] {
+  canvas.setFrameSize(NSSize(width: width, height: 360))
+  validateLayout("Resize round trip \(Int(width))")
+}
+for id in ["10x-bg-xlj", "gxw-pJ-Lcg", "EIi-qd-glM", "2py-h1-0km"] {
+  let button = fixture.view(id) as! NSButton
+  button.performClick(nil)
+  check(recorder.actions.last == button.tag, "Repositioned button \(id) still invokes its original action")
+}
+let audio = fixture.view("SAG-kc-FAt") as! NSSlider
+audio.doubleValue = 0
+_ = NSApp.sendAction(audio.action!, to: audio.target, from: audio)
+check(recorder.actions.last == audio.tag && audio.doubleValue == 0,
+      "The right-side volume slider preserves zero value and its original action")
+audio.doubleValue = 70
+_ = NSApp.sendAction(audio.action!, to: audio.target, from: audio)
+check(recorder.actions.last == audio.tag && audio.doubleValue == 70,
+      "The right-side volume slider remains adjustable after narrow/wide resize round trips")
 let seek = fixture.view("eBP-6g-bAT") as! NSSlider
 seek.doubleValue = 73
 _ = NSApp.sendAction(seek.action!, to: seek.target, from: seek)

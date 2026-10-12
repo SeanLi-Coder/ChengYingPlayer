@@ -8,6 +8,7 @@ if hardwareRequested && forceSoftwareGL {
 }
 
 NSApplication.shared.setActivationPolicy(.accessory)
+NSApplication.shared.finishLaunching()
 let player = PlayerCore()
 let video = VideoView(player: player)
 let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 640, height: 360),
@@ -32,6 +33,28 @@ var startedFiles = 0
 var endedFiles = 0
 var lastEndReason: Int32?
 var lastEndError: Int32?
+var renderStateSamples: [[String: Any]] = []
+
+func renderStateSnapshot(_ phase: String) -> [String: Any] {
+  let layer = video.videoLayer
+  return ["phase": phase, "round": loadRound,
+          "elapsed": ProcessInfo.processInfo.systemUptime - loadStartedAt,
+          "position": position ?? -1, "updates": ObservedLayer.updateRequests,
+          "forced_updates": ObservedLayer.forcedUpdateRequests,
+          "display_calls": ObservedLayer.displayCalls, "completed_display_calls": ObservedLayer.completedDisplayCalls,
+          "can_draw": ObservedLayer.readinessChecks, "accepted_can_draw": ObservedLayer.acceptedReadinessChecks,
+          "frames": ObservedLayer.frames, "pictures": ObservedLayer.pictureFrames,
+          "window_visible": window.isVisible, "window_occlusion_visible": window.occlusionState.contains(.visible),
+          "window_occlusion_raw": window.occlusionState.rawValue, "window_on_active_space": window.isOnActiveSpace,
+          "window_number": window.windowNumber, "window_alpha": window.alphaValue,
+          "window_miniaturized": window.isMiniaturized, "window_animation_behavior": window.animationBehavior.rawValue,
+          "application_active": NSApp.isActive, "application_hidden": NSApp.isHidden,
+          "view_has_window": video.window === window, "view_hidden": video.isHiddenOrHasHiddenAncestor,
+          "view_visible_rect": NSStringFromRect(video.visibleRect), "layer_hidden": layer.isHidden,
+          "layer_opacity": layer.opacity, "layer_bounds": NSStringFromRect(layer.bounds),
+          "layer_needs_display": layer.needsDisplay(), "layer_asynchronous": layer.isAsynchronous,
+          "layer_animation_keys": layer.animationKeys() ?? []]
+}
 
 func recordLifecycleEvent(_ event: mpv_event) {
   let relevant = [MPV_EVENT_START_FILE, MPV_EVENT_FILE_LOADED, MPV_EVENT_PLAYBACK_RESTART,
@@ -115,10 +138,12 @@ func drainMPVEvents() {
 }
 
 func pump(_ seconds: Double) {
-  let end = Date().addingTimeInterval(seconds)
-  while Date() < end {
+  let end = ProcessInfo.processInfo.systemUptime + seconds
+  while ProcessInfo.processInfo.systemUptime < end {
     drainMPVEvents()
-    RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+    PlayerCloseWindowLifecycle.dispatchEvents(until: end)
+    let remaining = end - ProcessInfo.processInfo.systemUptime
+    if remaining > 0 { RunLoop.main.run(until: Date().addingTimeInterval(min(remaining, 0.005))) }
   }
 }
 
@@ -133,8 +158,16 @@ func savePassDiagnostics(_ name: String, directory: URL) throws {
 func captureFailureDiagnostics(index: Int, frameDelta: Int, pictureDelta: Int) {
   guard let directory = failureDiagnosticDirectory else { return }
   do {
+    renderStateSamples.append(renderStateSnapshot("failure-before-screenshots"))
+    try JSONSerialization.data(withJSONObject: renderStateSamples, options: [.prettyPrinted, .sortedKeys])
+      .write(to: directory.appendingPathComponent("render-state.json"), options: .atomic)
     try diagnosticLog.write(to: directory.appendingPathComponent("before-screenshots.log"), options: .atomic)
     try savePassDiagnostics("before-screenshots", directory: directory)
+    if ProcessInfo.processInfo.environment["CLOSE_TEST_RENDER_STATE_ONLY"] == "1" {
+      print("FAILURE_DIAGNOSTICS: round=\(index), render_state_only=true, screenshots=0")
+      fflush(stdout)
+      return
+    }
     var screenshots: [[String: Any]] = []
     for (offset, mode) in ["video", "window"].enumerated() {
       let identifier = UInt64(1001 + offset)
@@ -198,7 +231,8 @@ window.delegate = delegate
 let media = CommandLine.arguments[1]
 var decoders = Set<String>()
 for index in 0..<30 {
-  window.orderFront(nil)
+  NSApp.activate(ignoringOtherApps: true)
+  window.makeKeyAndOrderFront(nil)
   delegate.preview = index % 2 == 0
   let initialRestarts = playbackRestarts
   position = nil
@@ -215,17 +249,29 @@ for index in 0..<30 {
   let initialFrames = ObservedLayer.frames
   let initialPictures = ObservedLayer.pictureFrames
   let initialPosition = position ?? 0
+  if failureDiagnosticDirectory != nil {
+    renderStateSamples = [renderStateSnapshot("readiness-start")]
+  }
+  var nextRenderStateSample = ProcessInfo.processInfo.systemUptime + 0.25
   let readinessStarted = Date()
   let frameDeadline = Date().addingTimeInterval(8)
-  while (ObservedLayer.pictureFrames < initialPictures + 2 || playbackRestarts <= initialRestarts ||
+  while (!PlayerCloseWindowLifecycle.isVisible(window) ||
+         ObservedLayer.pictureFrames < initialPictures + 2 || playbackRestarts <= initialRestarts ||
          (position ?? 0) <= initialPosition + 0.01),
-        Date() < frameDeadline { pump(0.01) }
+        Date() < frameDeadline {
+    pump(0.01)
+    if failureDiagnosticDirectory != nil, ProcessInfo.processInfo.systemUptime >= nextRenderStateSample {
+      renderStateSamples.append(renderStateSnapshot("readiness-wait"))
+      nextRenderStateSample = ProcessInfo.processInfo.systemUptime + 0.25
+    }
+  }
   let frameDelta = ObservedLayer.frames - initialFrames
   let pictureDelta = ObservedLayer.pictureFrames - initialPictures
   let readyAfter = Date().timeIntervalSince(readinessStarted)
-  print("READY: \(index), loaded=\(loadedFiles), frames=\(frameDelta), pictures=\(pictureDelta), restarts=\(playbackRestarts - initialRestarts), position=\(position ?? -1), loadWait=\(String(format: "%.3f", loadElapsed))s, wait=\(String(format: "%.3f", readyAfter))s, canDraw=\(ObservedLayer.acceptedReadinessChecks)/\(ObservedLayer.readinessChecks), visible=\(window.isVisible), bounds=\(video.videoLayer.bounds)")
+  print("READY: \(index), loaded=\(loadedFiles), frames=\(frameDelta), pictures=\(pictureDelta), restarts=\(playbackRestarts - initialRestarts), position=\(position ?? -1), loadWait=\(String(format: "%.3f", loadElapsed))s, wait=\(String(format: "%.3f", readyAfter))s, canDraw=\(ObservedLayer.acceptedReadinessChecks)/\(ObservedLayer.readinessChecks), visible=\(window.isVisible), activeSpace=\(window.isOnActiveSpace), unoccluded=\(window.occlusionState.contains(.visible)), bounds=\(video.videoLayer.bounds)")
   fflush(stdout)
-  let readinessPassed = frameDelta >= 2 && pictureDelta >= 2 && playbackRestarts > initialRestarts &&
+  let readinessPassed = PlayerCloseWindowLifecycle.isVisible(window) &&
+    frameDelta >= 2 && pictureDelta >= 2 && playbackRestarts > initialRestarts &&
     (position ?? 0) > initialPosition + 0.01
   if index == 0, let directory = failureDiagnosticDirectory {
     do {

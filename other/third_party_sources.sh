@@ -248,5 +248,9 @@ write_third_party_source_manifest() {
       printf '%s  other/patches/%s  %s  %s  %s\n' \
         "$expected_sha256" "$filename" "$record_name" "$version" "$url"
     done < "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/media-patches.tsv"
+    while IFS=$'\t' read -r record_name version filename url expected_sha256; do
+      printf '%s  other/patches/%s  %s  %s  %s\n' \
+        "$expected_sha256" "$filename" "$record_name" "$version" "$url"
+    done < "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/playback-ffmpeg-patches.tsv"
   } > "$destination"
 }
