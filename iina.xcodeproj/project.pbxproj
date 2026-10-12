@@ -7,6 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D4F500010000000000000001 /* CYNMediaDecoder.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000002 /* CYNMediaDecoder.m */; };
+		D4F500010000000000000002 /* NativeSampleBufferOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000003 /* NativeSampleBufferOutput.swift */; };
+		D4F500010000000000000003 /* NativePlaybackSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000004 /* NativePlaybackSession.swift */; };
+		D4F500010000000000000004 /* NativePlaybackSampleGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000005 /* NativePlaybackSampleGate.swift */; };
+		D4F500010000000000000005 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000006 /* AVFoundation.framework */; };
+		D4F500010000000000000006 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000007 /* CoreMedia.framework */; };
+		D4F500010000000000000007 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000008 /* CoreVideo.framework */; };
+		D4F500010000000000000008 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000009 /* AudioToolbox.framework */; };
 		D4F400010000000000000001 /* SummaryToolsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F400020000000000000001 /* SummaryToolsModels.swift */; };
 		D4F400010000000000000002 /* SummaryToolsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F400020000000000000002 /* SummaryToolsWindowController.swift */; };
 		D4F400010000000000000003 /* SummaryTools.strings in Resources */ = {isa = PBXBuildFile; fileRef = D4F400040000000000000001 /* SummaryTools.strings */; };
@@ -441,6 +449,15 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D4F500020000000000000001 /* CYNMediaDecoder.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CYNMediaDecoder.h; sourceTree = "<group>"; };
+		D4F500020000000000000002 /* CYNMediaDecoder.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = CYNMediaDecoder.m; sourceTree = "<group>"; };
+		D4F500020000000000000003 /* NativeSampleBufferOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSampleBufferOutput.swift; sourceTree = "<group>"; };
+		D4F500020000000000000004 /* NativePlaybackSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlaybackSession.swift; sourceTree = "<group>"; };
+		D4F500020000000000000005 /* NativePlaybackSampleGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlaybackSampleGate.swift; sourceTree = "<group>"; };
+		D4F500020000000000000006 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		D4F500020000000000000007 /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
+		D4F500020000000000000008 /* CoreVideo.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreVideo.framework; path = System/Library/Frameworks/CoreVideo.framework; sourceTree = SDKROOT; };
+		D4F500020000000000000009 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		D4F400020000000000000001 /* SummaryToolsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryToolsModels.swift; sourceTree = "<group>"; };
 		D4F400020000000000000002 /* SummaryToolsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryToolsWindowController.swift; sourceTree = "<group>"; };
 		D4F400030000000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/SummaryTools.strings; sourceTree = "<group>"; };
@@ -1930,6 +1947,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D4F500010000000000000005 /* AVFoundation.framework in Frameworks */,
+				D4F500010000000000000006 /* CoreMedia.framework in Frameworks */,
+				D4F500010000000000000007 /* CoreVideo.framework in Frameworks */,
+				D4F500010000000000000008 /* AudioToolbox.framework in Frameworks */,
 				496B19921E2968530035AF10 /* PIP.framework in Frameworks */,
 				8403CEA72007CBD400645516 /* MediaPlayer.framework in Frameworks */,
 				34ACAB872C142A0500F871A0 /* libpostproc.58.dylib in Frameworks */,
@@ -1967,6 +1988,18 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		D4F500030000000000000001 /* NativePlayback */ = {
+			isa = PBXGroup;
+			children = (
+				D4F500020000000000000001 /* CYNMediaDecoder.h */,
+				D4F500020000000000000002 /* CYNMediaDecoder.m */,
+				D4F500020000000000000003 /* NativeSampleBufferOutput.swift */,
+				D4F500020000000000000004 /* NativePlaybackSession.swift */,
+				D4F500020000000000000005 /* NativePlaybackSampleGate.swift */,
+			);
+			path = NativePlayback;
+			sourceTree = "<group>";
+		};
 		D4F100030000000000000001 /* Updates */ = {
 			isa = PBXGroup;
 			children = (
@@ -2168,6 +2201,10 @@
 		848290731D95978100C3C76C /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				D4F500020000000000000006 /* AVFoundation.framework */,
+				D4F500020000000000000007 /* CoreMedia.framework */,
+				D4F500020000000000000008 /* CoreVideo.framework */,
+				D4F500020000000000000009 /* AudioToolbox.framework */,
 				34ACAB602C142A0400F871A0 /* libavcodec.61.dylib */,
 				34ACAB682C142A0500F871A0 /* libavdevice.61.dylib */,
 				34ACAB482C142A0300F871A0 /* libavfilter.10.dylib */,
@@ -2546,6 +2583,7 @@
 		84EB1ED81D2F51D3004FA5A1 /* iina */ = {
 			isa = PBXGroup;
 			children = (
+				D4F500030000000000000001 /* NativePlayback */,
 				84FF846D1D2FF698001B318A /* deps */,
 				84A0BAA21D2FAE8200BC8DA1 /* Assets */,
 				84A0BAA71D2FAF9700BC8DA1 /* Controllers */,
@@ -3075,6 +3113,10 @@
 				D4C700022F6A000100000002 /* VideoToolsHelperClient.swift in Sources */,
 				D4C700032F6A000100000003 /* VideoToolsTaskManager.swift in Sources */,
 				D4C700042F6A000100000004 /* VideoToolsPlayerBridge.swift in Sources */,
+				D4F500010000000000000001 /* CYNMediaDecoder.m in Sources */,
+				D4F500010000000000000002 /* NativeSampleBufferOutput.swift in Sources */,
+				D4F500010000000000000003 /* NativePlaybackSession.swift in Sources */,
+				D4F500010000000000000004 /* NativePlaybackSampleGate.swift in Sources */,
 				D4C700052F6A000100000005 /* VideoToolsViewController.swift in Sources */,
 				D4C700062F6A000100000006 /* VideoToolsShortcuts.swift in Sources */,
 				D4C700072F6A000100000007 /* VideoToolsLoopPolicy.swift in Sources */,

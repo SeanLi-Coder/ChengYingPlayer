@@ -334,6 +334,16 @@ jobs:
           CODE_SIGNING_ALLOWED=YES
           CODE_SIGNING_REQUIRED=YES
 
+      - name: Test independent native playback backend
+        timeout-minutes: 6
+        run: |
+          bash Tools/NativeDecoderTests/run.sh
+          bash Tools/NativeSampleBufferOutputTests/run.sh
+          bash Tools/NativeSampleBufferDisplayTests/run.sh
+          bash Tools/NativePlaybackSessionTests/run.sh
+          bash Tools/NativePlaybackRenderedTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativePlaybackSessionTests/run.sh
+
       - name: Assemble and verify application
         run: |
           set -euo pipefail
