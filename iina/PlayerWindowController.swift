@@ -429,7 +429,8 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     ) else { return false }
     if player.isUsingNativePlayback {
       switch action {
-      case .consume, .speedUp, .speedDown:
+      case .consume, .speedUp, .speedDown, .zoomIn, .zoomOut,
+           .panLeft, .panRight, .panUp, .panDown, .resetViewport:
         break
       case .setA, .setB:
         player.requestNativeLoopAction(action == .setA ? .captureA : .captureB) { [weak self] result in

@@ -80,7 +80,14 @@ final class MockWindow {
   let videoView = MockVideoView()
 }
 final class MockPIP { var playing = false }
-final class MockVideoView { func stopDisplayLink() {} }
+final class MockVideoView {
+  var viewport: (Double, CGPoint)?
+  func stopDisplayLink() {}
+  func updateNativeViewport(scale: Double, normalizedPan: CGPoint) -> Bool {
+    viewport = (scale, normalizedPan)
+    return true
+  }
+}
 class CoreInfoBoundary {
   unowned let player: CoreBoundary
   init(_ player: CoreBoundary) { self.player = player }

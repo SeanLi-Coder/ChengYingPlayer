@@ -239,8 +239,195 @@ final class NativeAppTestDriver {
       self.wait("paused_seek_presents_green_frame", until: {
         player.info.state == .paused && player.playbackIsPaused &&
           abs((player.playbackPosition ?? -1) - 4.2) < 0.075 && self.pixel(player, is: .green)
-      }) { self.exerciseABLoop(player) }
+      }) { self.exerciseViewport(player) }
     }
+  }
+
+  private func exerciseViewport(_ player: PlayerCore) {
+    guard let window = player.mainWindow.window else { fail("viewport_key_window_ready"); return }
+    let originalFrame = window.frame
+    NSApp.activate(ignoringOtherApps: true)
+    window.makeKeyAndOrderFront(nil)
+    window.makeFirstResponder(nil)
+    player.mainWindow.beginControlInteraction()
+    let slider = player.mainWindow.volumeSlider!
+    slider.doubleValue = 0
+    guard let action = slider.action, NSApp.sendAction(action, to: slider.target, from: slider) else {
+      fail("viewport_key_window_ready"); return
+    }
+    wait("viewport_key_window_ready", until: { NSApp.keyWindow === window && window.isVisible }) {
+      self.waitForNativePaused(player, position: 4.2, color: .green,
+        label: "viewport_initial_attached_geometry",
+        extra: { self.viewportMatches(player, scale: 1, panX: 0, panY: 0) }) {
+        self.exerciseViewportKeys(player, originalFrame: originalFrame)
+      }
+    }
+  }
+
+  private func exerciseViewportKeys(_ player: PlayerCore, originalFrame: NSRect) {
+    // Expected values are independent of VideoToolsViewport.applying. Pan is
+    // one twentieth of the fitted dimension, divided by the accepted zoom.
+    typealias Step = (label: String, action: VideoToolsShortcuts.Action, repeats: Int,
+                      scale: Double, panX: Double, panY: Double)
+    let pan = 0.05 / 1.5
+    let steps: [Step] = [
+      ("viewport_zoom_in_key_updates_layer", .zoomIn, 1, 1.1, 0, 0),
+      ("viewport_zoom_out_key_updates_layer", .zoomOut, 1, 1, 0, 0),
+      ("viewport_pan_setup_zoomed", .zoomIn, 5, 1.5, 0, 0),
+      ("viewport_pan_right_key_updates_layer", .panRight, 1, 1.5, pan, 0),
+      ("viewport_pan_left_key_updates_layer", .panLeft, 2, 1.5, -pan, 0),
+      ("viewport_pan_up_key_updates_layer", .panUp, 1, 1.5, -pan, -pan),
+      ("viewport_pan_down_key_updates_layer", .panDown, 2, 1.5, -pan, pan),
+    ]
+    func advance(_ index: Int) {
+      guard index < steps.count else {
+        self.exerciseViewportResize(player, originalFrame: originalFrame, pan: pan)
+        return
+      }
+      let step = steps[index]
+      for _ in 0..<step.repeats {
+        guard self.sendViewportKey(player, action: step.action) else { self.fail(step.label); return }
+      }
+      self.waitForNativePaused(player, position: 4.2, color: .green, label: step.label,
+        extra: { self.viewportMatches(player, scale: step.scale, panX: step.panX, panY: step.panY) }) {
+        advance(index + 1)
+      }
+    }
+    advance(0)
+  }
+
+  private func sendViewportKey(_ player: PlayerCore, action: VideoToolsShortcuts.Action) -> Bool {
+    guard let window = player.mainWindow.window, NSApp.keyWindow === window,
+          !(window.firstResponder is NSTextInputClient) else { return false }
+    let code: UInt16
+    let characters: String
+    let modifiers: NSEvent.ModifierFlags
+    switch action {
+    case .zoomIn: code = 24; characters = "="; modifiers = []
+    case .zoomOut: code = 27; characters = "-"; modifiers = []
+    case .panLeft: code = 123; characters = "\u{f702}"; modifiers = [.command, .shift, .numericPad, .function]
+    case .panRight: code = 124; characters = "\u{f703}"; modifiers = [.command, .shift, .numericPad, .function]
+    case .panDown: code = 125; characters = "\u{f701}"; modifiers = [.command, .shift, .numericPad, .function]
+    case .panUp: code = 126; characters = "\u{f700}"; modifiers = [.command, .shift, .numericPad, .function]
+    case .resetViewport: code = 29; characters = "0"; modifiers = [.command, .shift]
+    default: return false
+    }
+    guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+      context: nil, characters: characters, charactersIgnoringModifiers: characters,
+      isARepeat: false, keyCode: code),
+      VideoToolsShortcuts.resolve(event, hasMedia: true, isTextInput: false) == action else { return false }
+    // Exercise the owned window's production event handler. This is not OS
+    // keyboard injection, and never calls the viewport implementation directly.
+    player.mainWindow.keyDown(with: event)
+    return true
+  }
+
+  private func exerciseViewportResize(_ player: PlayerCore, originalFrame: NSRect, pan: Double) {
+    guard let window = player.mainWindow.window, let surface = player.mainWindow.videoView.nativeSurface,
+          let screen = window.screen else { fail("viewport_resize_recomputes_normalized_pan"); return }
+    let originalSize = surface.bounds.size
+    let originalPan = surface.pan
+    var resized = originalFrame
+    resized.size.width += originalFrame.width + 96 < screen.visibleFrame.width ? 96 : -96
+    resized.size.height += originalFrame.height + 64 < screen.visibleFrame.height ? 64 : -64
+    guard resized.width >= window.minSize.width, resized.height >= window.minSize.height,
+          resized.width > 0, resized.height > 0 else {
+      fail("viewport_resize_recomputes_normalized_pan"); return
+    }
+    window.setFrame(resized, display: true, animate: false)
+    waitForNativePaused(player, position: 4.2, color: .green,
+      label: "viewport_resize_recomputes_normalized_pan", extra: {
+        self.viewportMatches(player, scale: 1.5, panX: -pan, panY: pan) &&
+          (abs(surface.bounds.width - originalSize.width) > 1 || abs(surface.bounds.height - originalSize.height) > 1) &&
+          (abs(surface.pan.x - originalPan.x) > 0.01 || abs(surface.pan.y - originalPan.y) > 0.01)
+      }) {
+      guard self.sendViewportKey(player, action: .resetViewport) else {
+        self.fail("viewport_reset_key_restores_fit"); return
+      }
+      self.waitForNativePaused(player, position: 4.2, color: .green,
+        label: "viewport_reset_key_restores_fit",
+        extra: { self.viewportMatches(player, scale: 1, panX: 0, panY: 0) }) {
+        window.setFrame(originalFrame, display: true, animate: false)
+        self.waitForNativePaused(player, position: 4.2, color: .green,
+          label: "viewport_window_and_state_restored", extra: {
+            abs(window.frame.minX - originalFrame.minX) < 0.01 &&
+              abs(window.frame.minY - originalFrame.minY) < 0.01 &&
+              abs(window.frame.width - originalFrame.width) < 0.01 &&
+              abs(window.frame.height - originalFrame.height) < 0.01 &&
+              self.viewportMatches(player, scale: 1, panX: 0, panY: 0)
+          }) {
+          self.verifyClock(player, advancing: false, label: "viewport_paused_clock_stays_still") {
+            player.mainWindow.endControlInteraction()
+            self.exerciseABLoop(player)
+          }
+        }
+      }
+    }
+  }
+
+  private func viewportMatches(_ player: PlayerCore, scale: Double, panX: Double, panY: Double) -> Bool {
+    guard player.isUsingNativePlayback, !player.mainWindow.videoView.hasInitializedOpenGL,
+          player.mpv.mpvRenderContext == nil, let window = player.mainWindow.window,
+          let surface = player.mainWindow.videoView.nativeSurface,
+          let layer = player.nativePlaybackOutput?.displayLayer,
+          surface.window === window, !surface.isHiddenOrHasHiddenAncestor, surface.alphaValue > 0,
+          surface.visibleRect.width > 0, surface.visibleRect.height > 0,
+          surface.displayLayer === layer, layer.superlayer === surface.layer,
+          !layer.isHidden, layer.opacity > 0, surface.layer?.masksToBounds == true,
+          surface.geometry?.codedSize == CGSize(width: 160, height: 96),
+          surface.geometry?.pixelAspectRatio == 1, surface.geometry?.rotationDegrees == 0,
+          abs(player.nativeViewport.scale - scale) < 0.000000001,
+          abs(player.nativeViewport.panX - panX) < 0.000000001,
+          abs(player.nativeViewport.panY - panY) < 0.000000001 else { return false }
+    player.mainWindow.videoView.layoutSubtreeIfNeeded()
+    surface.layoutSubtreeIfNeeded()
+    // The decoded pixel buffer remains a source image after zoom or pan. It
+    // cannot certify the final physical-screen transform; these checks inspect
+    // the real attached Core Animation model-layer geometry instead.
+    return Self.matchesViewportLayout(surface, layer: layer, scale: scale, panX: panX, panY: panY) &&
+      abs(layer.contentsScale - window.backingScaleFactor) < 0.000000001
+  }
+
+  private static func matchesViewportLayout(_ surface: NativePlaybackSurface, layer: AVSampleBufferDisplayLayer,
+                                            scale: Double, panX: Double, panY: Double) -> Bool {
+    guard let geometry = surface.geometry, let rectangle = surface.displayedVideoRect,
+          surface.bounds.width > 0, surface.bounds.height > 0,
+          scale.isFinite, scale > 0, panX.isFinite, panY.isFinite else { return false }
+    let width = geometry.codedSize.width * geometry.pixelAspectRatio
+    let height = geometry.codedSize.height
+    guard width.isFinite, height.isFinite, width > 0, height > 0 else { return false }
+    let rotated = geometry.rotationDegrees == 90 || geometry.rotationDegrees == 270
+    let fitted = min(surface.bounds.width / (rotated ? height : width),
+                     surface.bounds.height / (rotated ? width : height))
+    let scaled = CGSize(width: width * fitted * scale, height: height * fitted * scale)
+    let rotatedSize = rotated ? CGSize(width: scaled.height, height: scaled.width) : scaled
+    let offset = CGPoint(x: rotatedSize.width * panX, y: -rotatedSize.height * panY)
+    let center = CGPoint(x: surface.bounds.midX + offset.x, y: surface.bounds.midY + offset.y)
+    let expected = CGRect(x: center.x - rotatedSize.width / 2, y: center.y - rotatedSize.height / 2,
+                          width: rotatedSize.width, height: rotatedSize.height)
+    let transform = CATransform3DGetAffineTransform(layer.transform)
+    let rotation: CGAffineTransform
+    switch geometry.rotationDegrees {
+    case 0: rotation = .identity
+    case 90: rotation = CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: 0)
+    case 180: rotation = CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
+    case 270: rotation = CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 0, ty: 0)
+    default: return false
+    }
+    let pairs: [(CGFloat, CGFloat)] = [
+      (surface.zoom, scale), (surface.pan.x, offset.x), (surface.pan.y, offset.y),
+      (layer.bounds.minX, 0), (layer.bounds.minY, 0),
+      (layer.bounds.width, scaled.width), (layer.bounds.height, scaled.height),
+      (layer.position.x, center.x), (layer.position.y, center.y),
+      (layer.anchorPoint.x, 0.5), (layer.anchorPoint.y, 0.5),
+      (rectangle.minX, expected.minX), (rectangle.minY, expected.minY),
+      (rectangle.width, expected.width), (rectangle.height, expected.height),
+      (layer.frame.minX, expected.minX), (layer.frame.minY, expected.minY),
+      (layer.frame.width, expected.width), (layer.frame.height, expected.height),
+    ]
+    return pairs.allSatisfy { $0.isFinite && $1.isFinite && abs($0 - $1) < 0.01 } &&
+      CATransform3DIsAffine(layer.transform) && transform == rotation && layer.videoGravity == .resize
   }
 
   private func exerciseABLoop(_ player: PlayerCore) {

@@ -153,9 +153,11 @@ class RunnerTests(unittest.TestCase):
         # declaration-only boundaries are compile evidence, not an App UI test.
         driver = SOURCE.with_name("NativeAppTestDriver.swift")
         boundary = SOURCE.with_name("TypecheckBoundary.swift")
+        presentation = [str(runner.ROOT / "iina/NativePlayback/NativePlaybackSurface.swift"),
+                        str(runner.ROOT / "iina/VideoTools/VideoToolsShortcuts.swift")]
         command = ["xcrun", "swiftc", "-swift-version", "5", "-warnings-as-errors",
                    "-target", "arm64-apple-macos12", "-typecheck"]
-        subprocess.run(command + ["-D", "CHENGYING_NATIVE_APP_TESTS", str(driver), str(boundary)],
+        subprocess.run(command + ["-D", "CHENGYING_NATIVE_APP_TESTS", str(driver), str(boundary)] + presentation,
                        check=True, timeout=90)
         subprocess.run(command + [str(driver)], check=True, timeout=90)
         with tempfile.TemporaryDirectory(prefix="native-driver-availability-") as directory:
@@ -164,7 +166,7 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(source.count(guard), 1)
             old = Path(directory) / "LegacyAvailability.swift"
             old.write_text(source.replace(guard, "guard #available(macOS 14.0, *),", 1))
-            result = subprocess.run(command + ["-D", "CHENGYING_NATIVE_APP_TESTS", str(old), str(boundary)],
+            result = subprocess.run(command + ["-D", "CHENGYING_NATIVE_APP_TESTS", str(old), str(boundary)] + presentation,
                                     capture_output=True, text=True, timeout=90)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("'displayedPixelBuffer()' is only available in macOS 14.4 or newer", result.stderr)
@@ -223,7 +225,7 @@ class RunnerTests(unittest.TestCase):
             return source[start:end]
 
         volume = method("exerciseVolume")
-        self.assertIn("self.exerciseABLoop(player)", volume)
+        self.assertIn("self.exerciseViewport(player)", volume)
         self.assertNotIn("self.replaceRapidly(player)", volume)
         start = method("exerciseABLoop")
         self.assertIn("slider.doubleValue = 0", start)
@@ -296,7 +298,72 @@ class RunnerTests(unittest.TestCase):
         # This is a sequencing contract, not a substitute for executing the
         # compiled complete App with its real renderer and window on CI.
 
-    def test_every_baseline_ab_and_delayed_check_is_required(self):
+    def test_viewport_stage_uses_real_keys_layers_and_restores_the_window(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+
+        def method(name):
+            start = source.index("  private func " + name + "(")
+            end = source.index("\n  }", start) + len("\n  }")
+            return source[start:end]
+
+        stage = method("exerciseViewport")
+        for proof in ("let originalFrame = window.frame", "window.makeKeyAndOrderFront(nil)",
+                      "player.mainWindow.beginControlInteraction()", "slider.doubleValue = 0",
+                      "NSApp.sendAction(action, to: slider.target, from: slider)",
+                      "waitForNativePaused(player, position: 4.2, color: .green"):
+            self.assertIn(proof, stage)
+        keys = method("sendViewportKey")
+        for proof in ("NSEvent.keyEvent(with: .keyDown", "windowNumber: window.windowNumber",
+                      "VideoToolsShortcuts.resolve(event, hasMedia: true, isTextInput: false) == action",
+                      "player.mainWindow.keyDown(with: event)",
+                      "code = 24", "code = 27", "code = 123", "code = 124", "code = 125",
+                      "code = 126", "code = 29", ".command, .shift, .numericPad, .function"):
+            self.assertIn(proof, keys)
+        self.assertNotIn("postEvent", keys)
+        self.assertNotIn("CGEvent", keys)
+        self.assertNotIn("videoToolsApplyViewportShortcut", source)
+        self.assertNotIn("applyNativeViewport(", source)
+        self.assertNotIn(".applying(", source)
+        geometry = method("viewportMatches")
+        for proof in ("player.isUsingNativePlayback", "!player.mainWindow.videoView.hasInitializedOpenGL",
+                      "player.mpv.mpvRenderContext == nil", "surface.displayLayer === layer",
+                      "layer.superlayer === surface.layer", "surface.window === window",
+                      "surface.layer?.masksToBounds == true", "Self.matchesViewportLayout",
+                      "surface.geometry?.codedSize == CGSize(width: 160, height: 96)",
+                      "surface.geometry?.pixelAspectRatio == 1", "surface.geometry?.rotationDegrees == 0",
+                      "window.backingScaleFactor"):
+            self.assertIn(proof, geometry)
+        resize = method("exerciseViewportResize")
+        self.assertIn("window.setFrame(resized, display: true, animate: false)", resize)
+        self.assertIn("abs(surface.pan.x - originalPan.x) > 0.01", resize)
+        self.assertIn("sendViewportKey(player, action: .resetViewport)", resize)
+        self.assertIn("window.setFrame(originalFrame, display: true, animate: false)", resize)
+        self.assertIn("window.frame.width - originalFrame.width", resize)
+        self.assertIn('verifyClock(player, advancing: false, label: "viewport_paused_clock_stays_still")', resize)
+        self.assertLess(resize.index("window.setFrame(originalFrame"), resize.index("verifyClock("))
+        self.assertLess(resize.index("verifyClock("), resize.index("self.exerciseABLoop(player)"))
+        self.assertIn("player.mainWindow.endControlInteraction()", resize)
+        # This is a preparation contract. Actual event routing and attached
+        # layer geometry must still pass inside the complete CI application.
+
+    def test_actual_driver_viewport_geometry_comparator(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private static func matchesViewportLayout(")
+        end = source.index("\n  }", start) + len("\n  }")
+        comparator = source[start:end].replace("private ", "")
+        with tempfile.TemporaryDirectory(prefix="native-viewport-comparator-") as directory:
+            root = Path(directory).resolve()
+            extracted = root / "Comparator.swift"
+            extracted.write_text("import AppKit\nimport AVFoundation\nstruct ViewportComparator {\n" + comparator + "\n}\n")
+            main = root / "main.swift"
+            main.write_text(SOURCE.with_name("ViewportGeometryTests.swift").read_text())
+            executable = root / "ViewportTests"
+            subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-warnings-as-errors",
+                            str(runner.ROOT / "iina/NativePlayback/NativePlaybackSurface.swift"), str(extracted),
+                            str(main), "-o", str(executable)], check=True, timeout=90)
+            subprocess.run([str(executable)], check=True, timeout=15)
+
+    def test_every_baseline_ab_delayed_and_viewport_check_is_required(self):
         baseline = {
             "pristine_real_mpv_service", "native_autoplay_ready", "native_autoplay_shared_clock_advances",
             "real_mainwindow_nib_outlets", "paused_initial_frame_matches_red",
@@ -323,9 +390,21 @@ class RunnerTests(unittest.TestCase):
             "delayed_paused_shared_clock_stays_still", "delayed_real_resume_menu_action",
             "delayed_resume_ready", "delayed_resume_shared_clock_advances",
         }
+        viewport = {
+            "viewport_key_window_ready", "viewport_initial_attached_geometry",
+            "viewport_zoom_in_key_updates_layer", "viewport_zoom_out_key_updates_layer",
+            "viewport_pan_setup_zoomed", "viewport_pan_right_key_updates_layer",
+            "viewport_pan_left_key_updates_layer", "viewport_pan_up_key_updates_layer",
+            "viewport_pan_down_key_updates_layer", "viewport_resize_recomputes_normalized_pan",
+            "viewport_reset_key_restores_fit", "viewport_window_and_state_restored",
+            "viewport_paused_clock_stays_still",
+        }
         self.assertEqual(len(baseline), 23)
         self.assertEqual(len(baseline | ab), 41)
-        self.assertEqual(runner.REQUIRED_CHECKS, baseline | ab | delayed)
+        self.assertEqual(len(baseline | ab | delayed), 47)
+        self.assertEqual(len(viewport), 13)
+        self.assertEqual(len(runner.REQUIRED_CHECKS), 60)
+        self.assertEqual(runner.REQUIRED_CHECKS, baseline | ab | delayed | viewport)
         source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
         for label in runner.REQUIRED_CHECKS:
             self.assertIn('"' + label + '"', source)

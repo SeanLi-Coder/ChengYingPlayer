@@ -217,6 +217,11 @@ final class MPVController {
 
 final class PlayerCore: NSObject {
   var isUsingNativePlayback = false
+  var nativeViewport: VideoToolsViewport { preconditionFailure("Unexpected native viewport in live MPV clip tests") }
+  @discardableResult
+  func applyNativeViewport(_ viewport: VideoToolsViewport) -> Bool {
+    preconditionFailure("Unexpected native viewport in live MPV clip tests")
+  }
   enum NativeLoopAction { case clear }
   var playbackLoopA: Double? { VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA)) }
   var playbackLoopB: Double? { VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopB)) }

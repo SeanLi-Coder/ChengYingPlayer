@@ -276,6 +276,7 @@ class PlayerCore: NSObject {
   private var nativeLoopMode: LoopMode = .off
   private var nativePreferredRate: Double = 1
   private var nativeSingleInput = false
+  private(set) var nativeViewport = VideoToolsViewport(zoom: 0, panX: 0, panY: 0)
   enum NativeLoopAction {
     case captureA, captureB, cycle, clear, moveA(Double), moveB(Double)
   }
@@ -299,6 +300,7 @@ class PlayerCore: NSObject {
     let paused: Bool
     var loopA: Double? = nil
     var loopB: Double? = nil
+    var viewport = VideoToolsViewport(zoom: 0, panX: 0, panY: 0)
     let completion: () -> Void
     var waitingForSeek = false
   }
@@ -332,6 +334,19 @@ class PlayerCore: NSObject {
   var playbackIsPaused: Bool { playbackTransport.isPaused }
   var playbackPosition: Double? { playbackTransport.position }
   var playbackAtEOF: Bool { playbackTransport.isAtEOF }
+
+  /// Presentation state belongs to this media, not to the asynchronous decoder.
+  /// Commit only after the active surface accepts the complete transform.
+  @discardableResult
+  func applyNativeViewport(_ viewport: VideoToolsViewport) -> Bool {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard nativeTransport != nil, nativeReady, !nativeRetiring,
+          !nativeTerminationRequested, info.state.loaded,
+          mainWindow.videoView.updateNativeViewport(scale: viewport.scale,
+            normalizedPan: CGPoint(x: viewport.panX, y: viewport.panY)) else { return false }
+    nativeViewport = viewport
+    return true
+  }
 
   var playbackLoopA: Double? {
     isUsingNativePlayback ? nativeLoopA : VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA))
@@ -698,6 +713,7 @@ class PlayerCore: NSObject {
   private func beginNativeOpen(_ url: URL, request: UInt64) {
     cancelNativeLoopRequests()
     nativeLoopA = nil; nativeLoopB = nil
+    nativeViewport = VideoToolsViewport(zoom: 0, panX: 0, panY: 0)
     info.abLoopStatus = .cleared
     let session = NativePlaybackSession()
     let transport = NativePlaybackTransport(session: session)
@@ -858,6 +874,7 @@ class PlayerCore: NSObject {
         }
         restore?.loopA = self.nativeLoopA
         restore?.loopB = self.nativeLoopB
+        restore?.viewport = self.nativeViewport
         self.retireNativePlayback {
           self.nativeCompatibilityRestore = restore
           self.mpv.prepareForFirstMPVMediaLoad()
@@ -2844,6 +2861,7 @@ class PlayerCore: NSObject {
       playbackTransport.setRate(restore.rate)
       playbackTransport.setVolumePercent(restore.volume)
       restoreNativeLoopToMPV(start: restore.loopA, end: restore.loopB)
+      videoToolsRestoreViewportToMPV(restore.viewport)
       seek(absoluteSecond: restore.position)
       let restoreID = restore.id
       DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in

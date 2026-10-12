@@ -41,6 +41,13 @@ REQUIRED_CHECKS = {
     "delayed_native_paused_open_ready", "delayed_paused_first_frame_at_zero",
     "delayed_paused_shared_clock_stays_still", "delayed_real_resume_menu_action",
     "delayed_resume_ready", "delayed_resume_shared_clock_advances",
+    "viewport_key_window_ready", "viewport_initial_attached_geometry",
+    "viewport_zoom_in_key_updates_layer", "viewport_zoom_out_key_updates_layer",
+    "viewport_pan_setup_zoomed", "viewport_pan_right_key_updates_layer",
+    "viewport_pan_left_key_updates_layer", "viewport_pan_up_key_updates_layer",
+    "viewport_pan_down_key_updates_layer", "viewport_resize_recomputes_normalized_pan",
+    "viewport_reset_key_restores_fit", "viewport_window_and_state_restored",
+    "viewport_paused_clock_stays_still",
 }
 PIXEL_POINTS = [(x, y) for y in (8, 48, 86) for x in (8, 80, 150)]
 MAX_REPORT_BYTES = 1024 * 1024

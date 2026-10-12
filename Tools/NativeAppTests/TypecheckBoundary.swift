@@ -41,7 +41,7 @@ final class PlaybackInfo {
   var videoDuration: VideoTime?
   var abLoopStatus = LoopStatus.cleared
 }
-final class NativePlaybackSurface: NSView { var displayedVideoRect: CGRect? }
+struct VideoToolsViewport { var scale = 1.0; var panX = 0.0; var panY = 0.0 }
 final class VideoView: NSView {
   var hasInitializedOpenGL = false
   var nativeSurface: NativePlaybackSurface?
@@ -76,6 +76,7 @@ final class PlayerCore {
   let mainWindow = MainWindowController()
   var nativePlaybackSession: NativePlaybackSession?
   var nativePlaybackOutput: NativeSampleBufferOutput?
+  var nativeViewport = VideoToolsViewport()
   var isUsingNativePlayback = false
   var playbackIsPaused = false
   var playbackVolume = 0.0

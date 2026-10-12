@@ -380,6 +380,7 @@ jobs:
           export PATH="$PWD/deps/executable:$PATH"
           bash Tools/NativePlaybackSurfaceTests/run.sh
           bash Tools/NativePlaybackSurfaceTests/run-video-view.sh
+          bash Tools/NativeViewportTests/run.sh
           bash Tools/PlaybackTransportTests/run.sh
           NATIVE_PLAYBACK_SANITIZER=thread bash Tools/PlaybackTransportTests/run.sh
           python3 -B Tools/PlaybackBackendRoutingTests/run.py --sanitize address

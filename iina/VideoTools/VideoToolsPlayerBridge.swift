@@ -65,7 +65,12 @@ struct VideoToolsPlayerSnapshot {
 extension PlayerCore {
   @discardableResult
   func videoToolsApplyViewportShortcut(_ action: VideoToolsShortcuts.Action) -> VideoToolsViewport? {
-    guard !isUsingNativePlayback, info.state.loaded, let videoTrack = info.vid, videoTrack > 0 else { return nil }
+    guard info.state.loaded else { return nil }
+    if isUsingNativePlayback {
+      guard let next = nativeViewport.applying(action), applyNativeViewport(next) else { return nil }
+      return next
+    }
+    guard let videoTrack = info.vid, videoTrack > 0 else { return nil }
     let current = VideoToolsViewport(zoom: mpv.getDouble(MPVOption.Video.videoZoom),
       panX: mpv.getDouble(MPVOption.Video.videoPanX), panY: mpv.getDouble(MPVOption.Video.videoPanY))
     guard let next = current.applying(action) else { return nil }
@@ -78,10 +83,23 @@ extension PlayerCore {
   }
 
   func videoToolsResetViewport() {
-    guard !isUsingNativePlayback, info.state.loaded else { return }
+    guard info.state.loaded else { return }
+    if isUsingNativePlayback {
+      applyNativeViewport(VideoToolsViewport(zoom: 0, panX: 0, panY: 0))
+      return
+    }
     mpv.setDouble(MPVOption.Video.videoZoom, 0)
     mpv.setDouble(MPVOption.Video.videoPanX, 0)
     mpv.setDouble(MPVOption.Video.videoPanY, 0)
+  }
+
+  /// Restore the accepted native view only for the same-media compatibility
+  /// handoff, after the normal per-file reset and before its deferred action.
+  func videoToolsRestoreViewportToMPV(_ viewport: VideoToolsViewport) {
+    guard !isUsingNativePlayback, info.state.loaded else { return }
+    mpv.setDouble(MPVOption.Video.videoZoom, viewport.zoom)
+    mpv.setDouble(MPVOption.Video.videoPanX, viewport.panX)
+    mpv.setDouble(MPVOption.Video.videoPanY, viewport.panY)
   }
 
   var videoToolsLoopRange: VideoToolsLoopRange? {

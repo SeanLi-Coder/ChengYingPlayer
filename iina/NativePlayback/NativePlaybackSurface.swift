@@ -30,6 +30,7 @@ final class NativePlaybackSurface: NSView {
   private(set) var geometry: VideoGeometry?
   private(set) var zoom: Double = 1
   private(set) var pan: CGPoint = .zero
+  private var normalizedPan: CGPoint?
   /// The unclipped video rectangle in this view's unflipped point coordinates.
   private(set) var displayedVideoRect: CGRect?
   private var originalLayerState: LayerState?
@@ -142,6 +143,21 @@ final class NativePlaybackSurface: NSView {
           abs(pan.x) <= 1_048_576, abs(pan.y) <= 1_048_576 else { return false }
     self.zoom = zoom
     self.pan = pan
+    normalizedPan = nil
+    updateVideoLayout()
+    return true
+  }
+
+  /// Pan follows the shared controls: fractions of the rotated, scaled image,
+  /// with positive Y down. Keep the fractions so resize preserves their meaning.
+  @discardableResult
+  func setNormalizedViewport(zoom: Double, pan: CGPoint) -> Bool {
+    requireMain()
+    guard zoom.isFinite, (0.05...32).contains(zoom),
+          pan.x.isFinite, pan.y.isFinite,
+          abs(pan.x) <= 0.5, abs(pan.y) <= 0.5 else { return false }
+    self.zoom = zoom
+    normalizedPan = pan
     updateVideoLayout()
     return true
   }
@@ -217,6 +233,10 @@ final class NativePlaybackSurface: NSView {
       let rotated = quarterTurn ? CGSize(width: size.height, height: size.width) : size
       let fit = min(bounds.width / rotated.width, bounds.height / rotated.height) * zoom
       let width = size.width * fit, height = size.height * fit
+      let rotatedSize = quarterTurn ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
+      if let normalizedPan {
+        pan = CGPoint(x: rotatedSize.width * normalizedPan.x, y: -rotatedSize.height * normalizedPan.y)
+      }
       let center = CGPoint(x: bounds.midX + pan.x, y: bounds.midY + pan.y)
       // Exact quarter-turn matrices avoid trigonometric residue and define
       // clockwise rotation explicitly in AppKit's upward-positive coordinates.
@@ -230,7 +250,6 @@ final class NativePlaybackSurface: NSView {
       video.bounds = CGRect(x: 0, y: 0, width: width, height: height)
       video.position = center
       video.transform = CATransform3DMakeAffineTransform(rotation)
-      let rotatedSize = quarterTurn ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
       displayedVideoRect = CGRect(x: center.x - rotatedSize.width / 2,
         y: center.y - rotatedSize.height / 2, width: rotatedSize.width, height: rotatedSize.height)
       video.isHidden = isHidden

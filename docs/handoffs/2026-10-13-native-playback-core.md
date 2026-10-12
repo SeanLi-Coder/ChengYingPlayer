@@ -252,6 +252,56 @@ phase-only 负对照为 **147/4、退出 1**，准确复现 A/B 回绕时空格�
 前后输入 SHA-256 清单完全相同；旧 `6wlOQX` 是中间版本，不作为最终证据。
 这些是命令行生产方法／核心回归，不等于完整 App、实体音视频设备或 M4 验收。
 
+提交 `10d59252` 已推送开发分支并启动 CI
+[`38305625981`](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/38305625981)，
+不是标签发行。新的 H.264 定向 fixture 使用 CRF 18／固定 B 帧策略，并由 FFprobe 检查
+实际解码帧（普通和延迟素材各 75 个 B 帧），不再以编码参数当作重排证据。自然输出
+**117/0**（`5NkBbm`）、受控 flush 完成确认延迟 **126/0**（`3uNCAJ`）；相同 fixture 的
+flush 保护负对照 **110/16**（`LHIaR7`），去除 FIFO 单条件负对照 **72/5**（`aNcN3L`），
+后两组退出 1，不能标为生产失败或正向通过。前缀均为 `build/native-preroll-audio-tests.`。
+
+**新 fixture 的本机 TSan 未全过**：`build/native-preroll-audio-tests.twnu4i/results.log`
+为 116 通过／1 失败。FFV1/PCM 的 lifecycle paused seek 到 2 秒后，三秒内实际 renderer
+图像仍为空，时钟为 2、rate 为 0、held 为 0；没有 TSan race 诊断，其他样本顺序检查通过。
+此时不能把原因归为 B 帧、系统负载或物理屏幕黑屏；也不能只引用先前 TSan 通过掩盖它。
+保留原断言和生产源码，正在用隔离观测副本进一步定位。随后两次相同输入的有界 TSan
+运行 `jfzWen`、`UoFHbK` 各 117/0，仍不取消该失败。孤立 open→seek 的 12 次诊断成功，
+没有完整前序生命周期且同步日志改变时序，不据此判为已修复。
+
+新生产源码的默认三分钟 4K 重跑已完成：`build/native-playback-soak.Q9odqV/`，
+**292/0，182.45 秒**，九项输入文件 SHA-256 前后一致。实际读回 3840×2160 NV12／P010，
+三个 session 的 weak 引用均释放，损坏格式和未知颜色均为零；三轮空图读回次数为 5／4／2，
+不将其直接解释为实体屏幕黑帧。应用队列记账峰值 124,606,976 字节、进程 RSS 峰值
+260,882,432、footprint 峰值 200,868,944 字节，仅是本次采样，不是总内存保证、零泄漏
+或相对 MPV／Movist 的性能优势。旧十分钟结果仍属于旧源码，不能混为此次十分钟验证。
+
+## 原生画面缩放／平移（完整 App 验收待运行）
+
+原 `=/-`、⌘⇧方向键和 ⌘⇧0 现直接调用 native surface，不为这些动作退回 MPV。
+沿用现有 0.2–8 倍、每次 0.1 倍与边界限制；normalized pan 使用旋转后、SAR 修正后
+缩放图像的宽高，正 Y 向下只在 surface 转为 AppKit 坐标时反号。每次 resize 重新计算
+点偏移；原 point-based API 保持不变。新媒体同时清模型与显示层状态，关闭／退场拒绝修改。
+同媒体兼容切换先捕获最后接受的 viewport，在 MPV 正常开片复位后、恢复 seek 前写回。
+
+最终生产输入 SHA-256 前后一致，证据保存于 `build/native-viewport-regression.LKPhUf/`：
+
+- `bash Tools/NativeViewportTests/run.sh` 普通、ASan、TSan 各 **172/0**；包括四向旋转、
+  非方形像素、宽／窄窗口、非零 bounds、零尺寸恢复、键盘路由、文本输入隔离及停止屏障。
+  首轮未启动 NSApplication 生命周期而无法成为 key window 的失败保留；修正测试生命周期，
+  原断言不变。Y 方向与 compatibility 分派两个单变量负对照分别 **63/109、165/7**，退出 1。
+- 真实 session／VideoView route **48/0**，VideoView **34/0**，原 Surface **106/0**；
+  受控异步 Core ASan／TSan 各 **41/0**。不以边界替身当成完整 App。
+- 旧 viewport 两语言各 **1098/0**；真实 libmpv 恢复 helper **164 项／61 帧**，
+  VideoTools 三语言各 **942 UI + 132 task**、Rotation **77**、A/B **151/0**。
+  ClipPreviewLive **324/0、309 帧**，自有临时测试 App 清理成功。
+- 完整 App driver 保留原 47 项并增加 13 项 viewport 键盘、几何、resize、复位与暂停时钟，
+  共 **60 项**。准备测试 **23**、实际像素／音量比较器 **73**、独立图层几何比较器 **46**，
+  macOS 12 typecheck 和旧 guard 负对照通过；**完整 60 项尚未实跑通过**。
+
+`displayedPixelBuffer` 是变换前源像素，不能证明最终屏幕平移；新 driver 分开检查源像素与
+实际挂载 layer 的几何。SAR／旋转有独立几何验证，但完整 App 新步骤只用 SAR 1／旋转 0；
+没有旋转／SAR＋全屏组合或 native→MPV 同时关窗的完整实窗验收。默认路由和发布配置未改。
+
 ## 实现文件
 
 - `iina/NativePlayback/CYNMediaDecoder.{h,m}`：只读本地文件、FFmpeg 收帧／drain、
@@ -340,18 +390,19 @@ phase-only 负对照为 **147/4、退出 1**，准确复现 A/B 回绕时空格�
   仅在锁定 FFmpeg 路径明确要求硬件时为真。FFmpeg 7 的 HEVC 允许软件 fallback，
   因而 HEVC 的 false 是“实际硬件未确认”，不能标作软件解码或硬解失败。
 - 本机不是 M4；AV1 M4 硬解、实体 HDR 屏、ICC 色彩、真实音频设备切换和可听音质未验收。
-- 旋转和 SAR 已在新 surface 测试应用，但没有完整字幕／轨道选择、截图、
-  帧进、画面缩放平移、HDR 用户开关、播放列表策略及剪辑预览恢复。
+- 旋转、SAR 和画面缩放／平移已接入新 surface；完整 App 组合验收仍未完成。
+  完整字幕／轨道选择、截图、帧进、HDR 用户开关、播放列表策略及剪辑预览恢复仍走兼容路径。
 - 倍速当前只承诺 0.5–2.0；不能直接取代旧界面更广的速率范围而不给用户提示。
 - 暂未测得相对旧内核／Movist 的耗电、CPU、总内存、丢帧或启动速度优势。
 
 ## 下一阶段接入清单
 
-1. 将 `PlayerCore` 的开片、transport、状态、音量、模式和异步关闭改成明确后端分派。
-   `NativePlaybackSnapshot` 更新 `PlaybackInfo`；关闭仍可靠发出 `.iinaPlayerShutdown`。
-2. 隔离 `VideoView` 和 `MainWindowController` 对 ViewLayer／OpenGL 的假定；分别实现
-   native 图层尺寸、backing scale、全屏、旋转、色彩及关闭顺序。
-3. 改造 `PlayerWindowController` 的原始 mpv 快捷键透传及读回，不得悄悄操作闲置 mpv。
+1. 已有 `PlayerCore` 开片、transport、音量、单文件循环、A/B 和异步关闭分派；继续完成
+   完整 App 验收并解决暂停图像偶发不可读，不把独立 core 通过当成整窗成功。
+2. 已隔离 `VideoView` 的 GL 假定并迁入图层几何与 viewport；继续验证全屏／跨屏／真实
+   HDR 色彩，补已加载 native→MPV 的整窗状态交接，不直接放开现有准入保护。
+3. 快捷键已迁入速度、A/B、viewport；其余旧 mpv 透传仍明确兼容，继续补齐截图、帧进、
+   音轨等能力。日常同文件夹多媒体／播放列表及已用 MPV core 的 native 再进入仍待设计验证。
 4. 改造 `VideoToolsPlayerBridge`、预览 snapshot/restore/onUnload；重复编辑 A/B、
    切片预览、快速换片和关闭必须用真实窗口／实际画面回归。
 5. 明确支持矩阵、功能补齐及兼容选择，保留已有音视频品质和每文件音量零策略。

@@ -33,8 +33,10 @@ def main():
     gate_end = core.index("\n  }", core.index("  func noteMPVMediaCommand()", gate_start)) + len("\n  }")
     fields_start = core.index("  private var nativeTransport:")
     fields_end = core.index("  private var playbackTransport:", fields_start)
-    methods = ["advancePlaybackRoute", "cancelNativeLoopRequests", "requireMPVCompatibility", "retireNativePlayback", "stop", "shutdown", "open", "openMediaURLs"]
-    generated = "import Cocoa\nfinal class PlayerCore: CoreBoundary {\n"
+    methods = ["advancePlaybackRoute", "applyNativeViewport", "cancelNativeLoopRequests", "requireMPVCompatibility", "retireNativePlayback", "stop", "shutdown", "open", "openMediaURLs"]
+    bridge = (ROOT / "iina/VideoTools/VideoToolsPlayerBridge.swift").read_text()
+    model = bridge[bridge.index("struct VideoToolsViewport:"):bridge.index("struct VideoToolsPlayerSnapshot")]
+    generated = "import Cocoa\n" + model + "\nfinal class PlayerCore: CoreBoundary {\n"
     generated += core[gate_start:gate_end] + "\n" + core[fields_start:fields_end]
     bodies = {name: method(core, name) for name in methods}
     if args.negative_control:
@@ -72,7 +74,7 @@ def main():
         if args.sanitize:
             command.append("-sanitize=" + args.sanitize)
         command += [str(ROOT / path) for path in ["iina/Atomic.swift", "iina/Lock.swift", "iina/PlayerState.swift",
-                    "iina/MPVCommand.swift", "iina/MPVOption.swift", "Tools/NativePlayerCoreTests/Boundary.swift",
+                    "iina/MPVCommand.swift", "iina/MPVOption.swift", "iina/VideoTools/VideoToolsShortcuts.swift", "Tools/NativePlayerCoreTests/Boundary.swift",
                     "Tools/NativePlayerCoreTests/main.swift"]]
         subprocess.run(command + [str(production)], check=True, timeout=90)
         if args.negative_control or args.capture_negative_control:

@@ -41,6 +41,12 @@ let methods = [
 }.joined(separator: "\n\n")
 let declarations = section("  private var nativeTransport:", "  var receivedEndFileWhileLoading:")
 let boundary = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerRouteTests/PlayerBoundary.txt"), encoding: .utf8)
+let bridge = try String(contentsOf: root.appendingPathComponent("iina/VideoTools/VideoToolsPlayerBridge.swift"), encoding: .utf8)
+guard let modelStart = bridge.range(of: "struct VideoToolsViewport:")?.lowerBound,
+      let modelEnd = bridge.range(of: "struct VideoToolsPlayerSnapshot")?.lowerBound else {
+  fatalError("Production viewport model extraction boundaries changed")
+}
+let model = String(bridge[modelStart..<modelEnd])
 let infoSource = try String(contentsOf: root.appendingPathComponent("iina/PlaybackInfo.swift"), encoding: .utf8)
 guard let stateStart = infoSource.range(of: "  var state: PlayerState = .idle {")?.lowerBound,
       let stateEnd = infoSource.range(of: "\n  var isSeeking:", range: stateStart..<infoSource.endIndex)?.lowerBound else {
@@ -50,6 +56,7 @@ let state = String(infoSource[stateStart..<stateEnd])
 let output = """
 import AppKit
 import AVFoundation
+\(model)
 
 // Mechanically extracted production declarations and methods, not a policy copy.
 final class PlayerCore {

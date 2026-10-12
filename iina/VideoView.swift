@@ -160,6 +160,15 @@ class VideoView: NSView {
     return nativeSurface?.setViewport(zoom: zoom, pan: pan) ?? false
   }
 
+  /// Shared controls use fractions of the rotated, scaled display rectangle.
+  /// The surface converts them after each resize; positive normalized Y is down.
+  @discardableResult
+  func updateNativeViewport(scale: Double, normalizedPan: CGPoint) -> Bool {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard isUsingNativeSurface else { return false }
+    return nativeSurface?.setNormalizedViewport(zoom: scale, pan: normalizedPan) ?? false
+  }
+
   var playbackInLiveResize: Bool {
     get { isUsingNativeSurface ? nativeLiveResize : videoLayer.inLiveResize }
     set {

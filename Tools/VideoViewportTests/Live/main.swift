@@ -165,6 +165,16 @@ stable(snapshot("shrunk viewport playback state", like: reduced), relativeTo: ba
 
 player.videoToolsResetViewport()
 marker(snapshot("production file-change reset bridge", like: base), like: base)
+let nativeViewport = VideoToolsViewport(zoom: log2(1.7), panX: 0.1, panY: -0.1)
+player.videoToolsRestoreViewportToMPV(nativeViewport)
+let restoredViewport = snapshot("native compatibility viewport restore", like: base,
+  x: 640 * 1.7 * 0.1, y: -360 * 1.7 * 0.1, scale: 1.7)
+expect(near(restoredViewport.zoom, nativeViewport.zoom) && near(restoredViewport.pan_x, nativeViewport.panX) &&
+       near(restoredViewport.pan_y, nativeViewport.panY),
+       "Real MPV preserves the native log2 zoom and normalized pan during compatibility restoration")
+stable(restoredViewport, relativeTo: base, "native viewport restoration")
+player.videoToolsResetViewport()
+marker(snapshot("reset after native viewport restoration", like: base), like: base)
 _ = key(24)
 expect(viewport_live_set_paused(false) && viewport_live_wait(0.3), "Resume actual playback with a zoomed viewport")
 let playing = snapshot("playing while zoomed", like: base, scale: 1.1, advancingAfter: base.position + 0.1)

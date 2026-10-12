@@ -45,11 +45,25 @@ import AVFoundation
     view.playbackInLiveResize = false
     check(!view.playbackInLiveResize && ViewLayer.constructions == 0, "Live resize and backing changes do not create GL")
     let output = player.nativePlaybackOutput!
+    check(view.nativeSurface!.setVideoGeometry(codedSize: CGSize(width: 720, height: 576),
+      pixelAspectRatio: 16.0 / 15, rotationDegrees: 90), "Native viewport uses a rotated SAR-corrected source")
+    check(view.updateNativeViewport(scale: 2, normalizedPan: CGPoint(x: 0.1, y: -0.2)),
+      "Production VideoView routes normalized viewport without initializing GL")
+    check(view.nativeSurface!.pan.x > 0 && view.nativeSurface!.pan.y > 0,
+      "Normalized pan reaches upward-positive actual surface points")
     let replacement = NativeSampleBufferOutput()
     player.nativePlaybackOutput = replacement
     check(view.configurePlaybackSurface(), "Native session layer can be replaced")
     check(output.displayLayer.superlayer == nil, "Old output is detached without shutting down on main")
     check(view.nativeSurface?.displayLayer === replacement.displayLayer, "Replacement output is installed")
+    check(view.nativeSurface?.zoom == 1 && view.nativeSurface?.pan == .zero && view.nativeSurface?.geometry == nil,
+      "New output identity resets prior normalized viewport and source geometry")
+    check(view.nativeSurface!.setVideoGeometry(codedSize: CGSize(width: 1920, height: 1080)),
+      "Replacement output accepts independent source geometry")
+    view.setFrameSize(CGSize(width: 400, height: 300))
+    view.forcePlaybackRedraw()
+    check(view.nativeSurface?.pan == .zero && view.nativeSurface?.zoom == 1,
+      "Replacement resize cannot resurrect the old media normalized pan")
     player.isUsingNativePlayback = false
     check(view.configurePlaybackSurface(), "Explicit compatibility fallback installs GL boundary")
     check(!view.isUsingNativeSurface && view.nativeSurface == nil, "Fallback removes native view")

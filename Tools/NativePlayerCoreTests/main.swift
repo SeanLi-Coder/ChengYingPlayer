@@ -148,6 +148,19 @@ do {
 }
 do {
   let (core, transport) = native()
+  let first = VideoToolsViewport(zoom: log2(1.5), panX: 0.1, panY: -0.1)
+  let latest = VideoToolsViewport(zoom: log2(2), panX: -0.2, panY: 0.15)
+  check(core.applyNativeViewport(first), "Loaded native accepts a validated viewport before fallback")
+  core.requireMPVCompatibility(reason: "viewport") {}
+  check(core.applyNativeViewport(latest), "Viewport remains interactive during asynchronous clock capture")
+  transport.answer(.ready(.init(phase: .paused, position: 1.25)))
+  check(!core.applyNativeViewport(first), "Retirement freezes the accepted viewport before handoff")
+  transport.session.finish()
+  check(core.nativeCompatibilityRestore?.viewport == latest,
+        "Compatibility snapshot preserves the latest accepted linear zoom and normalized pan")
+}
+do {
+  let (core, transport) = native()
   core.nativeLoopA = 0
   core.nativeLoopB = 3
   core.requireMPVCompatibility(reason: "preroll") {}

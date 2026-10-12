@@ -83,6 +83,9 @@ autoplay.testSetVolume(0)
 check(autoplay.playbackVolume == 0, "Typed zero-volume command remains silent")
 let oldLayer = autoplay.nativePlaybackOutput!.displayLayer
 let originalWindow = autoplay.mainWindow.window
+let zoomed = VideoToolsViewport(zoom: 1, panX: 0.1, panY: -0.1)
+check(autoplay.applyNativeViewport(zoomed) && autoplay.nativeViewport == zoomed,
+      "Actual ready native route accepts shared viewport state")
 autoplay.testOpen(blue)
 check(awaitCondition { autoplay.isUsingNativePlayback && autoplay.info.currentURL == blue && autoplay.info.state == .playing }, "Same-window replacement loads a second native file")
 check(autoplay.mainWindow.window === originalWindow &&
@@ -94,6 +97,9 @@ check(autoplay.getMediaTitle() == "blue.mp4" && autoplay.getMediaTitle(withExten
 autoplay.testPause(true)
 check(awaitCondition { autoplay.info.state == .paused && checkPresentedPixel(autoplay, red: false) }, "Second file displays blue rather than retaining the old red frame")
 check(oldLayer.superlayer == nil, "Replacing the session detaches the retired display layer")
+check(autoplay.nativeViewport.scale == 1 && autoplay.nativeViewport.panX == 0 && autoplay.nativeViewport.panY == 0 &&
+      autoplay.mainWindow.videoView.nativeSurface?.zoom == 1 && autoplay.mainWindow.videoView.nativeSurface?.pan == .zero,
+      "A new native media generation resets logical viewport and actual presentation together")
 check(autoplay.playbackVolume == 0 && autoplay.info.volume == 0, "Replacement resets volume to zero")
 retire(autoplay)
 

@@ -1,4 +1,9 @@
   var nativeTransport: NativePlaybackTransport?
+  var nativeViewport: VideoToolsViewport { preconditionFailure("Viewport is outside the focused native A/B test boundary") }
+  @discardableResult
+  func applyNativeViewport(_ viewport: VideoToolsViewport) -> Bool {
+    preconditionFailure("Viewport is outside the focused native A/B test boundary")
+  }
   var nativeReady = true
   var nativeRetiring = false
   var nativeLoopMode = LoopMode.off
