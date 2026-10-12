@@ -152,7 +152,15 @@ final class NativeAppTestDriver {
           player.mainWindow.volumeSlider.doubleValue == 0,
           player.mainWindow.volumeSlider.isEnabled else { fail("initial_volume_and_slider_zero"); return }
     record("initial_volume_and_slider_zero")
-    guard !player.mainWindow.videoView.hasInitializedOpenGL, player.mpv.mpvRenderContext == nil else {
+    let videoView = player.mainWindow.videoView
+    guard !videoView.hasInitializedOpenGL, player.mpv.mpvRenderContext == nil,
+          let surface = videoView.nativeSurface, surface.window === window,
+          !surface.isHiddenOrHasHiddenAncestor, surface.alphaValue > 0,
+          surface.visibleRect.width > 0, surface.visibleRect.height > 0,
+          let rectangle = surface.displayedVideoRect, rectangle.intersects(surface.visibleRect),
+          let layer = player.nativePlaybackOutput?.displayLayer,
+          layer.superlayer === surface.layer, !layer.isHidden, layer.opacity > 0,
+          layer.bounds.width > 0, layer.bounds.height > 0 else {
       fail("native_window_has_no_compatibility_gl"); return
     }
     record("native_window_has_no_compatibility_gl")

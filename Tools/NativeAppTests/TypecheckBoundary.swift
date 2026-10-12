@@ -22,7 +22,11 @@ final class PlaybackInfo {
   var currentURL: URL?
   var subTracks: [String] = []
 }
-final class VideoView: NSView { var hasInitializedOpenGL = false }
+final class NativePlaybackSurface: NSView { var displayedVideoRect: CGRect? }
+final class VideoView: NSView {
+  var hasInitializedOpenGL = false
+  var nativeSurface: NativePlaybackSurface?
+}
 final class MainWindowController: NSWindowController {
   var loaded = false
   var videoView = VideoView()
