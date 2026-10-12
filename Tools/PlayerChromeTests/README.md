@@ -15,13 +15,17 @@ production `PlaySliderCell` drawing.
 
 Checks cover:
 
-- Exact layouts at widths 285, 320, 640, and 1920, including the actual minimum
-  playback-window width, without conflicting or ambiguous constraints.
+- Exact layouts at widths 285, 320, 379, 380, 381, 640, and 1920, including the
+  actual minimum playback-window width and both sides of the centered-transport
+  transition, without conflicting or ambiguous constraints. Repeated narrow/wide
+  resizing verifies that the original play button returns to the video center;
+  narrow windows yield only the space needed by the right-aligned volume controls.
 - Real-window screenshots in light/dark appearances and explicit 1×/2×
   rendering densities. Pixel sizes follow actual content bounds if the CI
   screen constrains the window; exact-width layout checks run separately.
-- Original control identity, target/action, keyboard equivalent, seek value,
-  button delivery, and clean removal from the previous `NSStackView`.
+- Original control identity, target/action, keyboard equivalent, seek and volume
+  values, transport/mute button delivery, and clean removal from the previous
+  `NSStackView`. Every transport/volume control retains its native hit surface.
 - Click-through empty video space, clickable slider bounds, and hidden/faded
   controls not intercepting mouse input.
 - Dynamic toolbar width and runtime accessibility updates. Reduce Transparency

@@ -12,6 +12,13 @@ The test generates its own six-second, 3840x2160, 24 fps H.264 8-bit and HEVC
 Main10 clips. It never reads user media, playback settings, cookies, or network
 resources. Fixtures and the compiled executable are removed on completion.
 
+Set `PLAYBACK_SOAK_DEPS_DIR=/absolute/path/to/candidate-deps` to test an isolated
+playback-library build without replacing `deps/`. Headers, linked libraries,
+runtime search paths and the verified library/source records all come from that
+same tree. Fixture generation still uses `deps/executable/ffmpeg` unless
+`PLAYBACK_SOAK_FFMPEG` is explicitly provided. All mode, pixel and timing gates
+remain unchanged.
+
 This is not a null-video-output test. It uses the application's actual pinned
 libmpv, a real CGL 3.2 context, and the libmpv OpenGL render API with
 advanced control enabled. Hardware mode renders to a 3840x2160 framebuffer;

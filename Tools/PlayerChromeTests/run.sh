@@ -13,4 +13,15 @@ xcrun swiftc -o "$test_dir/PlayerChromeTests" \
   "$project_root/iina/TimeLabelOverflowedView.swift" \
   "$project_root/Tools/PlayerChromeTests/Fixture.swift" \
   "$project_root/Tools/PlayerChromeTests/main.swift"
-"$test_dir/PlayerChromeTests" "$project_root/iina/Base.lproj/MainWindowController.xib" "$snapshot_dir"
+"$test_dir/PlayerChromeTests" "$project_root/iina/Base.lproj/MainWindowController.xib" "$snapshot_dir" \
+  2>&1 | tee "$test_dir/runtime.log"
+if /usr/bin/grep -nE 'Unable to simultaneously satisfy constraints|Will attempt to recover by breaking constraint' "$test_dir/runtime.log"; then
+  echo "FAIL: The native layout reported conflicting constraints."
+  exit 1
+else
+  grep_status=$?
+  if [[ "$grep_status" -ne 1 ]]; then
+    echo "FAIL: The constraint-conflict check could not read its log."
+    exit "$grep_status"
+  fi
+fi

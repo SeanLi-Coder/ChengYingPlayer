@@ -23,7 +23,8 @@ reopens a real `NSWindow` 30 times. Alternating iterations restore preview-like
 rotation/loop/seek state before issuing synchronous pause and stop calls. It
 waits for actual drawing, not only decoder initialization: after each file-loaded
 event it requires two additional decoded-picture draws, a playback-restart event,
-and an advancing playback position. Nine actual framebuffer RGB samples reject
+an advancing playback position, and a window that is ordered onscreen, on the
+active Space and actually unoccluded. Nine actual framebuffer RGB samples reject
 empty/clear-only draw callbacks. Each iteration logs its frame and picture deltas,
 restart count, position, readiness wait, and native view state for diagnosis.
 The original total `frames > 30` assertion remains, with at least 60 verified
@@ -67,6 +68,26 @@ Its negative control reproduces the old loop missing an already queued event;
 the positive control and genuine-missing/duplicate cases verify the correction
 without a display or an app bundle. This establishes a test-oracle defect, not
 the cause of any historical CI failure without corresponding runtime evidence.
+`python3 -B Tools/PlayerCloseTests/test_window_lifecycle.py` separately checks the
+actual AppKit event dispatcher without opening a window or creating an app bundle.
+It first establishes that a private `applicationDefined` probe is queued, then
+verifies that the old RunLoop-only turn does not dispatch it while the fixture's
+shared dispatcher does. It also rejects duplicate dispatch, exhausted dispatch
+budgets, and all seven incomplete window-visibility combinations.
+
+The playback fixture completes `NSApplication.finishLaunching`, requests normal
+application activation and key-window ordering, and dispatches this test app's
+queued `NSEvent` instances inside the existing pump time slices. A bare RunLoop
+turn is not the application event loop. The native window animations are retained;
+the fixture does not force a draw, disable animation, move the window to a different
+Space, relax pixel checks, or increase the three/eight-second budgets. A window
+that cannot become actually visible remains a failure, not an environment skip.
+An October 2026 fixed diagnostic group observed `isVisible == true` alongside
+`isOnActiveSpace == false` and an occluded state for an entire failing readiness
+interval, while mpv updates and completed `display()` calls continued. This is
+evidence for repairing the test host lifecycle, not proof that every historical
+close failure had the same cause or that production rendering needed changing.
+
 `Tools/RenderLifecycleTests/run.sh` separately verifies the real
 Core Animation shadow constructor shares both display and priority ownership,
 plus CGL reference balancing, callback shutdown, Intel typechecking, and ASan.
@@ -127,6 +148,15 @@ not captures of the original Core Animation output; a separately requested
 software screenshot is a decoded-source control. No user video or account data
 is involved. The first-ready, failure and final JSON/log snapshots are retained
 outside the disposable app workspace.
+
+Failure diagnostics also persist bounded per-round `render-state.json` samples
+of update/display counts and native window/view/model-layer state. They do not
+read `presentation()`: constructing a presentation-layer copy can invoke the
+production shadow initializer and enqueue a forced update. With
+`CLOSE_TEST_RENDER_STATE_ONLY=1`, which requires `--failure-diagnostics`, the
+failure report stops before any screenshot requests. This mode changes neither
+readiness nor the failing exit status; use it when observing a stalled display
+without performing a secondary screenshot render.
 
 File-load failures always emit a bounded `LOAD_FAILURE:` JSON summary to stdout
 before failing. It includes the round, actual monotonic elapsed time, expected

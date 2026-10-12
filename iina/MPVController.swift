@@ -13,6 +13,50 @@ import VideoToolbox
 fileprivate let yes_str = "yes"
 fileprivate let no_str = "no"
 
+/// A single, unambiguous seek sample. All mutations occur on the main thread;
+/// event timestamps are captured before dispatching there.
+struct MPVSeekTiming {
+  static let timeout: Double = 5
+  struct Sample {
+    let token: UInt64
+    let mediaGeneration: UInt64
+    let interval: Double
+  }
+  private struct Probe {
+    let token: UInt64
+    let mediaGeneration: UInt64
+    let armedAt: Double
+    var startedAt: Double?
+  }
+  private var probe: Probe?
+  var isArmed: Bool { probe != nil }
+
+  mutating func arm(token: UInt64, mediaGeneration: UInt64, at time: Double) {
+    probe = time.isFinite ? Probe(token: token, mediaGeneration: mediaGeneration, armedAt: time) : nil
+  }
+
+  mutating func cancel() { probe = nil }
+
+  mutating func seek(token: UInt64, at time: Double) {
+    guard var current = probe, current.token == token else { return }
+    guard time.isFinite, time >= current.armedAt, time - current.armedAt <= Self.timeout,
+          current.startedAt == nil else {
+      cancel()
+      return
+    }
+    current.startedAt = time
+    probe = current
+  }
+
+  mutating func restart(token: UInt64, at time: Double) -> Sample? {
+    guard let current = probe, current.token == token else { return nil }
+    cancel()
+    guard let start = current.startedAt, time.isFinite, time >= start,
+          time - current.armedAt <= Self.timeout else { return nil }
+    return Sample(token: token, mediaGeneration: current.mediaGeneration, interval: time - start)
+  }
+}
+
 /// Change this variable to adjust mpv log level.
 ///
 /// Available levels:
@@ -110,9 +154,63 @@ class MPVController: NSObject {
 
   unowned let player: PlayerCore
 
-  var needRecordSeekTime: Bool = false
-  var recordedSeekStartTime: CFTimeInterval = 0
-  var recordedSeekTimeListener: ((Double) -> Void)?
+  @Atomic private var seekTimingToken: UInt64 = 0
+  private var seekTiming = MPVSeekTiming()
+  private var seekTimingReadyToken: UInt64?
+
+  // MARK: - Auto seek timing
+
+  /// Invalidation is immediate even for commands submitted outside the main thread.
+  private func cancelSeekTiming() {
+    let token = $seekTimingToken.withLock { value -> UInt64 in value &+= 1; return value }
+    let clear = { [weak self] in
+      guard let self, self.seekTimingToken == token else { return }
+      self.seekTiming.cancel()
+    }
+    if Thread.isMainThread { clear() } else { DispatchQueue.main.async(execute: clear) }
+  }
+
+  private func beginSeekTiming(mediaGeneration: UInt64) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    // Check readiness before invalidation. A command that has not yet delivered
+    // its restart cannot lend its queued SEEK/RESTART events to a new probe.
+    let mayProbe = seekTimingReadyToken == seekTimingToken && !getFlag("seeking")
+    cancelSeekTiming()
+    // Startup and overlapping seeks have no reliable SEEK/RESTART request identity.
+    guard mayProbe else { return }
+    let token = seekTimingToken
+    seekTiming.arm(token: token, mediaGeneration: mediaGeneration, at: CACurrentMediaTime())
+    DispatchQueue.main.asyncAfter(deadline: .now() + MPVSeekTiming.timeout) { [weak self] in
+      guard let self, self.seekTimingToken == token, self.seekTiming.isArmed else { return }
+      self.cancelSeekTiming()
+    }
+  }
+
+  private func observeSeekTiming(token: UInt64, at time: Double) {
+    guard token == seekTimingToken else { return }
+    seekTiming.seek(token: token, at: time)
+  }
+
+  private func markSeekTimingPlaybackReady(token: UInt64) {
+    guard token == seekTimingToken, player.info.state.loaded, !getFlag("seeking") else { return }
+    seekTimingReadyToken = token
+  }
+
+  private func finishSeekTiming(token: UInt64, at time: Double) {
+    guard token == seekTimingToken,
+          let sample = seekTiming.restart(token: token, at: time),
+          sample.mediaGeneration == player.videoToolsMediaGeneration,
+          player.info.state.loaded else { return }
+    player.useExactSeekForCurrentFile = sample.interval < 0.05
+  }
+
+  private func commandInvalidatesSeekTiming(_ command: MPVCommand) -> Bool {
+    ["seek", "revert-seek", "frame-step", "frame-back-step", "sub-seek", "stop", "quit",
+     "quit-watch-later", "loadfile", "loadlist", "playlist-next", "playlist-prev",
+     "playlist-play-index"].contains(command.rawValue)
+  }
+
+  // MARK: - End auto seek timing
 
   @Atomic private var hooks: [UInt64: MPVHookValue] = [:]
   private var hookCounter: UInt64 = 1
@@ -720,8 +818,14 @@ class MPVController: NSObject {
 
   // Send arbitrary mpv command.
   func command(_ command: MPVCommand, args: [String?] = [], checkError: Bool = true,
-               level: Logger.Level = .debug, returnValueCallback: ((Int32) -> Void)? = nil) {
+               level: Logger.Level = .debug, seekTimingGeneration: UInt64? = nil,
+               returnValueCallback: ((Int32) -> Void)? = nil) {
     guard mpv != nil else { return }
+    if let generation = seekTimingGeneration, command.rawValue == "seek" {
+      beginSeekTiming(mediaGeneration: generation)
+    } else if commandInvalidatesSeekTiming(command) {
+      cancelSeekTiming()
+    }
     log(commandLogSummary("Run command", command: command, args: args), level: level)
     var cargs = makeCArgs(command, args).map { $0.flatMap { UnsafePointer<CChar>(strdup($0)) } }
     defer {
@@ -732,6 +836,7 @@ class MPVController: NSObject {
       }
     }
     let returnValue = mpv_command(self.mpv, &cargs)
+    if returnValue < 0, commandInvalidatesSeekTiming(command) { cancelSeekTiming() }
     if checkError {
       chkErr(returnValue)
     } else if let cb = returnValueCallback {
@@ -740,6 +845,7 @@ class MPVController: NSObject {
   }
 
   func command(rawString: String, level: Logger.Level = .debug) -> Int32 {
+    cancelSeekTiming()
     log("Run raw command (contents redacted, length=\(rawString.utf8.count))", level: level)
     return mpv_command_string(mpv, rawString)
   }
@@ -747,6 +853,7 @@ class MPVController: NSObject {
   func asyncCommand(_ command: MPVCommand, args: [String?] = [], checkError: Bool = true,
                     replyUserdata: UInt64, level: Logger.Level = .debug) {
     guard mpv != nil else { return }
+    if commandInvalidatesSeekTiming(command) { cancelSeekTiming() }
     log(commandLogSummary("Asynchronously run command", command: command, args: args), level: level)
     var cargs = makeCArgs(command, args).map { $0.flatMap { UnsafePointer<CChar>(strdup($0)) } }
     defer {
@@ -1039,7 +1146,9 @@ class MPVController: NSObject {
 
     switch eventId {
     case MPV_EVENT_SHUTDOWN:
+      cancelSeekTiming()
       DispatchQueue.main.async {
+        self.seekTimingReadyToken = nil
         self.player.mpvHasShutdown()
       }
 
@@ -1079,8 +1188,10 @@ class MPVController: NSObject {
       DispatchQueue.main.async { self.player.onVideoReconfig() }
 
     case MPV_EVENT_START_FILE:
+      cancelSeekTiming()
       guard let path = getString(MPVProperty.path) else { break }
       DispatchQueue.main.async { [self] in
+        seekTimingReadyToken = nil
         player.info.state = .starting
         player.fileStarted(path: path)
         let url = player.info.currentURL
@@ -1092,16 +1203,16 @@ class MPVController: NSObject {
       DispatchQueue.main.async { self.player.fileLoaded() }
 
     case MPV_EVENT_SEEK:
+      let seekTime = CACurrentMediaTime()
+      let timingToken = seekTimingToken
       DispatchQueue.main.async { [self] in
+        observeSeekTiming(token: timingToken, at: seekTime)
         player.info.isSeeking = true
         player.videoToolsEnforceLoopBounds()
         // When playback is paused the display link may be shutdown in order to not waste energy.
         // It must be running when seeking to avoid slowdowns caused by mpv waiting for IINA to call
         // mpv_render_report_swap.
         player.mainWindow.videoView.displayActive()
-        if needRecordSeekTime {
-          recordedSeekStartTime = CACurrentMediaTime()
-        }
         player.syncUI(.time)
         let osdText = (player.info.videoPosition?.stringRepresentation ?? Constants.String.videoTimePlaceholder) + " / " +
         (player.info.videoDuration?.stringRepresentation ?? Constants.String.videoTimePlaceholder)
@@ -1110,7 +1221,11 @@ class MPVController: NSObject {
       }
 
     case MPV_EVENT_PLAYBACK_RESTART:
+      let restartTime = CACurrentMediaTime()
+      let timingToken = seekTimingToken
       DispatchQueue.main.async { [self] in
+        finishSeekTiming(token: timingToken, at: restartTime)
+        markSeekTimingPlaybackReady(token: timingToken)
         player.info.isSeeking = false
         // When playback is paused the display link may be shutdown in order to not waste energy.
         // The display link will be restarted while seeking. If playback is paused shut it down
@@ -1118,15 +1233,12 @@ class MPVController: NSObject {
         if player.info.state == .paused {
           player.mainWindow.videoView.displayIdle()
         }
-        if needRecordSeekTime {
-          recordedSeekTimeListener?(CACurrentMediaTime() - recordedSeekStartTime)
-          recordedSeekTimeListener = nil
-        }
         player.playbackRestarted()
         player.syncUI(.time)
       }
 
     case MPV_EVENT_END_FILE:
+      cancelSeekTiming()
       let reason = event.pointee.data.load(as: mpv_end_file_reason.self)
       let dueToStopCommand = reason == MPV_END_FILE_REASON_STOP
       // When the IINA "Pause" setting is enabled under "When media is opened" IINA must tell mpv to
@@ -1144,7 +1256,10 @@ class MPVController: NSObject {
         // condition, playback must be paused as soon as possible, so logging is done afterward.
         log("Pausing playback because \"pause when media is opened\" is enabled")
       }
-      DispatchQueue.main.async { self.player.fileEnded(dueToStopCommand) }
+      DispatchQueue.main.async {
+        self.seekTimingReadyToken = nil
+        self.player.fileEnded(dueToStopCommand)
+      }
 
     case MPV_EVENT_COMMAND_REPLY:
       let reply = event.pointee.reply_userdata
@@ -1165,6 +1280,7 @@ class MPVController: NSObject {
       }
 
     case MPV_EVENT_QUEUE_OVERFLOW:
+      cancelSeekTiming()
       // The mpv event system uses an event queue of limited size. If events are not read quickly
       // enough the queue can overflow resulting in events being dropped. This event indicates the
       // ringbuffer overflowed and at least one event was dropped. IINA can recover from the loss of

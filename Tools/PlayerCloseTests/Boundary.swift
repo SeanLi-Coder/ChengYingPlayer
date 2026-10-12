@@ -173,6 +173,22 @@ final class ObservedLayer: ViewLayer {
   @Atomic static var pictureFrames = 0
   @Atomic static var readinessChecks = 0
   @Atomic static var acceptedReadinessChecks = 0
+  @Atomic static var updateRequests = 0
+  @Atomic static var forcedUpdateRequests = 0
+  @Atomic static var displayCalls = 0
+  @Atomic static var completedDisplayCalls = 0
+  override func update(force: Bool = false) {
+    if failureDiagnosticDirectory != nil {
+      Self.$updateRequests.withLock { $0 += 1 }
+      if force { Self.$forcedUpdateRequests.withLock { $0 += 1 } }
+    }
+    super.update(force: force)
+  }
+  override func display() {
+    if failureDiagnosticDirectory != nil { Self.$displayCalls.withLock { $0 += 1 } }
+    super.display()
+    if failureDiagnosticDirectory != nil { Self.$completedDisplayCalls.withLock { $0 += 1 } }
+  }
   override func canDraw(inCGLContext ctx: CGLContextObj, pixelFormat pf: CGLPixelFormatObj,
                         forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>?) -> Bool {
     Self.$readinessChecks.withLock { $0 += 1 }
