@@ -153,7 +153,8 @@ static void play_fixture(const char *path, int depth, const char *mode, bool har
     option(player, "hwdec", mode);
     option(player, "hwdec-codecs", "av1");
     option(player, "vd-lavc-threads", "2");
-    require(mpv_request_log_messages(player, "v") >= 0, "Enable bounded decoder diagnostics");
+    // mpv maps FFmpeg AV_LOG_VERBOSE session failures to its debug level.
+    require(mpv_request_log_messages(player, "debug") >= 0, "Enable bounded decoder diagnostics");
     require(mpv_initialize(player) >= 0, "Initialize actual libmpv");
     const char *load[] = {"loadfile", path, "replace", NULL};
     require(mpv_command(player, load) >= 0, "Load synthetic AV1 fixture");
