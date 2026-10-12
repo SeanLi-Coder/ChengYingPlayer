@@ -16,6 +16,27 @@ SPEC.loader.exec_module(runner)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_manual_ci_collects_independent_evidence_without_masking_failure(self):
+        workflow = (runner.ROOT / ".github/workflows/ci.yml").read_text()
+        sections = {part.split("\n", 1)[0]: part for part in workflow.split("\n      - name: ")[1:]}
+        self.assertIn("id: native_build", sections["Build application"])
+        condition = ("if: ${{ !cancelled() && steps.native_build.outcome == 'success' && "
+                     "(success() || github.event_name == 'workflow_dispatch') }}")
+        for title in ("Test bounded native preroll with delayed video",
+                      "Test native playback surfaces and route ownership",
+                      "Test native player lifecycle and menu integration",
+                      "Test native playback in the complete application window"):
+            self.assertIn(condition, sections[title])
+            self.assertNotIn("continue-on-error", sections[title])
+        self.assertNotIn("continue-on-error", workflow)
+        self.assertNotIn("if:", sections["Assemble and verify application"])
+        release = workflow.split("\n  publish-release:\n", 1)[1]
+        self.assertIn("needs: [media-helper-tests, build-apple-silicon]", release)
+        self.assertIn("if: startsWith(github.ref, 'refs/tags/')", release)
+        self.assertNotIn("always()", release)
+        self.assertNotIn("!cancelled()", release)
+        # This checks the workflow contract, not a successful remote App run.
+
     def test_cleanup_completion_does_not_hide_application_failure(self):
         with tempfile.TemporaryDirectory(prefix="native-cleanup-report-") as directory:
             owner = runner.TestAppWorkspace(prefix="fixture-", dir=directory)

@@ -328,6 +328,7 @@ jobs:
           CHENGYING_ALLOW_CI_GL_SKIP=1 CHENGYING_VIEWPORT_TEST_DROP_RESET_REDRAW=1 VIDEO_VIEWPORT_LIVE_MODE=software bash Tools/VideoViewportTests/Live/run.sh
 
       - name: Build application
+        id: native_build
         run: >-
           xcodebuild
           -project iina.xcodeproj
@@ -354,7 +355,21 @@ jobs:
           bash Tools/NativePlaybackRenderedTests/run.sh
           NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativePlaybackSessionTests/run.sh
 
+      - name: Preserve native core test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-core-test-evidence-${{ github.sha }}
+          path: |
+            build/native-playback-session-tests.*/results.log
+            build/native-playback-rendered-tests.*/results.log
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # Manual development runs gather independent evidence after a test fails.
+      # Failures still fail this job; packaging/publication keep success() gating.
       - name: Test bounded native preroll with delayed video
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
         timeout-minutes: 6
         run: |
           export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
@@ -374,6 +389,7 @@ jobs:
           retention-days: 3
 
       - name: Test native playback surfaces and route ownership
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
         timeout-minutes: 8
         run: |
           export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
@@ -389,6 +405,7 @@ jobs:
           python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control first-start
 
       - name: Test native player lifecycle and menu integration
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
         timeout-minutes: 5
         run: |
           export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
@@ -403,6 +420,7 @@ jobs:
           bash Tools/NativeDropRoutingTests/run.sh
 
       - name: Test native playback in the complete application window
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
         timeout-minutes: 20
         run: |
           python3 -B Tools/NativeAppTests/test_runner.py

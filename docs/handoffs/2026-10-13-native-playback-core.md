@@ -268,6 +268,21 @@ flush 保护负对照 **110/16**（`LHIaR7`），去除 FIFO 单条件负对照 
 运行 `jfzWen`、`UoFHbK` 各 117/0，仍不取消该失败。孤立 open→seek 的 12 次诊断成功，
 没有完整前序生命周期且同步日志改变时序，不据此判为已修复。
 
+随后一次完整原前序的隔离诊断 `build/native-preroll-ring-diagnosis.7te25h/` 保持原始素材与
+三秒像素截止时间，TSan **117/0**；有界 ring 为 804 项、丢弃为零，只在末尾输出。
+seek 到 2 的首个实际读回是 `raw nil`，约 14.3 ms 后是正确 NV12；两时钟均为 2、rate 0，
+flush 完成、renderer 无错误且 `isReadyForDisplay=true`。这只能证明该次短暂空值存在，
+没有复现原三秒失败；不能据此把 ready 标志或追加帧当作生产修补，也未继续重复碰运气。
+
+上述开发 CI `38305625981` 最终失败：媒体 job、完整生产 App 编译、decoder 全部检查、
+output 96、display 36、普通 session **209/0**、实际像素 **66/0** 通过；随后 session
+TSan 为 **208/1**，唯一失败是 `[0.5,0.9]`、速率 1.2 的 A/B 在固定 1.5 秒内只有一次
+已提交视频时间戳回绕（65 samples、phase seeking），未达到至少两次。没有 TSan race 报告；
+尚不能判为永久卡住、生产退化或单纯测试时间窗错误，不改期限、不抹去失败。
+日志保留 `build/native-ci-38305625981-build-failure.log`。本轮没有跑到完整 App 47 项。
+后续手动开发 CI 仅在生产 App 已编译且未取消时继续采集各独立 native 套件和实窗证据；
+失败仍使 job 失败，打包与发布的成功门禁不变，没有 `continue-on-error`。
+
 新生产源码的默认三分钟 4K 重跑已完成：`build/native-playback-soak.Q9odqV/`，
 **292/0，182.45 秒**，九项输入文件 SHA-256 前后一致。实际读回 3840×2160 NV12／P010，
 三个 session 的 weak 引用均释放，损坏格式和未知颜色均为零；三轮空图读回次数为 5／4／2，
