@@ -28,6 +28,8 @@ final class MPVBoundary {
 final class PlayerBoundary {
   let info = PlaybackInfo()
   let mpv = MPVBoundary()
+  var currentPlaybackSpeed: Double { mpv.speed }
+  var isUsingNativePlayback = false
   lazy var mainWindow = MainWindowUnderTest(player: self)
   var videoToolsLoopRange: VideoToolsLoopRange?
   var videoToolsCurrentTime: Double? = 12

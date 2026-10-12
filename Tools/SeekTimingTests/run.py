@@ -52,6 +52,14 @@ final class SeekCore {
   var videoToolsCurrentTime: Double? = 0
   var absoluteTarget: Double?
   let mpv = SeekCommandBoundary()
+  lazy var playbackTransport: PlaybackTransport = MPVPlaybackTransport(sink: .init(
+    isAvailable: { true }, getFlag: { _ in false }, getDouble: { _ in 0 },
+    setFlag: { _, _, _ in }, setDouble: { _, _, _ in },
+    command: { [weak self] name, arguments, context in
+      self?.mpv.command(MPVCommand(name), args: arguments.map(Optional.some),
+        checkError: context.checkError, level: context.verbosity == .verbose ? .verbose : .debug,
+        seekTimingGeneration: context.seekTimingGeneration)
+    }))
   func seek(absoluteSecond: Double) { absoluteTarget = absoluteSecond }
 """ + method(old_core, "seek(relativeSecond: Double, option: Preference.SeekOption)") + "\n" + method(core, "resetAutoSeekForNewMedia()") + "\n}\n"
     # Fail if lifecycle wiring ceases to invalidate before dispatching UI work.
@@ -78,6 +86,8 @@ final class SeekCore {
         extracted.write_text(generated)
         executable = work / "SeekTimingTests"
         sources = [ROOT / "iina/Atomic.swift", ROOT / "iina/Lock.swift", ROOT / "iina/MPVCommand.swift",
+                   ROOT / "iina/PlaybackBackend/PlaybackTransport.swift",
+                   ROOT / "iina/PlaybackBackend/MPVPlaybackTransport.swift",
                    ROOT / "iina/VideoTools/VideoToolsLoopPolicy.swift",
                    ROOT / "Tools/SeekTimingTests/Boundary.swift", extracted,
                    ROOT / "Tools/SeekTimingTests/main.swift"]

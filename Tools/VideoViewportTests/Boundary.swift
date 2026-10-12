@@ -78,9 +78,14 @@ final class MainWindowBoundary {
 }
 
 final class PlayerCore {
+  var isUsingNativePlayback = false
   static var keyBindings: [String: KeyBinding] = [:]
   let info = PlaybackInfo()
   let mpv = MPVController()
+  var currentPlaybackSpeed: Double { mpv.getDouble(MPVOption.PlaybackControl.speed) }
+  var playbackIsPaused: Bool { mpv.getFlag(MPVOption.PlaybackControl.pause) }
+  var playbackAtEOF: Bool { mpv.getFlag(MPVProperty.eofReached) }
+  var playbackPosition: Double? { mpv.getDouble(MPVProperty.timePos) }
   let mainWindow = MainWindowBoundary()
   var videoToolsMediaGeneration: UInt64 = 1
   var videoToolsLoopRecovery = VideoToolsLoopRecovery()

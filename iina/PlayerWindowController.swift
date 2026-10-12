@@ -94,8 +94,12 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     case PK.maxVolume.rawValue:
       if let newValue = change[.newKey] as? Int {
         volumeSlider.maxValue = Double(newValue)
-        if player.mpv.getDouble(MPVOption.Audio.volume) > Double(newValue) {
-          player.mpv.setDouble(MPVOption.Audio.volume, Double(newValue))
+        if player.playbackVolume > Double(newValue) {
+          if player.isUsingNativePlayback {
+            player.setVolume(Double(newValue), unmute: false)
+          } else {
+            player.mpv.setDouble(MPVOption.Audio.volume, Double(newValue))
+          }
         }
       }
     case PK.useExactSeek.rawValue:
@@ -258,6 +262,28 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       }
     } else {
       if handleVolumeKeyBinding(keyBinding.action) { return true }
+      if player.isUsingNativePlayback {
+        // Typed transport commands must never reach the idle compatibility
+        // core. Preserve arbitrary custom mpv bindings by switching explicitly
+        // before replaying the original binding on that backend.
+        if keyBinding.action == ["cycle", "pause"] {
+          player.togglePause()
+          return true
+        }
+        if keyBinding.action == ["set", "pause", "yes"] {
+          player.pause()
+          return true
+        }
+        if keyBinding.action == ["set", "pause", "no"] {
+          player.resume()
+          return true
+        }
+        if handleGuardedPlaybackCommand(keyBinding.action) { return true }
+        player.requireMPVCompatibility(reason: "The requested key binding needs the compatibility backend") { [weak self] in
+          _ = self?.handleKeyBinding(keyBinding)
+        }
+        return true
+      }
       if player.handleLoopModeKeyBinding(keyBinding.action) { return true }
       if handleGuardedPlaybackCommand(keyBinding.action) { return true }
       // - mpv command
@@ -307,8 +333,8 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     let volume: Double
     switch tokens[0] {
     case "set": volume = amount
-    case "add": volume = player.mpv.getDouble(MPVOption.Audio.volume) + amount
-    case "multiply": volume = player.mpv.getDouble(MPVOption.Audio.volume) * amount
+    case "add": volume = player.playbackVolume + amount
+    case "multiply": volume = player.playbackVolume * amount
     default: return false
     }
     guard volume.isFinite else { return false }
@@ -322,6 +348,12 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
   }
 
   func syncSlider() {
+    if player.isUsingNativePlayback {
+      playSlider.abLoopA.isHidden = true
+      playSlider.abLoopB.isHidden = true
+      playSlider.needsDisplay = true
+      return
+    }
     let a = player.abLoopA
     playSlider.abLoopA.isHidden = VideoToolsLoopRange.marker(from: player.mpv.getString(MPVOption.PlaybackControl.abLoopA)) == nil
     playSlider.abLoopA.doubleValue = secondsToPercent(a)
@@ -377,6 +409,17 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       event, hasMedia: player.info.state.loaded, isTextInput: isTextInput,
       isModal: NSApp.modalWindow != nil || window.attachedSheet != nil
     ) else { return false }
+    if player.isUsingNativePlayback {
+      switch action {
+      case .consume, .speedUp, .speedDown:
+        break
+      default:
+        player.requireMPVCompatibility(reason: "This video tool needs the compatibility backend") { [weak self] in
+          _ = self?.handleVideoToolsShortcutEvent(event)
+        }
+        return true
+      }
+    }
     switch action {
     case .consume:
       break
@@ -389,7 +432,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       }
     case .speedUp, .speedDown:
       let speed = VideoToolsShortcuts.adjustedSpeed(
-        from: player.mpv.getDouble(MPVOption.PlaybackControl.speed),
+        from: player.currentPlaybackSpeed,
         direction: action == .speedUp ? .increase : .decrease
       )
       player.setSpeed(speed)
@@ -417,8 +460,8 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
          VideoToolsPlaybackCommand.absoluteSeekTarget(amount, duration: player.info.videoDuration?.second) == nil {
         return false
       }
-      player.mainWindow.quickSettingView.prepareVideoToolsForUserSeek()
-      guard player.videoToolsLoopRange != nil else { return false }
+      if !player.isUsingNativePlayback { player.mainWindow.quickSettingView.prepareVideoToolsForUserSeek() }
+      guard player.isUsingNativePlayback || player.videoToolsLoopRange != nil else { return false }
       switch mode {
       case .absolute:
         guard let target = VideoToolsPlaybackCommand.absoluteSeekTarget(amount, duration: player.info.videoDuration?.second) else {
@@ -433,13 +476,14 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
         }
       }
     case .frame(let backwards):
+      guard !player.isUsingNativePlayback else { return false }
       player.mainWindow.quickSettingView.prepareVideoToolsForUserSeek()
       guard player.videoToolsLoopRange != nil else { return false }
       player.pause()
       player.frameStep(backwards: backwards)
     case .speed(let amount, let mode):
-      guard player.videoToolsLoopRange != nil else { return false }
-      let current = player.mpv.getDouble(MPVOption.PlaybackControl.speed)
+      guard player.isUsingNativePlayback || player.videoToolsLoopRange != nil else { return false }
+      let current = player.currentPlaybackSpeed
       let target: Double
       switch mode {
       case .set: target = amount
@@ -722,7 +766,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
   }
 
   func updateVolume() {
-    let hasSelectedAudio = (player.info.aid ?? 0) > 0
+    let hasSelectedAudio = player.hasSelectedPlaybackAudio
     // Keep the control discoverable even for a silent video or a deselected audio track.
     // A later file/track refresh must undo every state inherited from the previous file.
     volumeSlider.isHidden = false
@@ -799,7 +843,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       guard player.info.state == .paused || notVideo else { return }
     }
     log("Forcing drawing, \(reason)")
-    videoView.videoLayer.update(force: true)
+    videoView.forcePlaybackRedraw()
   }
 
   // MARK: - IBActions

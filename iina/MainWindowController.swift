@@ -130,6 +130,7 @@ class MainWindowController: PlayerWindowController {
   var blackWindows: [NSWindow] = []
 
   lazy var rotation: Int = {
+    if player.isUsingNativePlayback { return videoView.nativeSurface?.geometry?.rotationDegrees ?? 0 }
     return player.mpv.getInt(MPVProperty.videoParamsRotate)
   }()
 
@@ -430,7 +431,7 @@ class MainWindowController: PlayerWindowController {
   var fsState: FullScreenState = .windowed {
     didSet {
       // Must not access mpv while it is asynchronously processing stop and quit commands.
-      guard player.info.state.active else { return }
+      guard player.info.state.active, !player.isUsingNativePlayback else { return }
       switch fsState {
       case .fullscreen: player.mpv.setFlag(MPVOption.Window.fullscreen, true)
       case .animating:  break
@@ -1500,7 +1501,7 @@ class MainWindowController: PlayerWindowController {
       if recognizer.state == .began {
         // began
         lastMagnification = recognizer.magnification
-        videoView.videoLayer.inLiveResize = true
+        videoView.playbackInLiveResize = true
         frameWhenStartedPinching = window.frame
       } else if recognizer.state == .changed {
         // changed
@@ -1517,7 +1518,7 @@ class MainWindowController: PlayerWindowController {
         lastMagnification = recognizer.magnification
       } else if recognizer.state == .ended {
         updateWindowParametersForMPV()
-        videoView.videoLayer.inLiveResize = false
+        videoView.playbackInLiveResize = false
       }
     }
   }
@@ -2097,7 +2098,7 @@ class MainWindowController: PlayerWindowController {
     
     if case .animating(_, _, _) = fsState {
       forceDraw("window resized during animated enter or exit full screen")
-    } else if !videoView.videoLayer.inLiveResize {
+    } else if !videoView.playbackInLiveResize {
       forceDraw("window resized")
     }
 
@@ -2179,12 +2180,12 @@ class MainWindowController: PlayerWindowController {
   }
 
   func windowWillStartLiveResize(_ notification: Notification) {
-    videoView.videoLayer.inLiveResize = true
+    videoView.playbackInLiveResize = true
   }
 
   // resize framebuffer in videoView after resizing.
   func windowDidEndLiveResize(_ notification: Notification) {
-    videoView.videoLayer.inLiveResize = false
+    videoView.playbackInLiveResize = false
     // Must not access mpv while it is asynchronously processing stop and quit commands.
     // See comments in windowWillExitFullScreen for details.
     guard player.info.state.active else { return }
@@ -2194,7 +2195,7 @@ class MainWindowController: PlayerWindowController {
   func windowDidChangeBackingProperties(_ notification: Notification) {
     if let oldScale = (notification.userInfo?[NSWindow.oldScaleFactorUserInfoKey] as? NSNumber)?.doubleValue,
       oldScale != Double(window!.backingScaleFactor) {
-      videoView.videoLayer.contentsScale = window!.backingScaleFactor
+      videoView.updatePlaybackContentsScale()
     }
   }
   
@@ -2476,7 +2477,7 @@ class MainWindowController: PlayerWindowController {
       let osdData: [String: String] = [
         "duration": player.info.videoDuration?.stringRepresentation ?? Constants.String.videoTimePlaceholder,
         "position": player.info.videoPosition?.stringRepresentation ?? Constants.String.videoTimePlaceholder,
-        "currChapter": (player.mpv.getInt(MPVProperty.chapter) + 1).description,
+        "currChapter": player.isUsingNativePlayback ? "0" : (player.mpv.getInt(MPVProperty.chapter) + 1).description,
         "chapterCount": player.info.chapters.count.description
       ]
 
@@ -3267,6 +3268,7 @@ class MainWindowController: PlayerWindowController {
   }
 
   func updateWindowParametersForMPV(withFrame frame: NSRect? = nil) {
+    guard !player.isUsingNativePlayback else { return }
     guard let window = self.window else { return }
     if let videoWidth = player.info.videoWidth {
       let windowScale = Double((frame ?? window.frame).width) / Double(videoWidth)
@@ -3583,6 +3585,12 @@ class MainWindowController: PlayerWindowController {
   }
 
   func showSettingsSidebar(tab: QuickSettingViewController.TabViewType? = nil, force: Bool = false, hideIfAlreadyShown: Bool = true) {
+    if player.isUsingNativePlayback {
+      player.requireMPVCompatibility(reason: "Settings sidebar requires the compatibility renderer") { [weak self] in
+        self?.showSettingsSidebar(tab: tab, force: force, hideIfAlreadyShown: hideIfAlreadyShown)
+      }
+      return
+    }
     if !force && (sidebarAnimationState == .willShow || sidebarAnimationState == .willHide) {
       return  // do not interrupt other actions while it is animating
     }
@@ -3612,6 +3620,12 @@ class MainWindowController: PlayerWindowController {
   }
 
   func showPlaylistSidebar(tab: PlaylistViewController.TabViewType? = nil, force: Bool = false, hideIfAlreadyShown: Bool = true) {
+    if player.isUsingNativePlayback {
+      player.requireMPVCompatibility(reason: "Playlist sidebar requires the compatibility renderer") { [weak self] in
+        self?.showPlaylistSidebar(tab: tab, force: force, hideIfAlreadyShown: hideIfAlreadyShown)
+      }
+      return
+    }
     if !force && (sidebarAnimationState == .willShow || sidebarAnimationState == .willHide) {
       return  // do not interrupt other actions while it is animating
     }

@@ -6,7 +6,8 @@
 2026-10-13，工作分支为 `codex/native-playback-core`，基于 `ee83d00a`。
 
 **换核尚未完成，不是已发布版本。** 新后端已加入 Xcode 编译工程，能独立解码、同步播放
-音视频和呈现实际画面，但 `PlayerCore`、主窗口、字幕及剪辑预览仍调用 libmpv。
+音视频和呈现实际画面。`PlayerCore` 与主窗口正在接入严格受限的内部 native 路由；
+正式默认、字幕及剪辑预览仍使用 libmpv。
 没有改变默认播放路径、版本号、用户偏好、已安装 App、更新源或签名身份。
 不要仅因新文件进入编译工程，或下述测试通过，就宣布正式播放器已经换核。
 
@@ -17,6 +18,53 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 较早系统保留 display layer 队列路径，当前仅通过部署目标编译，未做旧系统运行验收。
 参考前一轮 REA 研究的高层职责划分；未复制 Movist Pro 的代码、反编译输出、二进制或资源。
 不声称已经得到 Movist 的同一内核或性能。
+
+## 主窗口接入切片（同日继续，尚未完成 App 验收）
+
+内部环境变量 `CHENGYING_NATIVE_PLAYBACK=1` 才会尝试新路径；没有新增面向用户的默认开关。
+只有从未向 mpv 发过媒体命令的 core、单个本地 SDR 视频、明确 SAR、单视频轨／最多一音轨、
+无内嵌字幕／章节和不支持的定制配置才准入。自动同目录播放列表、外部字幕搜索与已有续播
+状态不能静默丢失，因此检测到这些需求时使用兼容路径。一次回退后该 core 不再进入 native；
+这不是任意两个活跃后端之间的无缝切换实现。
+
+- 新 `PlaybackBackend` 类型接口保留 MPV 原命令语义，并接入独立 session。
+  volume/rate/连续相对 seek/pause 有接受中的命令状态，快速连按不会反复取同一个旧 UI 快照。
+  精确 A/B／预览时间读取另有异步、代次校验的 `captureCurrentState`，不阻塞主线程。
+- `NativePlaybackSurface` 挂真实 display layer，处理 SAR、四向旋转、裁切、backing scale、
+  zoom/pan。`VideoView` 原生路径不构造 `ViewLayer`／OpenGL、不启动 CVDisplayLink；
+  主窗口使用明确的 resize、backing 和 redraw 分派。
+- 设置、文件列表、未迁移快捷键／检查器暂先显式回到兼容内核；同一 URL 的暂停、时间、
+  音量和速度恢复经过实际 MPV seek 完成检查后才执行动作，换片／停止取消旧动作。
+  不把这种回退说成新内核已经支持字幕、剪辑预览和所有工具。
+- MPV 媒体事件同时检查接收及主线程投递时的路由代次；首次兼容加载等待 `START_FILE`，
+  不让初始化积压事件冒充新媒体。保留真实 shutdown、hook continuation 和错误诊断。
+  修复属性插件异步回调持有临时 C 指针，以及没有 GL context 的 idle MPV 退出清理。
+- metadata 增加真实轨道／章节清单、SAR 和 HDR 分类。容器 SAR 与码流不同的真实测试
+  暴露了比例优先级错误，已统一按容器 override；未知 SAR 不是默认假定为方形像素。
+
+新增本机验证：surface **106/0**、生产 VideoView 边界 **28/0**、transport **116/0**、
+MPV 事件路由 ASan/TSan 各 **85 项**及两个预期失败负对照；窗口生命周期 **188/0**。
+其中 ViewLayer／应用服务边界使用计数替身，不等于完整 App 窗口或物理设备验收。
+旧剪辑导航 **317/0**、静音开片 **363 项**、真实 libmpv 剪辑导航 **28 项**通过。
+
+补充生产 PlayerCore 方法抽取验证：
+
+- `Tools/NativePlayerRouteTests/run.sh` **35/0**：真实 decoder/session/output/surface/VideoView、
+  实际显示像素和状态 setter；首开自动播放、暂停首帧、静音、快速换片、停止及退出。
+  MainWindow nib／周边服务和 MPV 是边界替身。只移除自动 resume 的负对照为 **33/2**。
+- `Tools/NativePlayerCoreTests/run.py` ASan/TSan 各 **25 项**：受控异步 session 的
+  shutdown/stop 优先级、回退途中开新文件、整批多文件等退场后重放与取消；不伪装为像素测试。
+- `Tools/PlaybackMenuRoutingTests/run.py` AppKit **9 项**及 **22 个**菜单前置路由检查：
+  回退完成前不发旧内核命令，菜单重建不篡改已请求动作，连续速度／音量取接受中的状态。
+
+这些测试实际抓到并修复了退出 completion 被后续关窗覆盖、stopping→shuttingDown 非法跳转、
+回退期间新开 B 却恢复旧 A、整批文件过早 append 到闲置 MPV 的问题。没有放宽状态或像素断言。
+
+首个提交 `2884a403` 的 CI 完整 App 构建通过；新测试步骤因写死本机 Homebrew FFmpeg
+路径而失败（运行 `38279550088`），并非整条流水线成功。后续步骤已改用构建产出的固定
+`deps/executable/ffmpeg`，主窗口接入的新提交仍须独立通过完整构建／测试。
+可通过手动 workflow 的 `upload_development_build` 取短期开发构建用于隔离验收；
+这不会创建 Release、更新 appcast 或替换已安装 App。开发构建不得当成稳定更新交付。
 
 ## 实现文件
 
@@ -46,8 +94,8 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 
 | 命令 | 本机结果与边界 |
 | --- | --- |
-| `bash Tools/NativeDecoderTests/run.sh` | Objective-C 9226 项与 Swift optional EOF／seek／cancel 通过；H.264、HEVC PQ 10-bit、FFV1 8/10-bit、非零起始时间、旋转元数据、六声道、24/32-bit 精度边界、原始格式与硬件输出一致性、HDR 精确字节及非法元数据拒绝等。 |
-| 最新 decoder 源码 ASan + UBSan / `-Werror` | 9226 项通过，无 sanitizer 报错；这不是整个 App 的 sanitizer 验收。 |
+| `bash Tools/NativeDecoderTests/run.sh` | Objective-C 9265 项与 Swift optional EOF／seek／cancel 通过；H.264、HEVC PQ 10-bit、FFV1 8/10-bit、非零起始时间、旋转元数据、六声道、24/32-bit 精度边界、原始格式与硬件输出一致性、HDR 精确字节及非法元数据拒绝等。 |
+| 最新 decoder 源码 ASan + UBSan / `-Werror` | 9265 项通过，无 sanitizer 报错；这不是整个 App 的 sanitizer 验收。 |
 | `bash Tools/NativeSampleBufferOutputTests/run.sh` | 96 项通过，包括实际共享时钟、rate／anchor、队列背压、现代 renderer 身份、关闭释放以及错误队列调用的负对照。 |
 | `bash Tools/NativeSampleBufferDisplayTests/run.sh` | 36 项通过；读取生产 renderer 的实际 displayed pixel buffer 九点颜色，验证红→绿、暂停不显示后续蓝帧、flush、前后跳转、13 次重叠异步 flush 和关闭清图。不等于实体屏幕 HDR 色彩或可听音频验收。 |
 | `bash Tools/NativePlaybackRenderedTests/run.sh` | 66 项通过，连续多轮通过；合成媒体经独立 FFmpeg 原始字节校验，再走生产 decoder → session → renderer，读回真实 NV12 像素。包括 H.264 B 帧暂停双向 seek、8 次快速换片、停止后重开及异步关闭。 |
@@ -101,12 +149,12 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 - 仅本地 regular 文件；不接收网络 URL、嵌套播放清单、目录或设备。
 - 当前解码策略支持 8/10-bit 420、标准色彩标签和静态 HDR 元数据。动态 HDR、ICC、
   交错扫描、未知／镜像变换、软件非 420／大于 10-bit、不能无损表示的 PCM 明确拒绝。
-  **还没有 App 级兼容后端路由**，不能说这些文件已经自动回退并正常播放。
+  App 级兼容路由正在验证，不能仅据 decoder 的 unsupported 结果宣称完整 App 已回退成功。
 - `videoToolboxDecoded` 证明 CVPixelBuffer / VideoToolbox 路径；`hardwareDecoded`
   仅在锁定 FFmpeg 路径明确要求硬件时为真。FFmpeg 7 的 HEVC 允许软件 fallback，
   因而 HEVC 的 false 是“实际硬件未确认”，不能标作软件解码或硬解失败。
 - 本机不是 M4；AV1 M4 硬解、实体 HDR 屏、ICC 色彩、真实音频设备切换和可听音质未验收。
-- 旋转目前只提取元数据，尚未在新窗口呈现路径应用；没有完整字幕／轨道选择、截图、
+- 旋转和 SAR 已在新 surface 测试应用，但没有完整字幕／轨道选择、截图、
   帧进、画面缩放平移、HDR 用户开关、播放列表策略及剪辑预览恢复。
 - 倍速当前只承诺 0.5–2.0；不能直接取代旧界面更广的速率范围而不给用户提示。
 - 暂未测得相对旧内核／Movist 的耗电、CPU、总内存、丢帧或启动速度优势。

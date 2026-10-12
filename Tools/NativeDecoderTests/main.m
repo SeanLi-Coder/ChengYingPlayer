@@ -11,6 +11,12 @@
 - (BOOL)validateHardwarePixelBuffer:(CVPixelBufferRef)buffer sourceFormat:(enum AVPixelFormat)source
                              range:(enum AVColorRange)range error:(NSError **)error;
 - (BOOL)configureScaleColorspace:(int)space fullRange:(BOOL)full error:(NSError **)error;
+- (BOOL)populateAspectSummary:(CYNMediaInfo *)summary streamRatio:(AVRational)streamRatio
+                  codecRatio:(AVRational)codecRatio error:(NSError **)error;
+@end
+
+@interface CYNMediaInfo (Tests)
+@property(nonatomic) NSInteger width, height;
 @end
 
 @interface FailingColorDecoder : CYNMediaDecoder
@@ -161,8 +167,92 @@ static void staticHDRBoundaries(void) {
   error = nil;
   check(![decoder attachColor:frame buffer:pixel error:&error] && error.code == CYNMediaDecoderErrorUnsupported,
         @"Truncated light-level metadata rejected");
+  av_frame_remove_side_data(frame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
+  frame->sample_aspect_ratio = (AVRational){1, 0};
+  error = nil;
+  check(![decoder attachColor:frame buffer:pixel error:&error] && error.code == CYNMediaDecoderErrorUnsupported,
+        @"Malformed decoded-frame SAR is rejected instead of silently dropped");
   av_frame_free(&frame);
   CVPixelBufferRelease(pixel);
+}
+static void capabilityMetadata(NSString *root) {
+  CYNMediaDecoder *decoder = [CYNMediaDecoder new];
+  NSError *error = nil;
+  CYNMediaInfo *info = [decoder openURL:fixture(root, @"inventory.mkv") error:&error];
+  check(info && !error, @"Container inventory fixture opens");
+  check(info.videoStreamCount == 2 && info.audioStreamCount == 2 && info.subtitleStreamCount == 1 &&
+        info.chapterCount == 2 && info.attachedPictureStreamCount == 0, @"All tracks and chapters exposed without selecting them");
+  check(info.selectedVideoStreamIndex >= 0 && info.selectedVideoStreamIndex <= 1 &&
+        info.selectedAudioStreamIndex >= 2 && info.selectedAudioStreamIndex <= 3,
+        @"Selected FFmpeg stream indices belong to the expected media types");
+  check(info.sampleAspectRatioKnown && info.sampleAspectNumerator == 1 && info.sampleAspectDenominator == 1 &&
+        info.displayWidth == 320 && info.displayHeight == 180, @"Explicit square-pixel container geometry");
+  check(!info.isHDR && !info.hasStaticHDRMetadata && [info.videoTransfer isEqualToString:@"bt709"], @"SDR transfer summary");
+  [decoder close];
+  for (NSString *name in @[@"aspect.mp4", @"aspect-rotated.mp4", @"aspect-override.mp4"]) {
+    NSInteger numerator = [name isEqualToString:@"aspect-override.mp4"] ? 9 : 4;
+    NSInteger denominator = [name isEqualToString:@"aspect-override.mp4"] ? 8 : 3;
+    info = [decoder openURL:fixture(root, name) error:&error];
+    check(info && !error && info.sampleAspectRatioKnown && info.sampleAspectNumerator == numerator && info.sampleAspectDenominator == denominator,
+          @"Non-square sample aspect preserved at open");
+    check(fabs(info.displayWidth - 320.0 * numerator / denominator) < 1e-9 && info.displayHeight == 180,
+          @"Display dimensions apply SAR without premature integer rounding");
+    check(info.rotationDegrees == ([name isEqualToString:@"aspect-rotated.mp4"] ? 270 : 0),
+          @"Rotation remains separate from unrotated display geometry");
+    CYNMediaSample *sample = [decoder readSampleWithError:&error];
+    check(sample && !error, @"Non-square geometry still decodes");
+    CVPixelBufferRef pixel = CMSampleBufferGetImageBuffer(sample.sampleBuffer);
+    CFDictionaryRef aspect = CVBufferCopyAttachment(pixel, kCVImageBufferPixelAspectRatioKey, NULL);
+    NSDictionary *aspectValues = CFBridgingRelease(aspect);
+    check([aspectValues[(__bridge NSString *)kCVImageBufferPixelAspectRatioHorizontalSpacingKey] integerValue] == numerator &&
+          [aspectValues[(__bridge NSString *)kCVImageBufferPixelAspectRatioVerticalSpacingKey] integerValue] == denominator,
+          [NSString stringWithFormat:@"Rendered sample geometry agrees with open summary (%@, expected %ld/%ld, got %@/%@)",
+            name, (long)numerator, (long)denominator,
+            aspectValues[(__bridge NSString *)kCVImageBufferPixelAspectRatioHorizontalSpacingKey],
+            aspectValues[(__bridge NSString *)kCVImageBufferPixelAspectRatioVerticalSpacingKey]]);
+    [decoder close];
+  }
+  info = [decoder openURL:fixture(root, @"static-hdr.mkv") error:&error];
+  check(info && !error && info.isHDR && info.hasStaticHDRMetadata && [info.videoTransfer isEqualToString:@"smpte2084"],
+        @"Static HDR metadata and PQ reported from the selected video at open");
+  check([decoder readSampleWithError:&error] && !error, @"Static HDR metadata remains accepted by frame validation");
+  [decoder close];
+  info = [decoder openURL:fixture(root, @"surround.wav") error:&error];
+  check(info && !error && info.videoStreamCount == 0 && info.audioStreamCount == 1 && info.subtitleStreamCount == 0 &&
+        info.chapterCount == 0 && info.selectedVideoStreamIndex == -1 && info.selectedAudioStreamIndex == 0,
+        @"Audio-only inventory has explicit absent video selection");
+  check(!info.sampleAspectRatioKnown && info.sampleAspectNumerator == 0 && info.sampleAspectDenominator == 1 &&
+        info.displayWidth == 0 && info.displayHeight == 0 && !info.isHDR && [info.videoTransfer isEqualToString:@"unknown"],
+        @"Audio-only input does not fabricate video geometry or transfer");
+  [decoder close];
+  info = [decoder openURL:fixture(root, @"cover.m4a") error:&error];
+  check(info && !error && info.videoStreamCount == 1 && info.attachedPictureStreamCount == 1 &&
+        info.audioStreamCount == 1 && !info.hasVideo && info.hasAudio && info.selectedVideoStreamIndex == -1,
+        @"Attached cover is counted without being advertised as a selected video stream");
+  [decoder close];
+  info = [CYNMediaInfo new];
+  info.width = 320; info.height = 180;
+  AVRational invalid[] = {{-1, 1}, {1, 0}, {1, -1}, {0, -1}, {INT_MIN, INT_MIN}};
+  for (NSUInteger index = 0; index < sizeof(invalid) / sizeof(*invalid); ++index) {
+    for (int source = 0; source < 2; ++source) {
+      error = nil;
+      check(![decoder populateAspectSummary:info streamRatio:source ? (AVRational){1, 1} : invalid[index]
+                                    codecRatio:source ? invalid[index] : (AVRational){1, 1} error:&error] &&
+            error.code == CYNMediaDecoderErrorUnsupported, @"Malformed stream or codec SAR cannot be hidden by fallback");
+    }
+  }
+  error = nil;
+  check([decoder populateAspectSummary:info streamRatio:(AVRational){0, 0} codecRatio:(AVRational){0, 1} error:&error] && !error &&
+        !info.sampleAspectRatioKnown && info.sampleAspectNumerator == 0 && info.sampleAspectDenominator == 1 &&
+        info.displayWidth == 0 && info.displayHeight == 0, @"Unknown SAR remains unknown instead of square pixels");
+  error = nil;
+  check([decoder populateAspectSummary:info streamRatio:(AVRational){0, 1} codecRatio:(AVRational){8, 6} error:&error] && !error &&
+        info.sampleAspectRatioKnown && info.sampleAspectNumerator == 4 && info.sampleAspectDenominator == 3,
+        @"Codec SAR fallback is reduced without changing its value");
+  error = nil;
+  check([decoder populateAspectSummary:info streamRatio:(AVRational){2, 1} codecRatio:(AVRational){4, 3} error:&error] && !error &&
+        info.sampleAspectNumerator == 2 && info.sampleAspectDenominator == 1 && info.displayWidth == 640,
+        @"Explicit container display aspect has precedence over codec SAR");
 }
 static void exercise(NSString *root, NSString *name, BOOL audio, BOOL deep, BOOL hdr, BOOL full) {
   @autoreleasepool {
@@ -245,6 +335,7 @@ int main(int argc, const char **argv) {
     NSString *root = @(argv[1]);
     pixelFormatBoundaries();
     staticHDRBoundaries();
+    capabilityMetadata(root);
     exercise(root, @"av.mp4", YES, NO, NO, NO);
     exercise(root, @"software.mkv", NO, NO, NO, NO);
     exercise(root, @"software10.mkv", NO, YES, NO, NO);

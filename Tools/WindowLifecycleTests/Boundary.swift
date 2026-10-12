@@ -45,4 +45,10 @@ final class PreviewNavigation {
 }
 
 final class VideoLayer { var inLiveResize = true }
-final class VideoView { let videoLayer = VideoLayer() }
+final class VideoView {
+  let videoLayer = VideoLayer()
+  var playbackInLiveResize: Bool {
+    get { videoLayer.inLiveResize }
+    set { videoLayer.inLiveResize = newValue }
+  }
+}

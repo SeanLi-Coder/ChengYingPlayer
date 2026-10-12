@@ -74,6 +74,7 @@ final class MPVBoundary {
 final class PlayerCore { let mpv: MPVBoundary! = MPVBoundary() }
 final class VideoView {
   let player = PlayerCore()
+  let isUsingNativeSurface = false
   @ReadWriteAtomic var isUninited = false
 }
 

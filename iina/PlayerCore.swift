@@ -232,6 +232,91 @@ class PlayerCore: NSObject {
 
   var mpv: MPVController!
 
+  // A single lock protects both fields; event admission and epoch must never be
+  // sampled from independent atomics while a backend handoff is in progress.
+  @Atomic private var playbackEventRoute = (revision: UInt64(0), acceptsMPV: true)
+  @Atomic private var hasIssuedMPVMediaCommand = false
+
+  func captureMPVEventRevision() -> UInt64? {
+    $playbackEventRoute.withLock { $0.acceptsMPV ? $0.revision : nil }
+  }
+
+  func acceptsMPVEventRevision(_ revision: UInt64) -> Bool {
+    $playbackEventRoute.withLock { $0.acceptsMPV && $0.revision == revision }
+  }
+
+  func noteMPVMediaCommand() {
+    hasIssuedMPVMediaCommand = true
+  }
+
+  // MPV remains the production default. The environment-gated native route
+  // selects another transport only after the strict eligibility checks below.
+  private lazy var mpvPlaybackTransport: PlaybackTransport = MPVPlaybackTransport(sink: .init(
+    isAvailable: { [weak self] in self?.mpv?.mpv != nil },
+    getFlag: { [weak self] name in self?.mpv?.getFlag(name) ?? false },
+    getDouble: { [weak self] name in self?.mpv?.getDouble(name) ?? 0 },
+    setFlag: { [weak self] name, value, verbosity in
+      self?.mpv?.setFlag(name, value, level: verbosity == .verbose ? .verbose : .debug)
+    },
+    setDouble: { [weak self] name, value, verbosity in
+      self?.mpv?.setDouble(name, value, level: verbosity == .verbose ? .verbose : .debug)
+    },
+    command: { [weak self] name, arguments, context in
+      self?.mpv?.command(MPVCommand(name), args: arguments.map(Optional.some),
+        checkError: context.checkError, level: context.verbosity == .verbose ? .verbose : .debug,
+        seekTimingGeneration: context.seekTimingGeneration)
+    }
+  ))
+
+  private var nativeTransport: NativePlaybackTransport?
+  private var nativeReady = false
+  private var nativeRetiring = false
+  private var nativeTerminationRequested = false
+  private var nativeRetirementCompletion: (() -> Void)?
+  private var nativeLoopMode: LoopMode = .off
+  private var nativePreferredRate: Double = 1
+  private var nativeSingleInput = false
+  private struct NativeCompatibilityRestore {
+    let id = UUID()
+    let url: URL
+    let position: Double
+    let volume: Double
+    let rate: Double
+    let paused: Bool
+    let completion: () -> Void
+    var waitingForSeek = false
+  }
+  private var nativeCompatibilityRestore: NativeCompatibilityRestore?
+  private var playbackTransport: PlaybackTransport {
+    if let nativeTransport { return nativeTransport }
+    return mpvPlaybackTransport
+  }
+
+  // These presentation/session accessors belong to main, unlike the atomic
+  // event-gate methods above which are also called on mpv's event queue.
+  var isUsingNativePlayback: Bool { nativeTransport != nil }
+  var nativePlaybackOutput: NativeSampleBufferOutput? { nativeTransport?.session.output }
+  var nativePlaybackMedia: CYNMediaInfo? { nativeTransport?.snapshot?.media }
+  var nativePlaybackSession: NativePlaybackSession? { nativeTransport?.session }
+  var hasSelectedPlaybackAudio: Bool {
+    isUsingNativePlayback ? (nativePlaybackMedia?.hasAudio ?? false) : (info.aid ?? 0) > 0
+  }
+
+  @discardableResult
+  private func advancePlaybackRoute(acceptsMPV: Bool) -> UInt64 {
+    $playbackEventRoute.withLock {
+      $0.revision &+= 1
+      $0.acceptsMPV = acceptsMPV
+      return $0.revision
+    }
+  }
+
+  var playbackVolume: Double { playbackTransport.volumePercent }
+  var currentPlaybackSpeed: Double { playbackTransport.rate }
+  var playbackIsPaused: Bool { playbackTransport.isPaused }
+  var playbackPosition: Double? { playbackTransport.position }
+  var playbackAtEOF: Bool { playbackTransport.isAtEOF }
+
   var receivedEndFileWhileLoading: Bool = false
 
   var plugins: [JavascriptPluginInstance] = []
@@ -270,7 +355,7 @@ class PlayerCore: NSObject {
     /// Returns the value of the A loop point, a timestamp in seconds if set, otherwise returns zero.
     /// - Note: The value of the A loop point is not required by mpv to be before the B loop point.
     /// - Returns:value of the mpv option `ab-loop-a`
-    get { mpv.getDouble(MPVOption.PlaybackControl.abLoopA) }
+    get { isUsingNativePlayback ? 0 : mpv.getDouble(MPVOption.PlaybackControl.abLoopA) }
     /// Sets the value of the A loop point as an absolute timestamp in seconds.
     ///
     /// The loop points of the mpv A-B loop command can be adjusted at runtime. This method updates the A loop point. Setting a
@@ -279,6 +364,10 @@ class PlayerCore: NSObject {
     ///     to change the loop point will be ignored.
     /// - Note: The value of the A loop point is not required by mpv to be before the B loop point.
     set {
+      if isUsingNativePlayback {
+        requireMPVCompatibility(reason: "ab_loop_marker") { [weak self] in self?.abLoopA = newValue }
+        return
+      }
       guard info.abLoopStatus == .aSet || info.abLoopStatus == .bSet else { return }
       guard newValue.isFinite, newValue >= 0 else { return }
       if let end = VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopB)), newValue >= end { return }
@@ -293,7 +382,7 @@ class PlayerCore: NSObject {
     /// Returns the value of the B loop point, a timestamp in seconds if set, otherwise returns zero.
     /// - Note: The value of the B loop point is not required by mpv to be after the A loop point.
     /// - Returns:value of the mpv option `ab-loop-b`
-    get { mpv.getDouble(MPVOption.PlaybackControl.abLoopB) }
+    get { isUsingNativePlayback ? 0 : mpv.getDouble(MPVOption.PlaybackControl.abLoopB) }
     /// Sets the value of the B loop point as an absolute timestamp in seconds.
     ///
     /// The loop points of the mpv A-B loop command can be adjusted at runtime. This method updates the B loop point. Setting a
@@ -302,6 +391,10 @@ class PlayerCore: NSObject {
     ///     to change the loop point will be ignored.
     /// - Note: The value of the B loop point is not required by mpv to be after the A loop point.
     set {
+      if isUsingNativePlayback {
+        requireMPVCompatibility(reason: "ab_loop_marker") { [weak self] in self?.abLoopB = newValue }
+        return
+      }
       guard info.abLoopStatus == .bSet else { return }
       guard VideoToolsLoopRange(start: VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA)),
                                 end: newValue, duration: info.videoDuration?.second) != nil else { return }
@@ -384,7 +477,244 @@ class PlayerCore: NSObject {
 
   // MARK: - Control
 
+  /// This opt-in route deliberately has a one-way compatibility boundary. A
+  /// core which has ever loaded mpv media cannot re-enter native until a proven
+  /// stop/event-drain handoff exists. The production default remains mpv.
+  private func attemptNativeOpen(_ url: URL) -> Bool {
+    guard !nativeTerminationRequested else { return false }
+    guard ProcessInfo.processInfo.environment["CHENGYING_NATIVE_PLAYBACK"] == "1" else { return false }
+    let reason: String?
+    if hasIssuedMPVMediaCommand { reason = "mpv_session_already_used" }
+    else if !nativeSingleInput { reason = "multiple_or_playlist_input" }
+    else if !url.isFileURL || !Utility.supportedFileExt[.video]!.contains(url.pathExtension.lowercased()) {
+      reason = "non_video_input"
+    } else if Preference.bool(for: .enableAdvancedSettings) || Preference.bool(for: .useUserDefinedConfDir) ||
+                !plugins.isEmpty || Preference.string(for: .currentInputConfigName) != "ChengYing Default" {
+      reason = "unmigrated_custom_configuration"
+    } else if Preference.effectiveAudioDeviceName != "auto" || info.audioDelay != 0 ||
+                info.audioEqFilter != nil || info.deinterlace ||
+                !(Preference.array(for: .savedVideoFilters) ?? []).isEmpty ||
+                !(Preference.array(for: .savedAudioFilters) ?? []).isEmpty {
+      reason = "unmigrated_output_configuration"
+    } else if Preference.string(for: .subAutoLoadSearchPath) != "./*" {
+      reason = "custom_subtitle_search"
+    } else if Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) == .playlist {
+      reason = "playlist_repeat"
+    } else if !mpv.getFlag(MPVProperty.idleActive) || mpv.getString(MPVProperty.path) != nil {
+      reason = "mpv_not_pristine_idle"
+    } else { reason = nil }
+    if let reason {
+      log("Native compatibility: \(reason)")
+      return false
+    }
+    let request = advancePlaybackRoute(acceptsMPV: false)
+    let loadSiblings = info.shouldAutoLoadFiles
+    let loadSubs = Preference.integer(for: .subAutoLoadIINA) != 0
+    let watchLater = Utility.watchLaterURL.appendingPathComponent(Utility.mpvWatchLaterMd5(url.path))
+    let honorWatchLater = Preference.bool(for: .resumeLastPosition)
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      var reason: String?
+      if honorWatchLater && FileManager.default.fileExists(atPath: watchLater.path) {
+        reason = "existing_watch_later_configuration"
+      } else if loadSiblings || loadSubs {
+        do {
+          let files = try FileManager.default.contentsOfDirectory(at: url.deletingLastPathComponent(),
+            includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+          if files.count > 4096 { reason = "folder_inventory_limit" }
+          else {
+            for file in files where file.standardizedFileURL != url.standardizedFileURL {
+              let ext = file.pathExtension.lowercased()
+              if loadSiblings && Utility.playableFileExt.contains(ext) { reason = "sibling_playlist"; break }
+              if loadSubs {
+                let isDirectory = try file.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+                if Utility.supportedFileExt[.sub]!.contains(ext) || isDirectory {
+                  reason = "external_subtitle_search"; break
+                }
+              }
+            }
+          }
+        } catch { reason = "folder_inventory_unavailable" }
+      }
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.playbackEventRoute.revision == request,
+              !self.nativeTerminationRequested,
+              self.info.state != .shuttingDown, self.info.state != .shutDown else { return }
+        guard !self.hasIssuedMPVMediaCommand else {
+          self.log("Native compatibility: media_command_during_inventory")
+          self.advancePlaybackRoute(acceptsMPV: true)
+          return
+        }
+        if let reason {
+          self.log("Native compatibility: \(reason)")
+          self.mpv.prepareForFirstMPVMediaLoad()
+          self.advancePlaybackRoute(acceptsMPV: true)
+          self.openMainWindow(path: url.path, url: url, isNetwork: false, allowNative: false)
+        } else { self.beginNativeOpen(url, request: request) }
+      }
+    }
+    return true
+  }
+
+  private func beginNativeOpen(_ url: URL, request: UInt64) {
+    let session = NativePlaybackSession()
+    let transport = NativePlaybackTransport(session: session)
+    nativeTransport = transport
+    nativeReady = false
+    nativeLoopMode = Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) ?? .off
+    invalidateThumbnails()
+    videoToolsMediaGeneration &+= 1
+    info.currentURL = url
+    info.isNetworkResource = false
+    info.audioTracks = []; info.videoTracks = []; info.subTracks = []; info.chapters = []
+    info.aid = nil; info.vid = nil; info.sid = nil; info.secondSid = nil
+    info.videoWidth = nil; info.videoHeight = nil; info.displayWidth = nil; info.displayHeight = nil
+    info.videoDuration = nil; info.videoPosition = nil; info.videoRemaining = nil
+    info.playlist = []
+    info.volume = 0; info.isMuted = false
+    info.justOpenedFile = true; info.justStartedFile = true
+    info.disableOSDForFileLoading = true
+    info.state = .loading
+    currentMediaIsAudio = .notAudio
+    postNotification(.chengyingMediaSourceChanged)
+    transport.onSnapshot = { [weak self, weak transport] snapshot in
+      guard let self, let transport, self.nativeTransport === transport,
+            self.playbackEventRoute.revision == request, !self.nativeRetiring else { return }
+      self.receiveNativeSnapshot(snapshot)
+    }
+    let _ = mainWindow.window
+    mainWindow.pendingShow = true
+    initialWindow.close()
+    guard mainWindow.videoView.configurePlaybackSurface() else {
+      requireMPVCompatibility(reason: "native_surface_unavailable", completion: {})
+      return
+    }
+    session.setLoop(nil, repeatFile: nativeLoopMode == .file)
+    _ = transport.setRate(nativePreferredRate)
+    session.open(url, autoplay: false)
+  }
+
+  private func receiveNativeSnapshot(_ snapshot: NativePlaybackSnapshot) {
+    guard ![.stopping, .shuttingDown, .shutDown].contains(info.state) else { return }
+    if snapshot.phase == .failed {
+      if case .decoder(let domain, let code)? = snapshot.failure,
+         domain == CYNMediaDecoderErrorDomain, code == CYNMediaDecoderError.unsupported.rawValue {
+        requireMPVCompatibility(reason: "unsupported_native_media", completion: {})
+      } else {
+        log("Native playback failed: \(String(describing: snapshot.failure))", level: .error)
+        stop()
+        Utility.showAlert("error_open")
+      }
+      return
+    }
+    guard let media = snapshot.media else { return }
+    if !nativeReady {
+      guard snapshot.phase == .paused else { return }
+      let reason: String?
+      if !media.hasVideo || media.videoStreamCount != 1 || media.audioStreamCount > 1 ||
+          media.subtitleStreamCount != 0 || media.attachedPictureStreamCount != 0 || media.chapterCount != 0 {
+        reason = "unmigrated_container_tracks"
+      } else if !media.sampleAspectRatioKnown || media.displayWidth <= 0 || media.displayHeight <= 0 {
+        reason = "unknown_display_geometry"
+      } else if media.isHDR || media.hasStaticHDRMetadata { reason = "hdr_route_not_verified" }
+      else { reason = nil }
+      if let reason { requireMPVCompatibility(reason: reason, completion: {}); return }
+      guard mainWindow.videoView.updateNativeGeometry(media) else {
+        requireMPVCompatibility(reason: "native_geometry_unavailable", completion: {})
+        return
+      }
+      nativeReady = true
+      info.videoWidth = media.width; info.videoHeight = media.height
+      info.displayWidth = Int(media.displayWidth.rounded()); info.displayHeight = Int(media.displayHeight.rounded())
+      info.rotation = media.rotationDegrees
+      mainWindow.rotation = media.rotationDegrees
+      info.hdrAvailable = false
+      info.playlist = [MPVPlaylistItem(filename: info.currentURL!.path, isCurrent: true, isPlaying: true, title: nil)]
+      info.state = .loaded
+      resetAutoSeekForNewMedia()
+      info.disableOSDForFileLoading = false
+    }
+    info.videoDuration = VideoTime(snapshot.duration)
+    info.videoPosition = VideoTime(snapshot.position)
+    let remaining = max(0, snapshot.duration - snapshot.position)
+    info.videoRemaining = VideoTime(Preference.bool(for: .scaleRemainingTime) ? remaining / Double(snapshot.rate) : remaining)
+    info.volume = playbackVolume
+    info.playSpeed = currentPlaybackSpeed
+    info.isSeeking = snapshot.phase == .seeking
+    if info.state == .loaded {
+      currentController.setupUI()
+      notifyWindowVideoSizeChanged()
+      if let url = info.currentURL { HistoryController.shared.add(url, duration: snapshot.duration) }
+      postNotification(.iinaFileLoaded)
+      events.emit(.fileLoaded, data: info.currentURL?.absoluteString ?? "")
+      syncUI(.playlist)
+      generateThumbnails()
+      info.justOpenedFile = false; info.justStartedFile = false
+    } else if snapshot.phase == .playing { info.state = .playing }
+    else if [.paused, .ended].contains(snapshot.phase) { info.state = .paused }
+    mainWindow.updateSpeedLabel(speed: currentPlaybackSpeed)
+    syncUI([.time, .playButton, .volume])
+    refreshSyncUITimer()
+  }
+
+  /// Compatibility actions execute only after the same media has reached its
+  /// restored mpv seek position. A subsequent open/stop discards the action.
+  func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
+    guard let transport = nativeTransport, let url = info.currentURL else { completion(); return }
+    guard !nativeRetiring else { return }
+    let request = playbackEventRoute.revision
+    log("Native compatibility: \(reason)")
+    transport.captureCurrentState { [weak self, weak transport] result in
+      guard let self, let transport, self.nativeTransport === transport,
+            self.playbackEventRoute.revision == request else { return }
+      let restore: NativeCompatibilityRestore?
+      switch result {
+      case .ready(let snapshot):
+        restore = NativeCompatibilityRestore(url: url, position: snapshot.position,
+          volume: transport.volumePercent, rate: transport.rate,
+          paused: self.nativeReady ? snapshot.phase != .playing : Preference.bool(for: .pauseWhenOpen),
+          completion: completion)
+      case .unavailable:
+        restore = NativeCompatibilityRestore(url: url, position: 0, volume: 0, rate: 1,
+          paused: Preference.bool(for: .pauseWhenOpen), completion: completion)
+      case .superseded: return
+      }
+      self.retireNativePlayback {
+        self.nativeCompatibilityRestore = restore
+        self.mpv.prepareForFirstMPVMediaLoad()
+        self.advancePlaybackRoute(acceptsMPV: true)
+        self.openMainWindow(path: url.path, url: url, isNetwork: false, allowNative: false)
+      }
+    }
+  }
+
+  private func retireNativePlayback(completion: @escaping () -> Void) {
+    advancePlaybackRoute(acceptsMPV: false)
+    nativeRetirementCompletion = completion
+    guard let transport = nativeTransport else {
+      nativeRetirementCompletion = nil
+      completion()
+      return
+    }
+    guard !nativeRetiring else { return }
+    nativeRetiring = true
+    if info.state != .shuttingDown && info.state != .shutDown { info.state = .stopping }
+    transport.onSnapshot = nil
+    transport.session.shutdown { [weak self] in
+      guard let self else { return }
+      self.nativeTransport = nil
+      self.nativeRetiring = false
+      self.nativeReady = false
+      if self.info.state == .stopping { self.info.state = .idle }
+      let completion = self.nativeRetirementCompletion
+      self.nativeRetirementCompletion = nil
+      completion?()
+    }
+  }
+
   private func open(_ url: URL?, shouldAutoLoad: Bool = false) {
+    guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
     guard !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return }
     guard let url = url else {
       log("empty file path or url", level: .error)
@@ -394,7 +724,7 @@ class PlayerCore: NSObject {
       log("Ignoring a remote media URL in the local player", level: .warning)
       return
     }
-    guard info.state != .stopping else {
+    guard info.state != .stopping || nativeRetiring else {
       // The mpv core is currently processing an asynchronous stop command. To avoid the complexity
       // of coordinating two mpv commands executing at the same time, wait until the stop command
       // finishes and the core becomes idle before sending the loadfile command. The stop command
@@ -435,6 +765,7 @@ class PlayerCore: NSObject {
   /// Only call after ImageViewerCoordinator has removed standalone image inputs.
   @discardableResult
   func openMediaURLs(_ urls: [URL], shouldAutoLoad autoLoad: Bool = true) -> Int? {
+    guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return nil }
     guard !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return nil }
     guard !urls.isEmpty else { return 0 }
     guard urls.allSatisfy(\.isFileURL) else {
@@ -465,8 +796,20 @@ class PlayerCore: NSObject {
       return 0
     }
 
+    if nativeTransport != nil {
+      // Retire the whole request before issuing any MPV playlist commands.
+      // Deferring only open(first) would append the remaining files to an idle
+      // core and then lose them when the eventual loadfile replaces its list.
+      nativeCompatibilityRestore = nil
+      retireNativePlayback { [weak self] in
+        _ = self?.openMediaURLs(urls, shouldAutoLoad: autoLoad)
+      }
+      return count
+    }
+
     info.shouldAutoLoadFiles = PlaylistPlaybackPolicy.shouldAutoLoadSiblings(
       inputURLs: urls, playableFileCount: count, requested: autoLoad)
+    nativeSingleInput = count == 1 && urls.count == 1 && !urls[0].hasDirectoryPath
 
     // open the first file
     open(playableFiles[0])
@@ -534,7 +877,20 @@ class PlayerCore: NSObject {
   ///   - path: Path to the media to open.
   ///   - url: URL of the media to open.
   ///   - isNetwork: Whether the media must be streamed over the network.
-  private func openMainWindow(path: String, url: URL, isNetwork: Bool) {
+  private func openMainWindow(path: String, url: URL, isNetwork: Bool, allowNative: Bool = true) {
+    guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
+    if allowNative {
+      nativeCompatibilityRestore = nil
+      advancePlaybackRoute(acceptsMPV: nativeTransport == nil)
+      if nativeTransport != nil {
+        retireNativePlayback { [weak self] in
+          self?.openMainWindow(path: path, url: url, isNetwork: isNetwork)
+        }
+        return
+      }
+      if attemptNativeOpen(url) { return }
+    }
+    advancePlaybackRoute(acceptsMPV: true)
     log("Opening \(Utility.mediaLogSummary(url)) in main window")
     invalidateThumbnails()
     info.currentURL = url
@@ -552,6 +908,12 @@ class PlayerCore: NSObject {
     info.videoTracks = []
     info.videoWidth = nil
     let _ = mainWindow.window
+    guard mainWindow.videoView.configurePlaybackSurface() else {
+      log("Could not prepare the compatibility playback surface", level: .error)
+      Utility.showAlert("error_open")
+      return
+    }
+    if mpv.mpvRenderContext == nil { initVideo() }
     mainWindow.pendingShow = true
     miniPlayer.pendingShow = true
     initialWindow.close()
@@ -647,6 +1009,10 @@ class PlayerCore: NSObject {
   }
 
   func initVideo() {
+    if isUsingNativePlayback {
+      _ = mainWindow.videoView.configurePlaybackSurface()
+      return
+    }
     // init mpv render context.
     mpv.mpvInitRendering()
     mainWindow.videoView.startDisplayLink()
@@ -680,6 +1046,27 @@ class PlayerCore: NSObject {
   ///     task is still running this method only changes the player state. When the background task ends it will notice that shutting
   ///     down was in progress and will call this method again to continue the process of shutting down..
   func shutdown() {
+    guard !nativeTerminationRequested else { return }
+    if nativeTransport != nil {
+      guard info.state != .shutDown, !(nativeRetiring && info.state == .shuttingDown) else { return }
+      nativeTerminationRequested = true
+      nativeCompatibilityRestore = nil
+      pendingUrl = nil
+      invalidateThumbnails()
+      // A stop already draining the native output must finish its legal
+      // stopping -> idle transition before entering shuttingDown. The terminal
+      // intent prevents later open/stop actions from replacing this completion.
+      if info.state != .stopping { info.state = .shuttingDown }
+      retireNativePlayback { [weak self] in
+        guard let self else { return }
+        self.info.state = .shuttingDown
+        // mpv is still an initialized idle compatibility core. Its genuine
+        // shutdown event remains responsible for application termination.
+        self.mpv.mpvQuit()
+      }
+      return
+    }
+    advancePlaybackRoute(acceptsMPV: false)
     invalidateThumbnails()
     info.state = .shuttingDown
     guard !backgroundTaskInUse else { return }
@@ -781,7 +1168,8 @@ class PlayerCore: NSObject {
   // MARK: - MPV commands
 
   func togglePause(_ set: Bool? = nil) {
-    info.state == .paused ? resume() : pause()
+    if isUsingNativePlayback { playbackIsPaused ? resume() : pause() }
+    else { info.state == .paused ? resume() : pause() }
   }
 
   /// Pause playback.
@@ -796,7 +1184,7 @@ class PlayerCore: NSObject {
   func pause() {
     guard info.state.active else { return }
     log("Pausing playback")
-    mpv.setFlag(MPVOption.PlaybackControl.pause, true, level: .verbose)
+    playbackTransport.setPaused(true, context: .init(verbosity: .verbose))
   }
 
   /// Resume playback.
@@ -807,7 +1195,7 @@ class PlayerCore: NSObject {
     log("Resuming playback")
     mainWindow.videoView.displayActive()
     // Restart playback when reached EOF
-    if mpv.getFlag(MPVProperty.eofReached) {
+    if playbackAtEOF {
       seek(absoluteSecond: 0)
     }
     if videoToolsLoopRecovery.suspended {
@@ -817,7 +1205,7 @@ class PlayerCore: NSObject {
     }
     videoToolsEnforceLoopBounds()
     guard !videoToolsLoopRecovery.suspended else { return }
-    mpv.setFlag(MPVOption.PlaybackControl.pause, false, level: .verbose)
+    playbackTransport.setPaused(false, context: .init(verbosity: .verbose))
   }
 
   /// Stop playback and unload the media.
@@ -838,6 +1226,26 @@ class PlayerCore: NSObject {
   ///     and call this method again to continue the process of stopping. It is important to stop the background task as if it is still
   ///     running when the mpv core is shutdown it may call into mpv triggering a crash.
   func stop() {
+    // Closing a window while the native output is draining must not replace
+    // the terminal completion which will quit the idle compatibility core.
+    guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
+    nativeCompatibilityRestore = nil
+    if nativeTransport != nil {
+      invalidateThumbnails()
+      info.state = .stopping
+      retireNativePlayback { [weak self] in
+        guard let self else { return }
+        self.info.state = .idle
+        self.refreshSyncUITimer()
+        self.postNotification(.iinaPlayerStopped)
+        if let url = self.pendingUrl {
+          self.pendingUrl = nil
+          self.open(url, shouldAutoLoad: self.pendingAutoLoad)
+        }
+      }
+      return
+    }
+    advancePlaybackRoute(acceptsMPV: true)
     guard info.state != .shutDown else { return }
     invalidateThumbnails()
     savePlaybackPosition()
@@ -877,6 +1285,10 @@ class PlayerCore: NSObject {
   }
 
   func toggleMute(_ set: Bool? = nil) {
+    if isUsingNativePlayback {
+      requireMPVCompatibility(reason: "mute_track_state") { [weak self] in self?.toggleMute(set) }
+      return
+    }
     let newState = set ?? !mpv.getFlag(MPVOption.Audio.mute)
     mpv.setFlag(MPVOption.Audio.mute, newState)
   }
@@ -896,8 +1308,8 @@ class PlayerCore: NSObject {
       percent = percent.clamped(to: 0..<100)
     }
     let useExact = forceExact ? true : Preference.bool(for: .useExactSeek)
-    let seekMode = useExact ? "absolute-percent+exact" : "absolute-percent"
-    mpv.command(.seek, args: ["\(percent)", seekMode], checkError: false, level: .verbose)
+    playbackTransport.seek(.init(value: percent, reference: .absolutePercent, exact: useExact),
+      context: .init(checkError: false, verbosity: .verbose))
   }
 
   func seek(relativeSecond: Double, option: Preference.SeekOption) {
@@ -909,18 +1321,20 @@ class PlayerCore: NSObject {
     switch option {
 
     case .relative:
-      mpv.command(.seek, args: ["\(relativeSecond)", "relative"], checkError: false, level: .verbose)
+      playbackTransport.seek(.init(value: relativeSecond, reference: .relativeSeconds, exact: false),
+        context: .init(checkError: false, verbosity: .verbose))
 
     case .exact:
-      mpv.command(.seek, args: ["\(relativeSecond)", "relative+exact"], checkError: false)
+      playbackTransport.seek(.init(value: relativeSecond, reference: .relativeSeconds, exact: true),
+        context: .init(checkError: false))
 
     case .auto:
       // The first probe must actually be exact, even after a slow previous file.
       let firstProbe = !triedUsingExactSeekForCurrentFile
       triedUsingExactSeekForCurrentFile = true
-      let seekMode = firstProbe || useExactSeekForCurrentFile ? "relative+exact" : "relative"
-      mpv.command(.seek, args: ["\(relativeSecond)", seekMode], checkError: false,
-                  seekTimingGeneration: firstProbe ? videoToolsMediaGeneration : nil)
+      playbackTransport.seek(.init(value: relativeSecond, reference: .relativeSeconds,
+        exact: firstProbe || useExactSeekForCurrentFile),
+        context: .init(checkError: false, seekTimingGeneration: firstProbe ? videoToolsMediaGeneration : nil))
 
     }
   }
@@ -934,12 +1348,13 @@ class PlayerCore: NSObject {
     guard absoluteSecond.isFinite else { return }
     let target = videoToolsLoopRange?.clamped(absoluteSecond) ?? absoluteSecond
     if videoToolsLoopRange != nil { videoToolsLoopRecovery.userSeek(to: target) }
-    mpv.command(.seek, args: ["\(target)", "absolute+exact"])
+    playbackTransport.seek(.init(value: target, reference: .absoluteSeconds, exact: true))
   }
 
   /// Enforce loop boundaries from mpv events even when the tools panel and UI timer are inactive.
   /// Always query the current position instead of trusting an event payload from an older seek.
   func videoToolsEnforceLoopBounds(playbackRestarted: Bool = false) {
+    guard !isUsingNativePlayback else { return }
     guard info.state.loaded, let range = videoToolsLoopRange else {
       videoToolsLoopRecovery.reset()
       return
@@ -974,6 +1389,10 @@ class PlayerCore: NSObject {
   }
 
   func frameStep(backwards: Bool) {
+    if isUsingNativePlayback {
+      requireMPVCompatibility(reason: "frame_step") { [weak self] in self?.frameStep(backwards: backwards) }
+      return
+    }
     // When playback is paused the display link is stopped in order to avoid wasting energy on
     // It must be running when stepping to avoid slowdowns caused by mpv waiting for IINA to call
     // mpv_render_report_swap.
@@ -1015,6 +1434,10 @@ class PlayerCore: NSObject {
   /// `Preference.Key.screenshotIncludeSubtitle` to decide between `subtitles` or `video`.
   @discardableResult
   func screenshot(fromKeyBinding keyBinding: KeyMapping? = nil) -> Bool {
+    if isUsingNativePlayback {
+      requireMPVCompatibility(reason: "screenshot") { [weak self] in _ = self?.screenshot(fromKeyBinding: keyBinding) }
+      return true
+    }
     let saveToFile = Preference.bool(for: .screenshotSaveToFile)
     let saveToClipboard = Preference.bool(for: .screenshotCopyToClipboard)
     guard saveToFile || saveToClipboard else {
@@ -1143,6 +1566,10 @@ class PlayerCore: NSObject {
   /// a second time it sets the B loop point to the timestamp of the current frame, activating looping and causing mpv to seek back to
   /// the A loop point. When the command is invoked again both loop points are cleared (set to "no") and looping stops.
   func abLoop() {
+    if isUsingNativePlayback {
+      requireMPVCompatibility(reason: "ab_loop") { [weak self] in self?.abLoop() }
+      return
+    }
     switch info.abLoopStatus {
     case .cleared: videoToolsSetLoopStart()
     case .aSet: videoToolsSetLoopEnd()
@@ -1153,6 +1580,7 @@ class PlayerCore: NSObject {
 
   /// Synchronize IINA with the state of the [mpv](https://mpv.io/manual/stable/) A-B loop command.
   func syncAbLoop() {
+    guard !isUsingNativePlayback else { return }
     // Obtain the values of the ab-loop-a and ab-loop-b options representing the A & B loop points.
     let a = VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA))
     let b = VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopB))
@@ -1184,6 +1612,7 @@ class PlayerCore: NSObject {
   }
 
   func getLoopMode() -> LoopMode {
+    if isUsingNativePlayback { return nativeLoopMode }
     let loopFileStatus = mpv.getString(MPVOption.PlaybackControl.loopFile)
     guard loopFileStatus != "inf" else { return .file }
     if let loopFileStatus = loopFileStatus, let count = Int(loopFileStatus), count != 0 {
@@ -1214,6 +1643,15 @@ class PlayerCore: NSObject {
 
   /// Apply whole-file/list repetition without changing A-B markers or saving incidental mpv state.
   private func applyLoopMode(_ newMode: LoopMode) {
+    if let session = nativePlaybackSession {
+      if newMode == .playlist {
+        requireMPVCompatibility(reason: "playlist_repeat") { [weak self] in self?.applyLoopMode(newMode) }
+      } else {
+        nativeLoopMode = newMode
+        session.setLoop(nil, repeatFile: newMode == .file)
+      }
+      return
+    }
     guard info.state != .shuttingDown, info.state != .shutDown, mpv.mpv != nil else { return }
     let loopFile = newMode == .file ? "inf" : "no"
     let loopPlaylist = newMode == .playlist ? "inf" : "no"
@@ -1248,11 +1686,17 @@ class PlayerCore: NSObject {
     let maxVolume = Preference.integer(for: .maxVolume)
     let constrainedVolume = volume.clamped(to: 0...Double(maxVolume))
     let appliedVolume = constrain ? constrainedVolume : volume
+    if isUsingNativePlayback, !(0...100).contains(appliedVolume) {
+      requireMPVCompatibility(reason: "audio_amplification") { [weak self] in
+        self?.setVolume(volume, constrain: constrain, unmute: unmute)
+      }
+      return
+    }
     info.volume = appliedVolume
-    mpv.setDouble(MPVOption.Audio.volume, appliedVolume, level: .verbose)
+    playbackTransport.setVolumePercent(appliedVolume, context: .init(verbosity: .verbose))
     // An explicit audible volume is a request to hear playback. Silent file opening uses
     // a separate file-local mpv option and must never enter this user-action path.
-    if unmute, appliedVolume > 0, mpv.getFlag(MPVOption.Audio.mute) {
+    if !isUsingNativePlayback, unmute, appliedVolume > 0, mpv.getFlag(MPVOption.Audio.mute) {
       info.isMuted = false
       mpv.setFlag(MPVOption.Audio.mute, false)
     }
@@ -1263,6 +1707,11 @@ class PlayerCore: NSObject {
   /// Reconcile the volume UI with mpv without changing the saved volume preference.
   @discardableResult
   func syncVolumeFromMPV() -> Double {
+    if isUsingNativePlayback {
+      info.volume = playbackVolume
+      syncUI(.volume)
+      return info.volume
+    }
     guard info.state.active, mpv.mpv != nil else { return info.volume }
     let volume = mpv.getDouble(MPVOption.Audio.volume)
     info.volume = volume
@@ -1271,6 +1720,10 @@ class PlayerCore: NSObject {
   }
 
   func setTrack(_ index: Int, forType: MPVTrack.TrackType) {
+    if isUsingNativePlayback {
+      requireMPVCompatibility(reason: "track_selection") { [weak self] in self?.setTrack(index, forType: forType) }
+      return
+    }
     let name: String
     switch forType {
     case .audio:
@@ -1289,7 +1742,12 @@ class PlayerCore: NSObject {
   func setSpeed(_ speed: Double) {
     guard speed.isFinite else { return }
     let speed = speed < AppData.mpvMinPlaybackSpeed ? AppData.mpvMinPlaybackSpeed : speed
-    mpv.setDouble(MPVOption.PlaybackControl.speed, speed)
+    if isUsingNativePlayback, !(0.5...2).contains(speed) {
+      requireMPVCompatibility(reason: "unsupported_playback_rate") { [weak self] in self?.setSpeed(speed) }
+      return
+    }
+    playbackTransport.setRate(speed)
+    if isUsingNativePlayback { nativePreferredRate = speed }
     videoToolsEnforceLoopBounds()
   }
 
@@ -1580,6 +2038,10 @@ class PlayerCore: NSObject {
   /// - Parameter pos: Position of the entry in the playlist to be played.
   func playFileInPlaylist(_ pos: Int) {
     guard !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return }
+    if isUsingNativePlayback {
+      requireMPVCompatibility(reason: "playlist_selection") { [weak self] in self?.playFileInPlaylist(pos) }
+      return
+    }
     mainWindow.videoView.displayActive()
     if !mpv.getFlag(MPVOption.PlaybackControl.pause) {
       log("Pausing playback before playing entry at index \(pos) in the playlist")
@@ -1605,6 +2067,10 @@ class PlayerCore: NSObject {
   /// - Parameter nextMedia: When `true` play the next entry in the playlist; otherwise play the previous entry.
   func navigateInPlaylist(nextMedia: Bool) {
     guard !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return }
+    if isUsingNativePlayback {
+      requireMPVCompatibility(reason: "playlist_navigation") { [weak self] in self?.navigateInPlaylist(nextMedia: nextMedia) }
+      return
+    }
     if nextMedia == false && (info.playlist.first?.isPlaying) ?? false {
       seek(absoluteSecond: 0)
     } else {
@@ -1937,6 +2403,7 @@ class PlayerCore: NSObject {
   }
 
   func savePlaybackPosition() {
+    guard !isUsingNativePlayback else { return }
     guard mpv.getFlag(MPVOption.WatchLater.savePositionOnQuit) else { return }
 
     // The player must be active to be able to save the watch later configuration.
@@ -1956,6 +2423,7 @@ class PlayerCore: NSObject {
   }
 
   func getGeometry() -> GeometryDef? {
+    if isUsingNativePlayback { return nil }
     let geometry = mpv.getString(MPVOption.Window.geometry) ?? ""
     return GeometryDef.parse(geometry)
   }
@@ -2170,6 +2638,23 @@ class PlayerCore: NSObject {
     postNotification(.iinaFileLoaded)
     events.emit(.fileLoaded, data: info.currentURL?.absoluteString ?? "")
     syncUI(.playlist)
+    if var restore = nativeCompatibilityRestore, restore.url == info.currentURL {
+      restore.waitingForSeek = true
+      nativeCompatibilityRestore = restore
+      playbackTransport.setPaused(true)
+      playbackTransport.setRate(restore.rate)
+      playbackTransport.setVolumePercent(restore.volume)
+      seek(absoluteSecond: restore.position)
+      let restoreID = restore.id
+      DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+        guard let self, self.nativeCompatibilityRestore?.id == restoreID else { return }
+        self.nativeCompatibilityRestore = nil
+        self.log("Native compatibility restoration timed out; pending action was not executed", level: .error)
+        self.sendOSD(.custom(NSLocalizedString("playback.compatibility_restore_failed",
+          value: "Could not restore the playback position. Please retry the requested action.",
+          comment: "Compatibility backend handoff timed out")))
+      }
+    }
   }
 
   func fileEnded(_ dueToStopCommand: Bool) {
@@ -2347,6 +2832,15 @@ class PlayerCore: NSObject {
     NowPlayingInfoManager.shared.updateInfo()
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.info.disableOSDForFileLoading = false }
+    if let restore = nativeCompatibilityRestore, restore.waitingForSeek,
+       restore.url == info.currentURL, let position = playbackPosition,
+       abs(position - restore.position) <= 0.05 {
+      nativeCompatibilityRestore = nil
+      info.volume = restore.volume
+      playbackTransport.setPaused(restore.paused)
+      syncUI([.volume, .playButton, .time])
+      restore.completion()
+    }
   }
 
   func refreshEdrMode() {
@@ -2605,11 +3099,11 @@ class PlayerCore: NSObject {
       // If the media was loaded manually then playback was paused to avoid audio starting to play
       // before video is ready to be displayed. Now that the video is ready playback can be resumed
       // unless the IINA "Pause" setting is enabled under "When media is opened".
-      let paused = mpv.getFlag(MPVOption.PlaybackControl.pause)
-      if paused, !Preference.bool(for: .pauseWhenOpen)  {
+      let paused = playbackIsPaused
+      if paused, !Preference.bool(for: .pauseWhenOpen), nativeCompatibilityRestore == nil {
         log("Resuming playback now that file has been loaded")
         mainWindow.videoView.displayActive()
-        mpv.setFlag(MPVOption.PlaybackControl.pause, false, level: .verbose)
+        playbackTransport.setPaused(false, context: .init(verbosity: .verbose))
       }
       info.state = paused ? .paused : .playing
       syncUI(.playButton)
@@ -2629,6 +3123,11 @@ class PlayerCore: NSObject {
   ///     milliseconds. Due to this behavior of the `time-pos` property, this method checks to see of the end of the video has been
   ///     reached and if so, sets `videoPosition` to match `videoDuration`.
   private func syncPosition() {
+    if isUsingNativePlayback {
+      if let position = playbackPosition { info.videoPosition?.second = position }
+      info.constrainVideoPosition()
+      return
+    }
     if info.isNetworkResource {
       info.videoDuration?.second = mpv.getDouble(MPVProperty.duration)
     }
@@ -2683,9 +3182,14 @@ class PlayerCore: NSObject {
     case .time:
       let isNetworkStream = info.isNetworkResource
       syncPosition()
-      info.videoRemaining?.second = Preference.bool(for: .scaleRemainingTime) ?
-        mpv.getDouble(MPVProperty.playtimeRemainingFull) :
-        mpv.getDouble(MPVProperty.timeRemainingFull)
+      if isUsingNativePlayback {
+        let remaining = max(0, (info.videoDuration?.second ?? 0) - (playbackPosition ?? 0))
+        info.videoRemaining?.second = Preference.bool(for: .scaleRemainingTime) ? remaining / currentPlaybackSpeed : remaining
+      } else {
+        info.videoRemaining?.second = Preference.bool(for: .scaleRemainingTime) ?
+          mpv.getDouble(MPVProperty.playtimeRemainingFull) :
+          mpv.getDouble(MPVProperty.timeRemainingFull)
+      }
       if isNetworkStream {
         // Update cache info
         info.pausedForCache = mpv.getFlag(MPVProperty.pausedForCache)
@@ -2892,6 +3396,7 @@ class PlayerCore: NSObject {
   }
 
   func playlistSnapshot() -> [MPVPlaylistItem]? {
+    if isUsingNativePlayback { return info.playlist }
     return MPVPlaylistItem.playlist(from: mpv.getNode(MPVProperty.playlist))
   }
 
@@ -2978,7 +3483,8 @@ class PlayerCore: NSObject {
       }
 
       // if video has rotation
-      let netRotate = mpv.getInt(MPVProperty.videoParamsRotate) - mpv.getInt(MPVOption.Video.videoRotate)
+      let netRotate = isUsingNativePlayback ? (nativePlaybackMedia?.rotationDegrees ?? 0) :
+        mpv.getInt(MPVProperty.videoParamsRotate) - mpv.getInt(MPVOption.Video.videoRotate)
       let rotate = netRotate >= 0 ? netRotate : netRotate + 360
       if rotate == 90 || rotate == 270 {
         swap(&width, &height)
@@ -2990,7 +3496,8 @@ class PlayerCore: NSObject {
   var originalVideoSize: (Int, Int) {
     get {
       if let w = info.videoWidth, let h = info.videoHeight {
-        let netRotate = mpv.getInt(MPVProperty.videoParamsRotate) - mpv.getInt(MPVOption.Video.videoRotate)
+        let netRotate = isUsingNativePlayback ? (nativePlaybackMedia?.rotationDegrees ?? 0) :
+          mpv.getInt(MPVProperty.videoParamsRotate) - mpv.getInt(MPVOption.Video.videoRotate)
         let rotate = netRotate >= 0 ? netRotate : netRotate + 360
         if rotate == 90 || rotate == 270 {
           return (h, w)

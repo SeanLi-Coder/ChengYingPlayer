@@ -1,0 +1,49 @@
+  @Atomic private var playbackEventRoute = (revision: UInt64(0), acceptsMPV: true)
+  @Atomic private var hasIssuedMPVMediaCommand = false
+  private let mpvPlaybackTransport: PlaybackTransport = CompatibilityTransportDouble()
+  lazy var mpv: MPVController! = MPVController(player: self)
+  lazy var mainWindow = MainWindowDouble(player: self)
+  var currentController: MainWindowDouble { mainWindow }
+  let initialWindow = InitialWindowDouble()
+  let miniPlayer = InitialWindowDouble()
+  lazy var info = PlaybackInfoDouble(player: self)
+  static weak var lastActive: PlayerCore?
+  let events = EventDouble()
+  let playerNumber = 1
+  let subsystem = Logger.Subsystem(rawValue: "route-test")
+  var isInMiniPlayer = false
+  var videoToolsMediaGeneration: UInt64 = 0
+  var plugins: [String] = []
+  enum AudioStatus { case notAudio }
+  var currentMediaIsAudio = AudioStatus.notAudio
+  private var pendingUrl: URL?
+  private var pendingAutoLoad = false
+  private let playlistMutationLock = NSRecursiveLock()
+  private var backgroundTaskInUse = false
+  private(set) var notifications: [Notification.Name] = []
+  private(set) var logs: [String] = []
+  enum SyncUIOption { case time, playButton, volume, playlist }
+  func syncUI(_ option: SyncUIOption) {
+    if option == .volume { mainWindow.updateVolume() }
+  }
+  func syncUI(_ options: [SyncUIOption]) { options.forEach(syncUI) }
+  func refreshSyncUITimer() {}
+  func invalidateThumbnails() {}
+  func generateThumbnails() {}
+  func resetAutoSeekForNewMedia() {}
+  func savePlaybackPosition() {}
+  func savePlayerState() {}
+  func videoToolsClearLoop() {}
+  func stopBackgroundTask() {}
+  func restoreSavedLoopMode() {}
+  func postNotification(_ name: Notification.Name) { notifications.append(name) }
+  func log(_ text: String, level: Logger.Level = .debug) { logs.append(text); print("ROUTE: \(text)") }
+  func acceptFromPasteboard(_ sender: NSDraggingInfo, isPlaylist: Bool = false) -> NSDragOperation { [] }
+  func openFromPasteboard(_ sender: NSDraggingInfo) -> Bool { false }
+  func testOpen(_ url: URL) {
+    Self.lastActive = self
+    nativeSingleInput = true
+    openMainWindow(path: url.path, url: url, isNetwork: false)
+  }
+  func testSetVolume(_ percent: Double) { _ = playbackTransport.setVolumePercent(percent) }
+  func testPause(_ pause: Bool) { _ = playbackTransport.setPaused(pause) }

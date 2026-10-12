@@ -58,8 +58,13 @@ final class MPVController {
 }
 enum OSDMessage { case custom(String) }
 final class PlayerCore: NSObject {
+  var isUsingNativePlayback = false
   let info = PlaybackInfo()
   let mpv = MPVController()
+  var currentPlaybackSpeed: Double { mpv.getDouble(MPVOption.PlaybackControl.speed) }
+  var playbackIsPaused: Bool { mpv.getFlag(MPVOption.PlaybackControl.pause) }
+  var playbackAtEOF: Bool { mpv.getFlag(MPVProperty.eofReached) }
+  var playbackPosition: Double? { mpv.getDouble(MPVProperty.timePos) }
   var videoToolsMediaGeneration: UInt64 = 1
   var videoToolsLoopRecovery = VideoToolsLoopRecovery()
   var lastStepBackwards: Bool?

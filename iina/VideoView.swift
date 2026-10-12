@@ -14,10 +14,23 @@ class VideoView: NSView {
   weak var player: PlayerCore!
   var link: CVDisplayLink?
 
-  lazy var videoLayer: ViewLayer = {
-    let layer = ViewLayer(self)
-    return layer
-  }()
+  private var storedVideoLayer: ViewLayer?
+  private(set) var nativeSurface: NativePlaybackSurface?
+  @Atomic private(set) var isUsingNativeSurface = false
+
+  /// The compatibility renderer is created only after choosing the MPV route.
+  /// Native callers must use the typed presentation methods below instead.
+  var videoLayer: ViewLayer {
+    precondition(!isUsingNativeSurface, "Native presentation must not initialize OpenGL")
+    if let storedVideoLayer { return storedVideoLayer }
+    dispatchPrecondition(condition: .onQueue(.main))
+    let created = ViewLayer(self)
+    storedVideoLayer = created
+    return created
+  }
+
+  var hasInitializedOpenGL: Bool { storedVideoLayer != nil }
+  private var nativeLiveResize = false
 
   @ReadWriteAtomic var isUninited = false
 
@@ -61,16 +74,16 @@ class VideoView: NSView {
     self.player = player
     super.init(frame: frame)
 
-    // set up layer
-    layer = videoLayer
-    videoLayer.colorspace = VideoView.SRGB
-    videoLayer.contentsScale = NSScreen.main!.backingScaleFactor
-    wantsLayer = true
+    // Select before constructing any GL layer, context or display link.
+    if !configurePlaybackSurface() {
+      let placeholder = CALayer()
+      placeholder.backgroundColor = NSColor.black.cgColor
+      layer = placeholder
+      wantsLayer = true
+    }
 
     // other settings
     autoresizingMask = [.width, .height]
-    wantsBestResolutionOpenGLSurface = true
-    wantsExtendedDynamicRangeOpenGLSurface = true
 
     // dragging init
     registerForDraggedTypes([.nsFilenames, .nsURL, .string])
@@ -78,6 +91,113 @@ class VideoView: NSView {
 
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
+  }
+
+  /// Only fresh player cores may enter native mode. Once MPV initialized its GL
+  /// path, the first migration slice stays on MPV instead of racing its callbacks.
+  @discardableResult
+  func configurePlaybackSurface() -> Bool {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard !isUninited else { return false }
+    if player.isUsingNativePlayback {
+      guard storedVideoLayer == nil, let output = player.nativePlaybackOutput else { return false }
+      displayIdleTimer?.invalidate()
+      displayIdleTimer = nil
+      stopDisplayLink()
+      link = nil
+      currentDisplay = nil
+      if !isUsingNativeSurface {
+        let host = CALayer()
+        host.backgroundColor = NSColor.black.cgColor
+        layer = host
+        wantsLayer = true
+        wantsBestResolutionOpenGLSurface = false
+        wantsExtendedDynamicRangeOpenGLSurface = false
+        let surface = NativePlaybackSurface(frame: bounds)
+        surface.autoresizingMask = [.width, .height]
+        addSubview(surface, positioned: .below, relativeTo: nil)
+        nativeSurface = surface
+        isUsingNativeSurface = true
+      }
+      guard let surface = nativeSurface else { return false }
+      if surface.displayLayer !== output.displayLayer {
+        surface.detach()
+        surface.clearVideoGeometry()
+        surface.resetViewport()
+      }
+      return surface.attach(output.displayLayer)
+    }
+
+    nativeSurface?.detach()
+    nativeSurface?.removeFromSuperview()
+    nativeSurface = nil
+    isUsingNativeSurface = false
+    layer = videoLayer
+    videoLayer.colorspace = VideoView.SRGB
+    videoLayer.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+    wantsLayer = true
+    wantsBestResolutionOpenGLSurface = true
+    wantsExtendedDynamicRangeOpenGLSurface = true
+    return true
+  }
+
+  @discardableResult
+  func updateNativeGeometry(_ media: CYNMediaInfo) -> Bool {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard isUsingNativeSurface, media.sampleAspectRatioKnown,
+          media.sampleAspectNumerator > 0, media.sampleAspectDenominator > 0 else { return false }
+    return nativeSurface?.setVideoGeometry(
+      codedSize: CGSize(width: media.width, height: media.height),
+      pixelAspectRatio: Double(media.sampleAspectNumerator) / Double(media.sampleAspectDenominator),
+      rotationDegrees: media.rotationDegrees) ?? false
+  }
+
+  /// Linear zoom relative to fit; pan is in view points with positive Y up.
+  @discardableResult
+  func updateNativeViewport(zoom: Double, pan: CGPoint) -> Bool {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard isUsingNativeSurface else { return false }
+    return nativeSurface?.setViewport(zoom: zoom, pan: pan) ?? false
+  }
+
+  var playbackInLiveResize: Bool {
+    get { isUsingNativeSurface ? nativeLiveResize : videoLayer.inLiveResize }
+    set {
+      dispatchPrecondition(condition: .onQueue(.main))
+      if isUsingNativeSurface {
+        nativeLiveResize = newValue
+        forcePlaybackRedraw()
+      } else {
+        videoLayer.inLiveResize = newValue
+      }
+    }
+  }
+
+  func updatePlaybackContentsScale() {
+    dispatchPrecondition(condition: .onQueue(.main))
+    if isUsingNativeSurface {
+      nativeSurface?.viewDidChangeBackingProperties()
+    } else {
+      videoLayer.contentsScale = window?.backingScaleFactor ?? 1
+    }
+  }
+
+  func forcePlaybackRedraw() {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard !isUninited else { return }
+    if isUsingNativeSurface {
+      needsLayout = true
+      layoutSubtreeIfNeeded()
+      nativeSurface?.needsLayout = true
+      nativeSurface?.layoutSubtreeIfNeeded()
+    } else {
+      videoLayer.update(force: true)
+    }
+  }
+
+  override func layout() {
+    super.layout()
+    if isUsingNativeSurface { nativeSurface?.frame = bounds }
   }
 
   /// Uninitialize this view.
@@ -93,6 +213,13 @@ class VideoView: NSView {
     // CVDisplayLinkStop waits for an active callback. That callback acquires
     // isUninited's read lock, so stop it before taking either rendering lock.
     stopDisplayLink()
+    if storedVideoLayer == nil {
+      // Session shutdown is asynchronous and owned by PlayerCore. Presentation
+      // teardown never waits for its decoder or touches an absent GL context.
+      isUninited = true
+      if Thread.isMainThread { nativeSurface?.detach() }
+      return
+    }
     player.mpv.lockAndSetOpenGLContext()
     defer { player.mpv.unlockOpenGLContext() }
     $isUninited.withWriteLock() { isUninited in
@@ -221,6 +348,7 @@ class VideoView: NSView {
   /// by `Logger.fatal`.
   /// - Returns: A [CVDisplayLink](https://developer.apple.com/documentation/corevideo/cvdisplaylink-k0k).
   private func obtainDisplayLink() -> CVDisplayLink {
+    precondition(!isUsingNativeSurface, "Native presentation owns its render clock")
     if let link = link { return link }
     let result = CVDisplayLinkCreateWithActiveCGDisplays(&link)
     checkResult(result, "CVDisplayLinkCreateWithActiveCGDisplays")
@@ -231,7 +359,7 @@ class VideoView: NSView {
   }
 
   func startDisplayLink() {
-    guard !isUninited else { return }
+    guard !isUninited, !isUsingNativeSurface else { return }
     let link = obtainDisplayLink()
     guard !CVDisplayLinkIsRunning(link) else { return }
     updateDisplayLink()
@@ -249,6 +377,7 @@ class VideoView: NSView {
 
   // This should only be called if the window has changed displays
   func updateDisplayLink() {
+    guard !isUsingNativeSurface else { return }
     guard let window = window, let link = link, let screen = window.screen else { return }
     let displayId = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as! UInt32
 
@@ -305,6 +434,10 @@ class VideoView: NSView {
   ///         full screen mode.
   func displayIdle() {
     displayIdleTimer?.invalidate()
+    guard !isUsingNativeSurface else {
+      displayIdleTimer = nil
+      return
+    }
     // Because the display link is critical there is an internal setting that can be changed to
     // disable shutting down the display link should any problems with this energy saving feature
     // be discovered.
@@ -317,6 +450,7 @@ class VideoView: NSView {
   }
 
   private func setICCProfile() {
+    guard !isUsingNativeSurface else { return }
     let screenColorSpace = player.mainWindow.window?.screen?.colorSpace
     var usesScreenICCProfile = false
     if !Preference.bool(for: .loadIccProfile) {
@@ -437,6 +571,7 @@ class VideoView: NSView {
 
 extension VideoView {
   func refreshEdrMode() {
+    guard !isUsingNativeSurface else { return }
     guard player.mainWindow.loaded, player.info.state.loaded, let displayId = currentDisplay else { return }
     if let screen = self.window?.screen {
       NSScreen.logEDR("Refreshing HDR for \(player.subsystem.rawValue) on display\(displayId)",
@@ -451,6 +586,7 @@ extension VideoView {
   }
 
   func requestEdrMode() -> Bool? {
+    guard !isUsingNativeSurface else { return false }
     guard let mpv = player.mpv else { return false }
 
     guard let primaries = mpv.getString(MPVProperty.videoParamsPrimaries), let gamma = mpv.getString(MPVProperty.videoParamsGamma) else {
@@ -565,7 +701,7 @@ fileprivate func displayLinkCallback(
   _ context: UnsafeMutableRawPointer?) -> CVReturn {
   let videoView = unsafeBitCast(context, to: VideoView.self)
   videoView.$isUninited.withReadLock() { isUninited in
-    guard !isUninited else { return }
+    guard !isUninited, !videoView.isUsingNativeSurface else { return }
     videoView.player.mpv.mpvReportSwap()
   }
   return kCVReturnSuccess

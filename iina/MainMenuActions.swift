@@ -22,6 +22,19 @@ class MainMenuActionHandler: NSResponder, NSMenuItemValidation {
     fatalError("init(coder:) has not been implemented")
   }
 
+  /// Replay an unmigrated menu action only after the same media has completed
+  /// its compatibility handoff. Snapshot the item so a rebuilt menu cannot
+  /// change its tag or represented value while that asynchronous work runs.
+  private func routeToCompatibility(_ sender: NSMenuItem, action: Selector) -> Bool {
+    guard player.isUsingNativePlayback else { return false }
+    let preservedSender = (sender.copy() as? NSMenuItem) ?? sender
+    player.requireMPVCompatibility(reason: "The requested menu action needs the compatibility backend") { [weak self] in
+      guard let self else { return }
+      NSApp.sendAction(action, to: self, from: preservedSender)
+    }
+    return true
+  }
+
   @objc func menuSavePlaylist(_ sender: NSMenuItem) {
     Utility.quickSavePanel(title: "Save to playlist", types: ["m3u8"], sheetWindow: player.currentWindow) { (url) in
       if url.isFileURL {
@@ -47,6 +60,7 @@ class MainMenuActionHandler: NSResponder, NSMenuItemValidation {
   }
 
   @objc func menuDeleteCurrentFile(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuDeleteCurrentFile(_:))) { return }
     guard let url = player.info.currentURL, !player.info.isNetworkResource else { return }
     do {
       let index = player.mpv.getInt(MPVProperty.playlistPos)
@@ -107,7 +121,7 @@ extension MainMenuActionHandler {
       return
     }
     if let multiplier = sender.representedObject as? Double {
-      player.setSpeed(player.info.playSpeed * multiplier)
+      player.setSpeed(player.currentPlaybackSpeed * multiplier)
     }
   }
 
@@ -151,6 +165,7 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuChapterSwitch(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuChapterSwitch(_:))) { return }
     let index = sender.tag
     guard let chapter = player.playChapter(index) else {
       Logger.log("Cannot switch to chapter \(index) because it was not found! Will ignore request and reload chapters instead",
@@ -178,10 +193,12 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuNextChapter(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuNextChapter(_:))) { return }
     player.mpv.command(.add, args: ["chapter", "1"], checkError: false)
   }
 
   @objc func menuPreviousChapter(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuPreviousChapter(_:))) { return }
     player.mpv.command(.add, args: ["chapter", "-1"], checkError: false)
   }
 }
@@ -208,6 +225,7 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuChangeAspect(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuChangeAspect(_:))) { return }
     if let aspectStr = sender.representedObject as? String {
       player.setVideoAspect(aspectStr)
       player.sendOSD(.aspect(aspectStr))
@@ -217,6 +235,7 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuChangeCrop(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuChangeCrop(_:))) { return }
     if let cropStr = sender.representedObject as? String {
       if cropStr == "Custom" {
         player.mainWindow.hideSideBar {
@@ -231,12 +250,14 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuChangeRotation(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuChangeRotation(_:))) { return }
     if let rotationInt = sender.representedObject as? Int {
       player.setVideoRotate(rotationInt)
     }
   }
 
   @objc func menuToggleFlip(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuToggleFlip(_:))) { return }
     if player.info.flipFilter == nil {
       player.setFlip(true)
     } else {
@@ -245,6 +266,7 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuToggleMirror(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuToggleMirror(_:))) { return }
     if player.info.mirrorFilter == nil {
       player.setMirror(true)
     } else {
@@ -253,6 +275,7 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuToggleDeinterlace(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuToggleDeinterlace(_:))) { return }
     player.toggleDeinterlace(sender.state != .on)
   }
 
@@ -266,6 +289,7 @@ extension MainMenuActionHandler {
 
 extension MainMenuActionHandler {
   @objc func menuLoadExternalAudio(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuLoadExternalAudio(_:))) { return }
     let currentDir = player.info.currentURL?.deletingLastPathComponent()
     Utility.quickOpenPanel(title: "Load external audio file", chooseDir: false, dir: currentDir,
                            sheetWindow: player.currentWindow,
@@ -276,7 +300,7 @@ extension MainMenuActionHandler {
 
   @objc func menuChangeVolume(_ sender: NSMenuItem) {
     if let volumeDelta = sender.representedObject as? Int {
-      let newVolume = Double(volumeDelta) + player.info.volume
+      let newVolume = Double(volumeDelta) + player.playbackVolume
       player.setVolume(newVolume, unmute: true)
     } else {
       Logger.log("sender.representedObject is not int in menuChangeVolume()", level: .error)
@@ -288,6 +312,7 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuChangeAudioDelay(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuChangeAudioDelay(_:))) { return }
     if let delayDelta = sender.representedObject as? Double {
       let newDelay = player.info.audioDelay + delayDelta
       player.setAudioDelay(newDelay)
@@ -297,6 +322,7 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuResetAudioDelay(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuResetAudioDelay(_:))) { return }
     player.setAudioDelay(0)
   }
 
@@ -310,6 +336,7 @@ extension MainMenuActionHandler {
 
 extension MainMenuActionHandler {
   @objc func menuLoadExternalSub(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuLoadExternalSub(_:))) { return }
     let currentDir = player.info.currentURL?.deletingLastPathComponent()
     // In addition to subtitle files allow the user to choose video files as mpv will look for and
     // load embedded subtitle streams in the video file.
@@ -321,14 +348,17 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuToggleSubVisibility(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuToggleSubVisibility(_:))) { return }
     player.toggleSubVisibility()
   }
 
   @objc func menuToggleSecondSubVisibility(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuToggleSecondSubVisibility(_:))) { return }
     player.toggleSecondSubVisibility()
   }
 
   @objc func menuChangeSubDelay(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuChangeSubDelay(_:))) { return }
     if let delayDelta = sender.representedObject as? Double {
       let newDelay = player.info.subDelay + delayDelta
       player.setSubDelay(newDelay)
@@ -338,6 +368,7 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuChangeSubScale(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuChangeSubScale(_:))) { return }
     if sender.tag == 0 {
       player.setSubScale(1)
       return
@@ -356,19 +387,23 @@ extension MainMenuActionHandler {
   }
 
   @objc func menuResetSubDelay(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuResetSubDelay(_:))) { return }
     player.setSubDelay(0)
   }
 
   @objc func menuSetSubEncoding(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuSetSubEncoding(_:))) { return }
     player.setSubEncoding((sender.representedObject as? String) ?? "auto")
     player.reloadAllSubs()
   }
 
   @objc func menuSubFont(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuSubFont(_:))) { return }
     player.chooseSubFont()
   }
 
   @objc func menuCycleTrack(_ sender: NSMenuItem) {
+    if routeToCompatibility(sender, action: #selector(menuCycleTrack(_:))) { return }
     switch sender.tag {
     case 0: player.mpv.command(.cycle, args: ["video"])
     case 1: player.mpv.command(.cycle, args: ["audio"])

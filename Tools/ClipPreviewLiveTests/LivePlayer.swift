@@ -216,8 +216,25 @@ final class MPVController {
 }
 
 final class PlayerCore: NSObject {
+  var isUsingNativePlayback = false
   let info = PlaybackInfo()
   let mpv = MPVController()
+  lazy var playbackTransport: PlaybackTransport = MPVPlaybackTransport(sink: .init(
+    isAvailable: { [weak self] in self != nil },
+    getFlag: { [weak self] name in self?.mpv.getFlag(name) ?? false },
+    getDouble: { [weak self] name in self?.mpv.getDouble(name) ?? 0 },
+    setFlag: { [weak self] name, value, verbosity in
+      self?.mpv.setFlag(name, value, level: verbosity == .verbose ? .verbose : .debug)
+    },
+    setDouble: { [weak self] name, value, _ in self?.mpv.setDouble(name, value) },
+    command: { [weak self] name, arguments, context in
+      self?.mpv.command(MPVCommand(name), args: arguments, checkError: context.checkError)
+    }
+  ))
+  var currentPlaybackSpeed: Double { mpv.getDouble(MPVOption.PlaybackControl.speed) }
+  var playbackIsPaused: Bool { mpv.getFlag(MPVOption.PlaybackControl.pause) }
+  var playbackAtEOF: Bool { mpv.getFlag(MPVProperty.eofReached) }
+  var playbackPosition: Double? { mpv.getDouble(MPVProperty.timePos) }
   let mainWindow = MainWindowController()
   var videoToolsMediaGeneration: UInt64 = 1
   var videoToolsLoopRecovery = VideoToolsLoopRecovery()

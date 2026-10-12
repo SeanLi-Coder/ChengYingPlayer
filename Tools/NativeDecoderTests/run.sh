@@ -12,6 +12,7 @@ xcrun clang -fobjc-arc -fmodules -std=gnu11 -Wall -Wextra -Wno-unused-parameter 
   -framework CoreVideo -framework AudioToolbox -o "$test_dir/decoder-tests"
 "$ffmpeg_bin" -hide_banner -loglevel error -f lavfi -i testsrc2=s=320x180:r=30:d=4 \
   -f lavfi -i sine=frequency=440:sample_rate=48000:duration=4 \
+  -vf setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709 \
   -c:v libx264 -preset fast -bf 3 -g 30 -pix_fmt yuv420p -color_range tv \
   -color_primaries bt709 -color_trc bt709 -colorspace bt709 -c:a aac -y "$test_dir/av.mp4"
 "$ffmpeg_bin" -hide_banner -loglevel error -f lavfi -i testsrc2=s=320x180:r=30:d=4 \
@@ -40,6 +41,26 @@ xcrun clang -fobjc-arc -fmodules -std=gnu11 -Wall -Wextra -Wno-unused-parameter 
 "$ffmpeg_bin" -hide_banner -loglevel error -f lavfi -i sine=frequency=440:sample_rate=48000:duration=0.2 \
   -c:a pcm_s24le -y "$test_dir/audio24.wav"
 "$ffmpeg_bin" -hide_banner -loglevel error -i "$test_dir/audio24.wav" -c:a pcm_s32le -y "$test_dir/audio32.wav"
+"$ffmpeg_bin" -hide_banner -loglevel error -i "$test_dir/av.mp4" \
+  -i Tools/NativeDecoderTests/fixtures/subtitles.srt -i Tools/NativeDecoderTests/fixtures/chapters.ffmeta \
+  -map 0:v:0 -map 0:v:0 -map 0:a:0 -map 0:a:0 -map 1:0 -map_chapters 2 \
+  -c copy -y "$test_dir/inventory.mkv"
+"$ffmpeg_bin" -hide_banner -loglevel error -f lavfi -i testsrc2=s=320x180:r=30:d=0.2 \
+  -vf setsar=4/3 -c:v libx264 -preset fast -pix_fmt yuv420p -y "$test_dir/aspect.mp4"
+"$ffmpeg_bin" -hide_banner -loglevel error -display_rotation:v:0 90 -i "$test_dir/aspect.mp4" \
+  -c copy -y "$test_dir/aspect-rotated.mp4"
+"$ffmpeg_bin" -hide_banner -loglevel error -i "$test_dir/aspect.mp4" -c copy \
+  -aspect 2:1 -y "$test_dir/aspect-override.mp4"
+"$ffmpeg_bin" -hide_banner -loglevel error -f lavfi -i testsrc2=s=320x180:r=30:d=0.2 \
+  -vf format=yuv420p10le,setparams=range=limited:color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc \
+  -c:v libx265 -preset fast \
+  -x265-params 'log-level=error:pools=2:frame-threads=2:colorprim=9:transfer=16:colormatrix=9:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,200' \
+  -pix_fmt yuv420p10le -color_range tv -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc \
+  -y "$test_dir/static-hdr.mkv"
+"$ffmpeg_bin" -hide_banner -loglevel error -f lavfi -i color=c=blue:s=64x64:r=1:d=1 \
+  -frames:v 1 -c:v mjpeg -y "$test_dir/cover.jpg"
+"$ffmpeg_bin" -hide_banner -loglevel error -i "$test_dir/audio24.wav" -i "$test_dir/cover.jpg" \
+  -map 0:a:0 -map 1:v:0 -c:a aac -c:v copy -disposition:v:0 attached_pic -y "$test_dir/cover.m4a"
 "$test_dir/decoder-tests" "$test_dir"
 xcrun clang -fobjc-arc -fmodules -std=gnu11 -I deps/include -c \
   iina/NativePlayback/CYNMediaDecoder.m -o "$test_dir/decoder.o"

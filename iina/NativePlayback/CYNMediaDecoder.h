@@ -25,6 +25,26 @@ typedef NS_ERROR_ENUM(CYNMediaDecoderErrorDomain, CYNMediaDecoderError) {
 @property(nonatomic, readonly) NSInteger audioChannels;
 @property(nonatomic, readonly, copy) NSString *videoCodec;
 @property(nonatomic, readonly, copy) NSString *audioCodec;
+// Container inventory includes all streams, including attached video pictures.
+@property(nonatomic, readonly) NSInteger videoStreamCount;
+@property(nonatomic, readonly) NSInteger audioStreamCount;
+@property(nonatomic, readonly) NSInteger subtitleStreamCount;
+@property(nonatomic, readonly) NSInteger attachedPictureStreamCount;
+@property(nonatomic, readonly) NSInteger chapterCount;
+// FFmpeg container indices, not mpv track IDs. -1 means no selected stream.
+@property(nonatomic, readonly) NSInteger selectedVideoStreamIndex;
+@property(nonatomic, readonly) NSInteger selectedAudioStreamIndex;
+// Unknown SAR remains 0/1 with zero display dimensions, never fabricated 1/1.
+@property(nonatomic, readonly) BOOL sampleAspectRatioKnown;
+@property(nonatomic, readonly) NSInteger sampleAspectNumerator;
+@property(nonatomic, readonly) NSInteger sampleAspectDenominator;
+// Unrotated display size after applying the selected stream's validated SAR.
+@property(nonatomic, readonly) double displayWidth;
+@property(nonatomic, readonly) double displayHeight;
+// Codec code-point names only, never arbitrary media titles or metadata values.
+@property(nonatomic, readonly, copy) NSString *videoTransfer;
+@property(nonatomic, readonly) BOOL hasStaticHDRMetadata;
+@property(nonatomic, readonly) BOOL isHDR;
 @end
 
 @interface CYNMediaSample : NSObject

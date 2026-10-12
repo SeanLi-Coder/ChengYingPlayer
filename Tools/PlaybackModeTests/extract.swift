@@ -51,6 +51,13 @@ final class PlayerCore {
   static var playerCores: [PlayerCore] = []
   let mpv = MPVFixture()
   let info = InfoFixture()
+  let isUsingNativePlayback = false
+  var nativeLoopMode: LoopMode = .off
+  var nativePlaybackSession: NativeSessionFixture? { nil }
+  func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
+    preconditionFailure("Unexpected native route in legacy mode tests")
+  }
+  func acceptsMPVEventRevision(_ revision: UInt64) -> Bool { revision == 0 }
 \(section(player, "  func togglePlaylistLoop()", "  func toggleShuffle()"))
 }
 

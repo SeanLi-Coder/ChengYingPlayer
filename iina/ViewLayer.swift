@@ -118,6 +118,7 @@ class ViewLayer: CAOpenGLLayer {
   /// [#5029](https://github.com/iina/iina/pull/5029).
   /// - Parameter videoView: The view this layer will be associated with.
   init(_ videoView: VideoView) {
+    precondition(!videoView.isUsingNativeSurface, "Native presentation must not create a GL layer")
     self.videoView = videoView
     (cglPixelFormat, bufferDepth) = ViewLayer.createPixelFormat(videoView.player)
     cglContext = ViewLayer.createContext(cglPixelFormat)
@@ -311,10 +312,12 @@ class ViewLayer: CAOpenGLLayer {
   }
 
   func update(force: Bool = false) {
+    guard let videoView, !videoView.isUsingNativeSurface, !videoView.isUninited else { return }
     // The render queue may be occupied for longer than mpv's 200 ms frame deadline.
     // Remember the notification immediately, without entering mpv or taking GL locks.
     pendingRenderUpdate = true
     mpvGLQueue.async { [self] in
+      guard let videoView = self.videoView, !videoView.isUsingNativeSurface, !videoView.isUninited else { return }
       if force { forceDraw = true }
       needsFlip = true
       display()

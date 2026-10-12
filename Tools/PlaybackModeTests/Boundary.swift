@@ -8,6 +8,9 @@ enum MPVOption {
 }
 
 final class InfoFixture { var state: PlayerState = .idle }
+final class NativeSessionFixture {
+  func setLoop(_ interval: Int?, repeatFile: Bool) { preconditionFailure("Unexpected native route") }
+}
 
 final class MPVFixture {
   var mpv: Int? = 1
@@ -30,6 +33,7 @@ class HookFixture {
   let player: PlayerCore
   var hooks: [String: MPVHookValue] = [:]
   init(_ player: PlayerCore) { self.player = player }
+  func captureRoutedMPVEventRevision() -> UInt64? { 0 }
   func addHook(_ name: MPVHook, priority: Int32, hook: MPVHookValue) {
     precondition([MPVHook.onPreLoaded.rawValue, MPVHook.onAfterEndFile.rawValue].contains(name.rawValue) && priority == 100)
     precondition(hooks[name.rawValue] == nil)

@@ -93,6 +93,17 @@ extension Data {
 }
 
 class PlayerFixture {
+  // This suite exercises the unchanged MPV lifecycle. Native handoff has its
+  // own real-session and controlled-route regression suites.
+  var nativeTransport: AnyObject?
+  var nativeRetiring = false
+  var nativeTerminationRequested = false
+  var nativeCompatibilityRestore: Any?
+  var pendingUrl: URL?
+  var pendingAutoLoad = false
+  @discardableResult func advancePlaybackRoute(acceptsMPV: Bool) -> UInt64 { 0 }
+  func retireNativePlayback(completion: @escaping () -> Void) { preconditionFailure("Unexpected native route") }
+  func open(_ url: URL, shouldAutoLoad: Bool) { preconditionFailure("Unexpected pending open") }
   let info = PlaybackFixture()
   let mpv = PlaybackMPV()
   let mainWindow = WindowFixture()
@@ -117,6 +128,10 @@ class PlayerFixture {
   func savePlaybackPosition() {}
   func refreshSyncUITimer() {}
   func savePlayerState() {}
+}
+
+extension Notification.Name {
+  static let iinaPlayerStopped = Notification.Name("IINAPlayerStopped")
 }
 
 // POD equivalents of the C node layout allow boundary failures to be injected

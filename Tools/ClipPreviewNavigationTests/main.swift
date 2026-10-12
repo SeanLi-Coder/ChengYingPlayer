@@ -193,5 +193,22 @@ do {
   check(player.seeks == [80], "Navigation without a tools panel still works")
 }
 
+do {
+  let player = PlayerBoundary()
+  player.isUsingNativePlayback = true
+  let window = WindowUnderTest(player: player)
+  check(window.handleGuardedPlaybackCommand(["seek", "25", "absolute"]),
+        "Native seeking uses the typed transport without an A/B loop")
+  check(player.seeks == [25], "Native seek preserves the requested target")
+  check(window.handleGuardedPlaybackCommand(["add", "speed", "0.1"]),
+        "Native rate changes use the typed transport without an A/B loop")
+  check(abs((player.speeds.last ?? 0) - 1.1) < 0.0001, "Native rate delta is preserved")
+  check(!window.handleGuardedPlaybackCommand(["frame-step"]),
+        "Unsupported native frame stepping is left to explicit compatibility routing")
+  check(player.frames.isEmpty, "Unsupported stepping cannot reach the idle compatibility core")
+  check(player.mainWindow.quickSettingView.videoToolsViewController == nil,
+        "Native seeking and rate changes do not instantiate legacy preview controls")
+}
+
 print("Clip preview navigation checks: \(checks), failures: \(failures)")
 exit(failures == 0 ? 0 : 1)

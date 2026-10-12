@@ -113,6 +113,13 @@ class InspectorWindowController: NSWindowController, NSWindowDelegate, NSTableVi
   }
 
   override func showWindow(_ sender: Any?) {
+    let player = PlayerCore.lastActive
+    if player.isUsingNativePlayback {
+      player.requireMPVCompatibility(reason: "The property inspector needs the compatibility backend") { [weak self] in
+        self?.showWindow(sender)
+      }
+      return
+    }
     Logger.log("Showing Inspector window", level: .verbose)
 
     guard let _ = self.window else { return }  // trigger lazy load if not loaded
@@ -153,11 +160,14 @@ class InspectorWindowController: NSWindowController, NSWindowDelegate, NSTableVi
 
   func updateInfo(dynamic: Bool = false) {
     let player = PlayerCore.lastActive
-    guard player.info.state.active else { return }
+    guard player.info.state.active, !player.isUsingNativePlayback,
+          let revision = player.captureMPVEventRevision() else { return }
     let controller = player.mpv!
     let info = player.info
 
     DispatchQueue.main.async {
+      guard PlayerCore.lastActive === player, player.info.state.active,
+            player.acceptsMPVEventRevision(revision) else { return }
 
       if !dynamic {
 
@@ -259,7 +269,6 @@ class InspectorWindowController: NSWindowController, NSWindowDelegate, NSTableVi
         : NSLocalizedString("general.na", comment: "N/A");
       self.setLabelColor(self.vprimariesField, by: sigPeak > 0)
 
-      let player = PlayerCore.lastActive
       if player.mainWindow.loaded && player.info.state.loaded {
         if let colorspace = player.mainWindow.videoView.videoLayer.colorspace {
           let screenColorSpace = player.mainWindow.window?.screen?.colorSpace
@@ -357,7 +366,8 @@ class InspectorWindowController: NSWindowController, NSWindowDelegate, NSTableVi
       let player = PlayerCore.lastActive
 
       if let textField = cell.textField {
-        if player.info.state.active, let value = player.mpv.getString(property) {
+        if player.info.state.active, !player.isUsingNativePlayback,
+           let value = player.mpv.getString(property) {
           textField.stringValue = value
           textField.textColor = .labelColor
         } else {

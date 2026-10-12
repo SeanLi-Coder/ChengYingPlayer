@@ -157,6 +157,7 @@ final class PlayerCore {
 }
 final class VideoView: NSView {
   weak var player: PlayerCore!
+  let isUsingNativeSurface = false
   @ReadWriteAtomic var isUninited = false
   lazy var videoLayer = ObservedLayer(self)
   init(player: PlayerCore) {

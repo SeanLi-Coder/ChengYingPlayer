@@ -533,7 +533,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     deinterlaceLabel.stringValue = NSLocalizedString("quicksetting.deinterlace", comment: "Deinterlace")
     hdrLabel.stringValue = NSLocalizedString("quicksetting.hdr", comment: "HDR")
 
-    let speed = player.mpv.getDouble(MPVOption.PlaybackControl.speed)
+    let speed = player.currentPlaybackSpeed
     updateSpeed(to: speed)
   }
 

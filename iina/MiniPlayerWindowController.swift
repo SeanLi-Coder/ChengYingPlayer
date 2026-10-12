@@ -186,11 +186,11 @@ class MiniPlayerWindowController: PlayerWindowController, NSPopoverDelegate {
   // MARK: - Window delegate: Size
 
   func windowWillStartLiveResize(_ notification: Notification) {
-    videoView.videoLayer.inLiveResize = true
+    videoView.playbackInLiveResize = true
   }
 
   func windowDidEndLiveResize(_ notification: Notification) {
-    videoView.videoLayer.inLiveResize = false
+    videoView.playbackInLiveResize = false
     guard player.info.state.active, let window = window else { return }
     let windowHeight = normalWindowHeight()
     if isPlaylistVisible {

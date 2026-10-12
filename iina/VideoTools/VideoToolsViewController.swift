@@ -672,7 +672,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   @objc private func changePlaybackSpeed(_ sender: NSButton) {
     guard let player, player.info.state.loaded else { return }
-    let currentSpeed = player.mpv.getDouble(MPVOption.PlaybackControl.speed)
+    let currentSpeed = player.currentPlaybackSpeed
     guard currentSpeed.isFinite else { return }
     cancelScheduledPreview()
     player.setSpeed(VideoToolsShortcuts.adjustedSpeed(
@@ -1485,11 +1485,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     let duration = player.info.videoDuration?.second
     let durationText = duration.flatMap { $0.isFinite && $0 >= 0 ? formatTimestamp($0) : nil } ?? "--:--.---"
     playbackPositionLabel.stringValue = "\(position) / \(durationText)"
-    let paused = player.mpv.getFlag(MPVOption.PlaybackControl.pause)
+    let paused = player.playbackIsPaused
     playbackControl.setLabel(NSLocalizedString(
       paused ? "videotools.playback.play" : "videotools.playback.pause", comment: "Play or pause"
     ), forSegment: 1)
-    let speed = player.mpv.getDouble(MPVOption.PlaybackControl.speed)
+    let speed = player.currentPlaybackSpeed
     guard speed.isFinite, speed > 0 else { return }
     slowerButton.isEnabled = speed > 0.1
     fasterButton.isEnabled = speed < Self.playbackSpeeds[Self.playbackSpeeds.count - 1]

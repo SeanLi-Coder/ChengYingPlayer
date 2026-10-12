@@ -22,6 +22,12 @@ struct NativePlaybackSnapshot {
   let failure: NativePlaybackFailure?
 }
 
+enum NativePlaybackQueryResult {
+  case ready(NativePlaybackSnapshot)
+  case unavailable
+  case superseded
+}
+
 struct NativePlaybackSampleObservation {
   let generation: UInt64
   let revision: UInt64
@@ -254,6 +260,38 @@ final class NativePlaybackSession {
     }
   }
 
+  /// Capture the worker's playback state without blocking AppKit. A marker or
+  /// preview snapshot must use this instead of the periodic UI cache. Changing
+  /// media or seeking before delivery invalidates the result explicitly; every
+  /// request completes once on main, including shutdown and owner destruction.
+  func captureCurrentState(completion: @escaping (NativePlaybackQueryResult) -> Void) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard !terminal else {
+      DispatchQueue.main.async { completion(.unavailable) }
+      return
+    }
+    let request = identity.current()
+    worker.async { [weak self] in
+      guard let self, self.identity.accepts(request), self.revision == request else {
+        DispatchQueue.main.async { completion(.superseded) }
+        return
+      }
+      let result: NativePlaybackQueryResult
+      if self.media != nil, [.playing, .paused, .ended].contains(self.phase), !self.preroll {
+        result = .ready(self.snapshotOnWorker())
+      } else {
+        result = .unavailable
+      }
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.identity.accepts(request), !self.terminal else {
+          completion(.superseded)
+          return
+        }
+        completion(result)
+      }
+    }
+  }
+
   /// Return false for unsupported rates rather than silently muting the audio.
   @discardableResult
   func setRate(_ requested: Float) -> Bool {
@@ -421,17 +459,21 @@ final class NativePlaybackSession {
     let now = ProcessInfo.processInfo.systemUptime
     guard force || now - lastSnapshotTime >= 0.1 else { return }
     lastSnapshotTime = now
-    let snapshot = NativePlaybackSnapshot(generation: generation, revision: revision,
-      phase: phase, position: phase == .idle || phase == .closed ? 0 : positionOnWorker(),
-      duration: media?.duration ?? 0, volume: volume, rate: rate, media: media,
-      videoSamples: videoSamples, audioSamples: audioSamples,
-      hardwareVideoSamples: hardwareVideoSamples, videoToolboxSamples: videoToolboxSamples,
-      queuedBytes: queuedBytes, failure: failure)
+    let snapshot = snapshotOnWorker()
     DispatchQueue.main.async { [weak self] in
       guard let self, self.identity.accepts(snapshot.revision) else { return }
       self.mainPhase = snapshot.phase
       self.onSnapshot?(snapshot)
     }
+  }
+
+  private func snapshotOnWorker() -> NativePlaybackSnapshot {
+    NativePlaybackSnapshot(generation: generation, revision: revision,
+      phase: phase, position: phase == .idle || phase == .closed ? 0 : positionOnWorker(),
+      duration: media?.duration ?? 0, volume: volume, rate: rate, media: media,
+      videoSamples: videoSamples, audioSamples: audioSamples,
+      hardwareVideoSamples: hardwareVideoSamples, videoToolboxSamples: videoToolboxSamples,
+      queuedBytes: queuedBytes, failure: failure)
   }
 
   private func fail(_ error: Error, revision request: UInt64) {

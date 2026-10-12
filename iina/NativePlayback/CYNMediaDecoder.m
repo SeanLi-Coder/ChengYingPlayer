@@ -25,6 +25,12 @@ static const int64_t CYNMaxPixels = 8192LL * 8192;
 @property(nonatomic) BOOL hasVideo, hasAudio;
 @property(nonatomic) NSInteger rotationDegrees, audioSampleRate, audioChannels;
 @property(nonatomic, copy) NSString *videoCodec, *audioCodec;
+@property(nonatomic) NSInteger videoStreamCount, audioStreamCount, subtitleStreamCount, attachedPictureStreamCount, chapterCount;
+@property(nonatomic) NSInteger selectedVideoStreamIndex, selectedAudioStreamIndex;
+@property(nonatomic) BOOL sampleAspectRatioKnown, hasStaticHDRMetadata, isHDR;
+@property(nonatomic) NSInteger sampleAspectNumerator, sampleAspectDenominator;
+@property(nonatomic) double displayWidth, displayHeight;
+@property(nonatomic, copy) NSString *videoTransfer;
 @end
 @implementation CYNMediaInfo
 @end
@@ -251,6 +257,34 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   if (error) *error = openError;
   return result;
 }
+- (BOOL)populateAspectSummary:(CYNMediaInfo *)summary streamRatio:(AVRational)streamRatio
+                  codecRatio:(AVRational)codecRatio error:(NSError **)error {
+  // 0/0 and 0/positive are FFmpeg's unspecified values. Positive numerators
+  // require positive denominators; never let guessing normalize malformed SAR.
+  for (int source = 0; source < 2; ++source) {
+    AVRational ratio = source ? codecRatio : streamRatio;
+    if (ratio.num < 0 || ratio.den < 0 || (ratio.num > 0 && ratio.den == 0))
+      return [self fail:CYNMediaDecoderErrorUnsupported message:@"The video sample aspect ratio is invalid." error:error];
+  }
+  AVRational ratio = streamRatio.num > 0 ? streamRatio : codecRatio;
+  summary.sampleAspectNumerator = 0;
+  summary.sampleAspectDenominator = 1;
+  summary.sampleAspectRatioKnown = NO;
+  summary.displayWidth = summary.displayHeight = 0;
+  if (ratio.num == 0) return YES;
+  int numerator, denominator;
+  if (!av_reduce(&numerator, &denominator, ratio.num, ratio.den, INT_MAX))
+    return [self fail:CYNMediaDecoderErrorUnsupported message:@"The video sample aspect ratio cannot be represented safely." error:error];
+  double width = (double)summary.width * numerator / denominator;
+  if (summary.width <= 0 || summary.height <= 0 || !isfinite(width) || width <= 0)
+    return [self fail:CYNMediaDecoderErrorUnsupported message:@"The video display dimensions cannot be represented safely." error:error];
+  summary.sampleAspectNumerator = numerator;
+  summary.sampleAspectDenominator = denominator;
+  summary.sampleAspectRatioKnown = YES;
+  summary.displayWidth = width;
+  summary.displayHeight = summary.height;
+  return YES;
+}
 - (CYNMediaInfo *)openLocalURL:(NSURL *)url error:(NSError **)error {
   if (error) *error = nil;
   [self close];
@@ -303,6 +337,23 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   if (_videoIndex >= 0 && (_format->streams[_videoIndex]->disposition & AV_DISPOSITION_ATTACHED_PIC)) _videoIndex = -1;
   _info = [CYNMediaInfo new];
   _info.videoCodec = _info.audioCodec = @"";
+  _info.videoTransfer = @"unknown";
+  _info.selectedVideoStreamIndex = _videoIndex >= 0 ? _videoIndex : -1;
+  _info.selectedAudioStreamIndex = _audioIndex >= 0 ? _audioIndex : -1;
+  _info.sampleAspectDenominator = 1;
+  _info.chapterCount = _format->nb_chapters;
+  for (unsigned int index = 0; index < _format->nb_streams; ++index) {
+    AVStream *stream = _format->streams[index];
+    switch (stream->codecpar->codec_type) {
+      case AVMEDIA_TYPE_VIDEO:
+        _info.videoStreamCount++;
+        if (stream->disposition & AV_DISPOSITION_ATTACHED_PIC) _info.attachedPictureStreamCount++;
+        break;
+      case AVMEDIA_TYPE_AUDIO: _info.audioStreamCount++; break;
+      case AVMEDIA_TYPE_SUBTITLE: _info.subtitleStreamCount++; break;
+      default: break;
+    }
+  }
   _originUS = _format->start_time == AV_NOPTS_VALUE ? 0 : _format->start_time;
   _info.duration = _format->duration > 0 ? (double)_format->duration / AV_TIME_BASE : 0;
   if (_videoIndex >= 0) {
@@ -341,6 +392,22 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
     if (!_video) return nil;
     _info.hasVideo = YES;
     _info.width = parameters->width; _info.height = parameters->height;
+    if (![self populateAspectSummary:_info streamRatio:stream->sample_aspect_ratio
+                         codecRatio:parameters->sample_aspect_ratio error:error]) return nil;
+    const char *transfer = av_color_transfer_name(parameters->color_trc);
+    if (transfer && parameters->color_trc != AVCOL_TRC_UNSPECIFIED) _info.videoTransfer = @(transfer);
+    _info.hasStaticHDRMetadata = av_packet_side_data_get(parameters->coded_side_data, parameters->nb_coded_side_data,
+                                                        AV_PKT_DATA_MASTERING_DISPLAY_METADATA) != NULL ||
+                                av_packet_side_data_get(parameters->coded_side_data, parameters->nb_coded_side_data,
+                                                        AV_PKT_DATA_CONTENT_LIGHT_LEVEL) != NULL;
+    // Some codecs expose static SEI from extradata only after avcodec_open2.
+    for (int index = 0; index < _video->nb_decoded_side_data; ++index) {
+      enum AVFrameSideDataType type = _video->decoded_side_data[index]->type;
+      if (type == AV_FRAME_DATA_MASTERING_DISPLAY_METADATA || type == AV_FRAME_DATA_CONTENT_LIGHT_LEVEL)
+        _info.hasStaticHDRMetadata = YES;
+    }
+    _info.isHDR = parameters->color_trc == AVCOL_TRC_SMPTE2084 || parameters->color_trc == AVCOL_TRC_ARIB_STD_B67 ||
+                  _info.hasStaticHDRMetadata;
     AVRational rate = av_guess_frame_rate(_format, stream, NULL);
     _info.frameRate = rate.den > 0 ? av_q2d(rate) : 0;
     _info.videoCodec = @(avcodec_get_name(parameters->codec_id));
@@ -443,6 +510,21 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
     CVBufferSetAttachment(buffer, kCVImageBufferChromaLocationBottomFieldKey, chroma, kCVAttachmentMode_ShouldPropagate);
   }
   AVRational ratio = frame->sample_aspect_ratio;
+  if (ratio.num < 0 || ratio.den < 0 || (ratio.num > 0 && ratio.den == 0))
+    return [self fail:CYNMediaDecoderErrorUnsupported message:@"The decoded frame sample aspect ratio is invalid." error:error];
+  // Container display geometry takes precedence over codec VUI. FFmpeg 7 can
+  // leave the VUI ratio on a hardware frame even when the container overrides
+  // it; publishing that ratio would disagree with the open-time display size.
+  if (_format && _videoIndex >= 0) {
+    AVRational containerRatio = _format->streams[_videoIndex]->sample_aspect_ratio;
+    if (containerRatio.num > 0 && containerRatio.den > 0) ratio = containerRatio;
+  }
+  if (_info.sampleAspectRatioKnown) {
+    AVRational known = {(int)_info.sampleAspectNumerator, (int)_info.sampleAspectDenominator};
+    if (ratio.num == 0) ratio = known;
+    else if (av_cmp_q(ratio, known) != 0)
+      return [self fail:CYNMediaDecoderErrorUnsupported message:@"Changing video sample aspect ratios require the compatibility playback engine." error:error];
+  }
   if (ratio.num > 0 && ratio.den > 0) {
     NSDictionary *aspect = @{(__bridge NSString *)kCVImageBufferPixelAspectRatioHorizontalSpacingKey:@(ratio.num),
                              (__bridge NSString *)kCVImageBufferPixelAspectRatioVerticalSpacingKey:@(ratio.den)};

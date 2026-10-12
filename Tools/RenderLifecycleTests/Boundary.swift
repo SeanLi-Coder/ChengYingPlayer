@@ -49,6 +49,11 @@ final class PlayerCore {
 
 class VideoViewBoundary {
   let player = PlayerCore()
+  let isUsingNativeSurface = false
+  // This fixture exercises an already initialized compatibility renderer. The
+  // ownership token keeps production uninit on its original GL teardown path.
+  let storedVideoLayer: AnyObject? = NSObject()
+  let nativeSurface: NativeSurfaceBoundary? = nil
   @ReadWriteAtomic var isUninited = false
   var displayIdleTimer: Timer?
   var stopWaitTimedOut = false
@@ -86,6 +91,10 @@ class VideoViewBoundary {
   func updateDisplayLink() {}
   func checkResult(_ result: CVReturn, _ operation: String) {}
   func log(_ message: String, level: Logger.Level) {}
+}
+
+final class NativeSurfaceBoundary {
+  func detach() { preconditionFailure("The GL lifecycle fixture must not detach a native surface") }
 }
 
 func mutableRawPointerOf<T: AnyObject>(obj: T) -> UnsafeMutableRawPointer {

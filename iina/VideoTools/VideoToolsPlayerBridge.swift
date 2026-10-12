@@ -65,7 +65,7 @@ struct VideoToolsPlayerSnapshot {
 extension PlayerCore {
   @discardableResult
   func videoToolsApplyViewportShortcut(_ action: VideoToolsShortcuts.Action) -> VideoToolsViewport? {
-    guard info.state.loaded, let videoTrack = info.vid, videoTrack > 0 else { return nil }
+    guard !isUsingNativePlayback, info.state.loaded, let videoTrack = info.vid, videoTrack > 0 else { return nil }
     let current = VideoToolsViewport(zoom: mpv.getDouble(MPVOption.Video.videoZoom),
       panX: mpv.getDouble(MPVOption.Video.videoPanX), panY: mpv.getDouble(MPVOption.Video.videoPanY))
     guard let next = current.applying(action) else { return nil }
@@ -78,14 +78,14 @@ extension PlayerCore {
   }
 
   func videoToolsResetViewport() {
-    guard info.state.loaded else { return }
+    guard !isUsingNativePlayback, info.state.loaded else { return }
     mpv.setDouble(MPVOption.Video.videoZoom, 0)
     mpv.setDouble(MPVOption.Video.videoPanX, 0)
     mpv.setDouble(MPVOption.Video.videoPanY, 0)
   }
 
   var videoToolsLoopRange: VideoToolsLoopRange? {
-    guard info.state.loaded,
+    guard !isUsingNativePlayback, info.state.loaded,
           let count = mpv.getString(MPVOption.PlaybackControl.abLoopCount), count != "0" else { return nil }
     return VideoToolsLoopRange(
       start: videoToolsLoopMarker(MPVOption.PlaybackControl.abLoopA),
@@ -97,7 +97,8 @@ extension PlayerCore {
   private func videoToolsLoopMarker(_ property: String) -> Double? {
     // The string form distinguishes an unset marker from zero, but rounds numeric
     // timestamps. Read the double separately so an EOF marker cannot exceed duration.
-    guard VideoToolsLoopRange.marker(from: mpv.getString(property)) != nil else { return nil }
+    guard !isUsingNativePlayback,
+          VideoToolsLoopRange.marker(from: mpv.getString(property)) != nil else { return nil }
     let value = mpv.getDouble(property)
     return value.isFinite && value >= 0 ? value : nil
   }
@@ -105,7 +106,7 @@ extension PlayerCore {
   /// Replacing A also clears B so an old endpoint never silently starts a new loop.
   @discardableResult
   func videoToolsSetLoopStart() -> Bool {
-    guard let position = videoToolsCurrentTime else { return false }
+    guard !isUsingNativePlayback, let position = videoToolsCurrentTime else { return false }
     if let duration = info.videoDuration?.second, position >= duration { return false }
     videoToolsClearLoop()
     mpv.setDouble(MPVOption.PlaybackControl.abLoopA, position)
@@ -115,7 +116,7 @@ extension PlayerCore {
 
   @discardableResult
   func videoToolsSetLoopEnd() -> Bool {
-    guard let position = videoToolsCurrentTime,
+    guard !isUsingNativePlayback, let position = videoToolsCurrentTime,
           let range = VideoToolsLoopRange(
             start: videoToolsLoopMarker(MPVOption.PlaybackControl.abLoopA),
             end: position, duration: info.videoDuration?.second) else { return false }
@@ -126,7 +127,7 @@ extension PlayerCore {
 
   func videoToolsClearLoop() {
     videoToolsLoopRecovery.reset()
-    guard info.state != .shuttingDown, info.state != .shutDown else { return }
+    guard !isUsingNativePlayback, info.state != .shuttingDown, info.state != .shutDown else { return }
     mpv.setString(MPVOption.PlaybackControl.abLoopCount, "0")
     mpv.setString(MPVOption.PlaybackControl.abLoopA, "no")
     mpv.setString(MPVOption.PlaybackControl.abLoopB, "no")
@@ -134,6 +135,7 @@ extension PlayerCore {
   }
 
   private func videoToolsActivateLoop(_ range: VideoToolsLoopRange) {
+    guard !isUsingNativePlayback else { return }
     videoToolsLoopRecovery.reset()
     mpv.setString(MPVOption.PlaybackControl.abLoopCount, "0")
     mpv.setDouble(MPVOption.PlaybackControl.abLoopA, range.start)
@@ -142,13 +144,13 @@ extension PlayerCore {
     syncAbLoop()
   }
 
-  /// Read mpv directly so a marker does not use the UI timer's cached position.
+  /// Read the active transport rather than the UI timer's cached position.
   var videoToolsCurrentTime: Double? {
     guard info.state.loaded else { return nil }
-    let position = mpv.getFlag(MPVProperty.eofReached)
+    let position = playbackAtEOF
       ? info.videoDuration?.second ?? 0
-      : mpv.getDouble(MPVProperty.timePos)
-    guard position.isFinite, position >= 0 else { return nil }
+      : playbackPosition
+    guard let position, position.isFinite, position >= 0 else { return nil }
     return position
   }
 
@@ -167,13 +169,13 @@ extension PlayerCore {
   }
 
   func videoToolsCaptureSnapshot() -> VideoToolsPlayerSnapshot? {
-    guard info.state.loaded, let mediaURL = info.currentURL,
+    guard !isUsingNativePlayback, info.state.loaded, let mediaURL = info.currentURL,
           let position = videoToolsCurrentTime else { return nil }
     return VideoToolsPlayerSnapshot(
       mediaURL: mediaURL,
       mediaGeneration: videoToolsMediaGeneration,
       position: position,
-      wasPaused: mpv.getFlag(MPVOption.PlaybackControl.pause),
+      wasPaused: playbackIsPaused,
       abLoopA: mpv.getDouble(MPVOption.PlaybackControl.abLoopA),
       abLoopB: mpv.getDouble(MPVOption.PlaybackControl.abLoopB),
       abLoopCount: mpv.getString(MPVOption.PlaybackControl.abLoopCount) ?? "0",
@@ -184,7 +186,7 @@ extension PlayerCore {
   }
 
   func videoToolsPreviewRange(start: Double, end: Double) {
-    guard info.state.loaded,
+    guard !isUsingNativePlayback, info.state.loaded,
           let range = VideoToolsLoopRange(start: start, end: end, duration: info.videoDuration?.second) else { return }
     videoToolsActivateLoop(range)
     seek(absoluteSecond: start)
@@ -192,7 +194,7 @@ extension PlayerCore {
   }
 
   func videoToolsPreviewRotation(_ degrees: Int) {
-    guard info.state.loaded, [0, 90, 180, 270, 360].contains(degrees) else { return }
+    guard !isUsingNativePlayback, info.state.loaded, [0, 90, 180, 270, 360].contains(degrees) else { return }
     let rotation = degrees == 360 ? 0 : degrees
     // Export progress republishes the same angle; only actual changes need a write.
     guard mpv.getInt(MPVOption.Video.videoRotate) != rotation else { return }
@@ -204,7 +206,7 @@ extension PlayerCore {
   /// does not inspect the URL or seek to the saved position.
   func videoToolsRestorePreviewBeforeUnload(_ snapshot: VideoToolsPlayerSnapshot) {
     let state = info.state
-    guard state != .shuttingDown, state != .shutDown else { return }
+    guard !isUsingNativePlayback, state != .shuttingDown, state != .shutDown else { return }
     if state.loaded, snapshot.wasPaused {
       pause()
     }
@@ -213,7 +215,7 @@ extension PlayerCore {
 
   func videoToolsRestoreSnapshot(_ snapshot: VideoToolsPlayerSnapshot, restorePlaybackState: Bool = true) {
     let state = info.state
-    guard state != .shuttingDown, state != .shutDown else { return }
+    guard !isUsingNativePlayback, state != .shuttingDown, state != .shutDown else { return }
     guard videoToolsMediaGeneration == snapshot.mediaGeneration,
           info.currentURL == snapshot.mediaURL || info.currentURL == nil else { return }
     let canRestorePlaybackPosition = state.loaded && restorePlaybackState

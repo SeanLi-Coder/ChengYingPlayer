@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      upload_development_build:
+        description: "Retain an unreleased build for isolated application verification"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -337,12 +343,37 @@ jobs:
       - name: Test independent native playback backend
         timeout-minutes: 6
         run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
           bash Tools/NativeDecoderTests/run.sh
           bash Tools/NativeSampleBufferOutputTests/run.sh
           bash Tools/NativeSampleBufferDisplayTests/run.sh
           bash Tools/NativePlaybackSessionTests/run.sh
           bash Tools/NativePlaybackRenderedTests/run.sh
           NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativePlaybackSessionTests/run.sh
+
+      - name: Test native playback surfaces and route ownership
+        timeout-minutes: 8
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          export PATH="$PWD/deps/executable:$PATH"
+          bash Tools/NativePlaybackSurfaceTests/run.sh
+          bash Tools/NativePlaybackSurfaceTests/run-video-view.sh
+          bash Tools/PlaybackTransportTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/PlaybackTransportTests/run.sh
+          python3 -B Tools/PlaybackBackendRoutingTests/run.py --sanitize address
+          python3 -B Tools/PlaybackBackendRoutingTests/run.py --sanitize thread
+          python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control epoch
+          python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control first-start
+
+      - name: Test native player lifecycle and menu integration
+        timeout-minutes: 5
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          bash Tools/NativePlayerRouteTests/run.sh
+          python3 -B Tools/NativePlayerCoreTests/run.py --sanitize address
+          python3 -B Tools/NativePlayerCoreTests/run.py --sanitize thread
+          python3 -B Tools/NativePlayerCoreTests/run.py --negative-control
+          python3 -B Tools/PlaybackMenuRoutingTests/run.py
 
       - name: Assemble and verify application
         run: |
@@ -595,6 +626,17 @@ jobs:
             echo "path=$dmg_path"
             echo "checksum=${dmg_path}.sha256"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Retain an explicitly requested unreleased verification build
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_development_build && !startsWith(github.ref, 'refs/tags/') && github.repository == 'SeanLi-Coder/ChengYingPlayer'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: development-unreleased-${{ github.sha }}
+          path: |
+            ${{ steps.dmg.outputs.path }}
+            ${{ steps.dmg.outputs.checksum }}
+          retention-days: 3
+          if-no-files-found: error
 
       - name: Download the immutable previous stable delta base
         if: startsWith(github.ref, 'refs/tags/') && github.repository == 'SeanLi-Coder/ChengYingPlayer'
