@@ -127,8 +127,15 @@ H.264 B 帧素材的色块／字幕验证只算准备验证，**尚不代表完�
 原四组 Chrome 检查 **632／40／185 + 4／865** 本机全过；后续相关抽取测试复核包括
 RenderLifecycle **48 + 3855**、WindowLifecycle **188**、ThumbnailLifecycle **32**、
 PlaybackLifecycle **76**、SeekTiming **37** 和原字幕匹配／列表／缓存检查，未改原断言。
-失败日志保留于 `build/native-ci-38292407187-media-failure.log`。该轮完整 build job 尚在运行，
-不取消它的独立验证，也不将单个旧测试修补写为整体 CI 已成功。
+失败日志保留于 `build/native-ci-38292407187-media-failure.log`。该轮完整生产 App 编译及
+native decoder／output／session／surface／transport／主窗口方法路由回归均通过，随后
+独立的测试驱动 App 编译失败：`displayedPixelBuffer()` 需要 macOS 14.4，驱动却仅做 14.0
+检查。部署目标是 macOS 12；本机显式指定该目标可复现同一错误。失败发生于实窗运行前，
+不能将生产 App 编译成功写为完整 App 的 18 阶段验收通过。日志及测试 artifact 保留于
+`build/native-ci-38292407187-build-failure.log`、`build/native-app-ci-38292407187.M046Zz/`。
+后续仅将驱动的 availability guard 改为 14.4；新增显式 macOS 12 deployment-target
+正向 typecheck、普通 Release 排除驱动检查及精确旧 guard 的失败负对照。准备检查增至
+**13 项**（仍含 65 项像素比较）；本机通过，不替代待运行的完整实窗验证。
 
 隔离范围是唯一 player bundle 域和 disposable CI 主机，不是完整 HOME 沙箱。
 当前固定测试不打开下载／字幕／AI 面板，也不启动其固定路径的数据服务；以后若扩展这些
@@ -294,3 +301,13 @@ stop 清图后重开与三个独立关闭周期。**三次关闭后 weak session
 H.264 取得独立 hardware sample 证据；HEVC 仅确认 VideoToolbox 路径，不把允许软件
 fallback 的 sample 宣称为硬解。均匀色块素材便于精确像素比对，不代表复杂电影、
 数小时文件、M4 Max AV1、实体 HDR／EDR、真实声卡、完整主窗口操作或默认后端切换验收。
+
+同一冻结源码追加十分钟验证：
+`NATIVE_SOAK_SECONDS=600 bash Tools/NativePlaybackSoakTests/run.sh`，退出 0，
+**292 项／0 失败，602.48 秒**；三轮分别约 200.15／200.14／200.11 秒。
+证据为 `build/native-playback-soak.GKG7pu/results.log`；源码清单与最终 180 秒及负对照
+完全一致，结束后逐项校验仍一致。三轮 phase 集合均为 `{0,1,2,3}`，损坏格式和未知颜色
+均为零，无图像观察为 **4／1／1**；未测空图持续时间，不能说完全没有卡顿。
+三次 weak session 均释放，队列记账峰值 124,623,360 字节；RSS／footprint 峰值
+252,854,272／201,098,176 字节，第二至第三轮关闭后差值为 +4,128,768／−65,536 字节。
+这些是该次进程采样，不是内存上限或零泄漏结论。测试没有修改默认路由、安装或注册 App。

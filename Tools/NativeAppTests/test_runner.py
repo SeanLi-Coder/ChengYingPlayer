@@ -112,6 +112,29 @@ class RunnerTests(unittest.TestCase):
                             str(main), "-o", str(executable)], check=True, timeout=90)
             subprocess.run([str(executable)], check=True, timeout=15)
 
+    def test_driver_uses_correct_availability_at_the_app_deployment_target(self):
+        # A host-default target hid the missing 14.4 availability guard locally.
+        # Check the actual driver against the app's macOS 12 deployment target;
+        # declaration-only boundaries are compile evidence, not an App UI test.
+        driver = SOURCE.with_name("NativeAppTestDriver.swift")
+        boundary = SOURCE.with_name("TypecheckBoundary.swift")
+        command = ["xcrun", "swiftc", "-swift-version", "5", "-warnings-as-errors",
+                   "-target", "arm64-apple-macos12", "-typecheck"]
+        subprocess.run(command + ["-D", "CHENGYING_NATIVE_APP_TESTS", str(driver), str(boundary)],
+                       check=True, timeout=90)
+        subprocess.run(command + [str(driver)], check=True, timeout=90)
+        with tempfile.TemporaryDirectory(prefix="native-driver-availability-") as directory:
+            source = driver.read_text()
+            guard = "guard #available(macOS 14.4, *),"
+            self.assertEqual(source.count(guard), 1)
+            old = Path(directory) / "LegacyAvailability.swift"
+            old.write_text(source.replace(guard, "guard #available(macOS 14.0, *),", 1))
+            result = subprocess.run(command + ["-D", "CHENGYING_NATIVE_APP_TESTS", str(old), str(boundary)],
+                                    capture_output=True, text=True, timeout=90)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("'displayedPixelBuffer()' is only available in macOS 14.4 or newer", result.stderr)
+        print("PASS: macOS 12 driver typecheck rejects the exact legacy availability guard")
+
     def test_non_ci_rejected_before_build(self):
         with self.assertRaises(ValueError):
             runner.validate_environment({})

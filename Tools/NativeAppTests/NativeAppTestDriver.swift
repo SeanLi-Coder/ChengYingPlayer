@@ -272,7 +272,7 @@ final class NativeAppTestDriver {
   private func pixel(_ player: PlayerCore, is expected: Color) -> Bool {
     // Inspect the immutable display-layer reference and its actually displayed
     // buffer, not worker counters or an enqueued-but-never-presented sample.
-    guard #available(macOS 14.0, *),
+    guard #available(macOS 14.4, *),
           let layer = player.nativePlaybackOutput?.displayLayer,
           let buffer = layer.sampleBufferRenderer.displayedPixelBuffer(),
           let reference = pixelReferences[expected.rawValue] else { return false }
