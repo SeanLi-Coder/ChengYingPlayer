@@ -17,6 +17,9 @@ final class MPVBoundary {
 }
 enum OSDBoundary { case custom(String), abLoop(Int) }
 final class SettingsBoundary {
+  func prepareVideoToolsForLoopEdit() {
+    preconditionFailure("Loop editing is outside the focused viewport boundary")
+  }
   @discardableResult
   func performVideoToolsShortcut(_ action: VideoToolsShortcuts.Action) -> Bool { false }
 }

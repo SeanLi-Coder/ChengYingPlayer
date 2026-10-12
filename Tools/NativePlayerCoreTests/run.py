@@ -33,11 +33,15 @@ def main():
     gate_end = core.index("\n  }", core.index("  func noteMPVMediaCommand()", gate_start)) + len("\n  }")
     fields_start = core.index("  private var nativeTransport:")
     fields_end = core.index("  private var playbackTransport:", fields_start)
+    # The lifecycle fixture has no active clip preview. Keep all lifecycle and
+    # route methods real without inventing preview behavior in its controlled transport.
+    preview_start = core.index("  enum NativePreviewResult", fields_start, fields_end)
+    preview_end = core.index("  private struct NativeCompatibilityRestore", preview_start, fields_end)
     methods = ["advancePlaybackRoute", "applyNativeViewport", "cancelNativeLoopRequests", "requireMPVCompatibility", "retireNativePlayback", "stop", "shutdown", "open", "openMediaURLs"]
     bridge = (ROOT / "iina/VideoTools/VideoToolsPlayerBridge.swift").read_text()
     model = bridge[bridge.index("struct VideoToolsViewport:"):bridge.index("struct VideoToolsPlayerSnapshot")]
     generated = "import Cocoa\n" + model + "\nfinal class PlayerCore: CoreBoundary {\n"
-    generated += core[gate_start:gate_end] + "\n" + core[fields_start:fields_end]
+    generated += core[gate_start:gate_end] + "\n" + core[fields_start:preview_start] + core[preview_end:fields_end]
     bodies = {name: method(core, name) for name in methods}
     if args.negative_control:
         guard = "    guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }\n"

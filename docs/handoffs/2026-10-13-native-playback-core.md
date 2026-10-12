@@ -7,7 +7,7 @@
 
 **换核尚未完成，不是已发布版本。** 新后端已加入 Xcode 编译工程，能独立解码、同步播放
 音视频和呈现实际画面。`PlayerCore` 与主窗口正在接入严格受限的内部 native 路由；
-正式默认、字幕及剪辑预览仍使用 libmpv。
+正式默认及字幕仍使用 libmpv；内部 native 路由已接入剪辑预览，完整 App 回归仍待运行。
 没有改变默认播放路径、版本号、用户偏好、已安装 App、更新源或签名身份。
 不要仅因新文件进入编译工程，或下述测试通过，就宣布正式播放器已经换核。
 
@@ -343,6 +343,66 @@ nil、尺寸／像素格式／planes／lock 错误，并记录实际 timebase、
 实际挂载 layer 的几何。SAR／旋转有独立几何验证，但完整 App 新步骤只用 SAR 1／旋转 0；
 没有旋转／SAR＋全屏组合或 native→MPV 同时关窗的完整实窗验收。默认路由和发布配置未改。
 
+## 原生剪辑预览与兼容交接（专项通过，完整 App 待运行）
+
+原生 `.tools` 入口不再一律切回 MPV。时间输入自动 debounce 0.35 秒，第一次预览从实际
+worker 时钟保存 position、暂停／EOF 和可选 A/B 基线；修改范围保留最初基线，停止先还原
+A/B 再定位，避免临时预览区间夹住返回位置。音量、速度、画面变换与单文件循环不被旧基线
+覆盖。EOF 恢复保留“已到片尾”语义，一次播放即从头开始；显式 seek 清除此标记。
+
+输入、采点、停止、用户 seek、A/B 键、换片、退场各有媒体代次与用户意图检查。
+无效输入暂停临时循环而保留返回基线；自动隐藏播放 chrome 不等于关闭工具或停止预览。
+截图采点保留起点加五秒规则；旋转仍显式回到兼容内核。导出等待预览状态还原，导出任务
+本身不在新播放内核重写，也未改变原 HDR／品质约定。
+
+真实 session worker 屏障复现了旧兼容采点覆盖同文件新预览／暂停：
+`build/native-clip-preview-tests.jgMAFS/` 为 197 项／4 失败。第二段采点和重试已增加意图检查，
+但该检查最初也会取消尚未 ready 的必要回退；`vOeFEA` 为 201／3，保留失败证据。
+单纯豁免初始检查仍会丢失 sleep 的显式 pause（`i1IouH`），所以新增独立可选开片意图，
+在初始回退时沿用最后 pause/resume，没有显式操作时仍遵守原开片偏好。策略基于发起与
+当前 readiness，不依赖 reason 文本；进入 ready 后的新操作重新具有取消旧交接的优先级。
+
+冻结生产 `PlayerCore.swift` SHA-256：
+`38c30207d79f5e6555ce98339e85f2987944c4c546c4285b943a62a52b1db8ea`。
+新 `Tools/NativeClipPreviewTests/run.sh` 普通、ASan、TSan **各 235 项／0 失败**，分别保留在
+`build/native-clip-preview-tests.wr18yT/`、`e0RbSc/`、`ZG3l5M/`；源码前后与生成源码／fixture
+SHA 校验通过。真实 decoder/session/transport/output 与机械抽取的 Core／面板方法参与，
+MPV 加载、完整 nib 和面板布局仍是明确边界。不能据此宣称完整跨内核画面交接通过。
+同源四个单变量负控均退出 1：撤销请求取消 `VVDumK` 为 235／4、撤销采点取消 `bsnD6i`
+为 235／1、撤销 EOF 标记 `TDe8hw` 为 235／3、撤销兼容意图门禁 `IQVNi2` 为 235／5。
+七轮源码前后相同，生成文件校验通过；未知负控模式实际退出 2，没有误跑正向后记作通过。
+
+旧回归证据为 `build/native-preview-legacy-regression.8pyWN7/RESULT.txt`：导航 317、
+VideoTools 三语言各 942 UI 与 132 task、真实 libmpv preview 324 项与 300 帧、viewport
+两语言各 1098、native viewport 172、route 48、A/B normal/TSan 各 151 均通过。
+这些随本轮开发执行，不是最终冻结整窗验收。最后只新增 fixture 声明后补 ControlledCore
+41 项和 Live build-only；编译测试 App 的 owned workspace 清理通过，未重跑 GUI。
+后者记录于 `build/native-preview-intent-regression.qx6e58/RESULT.txt`。
+
+完整 App 驱动保留原 60 项，新增 15 项真实菜单、AX 时间字段及 AppKit delegate、预览按钮、
+slider、实际 chrome 隐藏和在已应用预览时关闭窗口，共 **75 项**。隐藏循环要求五秒内两次
+实际共享时钟回绕，不把播放中的 paused-image API 当作显示证据。暂停还原仍验证源像素。
+驱动准备测试 27 项通过，含 73 个像素／音量比较、46 个几何检查及 macOS 12 可用性负控；
+**尚未实际执行完整 App 75 项**。本机没有安装或运行正式 App，未改变用户配置或系统权限。
+
+较早 `bea876ea` 冻结候选的 CI `38310346836` 已跑完整 App **60 项中的前 59 项通过**，
+最后 `all_real_cores_shutdown_before_termination` 失败。包含真实显示像素、viewport/A/B、
+延迟首帧、快速换片、实际字幕兼容回退；不能把部分通过说成完整验收成功。
+生产和测试 App 编译、前置独立内核及延迟首帧阶段通过；artifact `summary.json` 确认
+退出码 1、owned cleanup completed，普通发行构建没有测试驱动。证据只读下载于
+`build/native-app-ci-38310346836.vnHcRF/`。它不含本次 preview 235／App 75 或新诊断。
+末项尚在核实：生产注册表没有正常关闭时删 core 的代码；现有 artifact 未保存各核末态，
+不能将失败归因为列表清空，也不能尚未证明就认定生产提前退出。
+
+额外待迁移门禁：
+
+- 正常 native 首次 admission 的 `receiveNativeSnapshot`／`notifyWindowVideoSizeChanged`
+  未被上述初始回退案例覆盖；极早 pause/resume 的 admission 与自动播放意图仍需单独验证。
+- native→MPV 过渡时连续旋转快捷键可能在 retiring／预览恢复期间丢掉累计动作；原 MPV
+  rotation coordinator 能排队不代表过渡层已将每次按键送达。本轮未改此行为。
+- 既有暂停图像不可读与固定 A/B 回绕截止偶发失败仍未定位。新增诊断和本次专项通过
+  不能取消旧失败记录，也不能据此切默认后端或发布稳定包。
+
 ## 实现文件
 
 - `iina/NativePlayback/CYNMediaDecoder.{h,m}`：只读本地文件、FFmpeg 收帧／drain、
@@ -432,7 +492,8 @@ nil、尺寸／像素格式／planes／lock 错误，并记录实际 timebase、
   因而 HEVC 的 false 是“实际硬件未确认”，不能标作软件解码或硬解失败。
 - 本机不是 M4；AV1 M4 硬解、实体 HDR 屏、ICC 色彩、真实音频设备切换和可听音质未验收。
 - 旋转、SAR 和画面缩放／平移已接入新 surface；完整 App 组合验收仍未完成。
-  完整字幕／轨道选择、截图、帧进、HDR 用户开关、播放列表策略及剪辑预览恢复仍走兼容路径。
+  完整字幕／轨道选择、截图、帧进、HDR 用户开关及播放列表策略仍走兼容路径。
+  剪辑预览恢复已接入原生路径，但新完整 App 预览回归仍待运行。
 - 倍速当前只承诺 0.5–2.0；不能直接取代旧界面更广的速率范围而不给用户提示。
 - 暂未测得相对旧内核／Movist 的耗电、CPU、总内存、丢帧或启动速度优势。
 
@@ -444,8 +505,8 @@ nil、尺寸／像素格式／planes／lock 错误，并记录实际 timebase、
    HDR 色彩，补已加载 native→MPV 的整窗状态交接，不直接放开现有准入保护。
 3. 快捷键已迁入速度、A/B、viewport；其余旧 mpv 透传仍明确兼容，继续补齐截图、帧进、
    音轨等能力。日常同文件夹多媒体／播放列表及已用 MPV core 的 native 再进入仍待设计验证。
-4. 改造 `VideoToolsPlayerBridge`、预览 snapshot/restore/onUnload；重复编辑 A/B、
-   切片预览、快速换片和关闭必须用真实窗口／实际画面回归。
+4. `VideoToolsPlayerBridge` 与预览 snapshot/restore/onUnload 已接入原生异步状态；
+   重复编辑 A/B、切片预览、快速换片和关闭的完整 App 回归仍需实际运行。
 5. 明确支持矩阵、功能补齐及兼容选择，保留已有音视频品质和每文件音量零策略。
 6. 完整 App 构建、真实窗口回归、目标 M4 验收通过后，才切默认路径并进行原有签名／
    增量更新／公开交付发行流程。当前不是发布候选，不给未验收换核包打稳定标签。

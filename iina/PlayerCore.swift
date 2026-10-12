@@ -270,6 +270,7 @@ class PlayerCore: NSObject {
 
   private var nativeTransport: NativePlaybackTransport?
   private var nativeReady = false
+  private var nativeInitialPauseIntent: Bool?
   private var nativeRetiring = false
   private var nativeTerminationRequested = false
   private var nativeRetirementCompletion: (() -> Void)?
@@ -291,6 +292,191 @@ class PlayerCore: NSObject {
   private var nativeLoopB: Double?
   private var nativeLoopRequests: [NativeLoopRequest] = []
   private var nativeLoopCaptureID: UUID?
+  enum NativePreviewResult { case applied, unavailable, superseded }
+  private struct NativePreviewBaseline {
+    let route: UInt64
+    let generation: UInt64
+    let position: Double
+    let paused: Bool
+    let atEOF: Bool
+    let loopA: Double?
+    let loopB: Double?
+  }
+  private var nativePreviewBaseline: NativePreviewBaseline?
+  private var nativePreviewRequestID: UUID?
+  private var nativePreviewCompletion: ((NativePreviewResult) -> Void)?
+  private var nativePreviewRevision: UInt64 = 0
+  private var nativeRestoredPreviewEOF = false
+  var nativePreviewIntentRevision: UInt64 { nativePreviewRevision }
+  var nativePreviewInProgress: Bool { nativePreviewBaseline != nil || nativePreviewRequestID != nil }
+
+  /// Preview commands own a temporary loop, never the user's persistent repeat mode.
+  /// Every delayed callback is checked against both media identity and UI intent.
+  func requestNativePreview(start: Double, end: Double,
+                            completion: @escaping (NativePreviewResult) -> Void) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard let range = VideoToolsLoopRange(start: start, end: end, duration: info.videoDuration?.second),
+          let interval = try? NativePlaybackInterval(start: range.start, end: range.end),
+          let transport = nativeTransport, nativeReady, !nativeRetiring, info.state.loaded,
+          !nativeTerminationRequested else {
+      DispatchQueue.main.async { completion(.unavailable) }; return
+    }
+    cancelNativeLoopRequests()
+    invalidateNativePreviewRequest()
+    let id = UUID()
+    nativePreviewRequestID = id
+    nativePreviewCompletion = completion
+    let route = playbackEventRoute.revision
+    let generation = videoToolsMediaGeneration
+    func apply() {
+      guard self.nativePreviewRequestID == id else { return }
+      self.nativeLoopA = range.start; self.nativeLoopB = range.end
+      transport.setLoop(interval)
+      let result = transport.seek(.init(value: range.start, reference: .absoluteSeconds, exact: true))
+      guard case .accepted = result else { self.completeNativePreview(id, .unavailable); return }
+      transport.setPaused(false, context: .init())
+      self.syncAbLoop()
+      self.captureNativePreviewState(transport, route: route, generation: generation,
+        isCurrent: { [weak self] in self?.nativePreviewRequestID == id }) { [weak self] result in
+        guard let self else { return }
+        if case .ready = result { self.completeNativePreview(id, .applied) }
+        else { self.completeNativePreview(id, .unavailable) }
+      }
+    }
+    if nativePreviewBaseline != nil { apply(); return }
+    captureNativePreviewState(transport, route: route, generation: generation,
+      isCurrent: { [weak self] in self?.nativePreviewRequestID == id }) { [weak self] result in
+      guard let self, self.nativePreviewRequestID == id else { return }
+      guard case .ready(let snapshot) = result else { self.completeNativePreview(id, .unavailable); return }
+      self.nativePreviewBaseline = NativePreviewBaseline(route: route, generation: generation,
+        position: snapshot.phase == .ended ? snapshot.duration : snapshot.position,
+        paused: snapshot.phase == .ended || !snapshot.wantsPlayback,
+        atEOF: snapshot.phase == .ended || self.nativeRestoredPreviewEOF,
+        loopA: self.nativeLoopA, loopB: self.nativeLoopB)
+      self.nativeRestoredPreviewEOF = false
+      apply()
+    }
+  }
+
+  /// Restore loop options before position, so the temporary preview cannot clamp
+  /// the return seek. The callback means worker preroll completed, not pixels.
+  func finishNativePreview(restorePlaybackState: Bool = true,
+                           completion: @escaping (NativePreviewResult) -> Void = { _ in }) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    invalidateNativePreviewRequest()
+    guard let baseline = nativePreviewBaseline else {
+      DispatchQueue.main.async { completion(.applied) }; return
+    }
+    nativePreviewBaseline = nil
+    guard let transport = nativeTransport, !nativeRetiring, !nativeTerminationRequested,
+          playbackEventRoute.revision == baseline.route,
+          videoToolsMediaGeneration == baseline.generation else {
+      DispatchQueue.main.async { completion(.superseded) }; return
+    }
+    restoreNativePreviewLoop(baseline, transport: transport)
+    if restorePlaybackState {
+      transport.setPaused(true, context: .init())
+      guard case .accepted = transport.seek(.init(value: baseline.position, reference: .absoluteSeconds, exact: true)) else {
+        DispatchQueue.main.async { completion(.unavailable) }; return
+      }
+      transport.setPaused(baseline.paused, context: .init())
+      nativeRestoredPreviewEOF = baseline.atEOF
+    }
+    let id = UUID()
+    nativePreviewRequestID = id
+    nativePreviewCompletion = completion
+    captureNativePreviewState(transport, route: baseline.route, generation: baseline.generation,
+      isCurrent: { [weak self] in self?.nativePreviewRequestID == id }) { [weak self] result in
+      guard let self else { return }
+      if case .ready = result { self.completeNativePreview(id, .applied) }
+      else { self.completeNativePreview(id, .unavailable) }
+    }
+  }
+
+  /// Navigation and marker edits cancel synchronously, before their own commands
+  /// are queued. They must not later restore the old position or pause intent.
+  func cancelNativePreview(restoreLoop: Bool) {
+    nativeRestoredPreviewEOF = false
+    invalidateNativePreviewRequest()
+    let baseline = nativePreviewBaseline
+    nativePreviewBaseline = nil
+    if restoreLoop, let baseline, let transport = nativeTransport, !nativeRetiring,
+       playbackEventRoute.revision == baseline.route, videoToolsMediaGeneration == baseline.generation {
+      restoreNativePreviewLoop(baseline, transport: transport)
+    }
+  }
+
+  func suspendNativePreview() {
+    invalidateNativePreviewRequest()
+    guard nativePreviewBaseline != nil, let transport = nativeTransport, !nativeRetiring else { return }
+    nativeLoopA = nil; nativeLoopB = nil
+    transport.setLoop(nil)
+    syncAbLoop()
+  }
+
+  func cancelNativePreviewCapture() { invalidateNativePreviewRequest() }
+
+  func captureNativePreviewPosition(completion: @escaping (Double?) -> Void) {
+    guard let transport = nativeTransport, nativeReady, !nativeRetiring else {
+      DispatchQueue.main.async { completion(nil) }; return
+    }
+    let intent = nativePreviewRevision
+    let restoredEOF = nativeRestoredPreviewEOF
+    captureNativePreviewState(transport, route: playbackEventRoute.revision,
+      generation: videoToolsMediaGeneration, isCurrent: { [weak self] in self?.nativePreviewRevision == intent }) { result in
+      if case .ready(let snapshot) = result {
+        completion(snapshot.phase == .ended || restoredEOF ? snapshot.duration : snapshot.position)
+      } else { completion(nil) }
+    }
+  }
+
+  private func restoreNativePreviewLoop(_ baseline: NativePreviewBaseline, transport: NativePlaybackTransport) {
+    nativeLoopA = baseline.loopA; nativeLoopB = baseline.loopB
+    let interval = baseline.loopA.flatMap { start in baseline.loopB.flatMap { try? NativePlaybackInterval(start: start, end: $0) } }
+    transport.setLoop(interval)
+    syncAbLoop()
+  }
+
+  private func invalidateNativePreviewRequest() {
+    nativePreviewRevision &+= 1
+    let completion = nativePreviewCompletion
+    nativePreviewCompletion = nil
+    nativePreviewRequestID = nil
+    if let completion { DispatchQueue.main.async { completion(.superseded) } }
+  }
+
+  private func completeNativePreview(_ id: UUID, _ result: NativePreviewResult) {
+    guard nativePreviewRequestID == id else { return }
+    let completion = nativePreviewCompletion
+    nativePreviewRequestID = nil
+    nativePreviewCompletion = nil
+    let revision = nativePreviewRevision
+    if let completion {
+      DispatchQueue.main.async { [weak self] in
+        completion(self?.nativePreviewRevision == revision ? result : .superseded)
+      }
+    }
+  }
+
+  private func captureNativePreviewState(_ transport: NativePlaybackTransport, route: UInt64, generation: UInt64,
+                                        isCurrent: @escaping () -> Bool,
+                                        completion: @escaping (NativePlaybackQueryResult) -> Void) {
+    let deadline = ProcessInfo.processInfo.systemUptime + 2
+    func capture() {
+      guard self.nativeTransport === transport, !self.nativeRetiring, !self.nativeTerminationRequested,
+            self.playbackEventRoute.revision == route, self.videoToolsMediaGeneration == generation,
+            isCurrent() else { completion(.superseded); return }
+      transport.captureCurrentState { [weak self] result in
+        guard let self, self.nativeTransport === transport, !self.nativeRetiring, !self.nativeTerminationRequested,
+              self.playbackEventRoute.revision == route, self.videoToolsMediaGeneration == generation,
+              isCurrent() else { completion(.superseded); return }
+        if case .unavailable = result, ProcessInfo.processInfo.systemUptime < deadline {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: capture)
+        } else { completion(result) }
+      }
+    }
+    DispatchQueue.main.async(execute: capture)
+  }
   private struct NativeCompatibilityRestore {
     let id = UUID()
     let url: URL
@@ -333,7 +519,7 @@ class PlayerCore: NSObject {
   var currentPlaybackSpeed: Double { playbackTransport.rate }
   var playbackIsPaused: Bool { playbackTransport.isPaused }
   var playbackPosition: Double? { playbackTransport.position }
-  var playbackAtEOF: Bool { playbackTransport.isAtEOF }
+  var playbackAtEOF: Bool { playbackTransport.isAtEOF || (isUsingNativePlayback && nativeRestoredPreviewEOF) }
 
   /// Presentation state belongs to this media, not to the asynchronous decoder.
   /// Commit only after the active surface accepts the complete transform.
@@ -364,6 +550,7 @@ class PlayerCore: NSObject {
     guard nativeTransport != nil, nativeReady, !nativeRetiring, info.state.loaded else {
       completion(.unavailable); return
     }
+    cancelNativePreview(restoreLoop: false)
     switch action {
     case .clear, .moveA, .moveB: cancelNativeLoopRequests()
     default: break
@@ -719,6 +906,7 @@ class PlayerCore: NSObject {
     let transport = NativePlaybackTransport(session: session)
     nativeTransport = transport
     nativeReady = false
+    nativeInitialPauseIntent = nil
     nativeLoopMode = Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) ?? .off
     invalidateThumbnails()
     videoToolsMediaGeneration &+= 1
@@ -832,22 +1020,46 @@ class PlayerCore: NSObject {
     guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
     guard let transport = nativeTransport, let url = info.currentURL else { completion(); return }
     guard !nativeRetiring else { return }
+    if nativePreviewInProgress {
+      let route = playbackEventRoute.revision
+      let generation = videoToolsMediaGeneration
+      finishNativePreview { [weak self, weak transport] result in
+        guard let self, let transport, self.nativeTransport === transport,
+              self.playbackEventRoute.revision == route, self.videoToolsMediaGeneration == generation,
+              !self.nativePreviewInProgress else { return }
+        if case .applied = result { self.requireMPVCompatibility(reason: reason, completion: completion) }
+        else if case .unavailable = result {
+          self.sendOSD(.custom(NSLocalizedString("playback.compatibility_restore_failed", comment: "Preview restore failed")))
+        }
+      }
+      return
+    }
     cancelNativeLoopRequests()
     let request = playbackEventRoute.revision
     let generation = videoToolsMediaGeneration
+    // Freeze intent only after a temporary preview has finished restoring.
+    // A newer preview or pause need not change the session's seek revision.
+    let previewIntent = nativePreviewIntentRevision
+    // Before readiness there is no admitted native playback to retain. Keep
+    // initial fallback viable, carrying explicit pause/resume instead; once
+    // readiness changes, a newer intent regains normal cancellation priority.
+    let initiallyReady = nativeReady
     let deadline = ProcessInfo.processInfo.systemUptime + 2
     log("Native compatibility: \(reason)")
     func capture() {
       transport.captureCurrentState { [weak self, weak transport] result in
         guard let self, let transport, self.nativeTransport === transport,
               self.playbackEventRoute.revision == request,
-              self.videoToolsMediaGeneration == generation, !self.nativeRetiring else { return }
+              self.videoToolsMediaGeneration == generation, !self.nativeRetiring,
+              (!initiallyReady && !self.nativeReady || self.nativePreviewIntentRevision == previewIntent),
+              !self.nativePreviewInProgress else { return }
         var restore: NativeCompatibilityRestore?
         switch result {
         case .ready(let snapshot):
-          restore = NativeCompatibilityRestore(url: url, position: snapshot.position,
+          restore = NativeCompatibilityRestore(url: url, position: self.nativeRestoredPreviewEOF ? snapshot.duration : snapshot.position,
             volume: transport.volumePercent, rate: transport.rate,
-            paused: self.nativeReady ? snapshot.phase != .playing : Preference.bool(for: .pauseWhenOpen),
+            paused: self.nativeReady ? snapshot.phase != .playing :
+              (self.nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)),
             completion: completion)
         case .unavailable:
           if self.nativeReady {
@@ -863,13 +1075,15 @@ class PlayerCore: NSObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self, weak transport] in
               guard let self, let transport, self.nativeTransport === transport,
                     self.playbackEventRoute.revision == request,
-                    self.videoToolsMediaGeneration == generation, !self.nativeRetiring else { return }
+                    self.videoToolsMediaGeneration == generation, !self.nativeRetiring,
+                    (!initiallyReady && !self.nativeReady || self.nativePreviewIntentRevision == previewIntent),
+                    !self.nativePreviewInProgress else { return }
               capture()
             }
             return
           }
           restore = NativeCompatibilityRestore(url: url, position: 0, volume: 0, rate: 1,
-            paused: Preference.bool(for: .pauseWhenOpen), completion: completion)
+            paused: self.nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen), completion: completion)
         case .superseded: return
         }
         restore?.loopA = self.nativeLoopA
@@ -887,6 +1101,8 @@ class PlayerCore: NSObject {
   }
 
   private func retireNativePlayback(completion: @escaping () -> Void) {
+    cancelNativePreview(restoreLoop: false)
+    nativeInitialPauseIntent = nil
     cancelNativeLoopRequests()
     nativeLoopA = nil; nativeLoopB = nil
     advancePlaybackRoute(acceptsMPV: false)
@@ -1382,6 +1598,10 @@ class PlayerCore: NSObject {
   ///     [#4520](https://github.com/iina/iina/issues/4520)
   func pause() {
     guard info.state.active else { return }
+    if isUsingNativePlayback {
+      invalidateNativePreviewRequest()
+      if !nativeReady { nativeInitialPauseIntent = true }
+    }
     log("Pausing playback")
     playbackTransport.setPaused(true, context: .init(verbosity: .verbose))
   }
@@ -1391,6 +1611,10 @@ class PlayerCore: NSObject {
   ///     the `pauseChanged` method, this method calls `displayActive` to provide more time for the display link to start up.
   func resume() {
     guard !UpdateWorkAdmission.shared.isBlocked else { return }
+    if isUsingNativePlayback {
+      invalidateNativePreviewRequest()
+      if !nativeReady { nativeInitialPauseIntent = false }
+    }
     log("Resuming playback")
     mainWindow.videoView.displayActive()
     // Restart playback when reached EOF
@@ -1494,7 +1718,7 @@ class PlayerCore: NSObject {
 
   func seek(percent: Double, forceExact: Bool = false) {
     guard percent.isFinite else { return }
-    if isUsingNativePlayback { cancelNativeLoopRequests() }
+    if isUsingNativePlayback { cancelNativePreview(restoreLoop: true); cancelNativeLoopRequests() }
     if videoToolsLoopRange != nil, let duration = info.videoDuration?.second, duration > 0 {
       seek(absoluteSecond: duration * percent / 100)
       return
@@ -1514,7 +1738,7 @@ class PlayerCore: NSObject {
 
   func seek(relativeSecond: Double, option: Preference.SeekOption) {
     guard relativeSecond.isFinite else { return }
-    if isUsingNativePlayback { cancelNativeLoopRequests() }
+    if isUsingNativePlayback { cancelNativePreview(restoreLoop: true); cancelNativeLoopRequests() }
     if !isUsingNativePlayback, videoToolsLoopRange != nil, let position = videoToolsLoopRecovery.pendingTarget ?? videoToolsCurrentTime {
       seek(absoluteSecond: position + relativeSecond)
       return
@@ -1548,6 +1772,7 @@ class PlayerCore: NSObject {
   func seek(absoluteSecond: Double) {
     guard absoluteSecond.isFinite else { return }
     if isUsingNativePlayback {
+      cancelNativePreview(restoreLoop: true)
       cancelNativeLoopRequests()
       playbackTransport.seek(.init(value: max(0, absoluteSecond), reference: .absoluteSeconds, exact: true))
       return

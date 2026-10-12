@@ -137,6 +137,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private var rangeIsUntouched = false
   private var validationMessage: String?
   private var previewSnapshot: VideoToolsPlayerSnapshot?
+  private var nativePreviewPending = false
+  private var nativeAnchorPending = false
+  private var previewInputRevision: UInt64 = 0
+  private var nativeAutomaticIntent: UInt64?
+  private var hasPreview: Bool { previewSnapshot != nil || player?.nativePreviewInProgress == true }
   private var rotationCoordinator: VideoToolsRotationCoordinator?
   private var rotationMediaGeneration: UInt64?
   private var rotationInitialDisplayDegrees: Int?
@@ -497,7 +502,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     // The main window reloads this tab for a newly loaded file before this controller's
     // own observer forces a refresh of the now-unchanged source. A preview that the first
     // pass already scheduled or started must survive that second pass.
-    let previewInFlight = automaticPreviewPending || previewTimer != nil || previewSnapshot != nil
+    let previewInFlight = automaticPreviewPending || previewTimer != nil || hasPreview || nativePreviewPending || nativeAnchorPending
     if sourceChanged || (force && !previewInFlight) {
       let shouldPreview = automaticPreviewPending || (sourceChanged && playbackControlsVisible && selectedOperation == .clip)
       if sourceChanged { validationMessage = nil }
@@ -519,6 +524,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
         rangeIsUntouched = false
       }
       automaticPreviewPending = shouldPreview
+      nativeAutomaticIntent = player?.nativePreviewIntentRevision
     }
 
     if let newURL {
@@ -540,8 +546,21 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     stopPreview(updateButton: true)
   }
 
+  func cancelPendingAutomaticPreview() {
+    automaticPreviewPending = false
+    cancelScheduledPreview()
+  }
+
   func requestPermanentRotation(clockwiseQuarterTurns: Int) {
     _ = view
+    if let player, player.isUsingNativePlayback {
+      cancelScheduledPreview()
+      automaticPreviewPending = false
+      player.requireMPVCompatibility(reason: "Permanent rotation preview") { [weak self] in
+        self?.requestPermanentRotation(clockwiseQuarterTurns: clockwiseQuarterTurns)
+      }
+      return
+    }
     guard let player, let inputURL = currentLocalMediaURL else {
       showValidationError(NSLocalizedString("videotools.error.no_local_video", comment: "Open a local video first"))
       return
@@ -616,7 +635,12 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       cancelScheduledPreview()
       return
     }
-    if becameVisible, selectedOperation == .clip, previewSnapshot == nil {
+    if selectedOperation == .rotate, let player, player.isUsingNativePlayback {
+      player.requireMPVCompatibility(reason: "Rotation tools") { [weak self] in self?.updatePlaybackControls() }
+      return
+    }
+    if becameVisible, selectedOperation == .clip, !hasPreview {
+      nativeAutomaticIntent = player?.nativePreviewIntentRevision
       anchorUntouchedRangeToCurrentPosition()
       automaticPreviewPending = true
     }
@@ -635,7 +659,14 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   /// Independent keyboard A/B loops and rotation previews keep their existing behavior.
   func prepareForUserSeek() {
     guard selectedOperation == .clip || selectedOperation == .frames,
-          previewSnapshot != nil || previewTimer != nil || automaticPreviewPending else { return }
+          hasPreview || nativePreviewPending || nativeAnchorPending || previewTimer != nil || automaticPreviewPending else { return }
+    if player?.isUsingNativePlayback == true {
+      automaticPreviewPending = false
+      cancelScheduledPreview()
+      player?.cancelNativePreview(restoreLoop: true)
+      updatePreviewButtons()
+      return
+    }
     stopPreview(updateButton: true, restorePlaybackState: false)
   }
 
@@ -692,9 +723,18 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   @objc private func modeChanged(_ sender: NSSegmentedControl) {
     validationMessage = nil
+    if let player, player.isUsingNativePlayback, selectedOperation == .rotate {
+      automaticPreviewPending = false
+      cancelScheduledPreview()
+      player.requireMPVCompatibility(reason: "Rotation tools") { [weak self] in
+        self?.updateModeUI(resetFrameEnd: false)
+      }
+      return
+    }
     stopPreview(updateButton: true)
     updateModeUI(resetFrameEnd: selectedOperation == .frames)
     if playbackControlsVisible, selectedOperation == .clip {
+      nativeAutomaticIntent = player?.nativePreviewIntentRevision
       anchorUntouchedRangeToCurrentPosition()
       automaticPreviewPending = true
       startAutomaticPreviewIfReady()
@@ -706,6 +746,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   @objc private func setStartToCurrentTime(_ sender: NSButton) {
+    if player?.isUsingNativePlayback == true { captureNativeRangeMarker(isEnd: false); return }
     defaultRangeNeedsDuration = false
     rangeIsUntouched = false
     validationMessage = nil
@@ -722,6 +763,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   @objc private func setEndToCurrentTime(_ sender: NSButton) {
+    if player?.isUsingNativePlayback == true { captureNativeRangeMarker(isEnd: true); return }
     defaultRangeNeedsDuration = false
     rangeIsUntouched = false
     validationMessage = nil
@@ -736,7 +778,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   @objc private func toggleRangePreview(_ sender: NSButton) {
-    if previewSnapshot != nil {
+    if hasPreview || nativePreviewPending {
       stopPreview(updateButton: true)
     } else {
       previewRange(showValidationError: true)
@@ -758,6 +800,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   @objc private func toggleRotationPreview(_ sender: NSButton) {
     guard selectedOperation == .rotate else { return }
+    if let player, player.isUsingNativePlayback {
+      cancelPendingAutomaticPreview()
+      player.requireMPVCompatibility(reason: "Rotation preview") { [weak self] in self?.toggleRotationPreview(sender) }
+      return
+    }
     if previewSnapshot != nil {
       stopPreview(updateButton: true)
       return
@@ -792,6 +839,14 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   @objc private func runTask(_ sender: NSButton) {
+    if selectedOperation == .rotate, let player, player.isUsingNativePlayback {
+      cancelPendingAutomaticPreview()
+      player.requireMPVCompatibility(reason: "Rotation tools") { [weak self] in
+        guard let self, self.selectedOperation == .rotate else { return }
+        self.runTask(sender)
+      }
+      return
+    }
     guard let inputURL = currentLocalMediaURL else {
       showValidationError(NSLocalizedString("videotools.error.no_local_video", comment: "Open a local video first"))
       return
@@ -810,24 +865,37 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       end = range.end
     }
 
-    stopPreview(updateButton: true)
-    do {
-      validationMessage = nil
-      ownedTaskID = try taskManager.start(
-        operation: operation,
-        inputURL: inputURL,
-        start: start,
-        end: end,
-        degrees: operation == .rotate ? selectedRotation : nil,
-        targetFormat: operation == .convert ? selectedConversionFormat : nil,
-        conversionMode: operation == .convert ? selectedConversionMode : nil,
-        frameFormat: operation == .frames ? selectedFrameFormat : nil,
-        outputDirectory: operation == .rotate ? nil : outputDirectoryURL
-      )
-      updateTaskUI()
-      revealTaskDetails()
-    } catch {
-      showValidationError(error.localizedDescription)
+    let degrees = operation == .rotate ? selectedRotation : nil
+    let targetFormat = operation == .convert ? selectedConversionFormat : nil
+    let conversionMode = operation == .convert ? selectedConversionMode : nil
+    let frameFormat = operation == .frames ? selectedFrameFormat : nil
+    let outputDirectory = operation == .rotate ? nil : outputDirectoryURL
+    func startExport() {
+      do {
+        validationMessage = nil
+        ownedTaskID = try taskManager.start(
+          operation: operation, inputURL: inputURL, start: start, end: end, degrees: degrees,
+          targetFormat: targetFormat, conversionMode: conversionMode, frameFormat: frameFormat,
+          outputDirectory: outputDirectory)
+        updateTaskUI()
+        revealTaskDetails()
+      } catch { showValidationError(error.localizedDescription) }
+    }
+    if let player, player.isUsingNativePlayback {
+      cancelPendingAutomaticPreview()
+      let revision = previewInputRevision
+      let generation = player.videoToolsMediaGeneration
+      player.finishNativePreview { [weak self] result in
+        guard let self, self.previewInputRevision == revision,
+              self.player?.videoToolsMediaGeneration == generation else { return }
+        if case .applied = result { startExport() }
+        else if case .unavailable = result {
+          self.showValidationError(NSLocalizedString("playback.compatibility_restore_failed", comment: "Preview restore failed"))
+        }
+      }
+    } else {
+      stopPreview(updateButton: true)
+      startExport()
     }
   }
 
@@ -873,6 +941,12 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
 
   private func startAutomaticPreviewIfReady() {
     guard automaticPreviewPending, playbackControlsVisible, selectedOperation == .clip else { return }
+    guard !nativeAnchorPending else { return }
+    if let player, player.isUsingNativePlayback, let intent = nativeAutomaticIntent,
+       intent != player.nativePreviewIntentRevision {
+      automaticPreviewPending = false
+      return
+    }
     guard taskManager.snapshot?.isActive != true, !hasActiveShortcutRotation,
           !UpdateWorkAdmission.shared.isBlocked else {
       automaticPreviewPending = false
@@ -900,15 +974,23 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     guard validatedRange(showError: false) != nil else {
       // Keep the saved playback state while the user is still typing: only the loop
       // ends, so the picture neither jumps back nor keeps repeating a stale range.
-      if previewSnapshot != nil {
+      if player?.isUsingNativePlayback == true {
+        player?.suspendNativePreview()
+      } else if previewSnapshot != nil {
         player?.videoToolsClearLoop()
       }
       updatePreviewButtons()
       return
     }
+    let revision = previewInputRevision
+    let generation = player?.videoToolsMediaGeneration
+    let nativeIntent = player?.nativePreviewIntentRevision
     let timer = Timer(timeInterval: 0.35, repeats: false) { [weak self] _ in
-      self?.previewTimer = nil
-      self?.previewRange(showValidationError: false)
+      guard let self, self.previewInputRevision == revision,
+            self.player?.videoToolsMediaGeneration == generation else { return }
+      self.previewTimer = nil
+      if self.player?.isUsingNativePlayback == true, self.player?.nativePreviewIntentRevision != nativeIntent { return }
+      self.previewRange(showValidationError: false)
     }
     previewTimer = timer
     RunLoop.main.add(timer, forMode: .common)
@@ -925,6 +1007,22 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     guard let range = validatedRange(showError: showValidationError), let player else { return }
     automaticPreviewPending = false
     cancelScheduledPreview()
+    if player.isUsingNativePlayback {
+      let revision = previewInputRevision
+      let generation = player.videoToolsMediaGeneration
+      nativePreviewPending = true
+      player.requestNativePreview(start: range.start, end: range.end) { [weak self] result in
+        guard let self, self.previewInputRevision == revision,
+              self.player?.videoToolsMediaGeneration == generation else { return }
+        self.nativePreviewPending = false
+        if case .unavailable = result {
+          self.validationMessage = NSLocalizedString("playback.loop_capture_unavailable", comment: "Preview clock unavailable")
+        } else if case .applied = result { self.validationMessage = nil }
+        self.updatePreviewButtons()
+      }
+      updatePreviewButtons()
+      return
+    }
     if previewSnapshot == nil {
       previewSnapshot = player.videoToolsCaptureSnapshot()
     }
@@ -958,6 +1056,24 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private func stopPreview(updateButton: Bool, restorePlaybackState: Bool = true) {
     automaticPreviewPending = false
     cancelScheduledPreview()
+    if player?.isUsingNativePlayback == true {
+      if restorePlaybackState, let player {
+        let revision = previewInputRevision
+        let generation = player.videoToolsMediaGeneration
+        nativePreviewPending = true
+        player.finishNativePreview { [weak self] result in
+          guard let self, self.previewInputRevision == revision,
+                self.player?.videoToolsMediaGeneration == generation else { return }
+          self.nativePreviewPending = false
+          if case .unavailable = result {
+            self.validationMessage = NSLocalizedString("playback.compatibility_restore_failed", comment: "Preview restore failed")
+          }
+          if updateButton, self.isViewLoaded { self.updatePreviewButtons() }
+        }
+      } else { player?.cancelNativePreview(restoreLoop: true) }
+      if updateButton, isViewLoaded { updatePreviewButtons() }
+      return
+    }
     if let previewSnapshot {
       player?.videoToolsRestoreSnapshot(previewSnapshot, restorePlaybackState: restorePlaybackState)
       self.previewSnapshot = nil
@@ -977,6 +1093,24 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   /// A default range nobody edited follows the position the user is actually watching when
   /// the clip tab is revealed, not the position recorded when the file finished loading.
   private func anchorUntouchedRangeToCurrentPosition() {
+    if let player, player.isUsingNativePlayback, rangeIsUntouched, currentLocalMediaURL != nil {
+      let revision = previewInputRevision
+      let generation = player.videoToolsMediaGeneration
+      let intent = player.nativePreviewIntentRevision
+      nativeAnchorPending = true
+      player.videoToolsCaptureTime { [weak self] position in
+        guard let self, self.previewInputRevision == revision,
+              self.player?.videoToolsMediaGeneration == generation else { return }
+        self.nativeAnchorPending = false
+        guard player.nativePreviewIntentRevision == intent else { self.automaticPreviewPending = false; return }
+        guard let position else { self.automaticPreviewPending = false; return }
+        self.startField.stringValue = self.formatTimestamp(position, precision: 6)
+        self.setDefaultEnd(after: position)
+        self.defaultRangeNeedsDuration = true
+        self.startAutomaticPreviewIfReady()
+      }
+      return
+    }
     guard rangeIsUntouched, let player, currentLocalMediaURL != nil,
           let position = player.videoToolsCurrentTime else { return }
     startField.stringValue = formatTimestamp(position, precision: 6)
@@ -998,7 +1132,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func updatePreviewButtons() {
-    let isPreviewing = previewSnapshot != nil
+    let isPreviewing = hasPreview
     let stopTitle = NSLocalizedString("videotools.stop_preview", comment: "Stop preview")
     rangePreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString("videotools.preview_range", comment: "Preview in player")
     rotationPreviewButton.title = isPreviewing ? stopTitle : NSLocalizedString("videotools.preview_rotation", comment: "Preview rotation")
@@ -1008,15 +1142,15 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
       previewStatusLabel.textColor = .systemRed
       return
     }
-    let previewRange = isPreviewing && previewTimer == nil ? player?.videoToolsLoopRange : nil
+    let previewRange = isPreviewing && previewTimer == nil && !nativePreviewPending && !nativeAnchorPending ? player?.videoToolsLoopRange : nil
     if let range = previewRange {
-      let paused = player?.mpv.getFlag(MPVOption.PlaybackControl.pause) == true
+      let paused = player?.playbackIsPaused == true
       previewStatusLabel.stringValue = String(format: NSLocalizedString(
         paused ? "videotools.preview.paused" : "videotools.preview.active", comment: "Selected range preview state"
       ), formatTimestamp(range.start), formatTimestamp(range.end))
       previewStatusLabel.textColor = paused ? .secondaryLabelColor : ChengYingStyle.accent
     } else {
-      let key = previewTimer != nil || automaticPreviewPending ? "videotools.preview.pending" :
+      let key = previewTimer != nil || automaticPreviewPending || nativePreviewPending || nativeAnchorPending ? "videotools.preview.pending" :
         (validatedRange(showError: false) == nil ? "videotools.preview.invalid" : "videotools.preview.hint")
       previewStatusLabel.stringValue = NSLocalizedString(key, comment: "Range preview status")
       previewStatusLabel.textColor = .secondaryLabelColor
@@ -1024,6 +1158,10 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func cancelScheduledPreview() {
+    previewInputRevision &+= 1
+    nativePreviewPending = false
+    nativeAnchorPending = false
+    if player?.isUsingNativePlayback == true { player?.cancelNativePreviewCapture() }
     previewTimer?.invalidate()
     previewTimer = nil
   }
@@ -1032,6 +1170,40 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
     automaticPreviewPending = false
     cancelScheduledPreview()
     previewSnapshot = nil
+    if player?.isUsingNativePlayback == true { player?.cancelNativePreview(restoreLoop: false) }
+  }
+
+  private func captureNativeRangeMarker(isEnd: Bool) {
+    guard let player, player.info.state.loaded else { return }
+    automaticPreviewPending = false
+    cancelScheduledPreview()
+    defaultRangeNeedsDuration = false
+    rangeIsUntouched = false
+    player.pause()
+    let revision = previewInputRevision
+    let generation = player.videoToolsMediaGeneration
+    let intent = player.nativePreviewIntentRevision
+    nativeAnchorPending = true
+    player.videoToolsCaptureTime { [weak self] position in
+      guard let self, self.previewInputRevision == revision,
+            self.player?.videoToolsMediaGeneration == generation else { return }
+      self.nativeAnchorPending = false
+      guard player.nativePreviewIntentRevision == intent else { return }
+      guard let position else {
+        self.showValidationError(NSLocalizedString("playback.loop_capture_unavailable", comment: "Marker clock unavailable"))
+        return
+      }
+      player.cancelNativePreview(restoreLoop: true)
+      if isEnd { self.endField.stringValue = self.formatTimestamp(position, precision: 6) }
+      else {
+        self.startField.stringValue = self.formatTimestamp(position, precision: 6)
+        if self.selectedOperation == .frames || (self.parseTimestamp(self.endField.stringValue) ?? 0) <= position {
+          self.setDefaultEnd(after: position)
+        }
+      }
+      self.scheduleRangePreview()
+      self.updatePlaybackControls()
+    }
   }
 
   private var hasActiveShortcutRotation: Bool {
@@ -1521,7 +1693,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
         formatTimestamp(range.start), formatTimestamp(range.end)
       )
       clearLoopButton.isEnabled = true
-    } else if let start = VideoToolsLoopRange.marker(from: player.mpv.getString(MPVOption.PlaybackControl.abLoopA)) {
+    } else if let start = player.playbackLoopA {
       loopStatusLabel.stringValue = String(
         format: NSLocalizedString("videotools.loop.start", comment: "A is set; B is not set"), formatTimestamp(start)
       )

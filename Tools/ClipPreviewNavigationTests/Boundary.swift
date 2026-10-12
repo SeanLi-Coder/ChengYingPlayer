@@ -30,6 +30,10 @@ final class PlayerBoundary {
   let mpv = MPVBoundary()
   var currentPlaybackSpeed: Double { mpv.speed }
   var isUsingNativePlayback = false
+  let nativePreviewInProgress = false
+  func cancelNativePreview(restoreLoop: Bool) {
+    preconditionFailure("Native preview is outside the legacy navigation boundary")
+  }
   lazy var mainWindow = MainWindowUnderTest(player: self)
   var videoToolsLoopRange: VideoToolsLoopRange?
   var videoToolsCurrentTime: Double? = 12
@@ -65,6 +69,9 @@ final class PanelUnderTest {
   let player: PlayerBoundary?
   var selectedOperation = Operation.clip
   var previewSnapshot: Bool?
+  var hasPreview: Bool { previewSnapshot != nil || player?.nativePreviewInProgress == true }
+  let nativePreviewPending = false
+  let nativeAnchorPending = false
   var previewTimer: PendingTimer?
   var automaticPreviewPending = false
   var priorLoop: VideoToolsLoopRange?
@@ -83,6 +90,12 @@ final class PanelUnderTest {
     previewSnapshot = nil
   }
   func updatePlaybackControls() { updates += 1 }
+  func cancelScheduledPreview() {
+    preconditionFailure("Native preview cancellation is outside the legacy navigation boundary")
+  }
+  func updatePreviewButtons() {
+    preconditionFailure("Native preview buttons are outside the legacy navigation boundary")
+  }
   func parseTimestamp(_ value: String) -> Double? { Double(value) }
 }
 final class SettingsUnderTest { var videoToolsViewController: PanelUnderTest? }

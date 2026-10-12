@@ -36,6 +36,9 @@ struct NativePlaybackSnapshot {
   enum Phase { case playing, paused, ended, failed }
   var phase: Phase
   var position: Double
+  var duration: Double {
+    preconditionFailure("Preview EOF restoration is outside the lifecycle boundary")
+  }
 }
 enum CaptureResult { case ready(NativePlaybackSnapshot), unavailable, superseded }
 final class NativePlaybackSession {
@@ -97,6 +100,18 @@ class CoreInfoBoundary {
   @Atomic var matchedSubs: [String: String] = [:]
 }
 class CoreBoundary: NSObject {
+  // Clip-preview operations are not simulated by this lifecycle-only fixture.
+  enum NativePreviewResult { case applied, unavailable, superseded }
+  let nativePreviewInProgress = false
+  let nativePreviewIntentRevision: UInt64 = 0
+  let nativeRestoredPreviewEOF = false
+  func cancelNativePreview(restoreLoop: Bool) {
+    precondition(!nativePreviewInProgress, "Active preview requires the real preview test harness")
+  }
+  func finishNativePreview(restorePlaybackState: Bool = true,
+                           completion: @escaping (NativePreviewResult) -> Void = { _ in }) {
+    preconditionFailure("Active preview restoration is outside the lifecycle boundary")
+  }
   static var lastActive: CoreBoundary?
   lazy var info = CoreInfo(self)
   let mainWindow = MockWindow()

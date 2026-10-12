@@ -389,6 +389,9 @@ jobs:
           path: |
             build/native-preroll-audio-tests.*/results.log
             build/native-preroll-audio-tests.*/source-sha256.txt
+            build/native-preroll-audio-tests.*/source-validation.log
+            build/native-preroll-audio-tests.*/fixture-sha256.txt
+            build/native-preroll-audio-tests.*/fixture-validation.log
             build/native-preroll-audio-tests.*/base-commit.txt
           if-no-files-found: ignore
           retention-days: 3
@@ -423,6 +426,30 @@ jobs:
           NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeABLoopTests/run.sh
           python3 -B Tools/PlaybackMenuRoutingTests/run.py
           bash Tools/NativeDropRoutingTests/run.sh
+
+      - name: Test native clip preview ownership and cancellation
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 6
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          bash Tools/NativeClipPreviewTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=address bash Tools/NativeClipPreviewTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeClipPreviewTests/run.sh
+
+      - name: Preserve native clip preview test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-clip-preview-test-evidence-${{ github.sha }}
+          path: |
+            build/native-clip-preview-tests.*/results.log
+            build/native-clip-preview-tests.*/source-before.sha256
+            build/native-clip-preview-tests.*/source-after.sha256
+            build/native-clip-preview-tests.*/source-comparison.log
+            build/native-clip-preview-tests.*/generated.sha256
+            build/native-clip-preview-tests.*/generated-validation.log
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Test native playback in the complete application window
         if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}

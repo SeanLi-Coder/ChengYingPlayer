@@ -217,6 +217,40 @@ final class MPVController {
 
 final class PlayerCore: NSObject {
   var isUsingNativePlayback = false
+  // The actual MPV path remains under test; native preview is not simulated here.
+  enum NativePreviewResult { case applied, unavailable, superseded }
+  let nativePreviewInProgress = false
+  let nativePreviewIntentRevision: UInt64 = 0
+  var nativeReady: Bool { preconditionFailure("Unexpected native readiness in live MPV clip tests") }
+  var nativeInitialPauseIntent: Bool? {
+    get { preconditionFailure("Unexpected native opening intent in live MPV clip tests") }
+    set { preconditionFailure("Unexpected native opening intent in live MPV clip tests") }
+  }
+  func requestNativePreview(start: Double, end: Double, completion: @escaping (NativePreviewResult) -> Void) {
+    preconditionFailure("Unexpected native preview in live MPV clip tests")
+  }
+  func finishNativePreview(restorePlaybackState: Bool = true,
+                           completion: @escaping (NativePreviewResult) -> Void = { _ in }) {
+    preconditionFailure("Unexpected native preview in live MPV clip tests")
+  }
+  func cancelNativePreview(restoreLoop: Bool) {
+    preconditionFailure("Unexpected native preview in live MPV clip tests")
+  }
+  func cancelNativePreviewCapture() {
+    preconditionFailure("Unexpected native preview in live MPV clip tests")
+  }
+  func suspendNativePreview() {
+    preconditionFailure("Unexpected native preview in live MPV clip tests")
+  }
+  func captureNativePreviewPosition(completion: @escaping (Double?) -> Void) {
+    preconditionFailure("Unexpected native preview in live MPV clip tests")
+  }
+  func invalidateNativePreviewRequest() {
+    preconditionFailure("Unexpected native preview in live MPV clip tests")
+  }
+  func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
+    preconditionFailure("Unexpected native route in live MPV clip tests")
+  }
   var nativeViewport: VideoToolsViewport { preconditionFailure("Unexpected native viewport in live MPV clip tests") }
   @discardableResult
   func applyNativeViewport(_ viewport: VideoToolsViewport) -> Bool {

@@ -62,6 +62,9 @@ enum TestOSD {
 
 final class SettingsBoundary {
   var shortcuts: [VideoToolsShortcuts.Action] = []
+  func prepareVideoToolsForLoopEdit() {
+    preconditionFailure("Unexpected native loop edit in legacy viewport tests")
+  }
   @discardableResult
   func performVideoToolsShortcut(_ action: VideoToolsShortcuts.Action) -> Bool {
     shortcuts.append(action)
@@ -79,6 +82,9 @@ final class MainWindowBoundary {
 
 final class PlayerCore {
   var isUsingNativePlayback = false
+  func captureNativePreviewPosition(completion: @escaping (Double?) -> Void) {
+    preconditionFailure("Unexpected native preview in legacy viewport tests")
+  }
   var nativeViewport: VideoToolsViewport { preconditionFailure("Unexpected native viewport in legacy viewport tests") }
   @discardableResult
   func applyNativeViewport(_ viewport: VideoToolsViewport) -> Bool {

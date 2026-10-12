@@ -193,6 +193,12 @@ extension PlayerCore {
     return position
   }
 
+  /// Editing markers need the decoder clock, not the periodic presentation cache.
+  func videoToolsCaptureTime(completion: @escaping (Double?) -> Void) {
+    if isUsingNativePlayback { captureNativePreviewPosition(completion: completion) }
+    else { completion(videoToolsCurrentTime) }
+  }
+
   /// Keep navigation inside the current file, including at the end boundary.
   func videoToolsSeek(to seconds: Double, pausePlayback: Bool) {
     guard info.state.loaded, seconds.isFinite else { return }

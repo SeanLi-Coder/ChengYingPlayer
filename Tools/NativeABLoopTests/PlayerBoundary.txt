@@ -6,6 +6,7 @@
   }
   var nativeReady = true
   var nativeRetiring = false
+  var nativeTerminationRequested = false
   var nativeLoopMode = LoopMode.off
   var playbackEventRoute = (revision: UInt64(1), acceptsMPV: false)
   var videoToolsMediaGeneration: UInt64 = 1

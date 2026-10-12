@@ -3587,7 +3587,7 @@ class MainWindowController: PlayerWindowController {
   }
 
   func showSettingsSidebar(tab: QuickSettingViewController.TabViewType? = nil, force: Bool = false, hideIfAlreadyShown: Bool = true) {
-    if player.isUsingNativePlayback {
+    if player.isUsingNativePlayback, (tab ?? quickSettingView.currentTab) != .tools {
       player.requireMPVCompatibility(reason: "Settings sidebar requires the compatibility renderer") { [weak self] in
         self?.showSettingsSidebar(tab: tab, force: force, hideIfAlreadyShown: hideIfAlreadyShown)
       }

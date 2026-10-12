@@ -433,6 +433,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
            .panLeft, .panRight, .panUp, .panDown, .resetViewport:
         break
       case .setA, .setB:
+        player.mainWindow.quickSettingView.prepareVideoToolsForLoopEdit()
         player.requestNativeLoopAction(action == .setA ? .captureA : .captureB) { [weak self] result in
           guard let self else { return }
           switch result {
@@ -494,7 +495,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
          VideoToolsPlaybackCommand.absoluteSeekTarget(amount, duration: player.info.videoDuration?.second) == nil {
         return false
       }
-      if !player.isUsingNativePlayback { player.mainWindow.quickSettingView.prepareVideoToolsForUserSeek() }
+      player.mainWindow.quickSettingView.prepareVideoToolsForUserSeek()
       guard player.isUsingNativePlayback || player.videoToolsLoopRange != nil else { return false }
       switch mode {
       case .absolute:

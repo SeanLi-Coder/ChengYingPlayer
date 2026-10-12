@@ -59,6 +59,32 @@ final class MPVController {
 enum OSDMessage { case custom(String) }
 final class PlayerCore: NSObject {
   var isUsingNativePlayback = false
+  // This suite exercises the legacy tools. Native preview has its own real-session suite.
+  enum NativePreviewResult { case applied, unavailable, superseded }
+  let nativePreviewInProgress = false
+  let nativePreviewIntentRevision: UInt64 = 0
+  func requestNativePreview(start: Double, end: Double, completion: @escaping (NativePreviewResult) -> Void) {
+    preconditionFailure("Unexpected native preview in legacy video tool tests")
+  }
+  func finishNativePreview(restorePlaybackState: Bool = true,
+                           completion: @escaping (NativePreviewResult) -> Void = { _ in }) {
+    preconditionFailure("Unexpected native preview in legacy video tool tests")
+  }
+  func cancelNativePreview(restoreLoop: Bool) {
+    preconditionFailure("Unexpected native preview in legacy video tool tests")
+  }
+  func cancelNativePreviewCapture() {
+    preconditionFailure("Unexpected native preview in legacy video tool tests")
+  }
+  func suspendNativePreview() {
+    preconditionFailure("Unexpected native preview in legacy video tool tests")
+  }
+  func captureNativePreviewPosition(completion: @escaping (Double?) -> Void) {
+    preconditionFailure("Unexpected native preview in legacy video tool tests")
+  }
+  func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
+    preconditionFailure("Unexpected native route in legacy video tool tests")
+  }
   var nativeViewport: VideoToolsViewport { preconditionFailure("Unexpected native viewport in legacy video tool tests") }
   @discardableResult
   func applyNativeViewport(_ viewport: VideoToolsViewport) -> Bool {

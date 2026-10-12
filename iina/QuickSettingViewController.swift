@@ -125,6 +125,10 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     videoToolsViewController?.prepareForUserSeek()
   }
 
+  func prepareVideoToolsForLoopEdit() {
+    videoToolsViewController?.cancelPendingAutomaticPreview()
+  }
+
   @discardableResult
   func performVideoToolsShortcut(_ action: VideoToolsShortcuts.Action) -> Bool {
     _ = view
@@ -495,6 +499,10 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
   }
 
   private func updateControlsState() {
+    if player.isUsingNativePlayback {
+      if currentTab == .tools { videoToolsViewController?.refreshCurrentMedia() }
+      return
+    }
     updateVideoTabControl()
     updateAudioTabControl()
     updateSubTabControl()
@@ -607,6 +615,11 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
 
   private func switchToTab(_ tab: TabViewType) {
     guard isViewLoaded else { return }
+    if player.isUsingNativePlayback, tab != .tools {
+      videoToolsViewController?.cancelPendingAutomaticPreview()
+      player.requireMPVCompatibility(reason: "Unmigrated settings tab") { [weak self] in self?.switchToTab(tab) }
+      return
+    }
     if currentTab == .tools, tab != .tools {
       videoToolsViewController?.stopPreview()
     }
@@ -627,6 +640,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
 
   func reload() {
     guard isViewLoaded else { return }
+    if player.isUsingNativePlayback, currentTab != .tools { return }
     switch currentTab {
     case .audio:
       audioTableView.reloadData()
