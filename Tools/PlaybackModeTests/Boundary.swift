@@ -9,6 +9,7 @@ enum MPVOption {
 
 final class InfoFixture { var state: PlayerState = .idle }
 final class NativeSessionFixture {
+  var loopInterval: Int? { nil }
   func setLoop(_ interval: Int?, repeatFile: Bool) { preconditionFailure("Unexpected native route") }
 }
 

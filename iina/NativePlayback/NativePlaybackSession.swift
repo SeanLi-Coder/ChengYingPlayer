@@ -405,6 +405,15 @@ final class NativePlaybackSession {
     videoToolboxSamples = 0
   }
 
+  /// Shared with the main-thread transport's accepted seek intent. Keeping the
+  /// exact floor/ceiling here prevents a UI pending target outside an active loop.
+  static func clampedSeekTarget(_ seconds: Double, duration: Double, loop: NativePlaybackInterval?) -> Double {
+    let mediaEnd = duration.isFinite && duration > 0 ? duration : Double.greatestFiniteMagnitude
+    let ceiling = min(mediaEnd, loop?.end ?? mediaEnd)
+    let floor = loop?.start ?? 0
+    return min(max(floor, seconds), max(floor, ceiling - 0.000001))
+  }
+
   private func seekOnWorker(to seconds: Double, revision request: UInt64) {
     guard let decoder, let media, identity.accepts(request), phase != .failed else { return }
     revision = request
@@ -414,9 +423,7 @@ final class NativePlaybackSession {
       fail(NativePlaybackFailure.invalidRange, revision: request)
       return
     }
-    let ceiling = min(mediaEnd, loop?.end ?? mediaEnd)
-    let floor = loop?.start ?? 0
-    let target = min(max(floor, seconds), max(floor, ceiling - 0.000001))
+    let target = Self.clampedSeekTarget(seconds, duration: media.duration, loop: loop)
     output.setRate(0)
     output.flush(removeImage: true)
     pending = nil

@@ -182,6 +182,124 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.validate_environment({"CI": "true"})
 
+    def test_ab_stage_uses_real_window_events_visible_knobs_and_worker_pixels(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+
+        def method(name):
+            start = source.index("  private func " + name + "(")
+            end = source.index("\n  }", start) + len("\n  }")
+            return source[start:end]
+
+        volume = method("exerciseVolume")
+        self.assertIn("self.exerciseABLoop(player)", volume)
+        self.assertNotIn("self.replaceRapidly(player)", volume)
+        start = method("exerciseABLoop")
+        self.assertIn("slider.doubleValue = 0", start)
+        self.assertIn("NSApp.sendAction(action, to: slider.target, from: slider)", start)
+        self.assertIn("player.mainWindow.beginControlInteraction()", start)
+        self.assertIn("NSApp.keyWindow === window", start)
+        key = method("sendMarkerKey")
+        self.assertIn("NSEvent.keyEvent(with: .keyDown", key)
+        self.assertIn("windowNumber: window.windowNumber", key)
+        self.assertIn("keyCode: start ? 33 : 30", key)
+        self.assertIn("player.mainWindow.keyDown(with: event)", key)
+        self.assertNotIn("requestNativeLoopAction", key)
+        self.assertNotIn("postEvent", key)
+        self.assertNotIn("CGEvent", key)
+        self.assertIn(".moveB(-1)", method("checkInvalidEndEdits"))
+        self.assertIn(".moveB(0)", method("checkInvalidEndEdits"))
+        self.assertIn("self.checkInvalidKnobNotifications(player)", method("checkInvalidEndEdits"))
+        knobs = method("checkInvalidKnobNotifications")
+        self.assertIn("slider.abLoopA.doubleValue = 70", knobs)
+        self.assertIn("slider.abLoopB.doubleValue = 0", knobs)
+        self.assertEqual(knobs.count("NotificationCenter.default.post(name: .iinaPlaySliderLoopKnobChanged"), 2)
+        self.assertEqual(knobs.count("self.markersMatch(player, start: 0, end: 4.2)"), 2)
+        self.assertNotIn("player.abLoopA =", knobs)
+        self.assertNotIn("player.abLoopB =", knobs)
+        self.assertIn("#selector(MainMenuActionHandler.menuFileLoop(_:))", method("checkFileLoopPreservesRange"))
+        self.assertIn("#selector(MainMenuActionHandler.menuABLoop(_:))", method("sendABMenu"))
+        self.assertIn("Preference.savedLoopMode", method("fileLoopIsSaved"))
+        bounds = method("checkABSeekBounds")
+        self.assertIn("player.seek(absoluteSecond: 50)", bounds)
+        self.assertIn("player.seek(relativeSecond: -50, option: .exact)", bounds)
+        self.assertIn("$0.position >= 0 && $0.position < 4.2", bounds)
+        markers = method("markersMatch")
+        for proof in ("(nil, nil)", "player.info.abLoopStatus == status", "knob.superview === slider",
+                      "knob.window === window", "!knob.isHiddenOrHasHiddenAncestor",
+                      "knob.visibleRect.width > 0", "knob.visibleRect.height > 0",
+                      "knob.doubleValue - value / duration * 100"):
+            self.assertIn(proof, markers)
+        paused = method("waitForNativePaused")
+        self.assertLess(paused.index("guard extra() else"), paused.index("session.captureCurrentState"))
+        self.assertEqual(paused.count("extra()"), 2)
+        for proof in ("session.captureCurrentState", "snapshot.phase == .paused", "snapshot.volume == 0",
+                      "snapshot.position - position", "player.nativePlaybackSession === session",
+                      "player.mpv.mpvRenderContext == nil", "!player.mainWindow.videoView.hasInitializedOpenGL",
+                      "self.pixel(player, is: color)"):
+            self.assertIn(proof, paused)
+        cycle = method("checkABMenuCycle")
+        self.assertEqual(cycle.count("sendABMenu(player)"), 3)
+        self.assertLess(cycle.index('"ab_menu_cycle_clears_range"'), cycle.index("self.replaceRapidly(player)"))
+        self.assertIn("player.mainWindow.endControlInteraction()", cycle)
+        # This checks the test's production-entry-point contract; only execution
+        # inside the complete CI App can establish actual UI/playback success.
+
+    def test_every_baseline_and_ab_check_is_required(self):
+        baseline = {
+            "pristine_real_mpv_service", "native_autoplay_ready", "native_autoplay_shared_clock_advances",
+            "real_mainwindow_nib_outlets", "paused_initial_frame_matches_red",
+            "initial_volume_and_slider_zero", "native_window_has_no_compatibility_gl", "real_pause_menu_action",
+            "paused_clock_stays_still", "real_volume_slider_action", "paused_seek_presents_green_frame",
+            "rapid_replace_presents_latest_blue_frame", "retired_layer_detached", "replacement_resets_volume_and_slider",
+            "real_window_close_retires_native_session", "embedded_subtitle_routes_to_real_compatibility",
+            "compatibility_open_remains_silent", "second_pristine_real_mpv_service",
+            "second_native_paused_blue_frame", "second_real_resume_menu_action", "resumed_native_shared_clock_advances",
+            "native_and_compatibility_ready_for_real_quit", "all_real_cores_shutdown_before_termination",
+        }
+        ab = {
+            "ab_key_window_ready", "ab_start_is_exact_zero", "ab_left_bracket_shows_zero_marker",
+            "ab_equal_end_key_is_rejected", "ab_end_capture_position_is_green",
+            "ab_right_bracket_shows_valid_paused_range", "ab_invalid_end_edits_preserve_range",
+            "ab_invalid_dragged_a_restores_visible_marker", "ab_invalid_dragged_b_restores_visible_marker",
+            "ab_file_loop_selection_keeps_markers", "ab_absolute_seek_stays_before_end",
+            "ab_relative_seek_stays_at_start", "ab_menu_clear_preserves_file_loop",
+            "ab_menu_cycle_sets_a", "ab_menu_end_position_is_green", "ab_menu_cycle_sets_b",
+            "ab_menu_cycle_clears_range", "ab_cleanup_remains_native_without_gl",
+        }
+        self.assertEqual(len(baseline), 23)
+        self.assertEqual(runner.REQUIRED_CHECKS, baseline | ab)
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        for label in runner.REQUIRED_CHECKS:
+            self.assertIn('"' + label + '"', source)
+            missing = {"format": 1, "run_id": "fixture", "complete": True, "passed": True,
+                       "checks": [{"label": value, "passed": True}
+                                  for value in sorted(runner.REQUIRED_CHECKS - {label})]}
+            with self.subTest(missing=label), self.assertRaises(RuntimeError):
+                runner.validate_result(missing, run_id="fixture", exit_code=0)
+
+    def test_rejected_native_knob_edits_cannot_report_success_osd(self):
+        source = (runner.ROOT / "iina/PlayerWindowController.swift").read_text()
+        start = source.index("  func handleNativeLoopKnob(")
+        end = source.index("\n  }", start) + len("\n  }")
+        helper = source[start:end]
+        self.assertIn("guard player.isUsingNativePlayback else { return false }", helper)
+        applied = helper[helper.index("case .applied:"):helper.index("case .invalid:")]
+        rejected = helper[helper.index("case .invalid:"):helper.index("case .superseded:")]
+        self.assertIn("sendOSD(.abLoopUpdate", applied)
+        self.assertEqual(helper.count("sendOSD(.abLoopUpdate"), 1)
+        self.assertNotIn(".abLoopUpdate", rejected)
+        self.assertEqual(rejected.count("self.syncSlider()"), 2)
+        self.assertEqual(rejected.count("sendOSD(.custom"), 2)
+        main = (runner.ROOT / "iina/MainWindowController.swift").read_text()
+        for letter, marker in (("A", "true"), ("B", "false")):
+            start = main.index("object: playSlider.abLoop" + letter + ")")
+            end = main.index("\n    }", start)
+            observer = main[start:end]
+            guard = "if self.handleNativeLoopKnob(start: " + marker + ", seconds: seconds) { return }"
+            self.assertIn(guard, observer)
+            self.assertLess(observer.index(guard), observer.index("self.player.abLoop" + letter + " ="))
+            self.assertLess(observer.index(guard), observer.index("sendOSD(.abLoopUpdate"))
+
     def test_loader_overrides_rejected(self):
         with patch.object(runner.sys, "platform", "darwin"):
             for key in ("DYLD_INSERT_LIBRARIES", "LD_LIBRARY_PATH"):

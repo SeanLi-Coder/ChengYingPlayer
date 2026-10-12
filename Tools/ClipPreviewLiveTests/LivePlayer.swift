@@ -217,6 +217,15 @@ final class MPVController {
 
 final class PlayerCore: NSObject {
   var isUsingNativePlayback = false
+  enum NativeLoopAction { case clear }
+  var playbackLoopA: Double? { VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA)) }
+  var playbackLoopB: Double? { VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopB)) }
+  func requestNativeLoopAction(_ action: NativeLoopAction) {
+    preconditionFailure("Unexpected native action in live MPV clip tests")
+  }
+  func cancelNativeLoopRequests() {
+    preconditionFailure("Unexpected native seek in live MPV clip tests")
+  }
   let info = PlaybackInfo()
   let mpv = MPVController()
   lazy var playbackTransport: PlaybackTransport = MPVPlaybackTransport(sink: .init(

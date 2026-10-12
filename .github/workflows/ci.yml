@@ -376,6 +376,9 @@ jobs:
           python3 -B Tools/NativePlayerCoreTests/run.py --sanitize address
           python3 -B Tools/NativePlayerCoreTests/run.py --sanitize thread
           python3 -B Tools/NativePlayerCoreTests/run.py --negative-control
+          python3 -B Tools/NativePlayerCoreTests/run.py --capture-negative-control
+          bash Tools/NativeABLoopTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeABLoopTests/run.sh
           python3 -B Tools/PlaybackMenuRoutingTests/run.py
           bash Tools/NativeDropRoutingTests/run.sh
 

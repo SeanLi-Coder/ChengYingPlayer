@@ -136,7 +136,7 @@ class PlaybackModeFixture {
   // session repeat and route ownership are covered by their dedicated suites.
   let isUsingNativePlayback = false
   var nativeLoopMode = LoopMode.off
-  var nativePlaybackSession: NativeSessionFixture? { nil }
+  var nativeTransport: NativeSessionFixture? { nil }
   func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
     preconditionFailure("Unexpected native route in live MPV repeat tests")
   }
@@ -150,6 +150,7 @@ class PlaybackModeFixture {
 }
 
 final class NativeSessionFixture {
+  var loopInterval: ClosedRange<Double>? { nil }
   func setLoop(_ range: ClosedRange<Double>?, repeatFile: Bool) {
     preconditionFailure("Unexpected native loop command in live MPV repeat tests")
   }

@@ -26,7 +26,7 @@ final class UpdateWorkAdmission {
   var isOpeningMediaBlocked = false
 }
 enum NotificationName { case iinaPlayerStopped, iinaPlaylistChanged }
-enum OSDMessage { case addToPlaylist(Int) }
+enum OSDMessage { case addToPlaylist(Int), custom(String) }
 enum SleepPreventer { static func updateSleepPrevention() {} }
 final class NowPlayingInfoManager {
   static let shared = NowPlayingInfoManager()
@@ -100,8 +100,11 @@ class CoreBoundary: NSObject {
   var opened: [(URL, Bool)] = []
   var stoppedNotifications = 0
   var backgroundStops = 0
+  var videoToolsMediaGeneration: UInt64 = 1
+  var logs: [String] = []
+  var osdCount = 0
   let playlistMutationLock = NSRecursiveLock()
-  func log(_ message: String, level: Logger.Level = .debug) {}
+  func log(_ message: String, level: Logger.Level = .debug) { logs.append(message) }
   func invalidateThumbnails() {}
   func refreshSyncUITimer() {}
   func savePlayerState() {}
@@ -111,7 +114,7 @@ class CoreBoundary: NSObject {
   func postNotification(_ name: NotificationName) {
     if name == .iinaPlayerStopped { stoppedNotifications += 1 }
   }
-  func sendOSD(_ message: OSDMessage) {}
+  func sendOSD(_ message: OSDMessage) { osdCount += 1 }
   func isBDFolder(_ url: URL) -> Bool { false }
   func getPlayableFiles(in urls: [URL]) -> [URL] { urls }
   func attemptNativeOpen(_ url: URL) -> Bool { false }

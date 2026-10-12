@@ -59,6 +59,12 @@ final class MPVController {
 enum OSDMessage { case custom(String) }
 final class PlayerCore: NSObject {
   var isUsingNativePlayback = false
+  enum NativeLoopAction { case clear }
+  var playbackLoopA: Double? { VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA)) }
+  var playbackLoopB: Double? { VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopB)) }
+  func requestNativeLoopAction(_ action: NativeLoopAction) {
+    preconditionFailure("Unexpected native action in legacy video tool tests")
+  }
   let info = PlaybackInfo()
   let mpv = MPVController()
   var currentPlaybackSpeed: Double { mpv.getDouble(MPVOption.PlaybackControl.speed) }

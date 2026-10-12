@@ -3,8 +3,18 @@
 import AppKit
 import AVFoundation
 
+extension Notification.Name {
+  static let iinaPlaySliderLoopKnobChanged = Notification.Name("fixture.loop-knob-changed")
+}
+
 enum MPVProperty { static let idleActive = "idle-active" }
 enum PlayerState { case idle, playing, paused, shutDown }
+enum LoopMode { case off, file }
+enum Preference {
+  enum SeekOption { case exact }
+  static func savedLoopMode(in defaults: UserDefaults, domain: String?) -> LoopMode? { nil }
+}
+struct VideoTime { var second: Double }
 enum NativePlaybackPhase { case paused, playing }
 struct NativePlaybackSnapshot {
   var phase: NativePlaybackPhase
@@ -23,27 +33,41 @@ final class MPVController {
   func getFlag(_ property: String) -> Bool { false }
 }
 final class PlaybackInfo {
+  enum LoopStatus { case cleared, aSet, bSet }
   var state = PlayerState.idle
   var volume = 0.0
   var currentURL: URL?
   var subTracks: [String] = []
+  var videoDuration: VideoTime?
+  var abLoopStatus = LoopStatus.cleared
 }
 final class NativePlaybackSurface: NSView { var displayedVideoRect: CGRect? }
 final class VideoView: NSView {
   var hasInitializedOpenGL = false
   var nativeSurface: NativePlaybackSurface?
 }
+final class PlaySliderLoopKnob: NSView { var doubleValue = 0.0 }
+final class PlaySlider: NSSlider {
+  var abLoopA = PlaySliderLoopKnob()
+  var abLoopB = PlaySliderLoopKnob()
+}
 final class MainWindowController: NSWindowController {
   var loaded = false
   var videoView = VideoView()
   var volumeSlider: NSSlider!
-  var playSlider: NSSlider!
+  var playSlider: PlaySlider!
   var menuActionHandler: MainMenuActionHandler!
+  func beginControlInteraction() {}
+  func endControlInteraction() {}
 }
 final class MainMenuActionHandler: NSObject {
   @objc func menuTogglePause(_ sender: NSMenuItem) {}
+  @objc func menuFileLoop(_ sender: NSMenuItem) {}
+  @objc func menuABLoop(_ sender: NSMenuItem) {}
 }
 final class PlayerCore {
+  enum NativeLoopAction { case moveB(Double) }
+  enum NativeLoopActionResult { case applied, invalid, unavailable, superseded }
   static let first = PlayerCore()
   static var newPlayerCore: PlayerCore { PlayerCore() }
   static var playerCores: [PlayerCore] = []
@@ -56,6 +80,12 @@ final class PlayerCore {
   var playbackIsPaused = false
   var playbackVolume = 0.0
   var playbackPosition: Double?
+  var playbackLoopA: Double?
+  var playbackLoopB: Double?
   func openURL(_ url: URL, shouldAutoLoad: Bool) {}
   func seek(absoluteSecond: Double) {}
+  func seek(relativeSecond: Double, option: Preference.SeekOption) {}
+  func getLoopMode() -> LoopMode { .off }
+  func setLoopMode(_ mode: LoopMode) {}
+  func requestNativeLoopAction(_ action: NativeLoopAction, completion: @escaping (NativeLoopActionResult) -> Void) {}
 }

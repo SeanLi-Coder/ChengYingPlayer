@@ -276,6 +276,20 @@ class PlayerCore: NSObject {
   private var nativeLoopMode: LoopMode = .off
   private var nativePreferredRate: Double = 1
   private var nativeSingleInput = false
+  enum NativeLoopAction {
+    case captureA, captureB, cycle, clear, moveA(Double), moveB(Double)
+  }
+  enum NativeLoopActionResult { case applied, invalid, unavailable, superseded }
+  private struct NativeLoopRequest {
+    let id = UUID()
+    let action: NativeLoopAction
+    let deadline = ProcessInfo.processInfo.systemUptime + 2
+    let completion: (NativeLoopActionResult) -> Void
+  }
+  private var nativeLoopA: Double?
+  private var nativeLoopB: Double?
+  private var nativeLoopRequests: [NativeLoopRequest] = []
+  private var nativeLoopCaptureID: UUID?
   private struct NativeCompatibilityRestore {
     let id = UUID()
     let url: URL
@@ -283,6 +297,8 @@ class PlayerCore: NSObject {
     let volume: Double
     let rate: Double
     let paused: Bool
+    var loopA: Double? = nil
+    var loopB: Double? = nil
     let completion: () -> Void
     var waitingForSeek = false
   }
@@ -316,6 +332,128 @@ class PlayerCore: NSObject {
   var playbackIsPaused: Bool { playbackTransport.isPaused }
   var playbackPosition: Double? { playbackTransport.position }
   var playbackAtEOF: Bool { playbackTransport.isAtEOF }
+
+  var playbackLoopA: Double? {
+    isUsingNativePlayback ? nativeLoopA : VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA))
+  }
+  var playbackLoopB: Double? {
+    isUsingNativePlayback ? nativeLoopB : VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopB))
+  }
+
+  /// Serialize exact marker captures without blocking main or consulting the
+  /// periodic UI position. Explicit edits cancel outstanding captures; queued
+  /// A/B/cycle commands retain their order, including rapid menu invocations.
+  func requestNativeLoopAction(_ action: NativeLoopAction,
+                               completion: @escaping (NativeLoopActionResult) -> Void = { _ in }) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard nativeTransport != nil, nativeReady, !nativeRetiring, info.state.loaded else {
+      completion(.unavailable); return
+    }
+    switch action {
+    case .clear, .moveA, .moveB: cancelNativeLoopRequests()
+    default: break
+    }
+    guard nativeLoopRequests.count < 64 else { completion(.unavailable); return }
+    nativeLoopRequests.append(NativeLoopRequest(action: action, completion: completion))
+    processNativeLoopRequest()
+  }
+
+  private func cancelNativeLoopRequests() {
+    let cancelled = nativeLoopRequests
+    nativeLoopRequests.removeAll()
+    nativeLoopCaptureID = nil
+    // Do not invoke callers inside an open/stop/clear transaction: a callback
+    // can itself close or replace media. State is invalidated synchronously,
+    // while cancellation is delivered once after the current transaction ends.
+    if !cancelled.isEmpty {
+      DispatchQueue.main.async { cancelled.forEach { $0.completion(.superseded) } }
+    }
+  }
+
+  private func processNativeLoopRequest() {
+    guard nativeLoopCaptureID == nil, let request = nativeLoopRequests.first,
+          let transport = nativeTransport, !nativeRetiring else { return }
+    nativeLoopCaptureID = request.id
+    let route = playbackEventRoute.revision
+    let generation = videoToolsMediaGeneration
+    let action: NativeLoopAction
+    if case .cycle = request.action {
+      action = nativeLoopA == nil ? .captureA : (nativeLoopB == nil ? .captureB : .clear)
+    } else { action = request.action }
+    switch action {
+    case .clear, .moveA, .moveB:
+      finishNativeLoopRequest(request.id, result: applyNativeLoopAction(action, position: nil))
+    default:
+      transport.captureCurrentState { [weak self, weak transport] result in
+        guard let self, let transport, self.nativeLoopCaptureID == request.id else { return }
+        guard self.nativeTransport === transport, self.playbackEventRoute.revision == route,
+              self.videoToolsMediaGeneration == generation, !self.nativeRetiring else {
+          self.finishNativeLoopRequest(request.id, result: .superseded); return
+        }
+        switch result {
+        case .ready(let snapshot):
+          self.finishNativeLoopRequest(request.id,
+            result: self.applyNativeLoopAction(action, position: snapshot.phase == .ended ? snapshot.duration : snapshot.position))
+        case .superseded:
+          self.finishNativeLoopRequest(request.id, result: .superseded)
+        case .unavailable:
+          // An earlier A/B edit may still be prerolling. Wait only for that
+          // same request, with a bounded deadline and cancellable identity.
+          guard ProcessInfo.processInfo.systemUptime < request.deadline else {
+            self.finishNativeLoopRequest(request.id, result: .unavailable); return
+          }
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self] in
+            guard let self, self.nativeLoopCaptureID == request.id else { return }
+            self.nativeLoopCaptureID = nil
+            self.processNativeLoopRequest()
+          }
+        }
+      }
+    }
+  }
+
+  private func finishNativeLoopRequest(_ id: UUID, result: NativeLoopActionResult) {
+    guard nativeLoopCaptureID == id, nativeLoopRequests.first?.id == id else { return }
+    let request = nativeLoopRequests.removeFirst()
+    nativeLoopCaptureID = nil
+    request.completion(result)
+    processNativeLoopRequest()
+  }
+
+  private func applyNativeLoopAction(_ action: NativeLoopAction, position: Double?) -> NativeLoopActionResult {
+    guard let transport = nativeTransport, !nativeRetiring,
+          let duration = info.videoDuration?.second, duration.isFinite, duration > 0 else { return .unavailable }
+    switch action {
+    case .captureA:
+      guard let position, position.isFinite, position >= 0, position < duration else { return .invalid }
+      nativeLoopA = position; nativeLoopB = nil
+      transport.setLoop(nil)
+    case .captureB:
+      guard let range = VideoToolsLoopRange(start: nativeLoopA, end: position, duration: duration),
+            let interval = try? NativePlaybackInterval(start: range.start, end: range.end) else { return .invalid }
+      nativeLoopB = range.end
+      transport.setLoop(interval)
+      transport.seek(.init(value: range.start, reference: .absoluteSeconds, exact: true))
+    case .clear:
+      nativeLoopA = nil; nativeLoopB = nil
+      transport.setLoop(nil)
+    case .moveA(let value):
+      guard nativeLoopA != nil, value.isFinite, value >= 0, value < duration,
+            nativeLoopB.map({ value < $0 }) ?? true else { return .invalid }
+      nativeLoopA = value
+      let interval = nativeLoopB.flatMap { try? NativePlaybackInterval(start: value, end: $0) }
+      transport.setLoop(interval)
+    case .moveB(let value):
+      guard nativeLoopB != nil,
+            let range = VideoToolsLoopRange(start: nativeLoopA, end: value, duration: duration),
+            let interval = try? NativePlaybackInterval(start: range.start, end: range.end) else { return .invalid }
+      nativeLoopB = value
+      transport.setLoop(interval)
+    case .cycle: return .invalid
+    }
+    syncAbLoop()
+    return .applied
+  }
 
   var receivedEndFileWhileLoading: Bool = false
 
@@ -355,7 +493,7 @@ class PlayerCore: NSObject {
     /// Returns the value of the A loop point, a timestamp in seconds if set, otherwise returns zero.
     /// - Note: The value of the A loop point is not required by mpv to be before the B loop point.
     /// - Returns:value of the mpv option `ab-loop-a`
-    get { isUsingNativePlayback ? 0 : mpv.getDouble(MPVOption.PlaybackControl.abLoopA) }
+    get { isUsingNativePlayback ? nativeLoopA ?? 0 : mpv.getDouble(MPVOption.PlaybackControl.abLoopA) }
     /// Sets the value of the A loop point as an absolute timestamp in seconds.
     ///
     /// The loop points of the mpv A-B loop command can be adjusted at runtime. This method updates the A loop point. Setting a
@@ -365,7 +503,7 @@ class PlayerCore: NSObject {
     /// - Note: The value of the A loop point is not required by mpv to be before the B loop point.
     set {
       if isUsingNativePlayback {
-        requireMPVCompatibility(reason: "ab_loop_marker") { [weak self] in self?.abLoopA = newValue }
+        requestNativeLoopAction(.moveA(newValue))
         return
       }
       guard info.abLoopStatus == .aSet || info.abLoopStatus == .bSet else { return }
@@ -382,7 +520,7 @@ class PlayerCore: NSObject {
     /// Returns the value of the B loop point, a timestamp in seconds if set, otherwise returns zero.
     /// - Note: The value of the B loop point is not required by mpv to be after the A loop point.
     /// - Returns:value of the mpv option `ab-loop-b`
-    get { isUsingNativePlayback ? 0 : mpv.getDouble(MPVOption.PlaybackControl.abLoopB) }
+    get { isUsingNativePlayback ? nativeLoopB ?? 0 : mpv.getDouble(MPVOption.PlaybackControl.abLoopB) }
     /// Sets the value of the B loop point as an absolute timestamp in seconds.
     ///
     /// The loop points of the mpv A-B loop command can be adjusted at runtime. This method updates the B loop point. Setting a
@@ -392,7 +530,7 @@ class PlayerCore: NSObject {
     /// - Note: The value of the B loop point is not required by mpv to be after the A loop point.
     set {
       if isUsingNativePlayback {
-        requireMPVCompatibility(reason: "ab_loop_marker") { [weak self] in self?.abLoopB = newValue }
+        requestNativeLoopAction(.moveB(newValue))
         return
       }
       guard info.abLoopStatus == .bSet else { return }
@@ -558,6 +696,9 @@ class PlayerCore: NSObject {
   }
 
   private func beginNativeOpen(_ url: URL, request: UInt64) {
+    cancelNativeLoopRequests()
+    nativeLoopA = nil; nativeLoopB = nil
+    info.abLoopStatus = .cleared
     let session = NativePlaybackSession()
     let transport = NativePlaybackTransport(session: session)
     nativeTransport = transport
@@ -590,7 +731,7 @@ class PlayerCore: NSObject {
       requireMPVCompatibility(reason: "native_surface_unavailable", completion: {})
       return
     }
-    session.setLoop(nil, repeatFile: nativeLoopMode == .file)
+    transport.setLoop(nil, repeatFile: nativeLoopMode == .file)
     _ = transport.setRate(nativePreferredRate)
     session.open(url, autoplay: false)
   }
@@ -599,10 +740,12 @@ class PlayerCore: NSObject {
     guard ![.stopping, .shuttingDown, .shutDown].contains(info.state) else { return }
     let previousState = info.state
     if snapshot.phase == .failed {
-      if case .decoder(let domain, let code)? = snapshot.failure,
+      if !nativeReady, case .decoder(let domain, let code)? = snapshot.failure,
          domain == CYNMediaDecoderErrorDomain, code == CYNMediaDecoderError.unsupported.rawValue {
         requireMPVCompatibility(reason: "unsupported_native_media", completion: {})
       } else {
+        // A midstream format change has no proven exact recovery position.
+        // Fail explicitly rather than silently restarting a loaded file at 0.
         log("Native playback failed: \(String(describing: snapshot.failure))", level: .error)
         stop()
         Utility.showAlert("error_open")
@@ -673,33 +816,62 @@ class PlayerCore: NSObject {
     guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
     guard let transport = nativeTransport, let url = info.currentURL else { completion(); return }
     guard !nativeRetiring else { return }
+    cancelNativeLoopRequests()
     let request = playbackEventRoute.revision
+    let generation = videoToolsMediaGeneration
+    let deadline = ProcessInfo.processInfo.systemUptime + 2
     log("Native compatibility: \(reason)")
-    transport.captureCurrentState { [weak self, weak transport] result in
-      guard let self, let transport, self.nativeTransport === transport,
-            self.playbackEventRoute.revision == request else { return }
-      let restore: NativeCompatibilityRestore?
-      switch result {
-      case .ready(let snapshot):
-        restore = NativeCompatibilityRestore(url: url, position: snapshot.position,
-          volume: transport.volumePercent, rate: transport.rate,
-          paused: self.nativeReady ? snapshot.phase != .playing : Preference.bool(for: .pauseWhenOpen),
-          completion: completion)
-      case .unavailable:
-        restore = NativeCompatibilityRestore(url: url, position: 0, volume: 0, rate: 1,
-          paused: Preference.bool(for: .pauseWhenOpen), completion: completion)
-      case .superseded: return
-      }
-      self.retireNativePlayback {
-        self.nativeCompatibilityRestore = restore
-        self.mpv.prepareForFirstMPVMediaLoad()
-        self.advancePlaybackRoute(acceptsMPV: true)
-        self.openMainWindow(path: url.path, url: url, isNetwork: false, allowNative: false)
+    func capture() {
+      transport.captureCurrentState { [weak self, weak transport] result in
+        guard let self, let transport, self.nativeTransport === transport,
+              self.playbackEventRoute.revision == request,
+              self.videoToolsMediaGeneration == generation, !self.nativeRetiring else { return }
+        var restore: NativeCompatibilityRestore?
+        switch result {
+        case .ready(let snapshot):
+          restore = NativeCompatibilityRestore(url: url, position: snapshot.position,
+            volume: transport.volumePercent, rate: transport.rate,
+            paused: self.nativeReady ? snapshot.phase != .playing : Preference.bool(for: .pauseWhenOpen),
+            completion: completion)
+        case .unavailable:
+          if self.nativeReady {
+            // A/B changes and seeks briefly make the exact worker clock
+            // unavailable. Do not silently restore an already-open file at 0.
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+              self.log("Native compatibility capture timed out; native playback remains active", level: .error)
+              self.sendOSD(.custom(NSLocalizedString("playback.compatibility_restore_failed",
+                value: "Could not restore the playback position. Please retry the requested action.",
+                comment: "Compatibility backend handoff timed out")))
+              return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self, weak transport] in
+              guard let self, let transport, self.nativeTransport === transport,
+                    self.playbackEventRoute.revision == request,
+                    self.videoToolsMediaGeneration == generation, !self.nativeRetiring else { return }
+              capture()
+            }
+            return
+          }
+          restore = NativeCompatibilityRestore(url: url, position: 0, volume: 0, rate: 1,
+            paused: Preference.bool(for: .pauseWhenOpen), completion: completion)
+        case .superseded: return
+        }
+        restore?.loopA = self.nativeLoopA
+        restore?.loopB = self.nativeLoopB
+        self.retireNativePlayback {
+          self.nativeCompatibilityRestore = restore
+          self.mpv.prepareForFirstMPVMediaLoad()
+          self.advancePlaybackRoute(acceptsMPV: true)
+          self.openMainWindow(path: url.path, url: url, isNetwork: false, allowNative: false)
+        }
       }
     }
+    capture()
   }
 
   private func retireNativePlayback(completion: @escaping () -> Void) {
+    cancelNativeLoopRequests()
+    nativeLoopA = nil; nativeLoopB = nil
     advancePlaybackRoute(acceptsMPV: false)
     nativeRetirementCompletion = completion
     guard let transport = nativeTransport else {
@@ -1305,6 +1477,7 @@ class PlayerCore: NSObject {
 
   func seek(percent: Double, forceExact: Bool = false) {
     guard percent.isFinite else { return }
+    if isUsingNativePlayback { cancelNativeLoopRequests() }
     if videoToolsLoopRange != nil, let duration = info.videoDuration?.second, duration > 0 {
       seek(absoluteSecond: duration * percent / 100)
       return
@@ -1324,7 +1497,8 @@ class PlayerCore: NSObject {
 
   func seek(relativeSecond: Double, option: Preference.SeekOption) {
     guard relativeSecond.isFinite else { return }
-    if videoToolsLoopRange != nil, let position = videoToolsLoopRecovery.pendingTarget ?? videoToolsCurrentTime {
+    if isUsingNativePlayback { cancelNativeLoopRequests() }
+    if !isUsingNativePlayback, videoToolsLoopRange != nil, let position = videoToolsLoopRecovery.pendingTarget ?? videoToolsCurrentTime {
       seek(absoluteSecond: position + relativeSecond)
       return
     }
@@ -1356,6 +1530,11 @@ class PlayerCore: NSObject {
 
   func seek(absoluteSecond: Double) {
     guard absoluteSecond.isFinite else { return }
+    if isUsingNativePlayback {
+      cancelNativeLoopRequests()
+      playbackTransport.seek(.init(value: max(0, absoluteSecond), reference: .absoluteSeconds, exact: true))
+      return
+    }
     let target = videoToolsLoopRange?.clamped(absoluteSecond) ?? absoluteSecond
     if videoToolsLoopRange != nil { videoToolsLoopRecovery.userSeek(to: target) }
     playbackTransport.seek(.init(value: target, reference: .absoluteSeconds, exact: true))
@@ -1577,7 +1756,10 @@ class PlayerCore: NSObject {
   /// the A loop point. When the command is invoked again both loop points are cleared (set to "no") and looping stops.
   func abLoop() {
     if isUsingNativePlayback {
-      requireMPVCompatibility(reason: "ab_loop") { [weak self] in self?.abLoop() }
+      requestNativeLoopAction(.cycle) { [weak self] result in
+        guard let self, case .applied = result else { return }
+        self.sendOSD(.abLoop(self.info.abLoopStatus))
+      }
       return
     }
     switch info.abLoopStatus {
@@ -1590,10 +1772,9 @@ class PlayerCore: NSObject {
 
   /// Synchronize IINA with the state of the [mpv](https://mpv.io/manual/stable/) A-B loop command.
   func syncAbLoop() {
-    guard !isUsingNativePlayback else { return }
     // Obtain the values of the ab-loop-a and ab-loop-b options representing the A & B loop points.
-    let a = VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA))
-    let b = VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopB))
+    let a = playbackLoopA
+    let b = playbackLoopB
     info.abLoopStatus = a == nil ? .cleared : (VideoToolsLoopRange(start: a, end: b) == nil ? .aSet : .bSet)
     log("Synchronized info.abLoopStatus \(info.abLoopStatus)")
 
@@ -1653,12 +1834,12 @@ class PlayerCore: NSObject {
 
   /// Apply whole-file/list repetition without changing A-B markers or saving incidental mpv state.
   private func applyLoopMode(_ newMode: LoopMode) {
-    if let session = nativePlaybackSession {
+    if let transport = nativeTransport {
       if newMode == .playlist {
         requireMPVCompatibility(reason: "playlist_repeat") { [weak self] in self?.applyLoopMode(newMode) }
       } else {
         nativeLoopMode = newMode
-        session.setLoop(nil, repeatFile: newMode == .file)
+        transport.setLoop(transport.loopInterval, repeatFile: newMode == .file)
       }
       return
     }
@@ -2654,6 +2835,7 @@ class PlayerCore: NSObject {
       playbackTransport.setPaused(true)
       playbackTransport.setRate(restore.rate)
       playbackTransport.setVolumePercent(restore.volume)
+      restoreNativeLoopToMPV(start: restore.loopA, end: restore.loopB)
       seek(absoluteSecond: restore.position)
       let restoreID = restore.id
       DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in

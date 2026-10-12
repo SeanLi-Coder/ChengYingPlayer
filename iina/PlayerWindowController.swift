@@ -350,19 +350,35 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
   }
 
   func syncSlider() {
-    if player.isUsingNativePlayback {
-      playSlider.abLoopA.isHidden = true
-      playSlider.abLoopB.isHidden = true
-      playSlider.needsDisplay = true
-      return
-    }
     let a = player.abLoopA
-    playSlider.abLoopA.isHidden = VideoToolsLoopRange.marker(from: player.mpv.getString(MPVOption.PlaybackControl.abLoopA)) == nil
+    playSlider.abLoopA.isHidden = player.playbackLoopA == nil
     playSlider.abLoopA.doubleValue = secondsToPercent(a)
     let b = player.abLoopB
-    playSlider.abLoopB.isHidden = VideoToolsLoopRange.marker(from: player.mpv.getString(MPVOption.PlaybackControl.abLoopB)) == nil
+    playSlider.abLoopB.isHidden = player.playbackLoopB == nil
     playSlider.abLoopB.doubleValue = secondsToPercent(b)
     playSlider.needsDisplay = true
+  }
+
+  /// Knob dragging changes its visual value before publishing the notification.
+  /// Invalid native edits must restore that value instead of displaying a loop
+  /// boundary which the decoder never accepted.
+  func handleNativeLoopKnob(start: Bool, seconds: Double) -> Bool {
+    guard player.isUsingNativePlayback else { return false }
+    player.requestNativeLoopAction(start ? .moveA(seconds) : .moveB(seconds)) { [weak self] result in
+      guard let self, self.player.isUsingNativePlayback else { return }
+      switch result {
+      case .applied:
+        self.player.sendOSD(.abLoopUpdate(start ? .aSet : .bSet, VideoTime(seconds).stringRepresentation))
+      case .invalid:
+        self.syncSlider()
+        self.player.sendOSD(.custom(NSLocalizedString("videotools.error.invalid_range", comment: "Invalid loop marker drag")))
+      case .unavailable:
+        self.syncSlider()
+        self.player.sendOSD(.custom(NSLocalizedString("playback.loop_capture_unavailable", comment: "Loop marker capture unavailable")))
+      case .superseded: break
+      }
+    }
+    return true
   }
 
   /// Returns the percent of the total duration of the video the given position in seconds represents.
@@ -415,6 +431,21 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       switch action {
       case .consume, .speedUp, .speedDown:
         break
+      case .setA, .setB:
+        player.requestNativeLoopAction(action == .setA ? .captureA : .captureB) { [weak self] result in
+          guard let self else { return }
+          switch result {
+          case .applied: self.player.sendOSD(.abLoop(self.player.info.abLoopStatus))
+          case .invalid:
+            let key = action == .setB ? "videotools.error.loop_end" : "videotools.error.invalid_range"
+            self.player.sendOSD(.custom(NSLocalizedString(key, comment: "Invalid keyboard loop marker")))
+          case .unavailable:
+            self.player.sendOSD(.custom(NSLocalizedString("playback.loop_capture_unavailable",
+              comment: "Native playback has no stable clock for a loop marker yet")))
+          case .superseded: break
+          }
+        }
+        return true
       default:
         player.requireMPVCompatibility(reason: "This video tool needs the compatibility backend") { [weak self] in
           _ = self?.handleVideoToolsShortcutEvent(event)

@@ -233,8 +233,229 @@ final class NativeAppTestDriver {
       self.wait("paused_seek_presents_green_frame", until: {
         player.info.state == .paused && player.playbackIsPaused &&
           abs((player.playbackPosition ?? -1) - 4.2) < 0.075 && self.pixel(player, is: .green)
-      }) { self.replaceRapidly(player) }
+      }) { self.exerciseABLoop(player) }
     }
+  }
+
+  private func exerciseABLoop(_ player: PlayerCore) {
+    guard let window = player.mainWindow.window else { fail("ab_key_window_ready"); return }
+    NSApp.activate(ignoringOtherApps: true)
+    window.makeKeyAndOrderFront(nil)
+    window.makeFirstResponder(nil)
+    player.mainWindow.beginControlInteraction()
+    let slider = player.mainWindow.volumeSlider!
+    slider.doubleValue = 0
+    guard let action = slider.action, NSApp.sendAction(action, to: slider.target, from: slider) else {
+      fail("ab_key_window_ready"); return
+    }
+    wait("ab_key_window_ready", until: { NSApp.keyWindow === window && window.isVisible }) {
+      player.seek(absoluteSecond: 0)
+      self.waitForNativePaused(player, position: 0, color: .red, label: "ab_start_is_exact_zero",
+        extra: { player.playbackLoopA == nil && player.playbackLoopB == nil && player.getLoopMode() == .off }) {
+        guard self.sendMarkerKey(player, start: true) else { self.fail("ab_left_bracket_shows_zero_marker"); return }
+        self.waitForNativePaused(player, position: 0, color: .red, label: "ab_left_bracket_shows_zero_marker",
+          extra: { self.markersMatch(player, start: 0, end: nil) }) {
+          self.checkInvalidEndKey(player)
+        }
+      }
+    }
+  }
+
+  private func sendMarkerKey(_ player: PlayerCore, start: Bool) -> Bool {
+    guard let window = player.mainWindow.window, NSApp.keyWindow === window,
+          !(window.firstResponder is NSTextInputClient),
+          let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, characters: start ? "[" : "]", charactersIgnoringModifiers: start ? "[" : "]",
+            isARepeat: false, keyCode: start ? 33 : 30) else { return false }
+    // Deliver only to this owned window's production controller, never post a
+    // global event or call the marker implementation in place of key handling.
+    player.mainWindow.keyDown(with: event)
+    return true
+  }
+
+  private func checkInvalidEndKey(_ player: PlayerCore) {
+    guard sendMarkerKey(player, start: false), let session = player.nativePlaybackSession else {
+      fail("ab_equal_end_key_is_rejected"); return
+    }
+    // The controller's marker capture and this read-only query use the same
+    // serial worker/main callback ordering. Inspect only after the key capture.
+    session.captureCurrentState { result in
+      guard case .ready(let snapshot) = result, snapshot.phase == .paused,
+            snapshot.position == 0, snapshot.volume == 0,
+            self.markersMatch(player, start: 0, end: nil) else {
+        self.fail("ab_equal_end_key_is_rejected"); return
+      }
+      self.record("ab_equal_end_key_is_rejected")
+      player.seek(absoluteSecond: 4.2)
+      self.waitForNativePaused(player, position: 4.2, color: .green, label: "ab_end_capture_position_is_green") {
+        guard self.sendMarkerKey(player, start: false) else { self.fail("ab_right_bracket_shows_valid_paused_range"); return }
+        self.waitForNativePaused(player, position: 0, color: .red, label: "ab_right_bracket_shows_valid_paused_range",
+          extra: { self.markersMatch(player, start: 0, end: 4.2) }) {
+          self.checkInvalidEndEdits(player)
+        }
+      }
+    }
+  }
+
+  private func checkInvalidEndEdits(_ player: PlayerCore) {
+    player.requestNativeLoopAction(.moveB(-1)) { below in
+      guard case .invalid = below, self.markersMatch(player, start: 0, end: 4.2) else {
+        self.fail("ab_invalid_end_edits_preserve_range"); return
+      }
+      player.requestNativeLoopAction(.moveB(0)) { equal in
+        guard case .invalid = equal, self.markersMatch(player, start: 0, end: 4.2) else {
+          self.fail("ab_invalid_end_edits_preserve_range"); return
+        }
+        self.record("ab_invalid_end_edits_preserve_range")
+        self.checkInvalidKnobNotifications(player)
+      }
+    }
+  }
+
+  private func checkInvalidKnobNotifications(_ player: PlayerCore) {
+    let slider = player.mainWindow.playSlider!
+    // A drag updates the real view before posting its existing notification.
+    // Merely setting PlayerCore properties would miss a rejected-but-stale knob.
+    slider.abLoopA.doubleValue = 70
+    NotificationCenter.default.post(name: .iinaPlaySliderLoopKnobChanged, object: slider.abLoopA)
+    waitForNativePaused(player, position: 0, color: .red, label: "ab_invalid_dragged_a_restores_visible_marker",
+      extra: { self.markersMatch(player, start: 0, end: 4.2) }) {
+      slider.abLoopB.doubleValue = 0
+      NotificationCenter.default.post(name: .iinaPlaySliderLoopKnobChanged, object: slider.abLoopB)
+      self.waitForNativePaused(player, position: 0, color: .red, label: "ab_invalid_dragged_b_restores_visible_marker",
+        extra: { self.markersMatch(player, start: 0, end: 4.2) }) {
+        self.checkFileLoopPreservesRange(player)
+      }
+    }
+  }
+
+  private func checkFileLoopPreservesRange(_ player: PlayerCore) {
+    guard NSApp.sendAction(#selector(MainMenuActionHandler.menuFileLoop(_:)),
+                           to: player.mainWindow.menuActionHandler, from: NSMenuItem()) else {
+      fail("ab_file_loop_selection_keeps_markers"); return
+    }
+    waitForNativePaused(player, position: 0, color: .red, label: "ab_file_loop_selection_keeps_markers",
+      extra: { self.fileLoopIsSaved(player) && self.markersMatch(player, start: 0, end: 4.2) }) {
+      self.checkABSeekBounds(player)
+    }
+  }
+
+  private func checkABSeekBounds(_ player: PlayerCore) {
+    // Expected values are independent of the production clamp helper. The end
+    // remains half-open and the actual paused worker clock must stay below B.
+    player.seek(absoluteSecond: 50)
+    waitForNativePaused(player, position: 4.2 - 0.000001, color: .green, label: "ab_absolute_seek_stays_before_end",
+      extra: { self.markersMatch(player, start: 0, end: 4.2) },
+      snapshotCheck: { $0.position >= 0 && $0.position < 4.2 }) {
+      player.seek(relativeSecond: -50, option: .exact)
+      self.waitForNativePaused(player, position: 0, color: .red, label: "ab_relative_seek_stays_at_start",
+        extra: { self.markersMatch(player, start: 0, end: 4.2) }) {
+        guard self.sendABMenu(player) else { self.fail("ab_menu_clear_preserves_file_loop"); return }
+        self.waitForNativePaused(player, position: 0, color: .red, label: "ab_menu_clear_preserves_file_loop",
+          extra: { self.fileLoopIsSaved(player) && self.markersMatch(player, start: nil, end: nil) }) {
+          self.checkABMenuCycle(player)
+        }
+      }
+    }
+  }
+
+  private func checkABMenuCycle(_ player: PlayerCore) {
+    guard sendABMenu(player) else { fail("ab_menu_cycle_sets_a"); return }
+    waitForNativePaused(player, position: 0, color: .red, label: "ab_menu_cycle_sets_a",
+      extra: { self.markersMatch(player, start: 0, end: nil) }) {
+      player.seek(absoluteSecond: 4.2)
+      self.waitForNativePaused(player, position: 4.2, color: .green, label: "ab_menu_end_position_is_green") {
+        guard self.sendABMenu(player) else { self.fail("ab_menu_cycle_sets_b"); return }
+        self.waitForNativePaused(player, position: 0, color: .red, label: "ab_menu_cycle_sets_b",
+          extra: { self.markersMatch(player, start: 0, end: 4.2) }) {
+          guard self.sendABMenu(player) else { self.fail("ab_menu_cycle_clears_range"); return }
+          self.waitForNativePaused(player, position: 0, color: .red, label: "ab_menu_cycle_clears_range",
+            extra: { self.fileLoopIsSaved(player) && self.markersMatch(player, start: nil, end: nil) }) {
+            player.setLoopMode(.off)
+            self.waitForNativePaused(player, position: 0, color: .red, label: "ab_cleanup_remains_native_without_gl",
+              extra: { player.getLoopMode() == .off && self.markersMatch(player, start: nil, end: nil) }) {
+              player.mainWindow.endControlInteraction()
+              self.replaceRapidly(player)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func sendABMenu(_ player: PlayerCore) -> Bool {
+    NSApp.sendAction(#selector(MainMenuActionHandler.menuABLoop(_:)),
+                     to: player.mainWindow.menuActionHandler, from: NSMenuItem())
+  }
+
+  private func fileLoopIsSaved(_ player: PlayerCore) -> Bool {
+    player.getLoopMode() == .file &&
+      Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) == .file
+  }
+
+  private func markersMatch(_ player: PlayerCore, start: Double?, end: Double?) -> Bool {
+    func matches(_ actual: Double?, _ expected: Double?) -> Bool {
+      switch (actual, expected) {
+      case (nil, nil): return true
+      case (let actual?, let expected?): return actual.isFinite && abs(actual - expected) < 0.000001
+      default: return false
+      }
+    }
+    guard matches(player.playbackLoopA, start), matches(player.playbackLoopB, end),
+          let duration = player.info.videoDuration?.second, duration > 0,
+          let window = player.mainWindow.window, let slider = player.mainWindow.playSlider,
+          slider.window === window, !slider.isHiddenOrHasHiddenAncestor, slider.alphaValue > 0,
+          slider.visibleRect.width > 0, slider.visibleRect.height > 0 else { return false }
+    let status: PlaybackInfo.LoopStatus = start == nil ? .cleared : (end == nil ? .aSet : .bSet)
+    guard player.info.abLoopStatus == status else { return false }
+    for (knob, value) in [(slider.abLoopA, start), (slider.abLoopB, end)] {
+      guard knob.superview === slider, knob.window === window else { return false }
+      if let value {
+        guard !knob.isHiddenOrHasHiddenAncestor, knob.alphaValue > 0,
+              knob.visibleRect.width > 0, knob.visibleRect.height > 0,
+              abs(knob.doubleValue - value / duration * 100) < 0.0001 else { return false }
+      } else if !knob.isHidden { return false }
+    }
+    return true
+  }
+
+  private func waitForNativePaused(_ player: PlayerCore, position: Double, color: Color, label: String,
+                                   extra: @escaping () -> Bool = { true },
+                                   snapshotCheck: @escaping (NativePlaybackSnapshot) -> Bool = { _ in true },
+                                   then continuation: @escaping () -> Void) {
+    guard let session = player.nativePlaybackSession else { fail(label); return }
+    pollRevision += 1
+    let request = pollRevision
+    let deadline = ProcessInfo.processInfo.systemUptime + 12
+    func poll() {
+      guard !self.terminal, request == self.pollRevision else { return }
+      guard player.nativePlaybackSession === session else { self.fail(label); return }
+      // Marker captures first return to main, where they enqueue a loop refill.
+      // Do not queue this query until the expected marker state is visible;
+      // otherwise an older paused snapshot can arrive after that new UI state.
+      guard extra() else {
+        if ProcessInfo.processInfo.systemUptime >= deadline { self.fail(label) }
+        else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: poll) }
+        return
+      }
+      session.captureCurrentState { result in
+        guard !self.terminal, request == self.pollRevision else { return }
+        if case .ready(let snapshot) = result, snapshot.phase == .paused, snapshot.volume == 0,
+           snapshot.position.isFinite, abs(snapshot.position - position) < 0.0000001,
+           snapshotCheck(snapshot), player.isUsingNativePlayback, player.playbackIsPaused,
+           player.info.state == .paused, !player.mainWindow.videoView.hasInitializedOpenGL,
+           player.mpv.mpvRenderContext == nil, extra(), self.pixel(player, is: color) {
+          self.record(label)
+          continuation()
+        } else if ProcessInfo.processInfo.systemUptime >= deadline {
+          self.fail(label)
+        } else {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: poll)
+        }
+      }
+    }
+    poll()
   }
 
   private func replaceRapidly(_ player: PlayerCore) {

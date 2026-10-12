@@ -29,6 +29,14 @@ REQUIRED_CHECKS = {
     "compatibility_open_remains_silent", "second_pristine_real_mpv_service",
     "second_native_paused_blue_frame", "second_real_resume_menu_action", "resumed_native_shared_clock_advances",
     "native_and_compatibility_ready_for_real_quit", "all_real_cores_shutdown_before_termination",
+    "ab_key_window_ready", "ab_start_is_exact_zero", "ab_left_bracket_shows_zero_marker",
+    "ab_equal_end_key_is_rejected", "ab_end_capture_position_is_green",
+    "ab_right_bracket_shows_valid_paused_range", "ab_invalid_end_edits_preserve_range",
+    "ab_invalid_dragged_a_restores_visible_marker", "ab_invalid_dragged_b_restores_visible_marker",
+    "ab_file_loop_selection_keeps_markers", "ab_absolute_seek_stays_before_end",
+    "ab_relative_seek_stays_at_start", "ab_menu_clear_preserves_file_loop",
+    "ab_menu_cycle_sets_a", "ab_menu_end_position_is_green", "ab_menu_cycle_sets_b",
+    "ab_menu_cycle_clears_range", "ab_cleanup_remains_native_without_gl",
 }
 PIXEL_POINTS = [(x, y) for y in (8, 48, 86) for x in (8, 80, 150)]
 MAX_REPORT_BYTES = 1024 * 1024

@@ -27,6 +27,7 @@
     if option == .volume { mainWindow.updateVolume() }
   }
   func syncUI(_ options: [SyncUIOption]) { options.forEach(syncUI) }
+  func sendOSD(_ message: OSDMessage) {}
   func refreshSyncUITimer() {}
   func invalidateThumbnails() {}
   func generateThumbnails() {}

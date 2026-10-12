@@ -44,6 +44,10 @@ final class TimingController {
   func getFlag(_ name: String) -> Bool { flagReader?(name) ?? seeking }
 """ + members + "\n}\n" + """
 final class SeekCore {
+  let isUsingNativePlayback = false
+  func cancelNativeLoopRequests() {
+    preconditionFailure("Unexpected native seek in MPV timing tests")
+  }
   var triedUsingExactSeekForCurrentFile = false
   var useExactSeekForCurrentFile = true
   var videoToolsMediaGeneration: UInt64 = 1

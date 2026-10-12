@@ -831,16 +831,18 @@ class MainWindowController: PlayerWindowController {
       setWindowFrameForLegacyFullScreen()
     }
 
-    // Observe the loop knobs on the progress bar and update mpv when the knobs move.
+    // Route progress-bar loop handle edits through the active playback backend.
     addObserver(to: .default, forName: .iinaPlaySliderLoopKnobChanged, object: playSlider.abLoopA) { [weak self] _ in
       guard let self = self else { return }
       let seconds = self.percentToSeconds(self.playSlider.abLoopA.doubleValue)
+      if self.handleNativeLoopKnob(start: true, seconds: seconds) { return }
       self.player.abLoopA = seconds
       self.player.sendOSD(.abLoopUpdate(.aSet, VideoTime(seconds).stringRepresentation))
     }
     addObserver(to: .default, forName: .iinaPlaySliderLoopKnobChanged, object: playSlider.abLoopB) { [weak self] _ in
       guard let self = self else { return }
       let seconds = self.percentToSeconds(self.playSlider.abLoopB.doubleValue)
+      if self.handleNativeLoopKnob(start: false, seconds: seconds) { return }
       self.player.abLoopB = seconds
       self.player.sendOSD(.abLoopUpdate(.bSet, VideoTime(seconds).stringRepresentation))
     }

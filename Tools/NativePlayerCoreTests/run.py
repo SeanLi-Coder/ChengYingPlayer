@@ -25,6 +25,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sanitize", choices=["address", "thread"])
     parser.add_argument("--negative-control", action="store_true")
+    parser.add_argument("--capture-negative-control", action="store_true")
     args = parser.parse_args()
     core = (ROOT / "iina/PlayerCore.swift").read_text()
     info = (ROOT / "iina/PlaybackInfo.swift").read_text()
@@ -32,7 +33,7 @@ def main():
     gate_end = core.index("\n  }", core.index("  func noteMPVMediaCommand()", gate_start)) + len("\n  }")
     fields_start = core.index("  private var nativeTransport:")
     fields_end = core.index("  private var playbackTransport:", fields_start)
-    methods = ["advancePlaybackRoute", "requireMPVCompatibility", "retireNativePlayback", "stop", "shutdown", "open", "openMediaURLs"]
+    methods = ["advancePlaybackRoute", "cancelNativeLoopRequests", "requireMPVCompatibility", "retireNativePlayback", "stop", "shutdown", "open", "openMediaURLs"]
     generated = "import Cocoa\nfinal class PlayerCore: CoreBoundary {\n"
     generated += core[gate_start:gate_end] + "\n" + core[fields_start:fields_end]
     bodies = {name: method(core, name) for name in methods}
@@ -41,6 +42,11 @@ def main():
         if guard not in bodies["stop"]:
             raise RuntimeError("Terminal-priority negative-control boundary changed")
         bodies["stop"] = bodies["stop"].replace(guard, "", 1)
+    if args.capture_negative_control:
+        guard = "          if self.nativeReady {"
+        if guard not in bodies["requireMPVCompatibility"]:
+            raise RuntimeError("Precise capture negative-control boundary changed")
+        bodies["requireMPVCompatibility"] = bodies["requireMPVCompatibility"].replace(guard, "          if false {", 1)
     opening = method(core, "openMainWindow")
     boundary = '\n    advancePlaybackRoute(acceptsMPV: true)\n    log("Opening '
     if boundary not in opening:
@@ -69,12 +75,13 @@ def main():
                     "iina/MPVCommand.swift", "iina/MPVOption.swift", "Tools/NativePlayerCoreTests/Boundary.swift",
                     "Tools/NativePlayerCoreTests/main.swift"]]
         subprocess.run(command + [str(production)], check=True, timeout=90)
-        if args.negative_control:
+        if args.negative_control or args.capture_negative_control:
             result = subprocess.run([str(executable)], capture_output=True, text=True, timeout=25)
-            expected = "FAIL: Shutdown intent cannot be replaced by a later window-close stop"
+            expected = ("FAIL: A ready preroll never silently restores the file at zero" if args.capture_negative_control else
+                        "FAIL: Shutdown intent cannot be replaced by a later window-close stop")
             if result.returncode != 1 or expected not in result.stderr:
                 raise RuntimeError("Negative control missed the expected shutdown invariant: " + result.stderr)
-            print("PASS: Removing terminal priority reproduces the blocked quit")
+            print("PASS: Negative control reproduces the expected lifecycle invariant failure")
         else:
             subprocess.run([str(executable)], check=True, timeout=25)
 

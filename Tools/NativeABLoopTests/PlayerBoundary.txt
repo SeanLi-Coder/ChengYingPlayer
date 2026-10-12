@@ -1,0 +1,51 @@
+  var nativeTransport: NativePlaybackTransport?
+  var nativeReady = true
+  var nativeRetiring = false
+  var nativeLoopMode = LoopMode.off
+  var playbackEventRoute = (revision: UInt64(1), acceptsMPV: false)
+  var videoToolsMediaGeneration: UInt64 = 1
+  let info = PlaybackInfo()
+  let mpv = MPVDouble()
+  let mainWindow = MainWindowDouble()
+  var videoToolsLoopRecovery = VideoToolsLoopRecovery()
+  var triedUsingExactSeekForCurrentFile = false
+  var useExactSeekForCurrentFile = true
+  var isUsingNativePlayback: Bool { nativeTransport != nil }
+  var playbackTransport: PlaybackTransport { nativeTransport! }
+  var playbackPosition: Double? { nativeTransport?.position ?? mpv.getDouble(MPVProperty.timePos) }
+  var playbackAtEOF: Bool { nativeTransport?.isAtEOF ?? false }
+  var playbackIsPaused: Bool { nativeTransport?.isPaused ?? mpv.getFlag(MPVOption.PlaybackControl.pause) }
+  var messages: [OSDMessage] = []
+  var compatibilityRequests = 0
+  var testPendingLoopRequests: Int { nativeLoopRequests.count }
+  func log(_ text: String) {}
+  func sendOSD(_ message: OSDMessage) { messages.append(message) }
+  func videoToolsEnforceLoopBounds() {}
+  func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) { compatibilityRequests += 1 }
+  func pause() { if let nativeTransport { nativeTransport.setPaused(true) } else { mpv.setFlag(MPVOption.PlaybackControl.pause, true) } }
+  func resume() { if let nativeTransport { nativeTransport.setPaused(false) } else { mpv.setFlag(MPVOption.PlaybackControl.pause, false) } }
+  func testRepeat(_ mode: LoopMode) { applyLoopMode(mode) }
+  func testOpen(_ url: URL, observer: @escaping (NativePlaybackSampleObservation) -> Void = { _ in }) {
+    cancelNativeLoopRequests()
+    nativeLoopA = nil; nativeLoopB = nil
+    info.abLoopStatus = .cleared
+    videoToolsMediaGeneration &+= 1
+    playbackEventRoute.revision &+= 1
+    let session = NativePlaybackSession(sampleObserver: observer)
+    let transport = NativePlaybackTransport(session: session)
+    nativeTransport = transport
+    info.currentURL = url
+    transport.onSnapshot = { [weak self] value in
+      self?.info.videoDuration = VideoTime(value.duration)
+      self?.info.videoPosition = VideoTime(value.position)
+    }
+    session.open(url, autoplay: false)
+  }
+  func testClose() {
+    cancelNativeLoopRequests()
+    nativeLoopA = nil; nativeLoopB = nil
+    playbackEventRoute.revision &+= 1
+    let transport = nativeTransport
+    nativeTransport = nil
+    transport?.session.shutdown {}
+  }

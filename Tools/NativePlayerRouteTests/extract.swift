@@ -26,6 +26,7 @@ let methods = [
   "  func requireMPVCompatibility(", "  private func retireNativePlayback(", "  private func open(_",
   "  private func openMainWindow(", "  func initVideo()", "  func shutdown()", "  func stop()",
   "  func notifyWindowVideoSizeChanged()", "  func getMediaTitle(",
+  "  func syncAbLoop()",
 ].map { signature -> String in
   let body = method(signature)
   if negative == "skip-native-title-update", signature == "  private func receiveNativeSnapshot(" {

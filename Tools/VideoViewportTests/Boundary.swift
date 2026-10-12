@@ -79,6 +79,14 @@ final class MainWindowBoundary {
 
 final class PlayerCore {
   var isUsingNativePlayback = false
+  enum NativeLoopAction { case clear, captureA, captureB }
+  enum NativeLoopActionResult { case applied, invalid, unavailable, superseded }
+  var playbackLoopA: Double? { VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopA)) }
+  var playbackLoopB: Double? { VideoToolsLoopRange.marker(from: mpv.getString(MPVOption.PlaybackControl.abLoopB)) }
+  func requestNativeLoopAction(_ action: NativeLoopAction,
+                               completion: (NativeLoopActionResult) -> Void = { _ in }) {
+    preconditionFailure("Unexpected native action in legacy viewport tests")
+  }
   func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
     preconditionFailure("Unexpected native route in MPV viewport tests")
   }

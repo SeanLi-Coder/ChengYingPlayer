@@ -85,7 +85,11 @@ extension PlayerCore {
   }
 
   var videoToolsLoopRange: VideoToolsLoopRange? {
-    guard !isUsingNativePlayback, info.state.loaded,
+    if isUsingNativePlayback {
+      guard info.state.loaded else { return nil }
+      return VideoToolsLoopRange(start: playbackLoopA, end: playbackLoopB, duration: info.videoDuration?.second)
+    }
+    guard info.state.loaded,
           let count = mpv.getString(MPVOption.PlaybackControl.abLoopCount), count != "0" else { return nil }
     return VideoToolsLoopRange(
       start: videoToolsLoopMarker(MPVOption.PlaybackControl.abLoopA),
@@ -126,6 +130,10 @@ extension PlayerCore {
   }
 
   func videoToolsClearLoop() {
+    if isUsingNativePlayback {
+      requestNativeLoopAction(.clear)
+      return
+    }
     videoToolsLoopRecovery.reset()
     guard !isUsingNativePlayback, info.state != .shuttingDown, info.state != .shutDown else { return }
     mpv.setString(MPVOption.PlaybackControl.abLoopCount, "0")
@@ -142,6 +150,19 @@ extension PlayerCore {
     mpv.setDouble(MPVOption.PlaybackControl.abLoopB, range.end)
     mpv.setString(MPVOption.PlaybackControl.abLoopCount, "inf")
     syncAbLoop()
+  }
+
+  /// Restore optional native markers before the compatibility seek and before
+  /// a tools panel captures its own temporary preview snapshot. Zero is set.
+  func restoreNativeLoopToMPV(start: Double?, end: Double?) {
+    guard !isUsingNativePlayback else { return }
+    videoToolsClearLoop()
+    guard let start, start.isFinite, start >= 0,
+          info.videoDuration.map({ start < $0.second }) ?? true else { return }
+    mpv.setDouble(MPVOption.PlaybackControl.abLoopA, start)
+    if let range = VideoToolsLoopRange(start: start, end: end, duration: info.videoDuration?.second) {
+      videoToolsActivateLoop(range)
+    } else { syncAbLoop() }
   }
 
   /// Read the active transport rather than the UI timer's cached position.

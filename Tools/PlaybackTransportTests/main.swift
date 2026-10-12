@@ -278,10 +278,61 @@ func testNative(_ url: URL) {
   check(waitUntil { weakAdapter.value == nil && weakSession.value == nil }, "Native adapter callbacks do not retain session or adapter")
 }
 
+func testNativeLoopTransport(_ url: URL) {
+  let session = NativePlaybackSession()
+  let transport = NativePlaybackTransport(session: session)
+  session.open(url, autoplay: false)
+  check(waitUntil { transport.snapshot?.phase == .paused }, "Loop transport fixture opens")
+  let interval = try! NativePlaybackInterval(start: 0.5, end: 1.5)
+  transport.setLoop(interval, repeatFile: true)
+  let prior = transport.snapshot!.revision
+  check(transport.seek(.init(value: 100, reference: .absoluteSeconds, exact: true)) == .accepted,
+        "Out-of-loop seek dispatches through the active interval")
+  let expected = NativePlaybackSession.clampedSeekTarget(100, duration: 3, loop: interval)
+  check(transport.position == expected, "Pending target uses exactly the worker clamp helper")
+  check(waitUntil { transport.snapshot!.revision > prior && transport.snapshot?.phase == .paused },
+        "Out-of-loop seek completes paused preroll")
+  check(abs(transport.snapshot!.position - expected) < 1e-8,
+        "Worker and main intent agree at the exact upper boundary")
+  let backwards = transport.snapshot!.revision
+  for _ in 0..<3 { transport.seek(.init(value: -0.1, reference: .relativeSeconds, exact: true)) }
+  check(abs((transport.position ?? 0) - (expected - 0.3)) < 1e-8,
+        "Rapid backwards seeks accumulate correctly inside A/B")
+  check(waitUntil { transport.snapshot!.revision > backwards && transport.snapshot?.phase == .paused },
+        "Rapid loop navigation settles")
+  transport.setPaused(false)
+  check(waitUntil { (transport.position ?? 0) < 0.8 && transport.snapshot?.phase == .playing },
+        "Pending intent clears and exposes the actual wrapped clock")
+  transport.setPaused(true)
+  check(waitUntil { transport.snapshot?.phase == .paused }, "Loop transport pauses")
+  transport.setLoop(nil)
+  let cleared = transport.snapshot!.revision
+  transport.seek(.init(value: 2, reference: .absoluteSeconds, exact: true))
+  check(transport.position == 2 && transport.loopInterval == nil, "Clearing A/B removes transport clamp immediately")
+  check(waitUntil { transport.snapshot!.revision > cleared && transport.snapshot?.phase == .paused },
+        "Cleared loop can seek outside its old interval")
+  transport.setPaused(false)
+  check(waitUntil { transport.snapshot?.phase == .playing && (transport.position ?? 5) < 0.5 },
+        "Clearing A/B retains real whole-file repetition at EOF")
+  transport.setPaused(true)
+  session.open(url, autoplay: false)
+  check(waitUntil { transport.snapshot?.generation == 2 && transport.snapshot?.phase == .paused },
+        "Loop transport reopens another generation")
+  check(transport.loopInterval == nil && transport.volumePercent == 0,
+        "A/B and previous volume do not leak across media generations")
+  let tiny = try! NativePlaybackInterval(start: 1, end: 1.0000001)
+  check(NativePlaybackSession.clampedSeekTarget(9, duration: 3, loop: tiny) == 1,
+        "Sub-microsecond loop clamp never crosses below A")
+  var closed = false
+  session.shutdown { closed = true }
+  check(waitUntil { closed }, "Loop transport retires without hanging")
+}
+
 _ = NSApplication.shared
 NSApp.setActivationPolicy(.prohibited)
 testMPV()
 testNative(URL(fileURLWithPath: CommandLine.arguments[1]))
+testNativeLoopTransport(URL(fileURLWithPath: CommandLine.arguments[1]))
 print("RESULT: \(passed) passed; \(failed) failed")
 print("LIMIT: Native command and clock checks do not certify displayed pixels or audible output.")
 exit(failed == 0 ? 0 : 1)

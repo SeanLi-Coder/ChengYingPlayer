@@ -12,6 +12,7 @@ xcrun swiftc -swift-version 5 -target arm64-apple-macos14.4 -suppress-warnings \
   -import-objc-header iina/NativePlayback/CYNMediaDecoder.h \
   iina/Atomic.swift iina/Lock.swift iina/ReadWriteAtomic.swift iina/ReadWriteLock.swift \
   iina/MPVOption.swift iina/MPVProperty.swift iina/PlayerState.swift \
+  iina/VideoTools/VideoToolsLoopPolicy.swift \
   iina/PlaybackBackend/PlaybackTransport.swift iina/PlaybackBackend/NativePlaybackTransport.swift \
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift \
   iina/NativePlayback/NativePlaybackSession.swift iina/NativePlayback/NativePlaybackSurface.swift \

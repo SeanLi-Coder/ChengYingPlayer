@@ -156,6 +156,45 @@ native decoder／output／session／surface／transport／主窗口方法路由�
 抽取实际协调方法，普通／ASan／TSan 各 **53 项**，含 1,000 次换片；精确旧方法负对照
 稳定触发失效任务预算断言。系统封面生成与发布接口是受控边界，不是系统 Now Playing 实窗验收。
 
+## 原生 A/B 主窗口接入（本地验证通过，完整 App 待运行）
+
+`PlayerCore` 现在对 `[]` 与菜单 A→B→清除串行提交原生动作，从 session worker 精确采点，
+不以周期 UI 缓存或正在闲置的 mpv 为时钟。A=0 与未设置分开表示；B 必须大于 A。
+新开片、关闭和显式 seek 取消旧采点；明确修改标记也取消旧队列，取消结果异步通知，
+避免回调重入 open／stop 事务。等待 preroll 的采点最多两秒，最多排队 64 项。
+单文件循环偏好独立于 A/B；原生 seek 和 pending target 共用同一精确区间约束。
+
+主窗口显示真实可选标记；无效拖动会还原显示并提示，不再发出成功的 OSD。
+兼容切换先读取原生精确位置，再恢复可选 A/B 和原播放状态。已载入媒体临时 preroll
+不再错误恢复到 0 秒；等待上限后保留原生路径并报错。初始不支持格式仍可回退，
+已载入后的不支持格式变化明确停止，不能宣称中途格式变化已实现无缝恢复。
+
+本轮最终局部结果：
+
+- `bash Tools/NativeABLoopTests/run.sh` 与 TSan 各 132 项；真实 production session、
+  受控 PlayerCore 边界，不是完整 MainWindow/nib 操作。
+- `bash Tools/PlaybackTransportTests/run.sh` 与 TSan 各 132 项；session 209 项。
+- `python3 -B Tools/NativePlayerCoreTests/run.py --sanitize address`／`--sanitize thread`
+  各 37 项；终止优先级、准备中位置恢复、取消失效、取消回调重入四类负对照均按预期失败。
+  负对照原始失败不是通过结果，也没有改掉保护断言。
+- 旧路径回归：NativePlayerRoute 46、PlaybackModeLive 58、VideoViewport 两语言各 1098、
+  VideoTools 三语言各 942 UI／132 task、ClipPreviewLive 324、SeekTiming 37 policy／38 live。
+  SeekTiming 使用 `vo=null`，不是画面验收；最后一次 ClipPreviewLive 实际渲染 306 帧。
+  旧 fixture 仅补本轮增加的方法／依赖边界，未降低原断言。
+- 完整 App driver 保留原有 23 项并增至 41 项（含真实 `[]`、A/B 菜单、标记通知、
+  无效拖动回滚、paused 像素与精确时钟）；准备检查 17 项、比较器 73 项及 macOS 12
+  warnings-as-errors 编译通过。**41 项实窗测试尚未执行完成，不计为验收通过。**
+
+此前仅含 API guard 修正的 `ceeaa21b` CI `38296853923` 的媒体 job 已通过，完整构建 job
+仍在运行；该版本不含后来的 clock／pixel 修正和本轮 A/B，不能代替最新版本验收。
+
+一项保留旧图以减少 loop flush 闪烁的实验已撤回：候选实测出现旧图残留，未纳入生产或
+CI，仍保留原 `flush(removeImage: true)`。失败证据留在本机 ignored
+`build/native-loop-rejected.RJ1Wpj/`；不以读帧 API 的短暂空值直接推断实体屏幕黑闪。
+另已独立复现首视频延迟 1 秒、音频从 0 开始的 paused-open 阻塞：两种合成编码均先接受
+47 个音频样本、视频为 0、音频背压、时钟为 0；恢复播放后可继续。普通同步素材通过。
+真实 App 当前先 paused-open，因此这是待修复的准入缺陷，不只是测例限制。
+
 ## 实现文件
 
 - `iina/NativePlayback/CYNMediaDecoder.{h,m}`：只读本地文件、FFmpeg 收帧／drain、

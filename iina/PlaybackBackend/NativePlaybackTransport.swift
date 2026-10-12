@@ -11,6 +11,7 @@ final class NativePlaybackTransport: PlaybackTransport {
   private var pendingRate: (generation: UInt64?, value: Double)?
   private var pendingPause: (generation: UInt64?, value: Bool)?
   private var pendingSeek: (generation: UInt64, afterRevision: UInt64, target: Double)?
+  private(set) var loopInterval: NativePlaybackInterval?
 
   init(session: NativePlaybackSession) {
     dispatchPrecondition(condition: .onQueue(.main))
@@ -18,6 +19,9 @@ final class NativePlaybackTransport: PlaybackTransport {
     session.onSnapshot = { [weak self] value in
       guard let self else { return }
       let inactive = [.idle, .closed, .failed].contains(value.phase)
+      if inactive || self.snapshot.map({ $0.generation != value.generation }) == true {
+        self.loopInterval = nil
+      }
       if let pending = self.pendingVolume,
          inactive || pending.generation != value.generation || abs(pending.value - Double(value.volume) * 100) < 0.0001 {
         self.pendingVolume = nil
@@ -76,6 +80,15 @@ final class NativePlaybackTransport: PlaybackTransport {
     session.captureCurrentState(completion: completion)
   }
 
+  /// A/B edits invalidate old accepted navigation targets, but do not change
+  /// the global single-file repeat preference unless explicitly requested.
+  func setLoop(_ interval: NativePlaybackInterval?, repeatFile: Bool? = nil) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    loopInterval = interval
+    pendingSeek = nil
+    session.setLoop(interval, repeatFile: repeatFile)
+  }
+
   @discardableResult
   func setPaused(_ paused: Bool, context: PlaybackCommandContext) -> PlaybackTransportResult {
     dispatchPrecondition(condition: .onQueue(.main))
@@ -107,8 +120,8 @@ final class NativePlaybackTransport: PlaybackTransport {
     guard target.isFinite else { return .invalidInput }
     // Native always gates decoded samples precisely; approximate mpv seeking
     // is not emulated, and mpv-specific timing probes are not forwarded.
-    guard session.seek(to: target) else { return .unavailable }
-    let bounded = snapshot.duration > 0 ? min(target, max(0, snapshot.duration - 0.000001)) : target
+    let bounded = NativePlaybackSession.clampedSeekTarget(target, duration: snapshot.duration, loop: loopInterval)
+    guard session.seek(to: bounded) else { return .unavailable }
     pendingSeek = (snapshot.generation, snapshot.revision, bounded)
     return .accepted
   }

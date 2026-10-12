@@ -41,6 +41,7 @@ final class MainWindowDouble: NSResponder {
   func setupUI() { setupCount += 1; updateVolume() }
   func updateVolume() { volumeEnabled = player.hasSelectedPlaybackAudio }
   func updateSpeedLabel(speed: Double) {}
+  func syncSlider() {}
   func setWindowFloatingOnTop(_ onTop: Bool) {
     isOntop = onTop
     floatingChanges.append(onTop)
@@ -62,6 +63,8 @@ final class QuickSettingDouble { func setHdrAvailability(to: Bool) {} }
 final class InitialWindowDouble { var pendingShow = false; func close() {} }
 
 class PlaybackInfoFields {
+  enum LoopStatus { case cleared, aSet, bSet }
+  var abLoopStatus: LoopStatus = .cleared
   var currentURL: URL?
   var isNetworkResource = false
   var shouldAutoLoadFiles = false
@@ -93,6 +96,7 @@ final class NowPlayingInfoManager {
 final class VideoTime { var second: Double; init(_ value: Double) { second = value } }
 struct MPVPlaylistItem { let filename: String; let isCurrent: Bool; let isPlaying: Bool; let title: String? }
 enum LoopMode { case off, file, playlist }
+enum OSDMessage { case custom(String) }
 final class UpdateWorkAdmission {
   static let shared = UpdateWorkAdmission()
   var isOpeningMediaBlocked = false
