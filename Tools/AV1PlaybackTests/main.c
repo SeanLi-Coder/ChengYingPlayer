@@ -39,6 +39,17 @@ static double now(void) {
     return value.tv_sec + value.tv_nsec / 1000000000.0;
 }
 
+static void drain_diagnostic_logs(mpv_handle *player) {
+    // mpv gives queued playback events priority over its separate log buffer.
+    // Drain already-produced diagnostics before asserting the active decoder.
+    const double deadline = now() + 0.05;
+    for (int i = 0; i < 512 && now() < deadline; ++i) {
+        mpv_event *event = mpv_wait_event(player, 0);
+        if (event->event_id == MPV_EVENT_NONE) break;
+        capture_log(event);
+    }
+}
+
 static void check_backend(void) {
     const AVCodec *codec = avcodec_find_decoder_by_name("av1");
     require(codec != NULL, "Native AV1 decoder is present");
@@ -150,7 +161,7 @@ static void play_fixture(const char *path, int depth, const char *mode, bool har
     wait_event(player, MPV_EVENT_PLAYBACK_RESTART);
     char *active = mpv_get_property_string(player, "hwdec-current");
     require(active != NULL, "Read actual AV1 decoder path");
-    char *decoder = mpv_get_property_string(player, "video-codec");
+    char *decoder = mpv_get_property_string(player, "current-tracks/video/decoder-desc");
     char *pixel_format = mpv_get_property_string(player, "video-dec-params/pixelformat");
     printf("INFO: AV1 %d-bit requested=%s active=%s decoder=%s pixel-format=%s\n",
            depth, mode, active, decoder ? decoder : "unavailable",
@@ -158,6 +169,7 @@ static void play_fixture(const char *path, int depth, const char *mode, bool har
     fflush(stdout);
     mpv_free(decoder);
     mpv_free(pixel_format);
+    drain_diagnostic_logs(player);
     if (strcmp(mode, "no") == 0 || !hardware) {
         require(strcmp(active, "no") == 0, "Software AV1 fallback is actually selected");
     } else {
