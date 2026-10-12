@@ -29,14 +29,14 @@ Movist Pro 是播放体验的主要参考，范围同时包括播放内核、界
   参考软件也有缺陷，不能照搬其所有行为；Dolby Vision 播放支持和 tone mapping 的
   profile 限制必须分别核实，不能概括为所有动态 HDR 均完整支持。
 
-### 本机静态检查
+### 第一轮本机静态检查（历史记录）
 
 本机参考 App 为 Movist Pro 2.19.0 / build 275，主程序包含 arm64 与 x86_64。
 REA 固定提交 `3bdc8730bd98e073522bcb8ba86527be402c0cbe`（CLI 6.4.0）已本地构建。
 上一轮已实际解析 33 份界面档案及 ARM64 动态库依赖；观察到 FFmpeg、AVFoundation、
 VideoToolbox 等接口，但不能仅凭依赖或符号证明某个视频的实际播放路径。
 
-本轮已从官方固定版本下载并核对 Ghidra 12.1.4 的 SHA-256，在隔离目录编译 macOS ARM64
+第一轮已从官方固定版本下载并核对 Ghidra 12.1.4 的 SHA-256，在隔离目录编译 macOS ARM64
 native 组件；REA 的平台、引擎、Java 及 native decompiler 共 8 项检查通过。
 原生函数目录会话实际完成，使用默认分析器，第一次查询含导入/分析约 307 秒：
 
@@ -44,14 +44,66 @@ native 组件；REA 的平台、引擎、Java 及 native decompiler 共 8 项检
 - `SampleBufferRenderer` 只匹配 `objc_stub::sampleBufferRenderer`，这是分派桩而非已核实的呈现实现。
 - ARM64 常规已定义符号表仅列出执行头；这不意味着所有 Objective-C/Swift 元数据都不存在。
   类名搜索未命中也不能证明对应组件不存在，或证明其他定位方法必然无效。
-- 本轮未反编译函数体、重建完整调用图或执行 Movist。会话关闭、传输关闭和副本哈希复核成功，
+- 第一轮未反编译函数体、重建完整调用图或执行 Movist。会话关闭、传输关闭和副本哈希复核成功，
   所属临时数据库已移除；已安装 App 严格签名与主程序原始哈希仍通过。
 
-因此 REA 可辅助结构研究，但不能把工具导入成功写成“已还原播放内核”。本轮不盲目扩大
-到全程序反编译；应先依据公开行为和对照测试定位具体待回答的问题。
+因此 REA 可辅助结构研究，但不能把工具导入成功写成“已还原播放内核”。类名检索未命中
+不是研究终点；后续应从原生元数据定位入口，再分析具体函数体，见下一节。
 没有运行时对照之前，不声明已证明性能优势。
 完整二进制、界面档案、反编译输出仅留本机独立研究目录，不提交到本仓库。
 不读取用户许可证、账号或偏好，不绕过授权，不修改或执行分析副本。
+
+### 第二轮 REA 函数体分析（2026-10-12 晚间）
+
+用户再次明确要求实际使用 REA 研究播放内核，而不是停在依赖和类名查询。
+工具为 [REA: Reverse Engineer Anything](https://github.com/morluto/rea)，不是 RSA；
+本轮仍固定上述提交、Ghidra 和同一 Movist Pro 版本。源码基线为 `cc39a9dc`，
+研究记录分支为 `codex/movist-rea-core-evidence`，没有改动播放器运行时代码或发布新版本。
+
+先用 REA 的 Mach-O、Objective-C/Swift 元数据与 chained-fixup 解析定位实际地址，再以
+独立 Swift ABI 记录布局、class metadata 中实存 vtable 及 ARM64 `B`/`BL` 指令交叉核验。
+这样绕过的是符号名缺失的分析障碍，不是应用授权或系统安全限制。类描述符本身不能证明
+方法行为；相邻地址也不能作为归属证据。仅对已确认入口调用 REA 的 Ghidra
+`procedure_info`、`procedure_pseudo_code`、`procedure_callees` 和 `procedure_references`。
+
+两个有界分析会话实际完成：第一组获得五个函数体；第二组获得两个异步分发函数体和一个
+仅转发的入口。合计八个入口不等于八个完整模块，更不等于整个播放内核已还原。
+
+| 入口与静态归属 | 已确认的行为 | 仍不能推断的事项 |
+| --- | --- | --- |
+| `0x100155e54`，`FFAudioCodec` 基类槽 24 的尾跳目标 | FFmpeg 送包、循环收帧、回调与释放，区分暂不可取和结束 | 完整音频输出、重采样及设备切换策略 |
+| `0x100159658`，`FFVideoCodec` 同槽的尾跳目标 | FFmpeg 收帧、PTS/time base/起点换算、按帧信息分支回调 | 未核对的像素格式数值不证明零拷贝或实际硬解 |
+| `0x10002aaf0`，`FFAVSyncer` 音频输出完成回调路径 | 主机时钟、设备/用户音频延迟、播放速率参与时间映射；漂移修正并更新 generation | 实际音画误差、设备切换正确性或优于现有播放器 |
+| `0x10019f1f0`，`FFVideoDecoder` 槽 73 | 下层 codec/delegate 配置，deep color、HDR、Dolby Vision 兼容性的条件分支 | 完整 tone-mapping 算法、HDR 输出质量或所有 profile 支持 |
+| `0x10002bdec`，`FFMoviePlayer` 槽 52 | seek 状态与当前时间两条分支、访问 seekCommandCount 并调用相关 helper，构造闭包后调度 | 尚未追完 helper；不证明计数更新规则、请求合并、取消、精确定位或 A/B 边界 |
+| `0x10028fbf8`、`0x10028ff24`，`SampleBufferRenderer` 覆盖槽 24/25 | 读取对象的 queue，捕获输入及 self，以 Dispatch 异步提交 | 闭包执行体未查；不命名为送帧/暂停/变速，不证明串行队列 |
+| `0x100290344`，同 renderer 覆盖槽 26 | 20 字节入口转发至 `0x100290358` | 不作为已经分析呈现算法的证据 |
+
+同步函数的命名已通过真实调用边纠正：`audioDidOutWithAudioTime:hostTimeRaw:streamId:`
+wrapper `0x10002ac00` 的 `BL` 指向 `0x10002aaf0`；
+`shouldOutAudioAt:hostTimeRaw:startTime:streamId:` 的 wrapper 指向另一地址 `0x10002a9b4`。
+不要把前者误称为后者。音频/视频 codec 的两个归属也由各自已核验的覆盖入口直接尾跳确认，
+不是因函数体形似或地址邻近而猜测。
+
+renderer 元数据另确认 `timingSource`、`timer`、`sampleDuration`、`outputHostTime`、
+`nextDisplayHostTime`、`playbackRate`、`avSyncGeneration` 等计时字段；字段存在不证明更新算法。
+`VTDecompressionSession*` 的导入和桩存在，但仅查外部节点 caller 为空不能证明没有调用。
+本轮未验证特定文件使用硬解、AV1、零拷贝或 Metal，没有性能、功耗、实屏 HDR 或线程安全结论。
+Swift 调用约定、寄存器复用和推测类型在反编译中仍有误判，伪代码不能当作可编译源码照搬。
+
+本机证据目录：`build/movist-core-research-2026-10-12.HEq960/` 下的
+`session-l02Ovk`、`session-HJrFVa`，以及 `build/movist-metadata-map.KH8iwC/` 下的
+`dispatch-map.json`、`override-crosscheck.json`、`call-edge-crosscheck.json`。
+原始二进制和反编译输出只保留本地 ignored 目录，不上传公开仓库；仓库仅保留高层研究结论。
+两个会话均确认关闭 binary/transport，分析副本 SHA-256 不变；已安装 App 的主程序
+SHA-256 不变，`codesign --verify --deep --strict` 通过。未执行 Movist、修改安装、读取许可证或用户数据。
+
+后续实现应明确区分两条路线：原生 `AVPlayer` 候选，或自行实现的 FFmpeg/VideoToolbox
+解码、输出队列、音视频时钟与原生 sample-buffer 呈现组合。前者不能被表述为已移植 Movist
+内核；后者也需独立编写并实测，不能搬运反编译代码。现有 `PlayerCore`、菜单/快捷键、
+seek、A/B、字幕及剪辑预览直接依赖 mpv，不能只替换图层就宣称换核完成。
+下一步的具体研究缺口是 renderer 闭包执行体、seek 调度 helper 和真实 VideoToolbox 调用路径；
+下一步实现需先分离后端契约、状态事件与资源所有权，再做兼容矩阵和目标机验收。
 
 ### 实施前 ChengYing 的可核实差异（基线 d7cc6fea）
 
@@ -159,7 +211,8 @@ Dolby Vision profile、内外屏、全屏、倍速、A/B 与连续 seek。音画
 ## 当前交付状态
 
 - 已确认：参考范围覆盖内核、界面和交互；现有架构和 AV1 限制有源码依据。
-- 已完成的研究：隔离工具构建、原生函数目录查询和有界会话清理；类名到核心实现的定位仍未完成。
+- 已完成的研究：隔离工具构建、原生函数目录查询，以及第二轮元数据定位和八个入口的有界
+  函数体分析，详见上文；完整调用链、renderer 闭包与运行时验证仍未完成。
 - 实验分支已实现：上述 AV1、seek 与底栏三项独立改动，保留原项目许可证及来源。
 - 稳定候选只包含 seek 与底栏改动；AV1 仍保留原有软件解码及白名单保护，不宣称新增硬解支持。
 - 未完成：Movist 与 ChengYing 的运行时性能对照、原生新后端和目标 M4 Max 硬解/EDR 验收。
