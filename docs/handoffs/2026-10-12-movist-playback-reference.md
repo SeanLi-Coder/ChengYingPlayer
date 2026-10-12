@@ -182,7 +182,7 @@ Dolby Vision profile、内外屏、全屏、倍速、A/B 与连续 seek。音画
   AV1 实验保留于 `codex/movist-core-reference`（`e372bbd6`）；另从已验证主线建立不含 AV1
   回移的稳定候选，先交付 seek、居中底栏与测试宿主修补，不修改或重新运行失败标签。
 
-## 稳定候选 v0.2.81 / build 92
+## 稳定版本 v0.2.81 / build 92
 
 分支 `codex/movist-verified-playback-polish` 从主线 `d7cc6fea` 建立。依赖源码锁、五个既有
 mpv 补丁、构建脚本及分发验证器与该基线逐文件相同，没有回移 AV1 源文件、运行时白名单
@@ -204,7 +204,39 @@ helper 或实验诊断流程。AV1 的严格断言仍在实验分支，不通过
 - 底栏 667 项、集成 638 项、生命周期 174 项与交互 40 项检查通过；等待器 11 项、
   原生事件和可见性 16 项正反对照通过。GUI 测试 App 均退出并完成注册及临时目录清理。
   本地记录位于 `build/v0281-native-regression.HSQm8g`。
-- 完整 Xcode 构建、六个签名安装场景和公开自动更新验收待标签流水线完成；尚不能称为已发布。
+- 基线库 180 秒 4K H.264／HEVC Main10 实际硬解检查通过：6 次加载均选中 VideoToolbox，
+  3 轮重建、3 次编码切换、15 次 seek、9 次变速；每轮都核验两个编码的变化像素。
+  177 次内存采样中热身后 RSS 增长 4.7 MiB、physical footprint 增长 8.4 MiB，
+  不把短时样本说成多小时稳定性或零内存增长。记录位于 `build/playback-soak-stable-v0.2.81.PvcSVC`。
+- 原生更新检查 143 项、签名更新检查 23 项，以及更新策略／交付／增量资产／runner 共 60 项通过；
+  测试使用一次性签名与合成配置，不读取正式私钥、用户偏好或浏览器资料。
+- 完整 Xcode、六个签名安装场景、打包后 A/B／旋转／转换／Dolby Vision／HDR10+ 检查均已在
+  标签流水线通过，详见下方云端发布记录；不要与附加本机安装复核的限流失败混为一谈。
 
 每文件静音、用户配置／模型目录、更新签名与固定更新源均保持不变；不替换本机已安装 App，
 不调整系统权限，不把对照研究说成已经替换整个播放内核或证明相对 Movist 的性能提升。
+
+### 正式发布与验证边界
+
+- [v0.2.81](https://github.com/SeanLi-Coder/ChengYingPlayer/releases/tag/v0.2.81) 已于北京时间
+  **2026-10-12 16:44:14** 发布；版本标签对应 `7c8616eadba62640cfba4071389cacaa740c461f`，
+  不移动此前失败的 `v0.2.80` 标签。
+- [完整标签流水线](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/38220327610) 全部成功。
+  六个真实签名升级场景通过，合成偏好、书签、模型和历史保留；损坏增量回退和双损坏拒绝保持原断言。
+  原稳定版 v0.2.79 / build 90 的完整包先认证，再生成和还原增量，公钥、固定更新源和 Bundle ID 不变。
+- 八个正式资产齐全：DMG **168,997,704 字节**，从 build 90 的增量 **1,291,158 字节**，
+  源码包 559,718,120 字节，另含各校验和、来源清单和签名更新源。
+  发布 job `114731268492` 于 `08:44:17 UTC` 确认匿名 latest、实际客户端更新源，以及匿名下载
+  完整包／所有增量的大小和 SHA-256 与构建一致。日志保留于本地
+  `build/release-v0.2.81-build.log` 和 `build/release-v0.2.81-publication.log`。
+- 本机用跟踪脚本 `other/verify_public_release.py` 做附加公开安装复核，尚未通过：官方 Python 3.13
+  默认 CA 路径缺失，改为单次命令使用系统 `/etc/ssl/cert.pem` 后 TLS 正常，但 GitHub 匿名 API 返回
+  `403 rate limit exceeded`（当次返回重置时间 `09:50:02 UTC`）。未关闭 TLS／主机名校验、未修改
+  全局信任或给匿名请求添加认证。失败发生在元数据阶段，未展开 App 或挂载 DMG；失败证据保留，
+  不能把云端通过说成这一本机附加检查也通过。需要在匿名额度恢复后使用同一跟踪脚本重新验证。
+- 本机另做了不依赖 API 的有限复核：以跟踪模块的 `fetch`、`verify_feed_signature` 和 `verify`
+  读取实际客户端更新源及版本固定更新源，两者字节相同；匿名完整下载 DMG 和增量，SHA-256 校验和
+  与旧独立可信 plist 的 Ed25519 公钥验签均通过，版本／build／架构策略检查通过。未创建测试 App，
+  未挂载或安装；这不替代上项完整安装复核。记录：`build/ReleaseVerification.noindex/release-v0.2.81-feed.bbi7we_g`。
+  DMG SHA-256：`54ecf602f7104655ee808a25d0f439d8ee590e31523c89d1143ea53cc5b3fe74`；
+  增量 SHA-256：`78c26e54aebab2f4d0b56e86393c0c9eb14046c434ebbf91c594251e17721260`。
