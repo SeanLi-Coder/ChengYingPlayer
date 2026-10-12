@@ -164,3 +164,9 @@ Dolby Vision profile、内外屏、全屏、倍速、A/B 与连续 seek。音画
   后实际模式未通过严格断言。初始日志缺少实际模式及解码错误，不能推断是虚拟机或素材限制。
   新增仅播放库的分支诊断流程及有界日志，保留断言，不重跑原标签择优、不跳过失败、不修改旧发行版。
   修补后需新版本完整 CI 与公开自动更新验收。
+- 专项诊断 `38215640273` 证实 native AV1 已被选择，硬解初始化失败后退回 dav1d。
+  增加日志队列的有界排空，以及 FFmpeg verbose 对应的 mpv debug 级别后，
+  `38216265856` 得到具体错误：`VideoToolbox decoder for this format not found.`，
+  对应 `VTDecompressionSessionCreate` 的 `kVTCouldNotFindVideoDecoderErr`。
+  这排除了“没有尝试硬解”和属性名称错误，但仍不能单凭错误断定虚拟机或分辨率是原因。
+  中间排队的 `38215855776` 被同一诊断并发组的新提交替代而取消，没有测试结果，不计为通过。

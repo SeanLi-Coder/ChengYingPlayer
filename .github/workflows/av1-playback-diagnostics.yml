@@ -20,7 +20,7 @@ concurrency:
 jobs:
   decode:
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
       ARCHS: arm64
@@ -32,11 +32,33 @@ jobs:
           persist-credentials: false
       - name: Install isolated build tools
         run: brew install cmake pkg-config meson ninja autoconf automake libtool
+      - name: Record decoder test host capabilities
+        run: |
+          sw_vers -productVersion
+          uname -m
+          sysctl -n machdep.cpu.brand_string
+      - name: Test diagnostic isolation and failure reporting
+        run: python3 -B Tools/AV1PlaybackTests/test_diagnostics.py
       - name: Build and verify the same locked playback libraries
         run: |
           bash other/build_playback_libraries.sh
           bash Tools/PlaybackBuildTests/run.sh
           python3 -B other/verify_playback_distribution.py "$PWD/deps"
       - name: Require real AV1 decoding with diagnostic evidence
+        id: av1
         timeout-minutes: 5
         run: bash Tools/AV1PlaybackTests/run.sh
+      - name: Compare failures with the pinned upstream decoder
+        if: failure() && steps.av1.outcome == 'failure'
+        timeout-minutes: 12
+        run: |
+          python3 -B Tools/AV1PlaybackTests/diagnose.py \
+            --deps "$PWD/deps" --report "$PWD/build/av1-diagnostic-matrix"
+      - name: Retain synthetic decoder comparison evidence
+        if: always() && steps.av1.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: AV1-synthetic-decoder-diagnostics
+          path: build/av1-diagnostic-matrix/
+          if-no-files-found: error
+          retention-days: 7
