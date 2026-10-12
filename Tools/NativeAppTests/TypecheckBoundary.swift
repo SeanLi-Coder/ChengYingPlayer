@@ -5,6 +5,7 @@ import AVFoundation
 
 extension Notification.Name {
   static let iinaPlaySliderLoopKnobChanged = Notification.Name("fixture.loop-knob-changed")
+  static let iinaPlayerShutdown = Notification.Name("fixture.player-shutdown")
 }
 
 enum MPVProperty { static let idleActive = "idle-active" }
@@ -22,6 +23,7 @@ struct NativePlaybackSnapshot {
   var generation: UInt64
   var revision: UInt64
   var position: Double
+  var wantsPlayback: Bool
 }
 enum NativePlaybackQueryResult { case ready(NativePlaybackSnapshot), unavailable }
 final class NativePlaybackSession {
@@ -29,6 +31,7 @@ final class NativePlaybackSession {
 }
 final class NativeSampleBufferOutput { let displayLayer = AVSampleBufferDisplayLayer() }
 final class MPVController {
+  var mpv: OpaquePointer?
   var mpvRenderContext: OpaquePointer?
   func getFlag(_ property: String) -> Bool { false }
 }
@@ -42,8 +45,15 @@ final class PlaybackInfo {
   var abLoopStatus = LoopStatus.cleared
 }
 struct VideoToolsViewport { var scale = 1.0; var panX = 0.0; var panY = 0.0 }
+struct VideoToolsLoopRange { var start: Double; var end: Double }
+final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {}
+final class QuickSettingViewController: NSViewController {
+  enum TabViewType { case tools }
+  var currentTab = TabViewType.tools
+}
 final class VideoView: NSView {
   var hasInitializedOpenGL = false
+  var isUninited = false
   var nativeSurface: NativePlaybackSurface?
 }
 final class PlaySliderLoopKnob: NSView { var doubleValue = 0.0 }
@@ -52,18 +62,26 @@ final class PlaySlider: NSSlider {
   var abLoopB = PlaySliderLoopKnob()
 }
 final class MainWindowController: NSWindowController {
+  enum SideBarViewType { case hidden, settings }
   var loaded = false
   var videoView = VideoView()
   var volumeSlider: NSSlider!
   var playSlider: PlaySlider!
   var menuActionHandler: MainMenuActionHandler!
+  var quickSettingView = QuickSettingViewController()
+  var sideBarStatus = SideBarViewType.hidden
+  var isSidebarVisible = false
+  var sidebarAutoHidden = false
   func beginControlInteraction() {}
   func endControlInteraction() {}
+  func hideUIAndCursor() {}
+  func hideSideBar(animate: Bool = true, after: @escaping () -> Void = {}) {}
 }
 final class MainMenuActionHandler: NSObject {
   @objc func menuTogglePause(_ sender: NSMenuItem) {}
   @objc func menuFileLoop(_ sender: NSMenuItem) {}
   @objc func menuABLoop(_ sender: NSMenuItem) {}
+  @objc func menuShowVideoTools(_ sender: NSMenuItem) {}
 }
 final class PlayerCore {
   enum NativeLoopAction { case moveB(Double) }
@@ -83,6 +101,8 @@ final class PlayerCore {
   var playbackPosition: Double?
   var playbackLoopA: Double?
   var playbackLoopB: Double?
+  var nativePreviewInProgress = false
+  var videoToolsLoopRange: VideoToolsLoopRange?
   func openURL(_ url: URL, shouldAutoLoad: Bool) {}
   func seek(absoluteSecond: Double) {}
   func seek(relativeSecond: Double, option: Preference.SeekOption) {}

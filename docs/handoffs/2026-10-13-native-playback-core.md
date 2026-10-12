@@ -382,7 +382,7 @@ VideoTools 三语言各 942 UI 与 132 task、真实 libmpv preview 324 项与 3
 完整 App 驱动保留原 60 项，新增 15 项真实菜单、AX 时间字段及 AppKit delegate、预览按钮、
 slider、实际 chrome 隐藏和在已应用预览时关闭窗口，共 **75 项**。隐藏循环要求五秒内两次
 实际共享时钟回绕，不把播放中的 paused-image API 当作显示证据。暂停还原仍验证源像素。
-驱动准备测试 27 项通过，含 73 个像素／音量比较、46 个几何检查及 macOS 12 可用性负控；
+驱动准备测试 29 项通过，含 73 个像素／音量比较、46 个几何检查及 macOS 12 可用性负控；
 **尚未实际执行完整 App 75 项**。本机没有安装或运行正式 App，未改变用户配置或系统权限。
 
 较早 `bea876ea` 冻结候选的 CI `38310346836` 已跑完整 App **60 项中的前 59 项通过**，
@@ -391,8 +391,20 @@ slider、实际 chrome 隐藏和在已应用预览时关闭窗口，共 **75 项
 生产和测试 App 编译、前置独立内核及延迟首帧阶段通过；artifact `summary.json` 确认
 退出码 1、owned cleanup completed，普通发行构建没有测试驱动。证据只读下载于
 `build/native-app-ci-38310346836.vnHcRF/`。它不含本次 preview 235／App 75 或新诊断。
-末项尚在核实：生产注册表没有正常关闭时删 core 的代码；现有 artifact 未保存各核末态，
-不能将失败归因为列表清空，也不能尚未证明就认定生产提前退出。
+生产注册表没有正常关闭时删 core 的代码；现有 artifact 未保存各核末态，不能将失败
+归因为列表清空。driver 原退出请求来自 `captureCurrentState` 的 main GCD completion，
+而异步关核也依赖 main GCD；生产 MPV 发起退出已有 common RunLoop 入口避开此问题。
+无窗口真实 `NSApplication` 双对照 `build/native-termination-context.8n2vix/` 复现：
+GCD 发起 `.terminateLater` 时，一秒 common Timer 截止两个 main.async 关闭回调均为零、
+退出 1；只改 common RunLoop 入口则两回调完成、退出 0。未生成／安装 `.app`。
+
+新 driver 已采用 `performTerminationFromRunLoop`，不预先关闭 core、不延长 deadline。
+原 count≥2、所有 registered core `.shutDown` 门禁保留；另强持有实际两核，验证原生
+session/output 和 GL context 已卸下、已加载 VideoView 完成 uninit、原生层脱离宿主。
+输出无路径的各核状态、通知数、资源布尔值和耗时；未加载窗口不为诊断强制加载 nib。
+MPV handle 销毁可能在同步 shutdown 通知返回后，因而只诊断指针是否存在、不误作失败门禁。
+机械提取实际 driver helper 的真实 AppKit 正向与撤回旧 GCD 的单变量负控均有效，包含在
+29 项准备测试中。**这证明测试入口会产生阻塞，不代表新完整 App 75 项退出已通过**。
 
 额外待迁移门禁：
 

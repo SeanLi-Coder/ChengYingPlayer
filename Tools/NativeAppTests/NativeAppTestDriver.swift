@@ -13,10 +13,15 @@ final class NativeAppTestDriver {
   private let pixelReferences: [String: [Int]]
   private var checks: [[String: Any]] = []
   private var observer: NSObjectProtocol?
+  private var shutdownObserver: NSObjectProtocol?
   private var terminal = false
   private var awaitingQuit = false
   private var pollRevision = 0
   private var player: PlayerCore?
+  private var quitPlayers: [PlayerCore] = []
+  private var quitNativeLayer: AVSampleBufferDisplayLayer?
+  private var quitRequestedAt: TimeInterval?
+  private var shutdownNotifications: [ObjectIdentifier: Int] = [:]
 
   private init(root: URL, runID: String, pixelReferences: [String: [Int]]) {
     self.root = root
@@ -78,6 +83,7 @@ final class NativeAppTestDriver {
       "currentInputConfigName": "ChengYing Default", "audioDevice": "auto",
       "subAutoLoadIINA": 0, "subAutoLoadSearchPath": "./*",
       "softVolume": 0, "enableHdrSupport": false,
+      "enableControlBarAutoHide": true, "oscPosition": 2,
     ]
     arguments.merge(overrides) { _, value in value }
     UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
@@ -117,12 +123,27 @@ final class NativeAppTestDriver {
   }
 
   private func start() {
+    shutdownObserver = NotificationCenter.default.addObserver(forName: .iinaPlayerShutdown,
+                                                              object: nil, queue: .main) { [weak self] note in
+      guard let self, let core = note.object as? PlayerCore else { return }
+      self.shutdownNotifications[ObjectIdentifier(core), default: 0] += 1
+      if self.awaitingQuit { self.reportShutdownState(stage: "shutdown_notification") }
+    }
     observer = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
                                                       object: NSApp, queue: .main) { [weak self] _ in
       guard let self, !self.terminal else { return }
       guard self.awaitingQuit else { self.fail("unexpected_application_termination"); return }
-      guard PlayerCore.playerCores.count >= 2,
-            PlayerCore.playerCores.allSatisfy({ $0.info.state == .shutDown }) else {
+      self.reportShutdownState(stage: "will_terminate")
+      let registered = PlayerCore.playerCores
+      guard self.quitPlayers.count == 2, self.quitPlayers[0] !== self.quitPlayers[1],
+            registered.count >= 2,
+            self.quitPlayers.allSatisfy({ expected in registered.contains { $0 === expected } }),
+            registered.allSatisfy({ $0.info.state == .shutDown }),
+            self.quitPlayers.allSatisfy({
+              $0.info.state == .shutDown && $0.nativePlaybackSession == nil &&
+                $0.nativePlaybackOutput == nil && $0.mpv.mpvRenderContext == nil &&
+                $0.mainWindow.loaded && $0.mainWindow.videoView.isUninited
+            }), self.quitNativeLayer != nil, self.quitNativeLayer?.superlayer == nil else {
         self.fail("all_real_cores_shutdown_before_termination")
         return
       }
@@ -569,7 +590,7 @@ final class NativeAppTestDriver {
             self.waitForNativePaused(player, position: 0, color: .red, label: "ab_cleanup_remains_native_without_gl",
               extra: { player.getLoopMode() == .off && self.markersMatch(player, start: nil, end: nil) }) {
               player.mainWindow.endControlInteraction()
-              self.exerciseDelayedFirstVideo(player)
+              self.exerciseClipPreview(player)
             }
           }
         }
@@ -669,11 +690,259 @@ final class NativeAppTestDriver {
         self.fail("replacement_resets_volume_and_slider"); return
       }
       self.record("replacement_resets_volume_and_slider")
+      self.closeWhilePreviewing(player)
+    }
+  }
+
+  private struct PreviewControls {
+    let panel: VideoToolsViewController
+    let start: NSTextField
+    let end: NSTextField
+    let toggle: NSButton
+  }
+
+  private func previewControls(_ player: PlayerCore) -> PreviewControls? {
+    guard let panel = player.mainWindow.quickSettingView.children.compactMap({ $0 as? VideoToolsViewController }).first,
+          panel.isViewLoaded, panel.view.window === player.mainWindow.window else { return nil }
+    func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+    let views = descendants(panel.view)
+    let fields = views.compactMap { $0 as? NSTextField }.filter { ($0.delegate as AnyObject?) === panel }
+    let starts = fields.filter { $0.accessibilityLabel() == NSLocalizedString("videotools.start", comment: "Start") }
+    let ends = fields.filter { $0.accessibilityLabel() == NSLocalizedString("videotools.end", comment: "End") }
+    let buttons = views.compactMap { $0 as? NSButton }.filter {
+      ($0.target as AnyObject?) === panel && $0.action == NSSelectorFromString("toggleRangePreview:")
+    }
+    guard starts.count == 1, ends.count == 1, buttons.count == 1,
+          starts[0] !== ends[0], starts[0].isEnabled, ends[0].isEnabled, buttons[0].isEnabled else { return nil }
+    return PreviewControls(panel: panel, start: starts[0], end: ends[0], toggle: buttons[0])
+  }
+
+  private func previewActive(_ player: PlayerCore, start: Double, end: Double) -> Bool {
+    previewOwnedRange(player, start: start, end: end) && player.info.state == .playing && !player.playbackIsPaused
+  }
+
+  private func previewOwnedRange(_ player: PlayerCore, start: Double, end: Double) -> Bool {
+    guard player.isUsingNativePlayback, !player.mainWindow.videoView.hasInitializedOpenGL,
+          player.mpv.mpvRenderContext == nil, player.nativePreviewInProgress,
+          player.playbackVolume == 0,
+          let range = player.videoToolsLoopRange else { return false }
+    return abs(range.start - start) < 0.000001 && abs(range.end - end) < 0.000001
+  }
+
+  private func sendPreviewToggle(_ controls: PreviewControls) -> Bool {
+    guard controls.toggle.isEnabled, let action = controls.toggle.action,
+          (controls.toggle.target as AnyObject?) === controls.panel else { return false }
+    return NSApp.sendAction(action, to: controls.toggle.target, from: controls.toggle)
+  }
+
+  private func editPreviewField(_ field: NSTextField, text: String, panel: VideoToolsViewController) -> Bool {
+    guard field.isEnabled, field.window != nil, (field.delegate as AnyObject?) === panel else { return false }
+    field.stringValue = text
+    // Exercise the existing AppKit text delegate entry, not the private timer or
+    // Core preview implementation. This is not physical keyboard injection.
+    field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
+    return true
+  }
+
+  private func exerciseClipPreview(_ player: PlayerCore) {
+    player.seek(absoluteSecond: 1.25)
+    waitForNativePaused(player, position: 1.25, color: .red, label: "preview_baseline_paused_red",
+      extra: { !player.nativePreviewInProgress && player.videoToolsLoopRange == nil && player.getLoopMode() == .off }) {
+      guard let window = player.mainWindow.window,
+            NSApp.sendAction(#selector(MainMenuActionHandler.menuShowVideoTools(_:)),
+                             to: player.mainWindow.menuActionHandler, from: NSMenuItem()) else {
+        self.fail("preview_real_tools_menu_attached"); return
+      }
+      let originalFrame = window.frame
+      self.wait("preview_real_tools_menu_attached", until: {
+        player.mainWindow.sideBarStatus == .settings && player.mainWindow.quickSettingView.currentTab == .tools &&
+          player.mainWindow.isSidebarVisible && self.previewControls(player) != nil && player.isUsingNativePlayback &&
+          !player.mainWindow.videoView.hasInitializedOpenGL && player.mpv.mpvRenderContext == nil
+      }) {
+        guard let controls = self.previewControls(player) else { self.fail("preview_real_tools_menu_attached"); return }
+        self.wait("preview_tools_auto_preview", until: { self.previewActive(player, start: 1.25, end: 6.25) }) {
+          self.verifyClock(player, advancing: true, label: "preview_auto_shared_clock_advances") {
+            self.editPreviewRange(player, controls: controls, originalFrame: originalFrame)
+          }
+        }
+      }
+    }
+  }
+
+  private func editPreviewRange(_ player: PlayerCore, controls: PreviewControls, originalFrame: NSRect) {
+    guard editPreviewField(controls.start, text: "00:02.000000", panel: controls.panel),
+          editPreviewField(controls.end, text: "00:03.800000", panel: controls.panel),
+          editPreviewField(controls.start, text: "00:02.750000", panel: controls.panel),
+          editPreviewField(controls.end, text: "00:03.250000", panel: controls.panel),
+          previewActive(player, start: 1.25, end: 6.25) else {
+      fail("preview_fields_debounce_pending"); return
+    }
+    // Same-turn edits must not synchronously apply any intermediate range.
+    // The production timer is responsible for the eventual latest-only commit.
+    record("preview_fields_debounce_pending")
+    wait("preview_latest_fields_apply", until: { self.previewActive(player, start: 2.75, end: 3.25) }) {
+      guard let window = player.mainWindow.window else { self.fail("preview_chrome_actually_hides"); return }
+      window.makeFirstResponder(nil)
+      let view = player.mainWindow.videoView
+      let desired = window.convertPoint(toScreen: view.convert(
+        NSPoint(x: view.bounds.width * 0.25, y: view.bounds.midY), to: nil))
+      let pointer = NSEvent.mouseLocation
+      // Move only this disposable test window, placing the existing cursor over
+      // its picture instead of controls. Never move/inject the system cursor.
+      window.setFrameOrigin(NSPoint(x: window.frame.minX + pointer.x - desired.x,
+                                    y: window.frame.minY + pointer.y - desired.y))
+      player.mainWindow.hideUIAndCursor()
+      self.wait("preview_chrome_actually_hides", until: {
+        player.mainWindow.sidebarAutoHidden && player.mainWindow.sideBarStatus == .settings &&
+          !player.mainWindow.isSidebarVisible && controls.panel.view.isHiddenOrHasHiddenAncestor &&
+          self.previewActive(player, start: 2.75, end: 3.25)
+      }) {
+        self.observeHiddenPreviewWraps(player) {
+          player.mainWindow.beginControlInteraction()
+          window.setFrame(originalFrame, display: true, animate: false)
+          self.wait("preview_stop_button_restores_state", recordSuccess: false, until: {
+            player.mainWindow.isSidebarVisible && !controls.panel.view.isHiddenOrHasHiddenAncestor
+          }) {
+            guard self.sendPreviewToggle(controls) else { self.fail("preview_stop_button_restores_state"); return }
+            self.waitForNativePaused(player, position: 1.25, color: .red,
+              label: "preview_stop_button_restores_state", extra: {
+                !player.nativePreviewInProgress && player.videoToolsLoopRange == nil && player.getLoopMode() == .off
+              }) {
+              self.checkStoppedPreview(player, controls: controls)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func observeHiddenPreviewWraps(_ player: PlayerCore, completion: @escaping () -> Void) {
+    guard let session = player.nativePlaybackSession else { fail("preview_hidden_chrome_keeps_looping"); return }
+    let deadline = ProcessInfo.processInfo.systemUptime + 5
+    var last: Double?
+    var wraps = 0
+    var observations = 0
+    var revision: UInt64 = 0
+    func poll() {
+      guard !self.terminal else { return }
+      session.captureCurrentState { result in
+        guard !self.terminal else { return }
+        if case .ready(let snapshot) = result {
+          guard player.nativePlaybackSession === session, snapshot.volume == 0,
+                snapshot.phase == .playing, snapshot.wantsPlayback,
+                snapshot.position >= 2.75 && snapshot.position <= 3.25,
+                player.mainWindow.sidebarAutoHidden,
+                self.previewOwnedRange(player, start: 2.75, end: 3.25) else {
+            self.fail("preview_hidden_chrome_keeps_looping"); return
+          }
+          observations += 1
+          if let last, snapshot.position < last - 0.2 { wraps += 1 }
+          last = snapshot.position
+          revision = snapshot.revision
+        }
+        if wraps >= 2 && observations >= 4 {
+          print("NATIVE_APP_PREVIEW_LOOP: observations=\(observations) wraps=\(wraps) revision=\(revision)")
+          self.record("preview_hidden_chrome_keeps_looping")
+          completion()
+        } else if ProcessInfo.processInfo.systemUptime >= deadline {
+          print("NATIVE_APP_PREVIEW_LOOP: observations=\(observations) wraps=\(wraps) revision=\(revision) position=\(last ?? -1)")
+          self.fail("preview_hidden_chrome_keeps_looping")
+        } else {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: poll)
+        }
+      }
+    }
+    poll()
+  }
+
+  private func checkStoppedPreview(_ player: PlayerCore, controls: PreviewControls) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+      guard !self.terminal else { return }
+      guard let session = player.nativePlaybackSession else { self.fail("preview_stopped_stays_stopped"); return }
+      session.captureCurrentState { result in
+        guard case .ready(let snapshot) = result, snapshot.phase == .paused,
+              abs(snapshot.position - 1.25) < 0.000001, snapshot.volume == 0,
+              !player.nativePreviewInProgress, player.videoToolsLoopRange == nil else {
+          self.fail("preview_stopped_stays_stopped"); return
+        }
+        self.record("preview_stopped_stays_stopped")
+        guard self.sendPreviewToggle(controls) else { self.fail("preview_manual_seek_cancels"); return }
+        self.wait("preview_manual_seek_cancels", recordSuccess: false, until: {
+          self.previewActive(player, start: 2.75, end: 3.25)
+        }) {
+          guard NSApp.sendAction(#selector(MainMenuActionHandler.menuTogglePause(_:)),
+                                 to: player.mainWindow.menuActionHandler, from: NSMenuItem()) else {
+            self.fail("preview_manual_seek_cancels"); return
+          }
+          self.wait("preview_manual_seek_cancels", recordSuccess: false,
+            until: { player.playbackIsPaused && player.info.state == .paused }) {
+            guard let duration = player.info.videoDuration?.second, duration > 4.2 else {
+              self.fail("preview_manual_seek_cancels"); return
+            }
+            let slider = player.mainWindow.playSlider!
+            slider.doubleValue = 4.2 / duration * slider.maxValue
+            guard let action = slider.action, NSApp.sendAction(action, to: slider.target, from: slider) else {
+              self.fail("preview_manual_seek_cancels"); return
+            }
+            self.waitForNativePaused(player, position: 4.2, color: .green,
+              label: "preview_manual_seek_cancels", extra: {
+                !player.nativePreviewInProgress && player.videoToolsLoopRange == nil
+              }) {
+              self.finishPreviewPanel(player)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func finishPreviewPanel(_ player: PlayerCore) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+      guard !self.terminal else { return }
+      guard let session = player.nativePlaybackSession else { self.fail("preview_manual_seek_stays_cancelled"); return }
+      session.captureCurrentState { result in
+        guard case .ready(let snapshot) = result, snapshot.phase == .paused,
+              abs(snapshot.position - 4.2) < 0.000001, snapshot.volume == 0,
+              !player.nativePreviewInProgress, player.videoToolsLoopRange == nil else {
+          self.fail("preview_manual_seek_stays_cancelled"); return
+        }
+        self.record("preview_manual_seek_stays_cancelled")
+        player.mainWindow.hideSideBar(animate: false) {
+          self.waitForNativePaused(player, position: 4.2, color: .green,
+            label: "preview_panel_close_remains_native", extra: {
+              player.mainWindow.sideBarStatus == .hidden && !player.nativePreviewInProgress &&
+                player.videoToolsLoopRange == nil && player.getLoopMode() == .off
+            }) {
+            player.mainWindow.endControlInteraction()
+            self.exerciseDelayedFirstVideo(player)
+          }
+        }
+      }
+    }
+  }
+
+  private func closeWhilePreviewing(_ player: PlayerCore) {
+    guard NSApp.sendAction(#selector(MainMenuActionHandler.menuShowVideoTools(_:)),
+                           to: player.mainWindow.menuActionHandler, from: NSMenuItem()) else {
+      fail("preview_window_close_begins_with_applied_range"); return
+    }
+    wait("preview_window_close_begins_with_applied_range", until: {
+      player.mainWindow.sideBarStatus == .settings && self.previewControls(player) != nil &&
+        self.previewActive(player, start: 0, end: 5)
+    }) {
+      let layer = player.nativePlaybackOutput?.displayLayer
       player.mainWindow.window?.performClose(nil)
       self.wait("real_window_close_retires_native_session", until: {
         player.info.state == .idle && !player.isUsingNativePlayback &&
           player.mainWindow.window?.isVisible == false
-      }) { self.exerciseCompatibility(player) }
+      }) {
+        guard !player.nativePreviewInProgress, layer?.superlayer == nil,
+              player.nativePlaybackSession == nil else {
+          self.fail("preview_window_close_cancels_and_detaches"); return
+        }
+        self.record("preview_window_close_cancels_and_detaches")
+        self.exerciseCompatibility(player)
+      }
     }
   }
 
@@ -733,6 +1002,10 @@ final class NativeAppTestDriver {
   private func prepareActiveQuit() {
     // The first core stays loaded in compatibility, so this is a genuinely new core.
     let second = PlayerCore.newPlayerCore
+    guard let first = player, first !== second else {
+      fail("native_and_compatibility_ready_for_real_quit"); return
+    }
+    quitPlayers = [first, second]
     var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
     arguments["pauseWhenOpen"] = true
     UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
@@ -753,12 +1026,43 @@ final class NativeAppTestDriver {
             self.player?.info.state == .paused
         }) {
           self.verifyClock(second, advancing: true, label: "resumed_native_shared_clock_advances") {
+            guard let layer = second.nativePlaybackOutput?.displayLayer else {
+              self.fail("all_real_cores_shutdown_before_termination"); return
+            }
+            self.quitNativeLayer = layer
             self.awaitingQuit = true
+            self.quitRequestedAt = ProcessInfo.processInfo.systemUptime
+            self.reportShutdownState(stage: "before_terminate")
             self.writeReport(complete: false, passed: false)
-            NSApp.terminate(nil)
+            Self.performTerminationFromRunLoop {
+              guard !self.terminal, self.awaitingQuit else { return }
+              NSApp.terminate(nil)
+            }
           }
         }
       }
+    }
+  }
+
+  private static func performTerminationFromRunLoop(_ termination: @escaping () -> Void) {
+    // terminateLater runs AppKit's nested termination loop. Entering it from a
+    // main GCD block starves the main-queue shutdown completions it must await.
+    // Match the production mpv-initiated quit path without pre-closing any core.
+    RunLoop.main.perform(inModes: [.common], block: termination)
+  }
+
+  private func reportShutdownState(stage: String) {
+    let registered = PlayerCore.playerCores
+    let elapsed = quitRequestedAt.map { ProcessInfo.processInfo.systemUptime - $0 } ?? -1
+    print("NATIVE_APP_TEST_QUIT: stage=\(stage) elapsed=\(elapsed) expected=\(quitPlayers.count) registered=\(registered.count) nativeLayerDetached=\(quitNativeLayer?.superlayer == nil)")
+    for (index, core) in registered.enumerated() {
+      let expected = quitPlayers.firstIndex { $0 === core } ?? -1
+      let notices = shutdownNotifications[ObjectIdentifier(core), default: 0]
+      let windowLoaded = core.mainWindow.loaded
+      let videoUninited = windowLoaded ? core.mainWindow.videoView.isUninited : false
+      // A headless mpv handle is detached after mpvHasShutdown returns. Its
+      // pointer is diagnostic, not a substitute for genuine shutdown state.
+      print("NATIVE_APP_TEST_QUIT_CORE: index=\(index) expected=\(expected) state=\(core.info.state) notices=\(notices) nativeSession=\(core.nativePlaybackSession != nil) nativeOutput=\(core.nativePlaybackOutput != nil) glContext=\(core.mpv.mpvRenderContext != nil) windowLoaded=\(windowLoaded) videoUninited=\(videoUninited) mpvHandle=\(core.mpv.mpv != nil)")
     }
   }
 
@@ -813,7 +1117,7 @@ final class NativeAppTestDriver {
 
   private func fixture(_ name: String) -> URL { root.appendingPathComponent(name) }
 
-  private func wait(_ label: String, timeout: Double = 12, until condition: @escaping () -> Bool,
+  private func wait(_ label: String, timeout: Double = 12, recordSuccess: Bool = true, until condition: @escaping () -> Bool,
                     then continuation: @escaping () -> Void) {
     pollRevision += 1
     let request = pollRevision
@@ -821,7 +1125,7 @@ final class NativeAppTestDriver {
     func poll() {
       guard !terminal, request == pollRevision else { return }
       if condition() {
-        record(label)
+        if recordSuccess { record(label) }
         continuation()
       } else if ProcessInfo.processInfo.systemUptime >= deadline {
         fail(label)
@@ -833,6 +1137,7 @@ final class NativeAppTestDriver {
   }
 
   private func record(_ label: String) {
+    if label.hasPrefix("preview_") { logPreviewState() }
     checks.append(["label": label, "passed": true])
     print("NATIVE_APP_TEST_PASS: \(label)")
     writeReport(complete: false, passed: false)
@@ -840,11 +1145,20 @@ final class NativeAppTestDriver {
 
   private func fail(_ label: String) {
     guard !terminal else { return }
+    if label.hasPrefix("preview_") { logPreviewState() }
     terminal = true
     checks.append(["label": label, "passed": false])
     writeReport(complete: true, passed: false)
     fputs("NATIVE_APP_TEST_FAIL: \(label)\n", stderr)
     exit(1)
+  }
+
+  private func logPreviewState() {
+    guard let player else { print("NATIVE_APP_PREVIEW_STATE: player=unavailable"); return }
+    let range = player.videoToolsLoopRange
+    // Main-owned cached state is diagnostic only. Worker-clock assertions are
+    // still made separately, without reading worker-owned fields from AppKit.
+    print("NATIVE_APP_PREVIEW_STATE: native=\(player.isUsingNativePlayback) preview=\(player.nativePreviewInProgress) phase=\(String(describing: player.info.state)) cachedPosition=\(player.playbackPosition ?? -1) start=\(range?.start ?? -1) end=\(range?.end ?? -1) paused=\(player.playbackIsPaused) sidebarHidden=\(player.mainWindow.sidebarAutoHidden) gl=\(player.mainWindow.videoView.hasInitializedOpenGL)")
   }
 
   private func writeReport(complete: Bool, passed: Bool) {

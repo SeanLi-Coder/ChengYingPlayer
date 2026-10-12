@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check isolation and generated media before the complete CI-only App run."""
 import importlib.util
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -16,6 +17,69 @@ SPEC.loader.exec_module(runner)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_real_appkit_termination_context_and_old_gcd_negative_control(self):
+        driver = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        anchor = "  private static func performTerminationFromRunLoop("
+        self.assertEqual(driver.count(anchor), 1)
+        start = driver.index(anchor)
+        end = driver.index("\n  }", start) + len("\n  }")
+        scheduler = driver[start:end].replace("private static func", "static func", 1)
+        statement = "RunLoop.main.perform(inModes: [.common], block: termination)"
+        self.assertEqual(scheduler.count(statement), 1)
+        probe = SOURCE.with_name("TerminationContextProbe.swift").read_text()
+        marker = "  // INSERT_DRIVER_SCHEDULER"
+        self.assertEqual(probe.count(marker), 1)
+        print("TERMINATION_PROBE_INPUTS: driver_sha256=" + hashlib.sha256(driver.encode()).hexdigest() +
+              " probe_sha256=" + hashlib.sha256(probe.encode()).hexdigest())
+        # CLI executables only: no NSWindow, .app bundle, LaunchServices registration,
+        # production media or actual PlayerCore teardown is claimed by this probe.
+        with tempfile.TemporaryDirectory(prefix="native-termination-context-") as directory:
+            root = Path(directory)
+            main = root / "main.swift"
+            executable = root / "termination-probe"
+            for negative in (False, True):
+                selected = scheduler.replace(statement, "termination()", 1) if negative else scheduler
+                generated = probe.replace(marker, selected, 1)
+                main.write_text(generated)
+                subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-warnings-as-errors",
+                                str(main), "-o", str(executable)], check=True, timeout=90)
+                result = subprocess.run([str(executable)], capture_output=True, text=True, timeout=8)
+                print("TERMINATION_PROBE_RESULT: negative=" + str(negative) +
+                      " exit=" + str(result.returncode) + " source_sha256=" +
+                      hashlib.sha256(generated.encode()).hexdigest())
+                print(result.stdout, end="")
+                self.assertIn("TERMINATION_PROBE: should_terminate", result.stdout)
+                if negative:
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("TERMINATION_PROBE_FAIL: main_queue_completions=0", result.stdout)
+                    self.assertNotIn("TERMINATION_PROBE: will_terminate", result.stdout)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("TERMINATION_PROBE: will_terminate main_queue_completions=2", result.stdout)
+                    self.assertNotIn("TERMINATION_PROBE_FAIL", result.stdout)
+
+    def test_quit_preserves_real_core_state_and_resource_requirements(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        observer = source[source.index("    observer = NotificationCenter"):source.index("    DispatchQueue.main.asyncAfter(deadline: .now() + 110)")]
+        for evidence in ("self.quitPlayers.count == 2", "self.quitPlayers[0] !== self.quitPlayers[1]",
+                         "registered.count >= 2", "registered.contains { $0 === expected }",
+                         "registered.allSatisfy({ $0.info.state == .shutDown })",
+                         "$0.nativePlaybackSession == nil", "$0.nativePlaybackOutput == nil",
+                         "$0.mpv.mpvRenderContext == nil", "$0.mainWindow.videoView.isUninited",
+                         "$0.mainWindow.loaded && $0.mainWindow.videoView.isUninited",
+                         "self.quitNativeLayer != nil", "self.quitNativeLayer?.superlayer == nil"):
+            self.assertIn(evidence, observer)
+        self.assertNotIn("shutdownNotifications", observer)
+        self.assertNotIn(".mpv.mpv == nil", observer)
+        self.assertIn("quitPlayers = [first, second]", source)
+        self.assertIn("Self.performTerminationFromRunLoop {", source)
+        self.assertIn('reportShutdownState(stage: "will_terminate")', observer)
+        self.assertIn('reportShutdownState(stage: "shutdown_notification")', source)
+        self.assertIn("windowLoaded ? core.mainWindow.videoView.isUninited : false", source)
+        self.assertIn("NSApp.terminate(nil)", source)
+        # This is a source contract. Only a subsequent complete App run can
+        # establish that both production cores really reached these states.
+
     def test_manual_ci_collects_independent_evidence_without_masking_failure(self):
         workflow = (runner.ROOT / ".github/workflows/ci.yml").read_text()
         sections = {part.split("\n", 1)[0]: part for part in workflow.split("\n      - name: ")[1:]}
@@ -25,6 +89,7 @@ class RunnerTests(unittest.TestCase):
         for title in ("Test bounded native preroll with delayed video",
                       "Test native playback surfaces and route ownership",
                       "Test native player lifecycle and menu integration",
+                      "Test native clip preview ownership and cancellation",
                       "Test native playback in the complete application window"):
             self.assertIn(condition, sections[title])
             self.assertNotIn("continue-on-error", sections[title])
@@ -224,7 +289,9 @@ class RunnerTests(unittest.TestCase):
         self.assertLess(quit.index("second.info.state == .paused"), quit.index("self.pixel(second, is: .blue)"))
         self.assertLess(quit.index("self.pixel(second, is: .blue)"), quit.index("menuTogglePause"))
         self.assertLess(quit.index("verifyClock(second, advancing: true"), quit.index("NSApp.terminate(nil)"))
-        self.assertNotIn("self.pixel(", quit[quit.index('"native_and_compatibility_ready_for_real_quit"'):])
+        playing_stage = 'self.wait("native_and_compatibility_ready_for_real_quit", until:'
+        self.assertEqual(quit.count(playing_stage), 1)
+        self.assertNotIn("self.pixel(", quit[quit.index(playing_stage):])
         self.assertTrue({"native_autoplay_shared_clock_advances", "paused_initial_frame_matches_red",
                          "second_native_paused_blue_frame", "second_real_resume_menu_action",
                          "resumed_native_shared_clock_advances"}.issubset(runner.REQUIRED_CHECKS))
@@ -294,10 +361,61 @@ class RunnerTests(unittest.TestCase):
             self.assertIn(proof, paused)
         cycle = method("checkABMenuCycle")
         self.assertEqual(cycle.count("sendABMenu(player)"), 3)
-        self.assertLess(cycle.index('"ab_menu_cycle_clears_range"'), cycle.index("self.exerciseDelayedFirstVideo(player)"))
+        self.assertLess(cycle.index('"ab_menu_cycle_clears_range"'), cycle.index("self.exerciseClipPreview(player)"))
+        self.assertIn("self.exerciseDelayedFirstVideo(player)", method("finishPreviewPanel"))
         self.assertIn("player.mainWindow.endControlInteraction()", cycle)
         # This checks the test's production-entry-point contract; only execution
         # inside the complete CI App can establish actual UI/playback success.
+
+    def test_preview_driver_uses_real_menu_controls_and_delegate_entries(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private struct PreviewControls")
+        end = source.index("  private func exerciseDelayedFirstVideo", start)
+        preview = source[start:end]
+        for proof in ("#selector(MainMenuActionHandler.menuShowVideoTools(_:))", "panel.view.window ===",
+                      "accessibilityLabel()", "NSSelectorFromString(\"toggleRangePreview:\")",
+                      "NSApp.sendAction(action, to: controls.toggle.target, from: controls.toggle)",
+                      "field.delegate?.controlTextDidChange?", "NSControl.textDidChangeNotification",
+                      "slider.doubleValue = 4.2 / duration * slider.maxValue",
+                      "NSApp.sendAction(action, to: slider.target, from: slider)"):
+            self.assertIn(proof, preview)
+        for bypass in ("requestNativePreview(", "finishNativePreview(", "cancelNativePreview(",
+                       "previewRange(", "stopPreview(", "Mirror(reflecting:"):
+            self.assertNotIn(bypass, preview)
+        self.assertIn('"enableControlBarAutoHide": true', source)
+        self.assertIn('"oscPosition": 2', source)
+
+    def test_preview_hidden_loop_uses_bounded_real_clock_and_keeps_readback_contract(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private func observeHiddenPreviewWraps(")
+        end = source.index("\n  }", start) + len("\n  }")
+        loop = source[start:end]
+        for proof in ("systemUptime + 5", "session.captureCurrentState", "snapshot.phase == .playing",
+                      "snapshot.wantsPlayback", "snapshot.volume == 0", "snapshot.position >= 2.75",
+                      "snapshot.position <= 3.25", "player.mainWindow.sidebarAutoHidden",
+                      "snapshot.position < last - 0.2", "wraps >= 2 && observations >= 4",
+                      "NATIVE_APP_PREVIEW_LOOP"):
+            self.assertIn(proof, loop)
+        self.assertNotIn("displayedPixelBuffer", loop)
+        self.assertNotIn(".pixel(", loop)
+        self.assertIn("window.setFrameOrigin", source)
+        self.assertIn("player.mainWindow.hideUIAndCursor()", source)
+        self.assertNotIn("CGWarpMouseCursorPosition", source)
+        self.assertIn("window.setFrame(originalFrame, display: true, animate: false)", source)
+
+    def test_preview_close_requires_applied_range_before_actual_window_close(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private func closeWhilePreviewing(")
+        end = source.index("\n  }", start) + len("\n  }")
+        close = source[start:end]
+        self.assertLess(close.index("self.previewActive(player, start: 0, end: 5)"),
+                        close.index("player.mainWindow.window?.performClose(nil)"))
+        for proof in ("!player.nativePreviewInProgress", "layer?.superlayer == nil",
+                      "player.nativePlaybackSession == nil", '"real_window_close_retires_native_session"',
+                      "self.exerciseCompatibility(player)"):
+            self.assertIn(proof, close)
+        self.assertIn("recordSuccess: Bool = true", source)
+        self.assertIn("if recordSuccess { record(label) }", source)
 
     def test_delayed_stage_requires_real_paused_pixels_before_resuming(self):
         source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
@@ -384,7 +502,7 @@ class RunnerTests(unittest.TestCase):
                             str(main), "-o", str(executable)], check=True, timeout=90)
             subprocess.run([str(executable)], check=True, timeout=15)
 
-    def test_every_baseline_ab_delayed_and_viewport_check_is_required(self):
+    def test_every_baseline_ab_delayed_viewport_and_preview_check_is_required(self):
         baseline = {
             "pristine_real_mpv_service", "native_autoplay_ready", "native_autoplay_shared_clock_advances",
             "real_mainwindow_nib_outlets", "paused_initial_frame_matches_red",
@@ -420,12 +538,22 @@ class RunnerTests(unittest.TestCase):
             "viewport_reset_key_restores_fit", "viewport_window_and_state_restored",
             "viewport_paused_clock_stays_still",
         }
+        preview = {
+            "preview_baseline_paused_red", "preview_real_tools_menu_attached", "preview_tools_auto_preview",
+            "preview_auto_shared_clock_advances", "preview_fields_debounce_pending", "preview_latest_fields_apply",
+            "preview_chrome_actually_hides", "preview_hidden_chrome_keeps_looping",
+            "preview_stop_button_restores_state", "preview_stopped_stays_stopped", "preview_manual_seek_cancels",
+            "preview_manual_seek_stays_cancelled", "preview_panel_close_remains_native",
+            "preview_window_close_begins_with_applied_range", "preview_window_close_cancels_and_detaches",
+        }
         self.assertEqual(len(baseline), 23)
         self.assertEqual(len(baseline | ab), 41)
         self.assertEqual(len(baseline | ab | delayed), 47)
         self.assertEqual(len(viewport), 13)
-        self.assertEqual(len(runner.REQUIRED_CHECKS), 60)
-        self.assertEqual(runner.REQUIRED_CHECKS, baseline | ab | delayed | viewport)
+        self.assertEqual(len(baseline | ab | delayed | viewport), 60)
+        self.assertEqual(len(preview), 15)
+        self.assertEqual(len(runner.REQUIRED_CHECKS), 75)
+        self.assertEqual(runner.REQUIRED_CHECKS, baseline | ab | delayed | viewport | preview)
         source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
         for label in runner.REQUIRED_CHECKS:
             self.assertIn('"' + label + '"', source)

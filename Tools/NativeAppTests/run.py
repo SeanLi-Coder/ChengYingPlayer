@@ -48,6 +48,12 @@ REQUIRED_CHECKS = {
     "viewport_pan_down_key_updates_layer", "viewport_resize_recomputes_normalized_pan",
     "viewport_reset_key_restores_fit", "viewport_window_and_state_restored",
     "viewport_paused_clock_stays_still",
+    "preview_baseline_paused_red", "preview_real_tools_menu_attached", "preview_tools_auto_preview",
+    "preview_auto_shared_clock_advances", "preview_fields_debounce_pending", "preview_latest_fields_apply",
+    "preview_chrome_actually_hides", "preview_hidden_chrome_keeps_looping",
+    "preview_stop_button_restores_state", "preview_stopped_stays_stopped", "preview_manual_seek_cancels",
+    "preview_manual_seek_stays_cancelled", "preview_panel_close_remains_native",
+    "preview_window_close_begins_with_applied_range", "preview_window_close_cancels_and_detaches",
 }
 PIXEL_POINTS = [(x, y) for y in (8, 48, 86) for x in (8, 80, 150)]
 MAX_REPORT_BYTES = 1024 * 1024
