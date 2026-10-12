@@ -53,6 +53,7 @@ final class LayerBoundary {
 }
 
 class VideoViewBoundary {
+  let isUsingNativeSurface = false
   let player = PlayerBoundary()
   lazy var videoLayer = LayerBoundary(player.mpv)
   func logHDR(_ message: String, level: LogLevel? = nil) {}
@@ -60,6 +61,8 @@ class VideoViewBoundary {
 }
 
 final class PlaybackInfoBoundary {
+  var currentURL: URL?
+  var volume: Double = 0
   var state = PlayerState.loaded
   var justOpenedFile = false
   var justStartedFile = false
@@ -82,7 +85,21 @@ final class PlaybackWindowBoundary {
   let videoView = PlaybackVideoViewBoundary()
 }
 
-enum PlaybackUI { case time }
+enum PlaybackUI { case time, volume, playButton }
+
+struct NativeRestoreBoundary {
+  let url: URL
+  let position: Double
+  let volume: Double
+  let paused: Bool
+  let waitingForSeek: Bool
+  let completion: () -> Void
+}
+final class PlaybackTransportBoundary {
+  func setPaused(_ value: Bool) {
+    preconditionFailure("Unexpected native restoration in MPV color-state tests")
+  }
+}
 
 final class NowPlayingInfoManager {
   static let shared = NowPlayingInfoManager()
@@ -91,6 +108,11 @@ final class NowPlayingInfoManager {
 }
 
 class PlaybackBoundary {
+  // The suite retains the MPV color-state branch; native handoff has its own
+  // real-session and controlled PlayerCore regression suites.
+  var nativeCompatibilityRestore: NativeRestoreBoundary?
+  var playbackPosition: Double? { nil }
+  let playbackTransport = PlaybackTransportBoundary()
   let info = PlaybackInfoBoundary()
   let mainWindow = PlaybackWindowBoundary()
   var loopRestarts: [Bool] = []
@@ -99,5 +121,6 @@ class PlaybackBoundary {
   func log(_ message: String) {}
   func videoToolsEnforceLoopBounds(playbackRestarted: Bool) { loopRestarts.append(playbackRestarted) }
   func syncUI(_ option: PlaybackUI) { timeSyncs += 1 }
+  func syncUI(_ options: [PlaybackUI]) { options.forEach(syncUI) }
   func reloadSavedIINAfilters() { filterReloads += 1 }
 }

@@ -43,12 +43,20 @@ let red = directory.appendingPathComponent("red.mp4")
 let blue = directory.appendingPathComponent("blue.mp4")
 
 Preference.pauseWhenOpen = false
+Preference.alwaysFloatOnTop = true
 let autoplay = PlayerCore()
 autoplay.testOpen(red)
 check(awaitCondition { autoplay.info.state == .playing && (autoplay.playbackPosition ?? 0) > 0.25 }, "First native file automatically advances after loaded")
 check(autoplay.isUsingNativePlayback, "First file remains on the real native backend")
 check(autoplay.mainWindow.window?.isVisible == true && autoplay.mainWindow.showCount == 1, "Loaded route displays its actual AppKit window once")
 check(autoplay.mainWindow.setupCount == 1, "Native loaded UI setup does not repeat per snapshot")
+check(NowPlayingInfoManager.shared.titleUpdates.map(\.url) == [red] &&
+      NowPlayingInfoManager.shared.titleUpdates.first?.title == "red" &&
+      (NowPlayingInfoManager.shared.titleUpdates.first?.duration ?? 0) > 7,
+      "First native ready publishes the complete Now Playing title and duration")
+check(autoplay.getMediaTitle() == "red.mp4" && autoplay.mpv.titleReads == 0,
+      "Native title uses the local file name without reading idle MPV metadata")
+check(autoplay.mainWindow.isOntop, "Saved floating-window preference applies to native autoplay")
 check(autoplay.playbackVolume == 0 && autoplay.info.volume == 0, "First autoplay file starts at zero volume")
 check(autoplay.hasSelectedPlaybackAudio && autoplay.mainWindow.volumeEnabled, "Selected native audio enables the typed volume boundary")
 check(autoplay.info.aid == nil, "Native audio does not fabricate an MPV track ID")
@@ -56,16 +64,33 @@ check(!autoplay.mainWindow.videoView.hasInitializedOpenGL && autoplay.mpv.render
 check(autoplay.mainWindow.videoView.link == nil, "Native route never creates CVDisplayLink")
 autoplay.testPause(true)
 check(awaitCondition { autoplay.info.state == .paused }, "Typed pause reaches the real renderer clock")
+check(!autoplay.mainWindow.isOntop, "Native pause restores the normal window level")
 check(awaitCondition { checkPresentedPixel(autoplay, red: true) }, "Actual displayed pixel belongs to the loaded red file")
 let pausedAt = autoplay.playbackPosition ?? -1
+let floatingUpdates = autoplay.mainWindow.floatingChanges.count
 pump(0.2)
 check(abs((autoplay.playbackPosition ?? -2) - pausedAt) < 0.01, "Paused native time remains stable")
+check(autoplay.mainWindow.floatingChanges.count == floatingUpdates,
+      "Unchanged native snapshots do not repeatedly mutate the window level")
+autoplay.testPause(false)
+check(awaitCondition { autoplay.info.state == .playing && autoplay.mainWindow.isOntop },
+      "Native resume reapplies floating-window preference")
+autoplay.testPause(true)
+check(awaitCondition { autoplay.info.state == .paused && !autoplay.mainWindow.isOntop },
+      "A second native pause removes floating status again")
 // Keep actual audio at zero throughout the test, including volume command paths.
 autoplay.testSetVolume(0)
 check(autoplay.playbackVolume == 0, "Typed zero-volume command remains silent")
 let oldLayer = autoplay.nativePlaybackOutput!.displayLayer
+let originalWindow = autoplay.mainWindow.window
 autoplay.testOpen(blue)
 check(awaitCondition { autoplay.isUsingNativePlayback && autoplay.info.currentURL == blue && autoplay.info.state == .playing }, "Same-window replacement loads a second native file")
+check(autoplay.mainWindow.window === originalWindow &&
+      NowPlayingInfoManager.shared.titleUpdates.map(\.url) == [red, blue] &&
+      NowPlayingInfoManager.shared.titleUpdates.last?.title == "blue",
+      "Same-window replacement publishes the new title without an activation callback")
+check(autoplay.getMediaTitle() == "blue.mp4" && autoplay.getMediaTitle(withExtension: false) == "blue" &&
+      autoplay.mpv.titleReads == 0, "Replacement native titles never query the idle compatibility core")
 autoplay.testPause(true)
 check(awaitCondition { autoplay.info.state == .paused && checkPresentedPixel(autoplay, red: false) }, "Second file displays blue rather than retaining the old red frame")
 check(oldLayer.superlayer == nil, "Replacing the session detaches the retired display layer")
@@ -73,6 +98,7 @@ check(autoplay.playbackVolume == 0 && autoplay.info.volume == 0, "Replacement re
 retire(autoplay)
 
 Preference.pauseWhenOpen = true
+Preference.alwaysFloatOnTop = false
 let paused = PlayerCore()
 paused.testOpen(red)
 check(awaitCondition { paused.info.state == .paused && paused.mainWindow.showCount == 1 }, "Pause-when-open displays the first native file without autoplay")
@@ -119,5 +145,15 @@ check(!cancelled.isUsingNativePlayback && !cancelled.mainWindow.loaded, "Shutdow
 check(cancelled.mpv.quitCalls == 1, "Admission cancellation quits the idle compatibility service once")
 check(ViewLayer.constructions == 0, "All native lifecycle cases created zero compatibility layers")
 check(Utility.alerts.isEmpty, "Synthetic valid playback produces no generic error alerts")
+Preference.keepOpenOnFileEnd = false
+let eofClose = PlayerCore()
+eofClose.testOpen(red)
+check(!eofClose.isUsingNativePlayback && eofClose.logs.contains("Native compatibility: close_window_on_eof"),
+      "Unmigrated close-window-on-EOF preference explicitly selects compatibility playback")
+check(eofClose.mpv.renderInitializations > 0,
+      "EOF-close fallback selects the compatibility surface before loading media")
+eofClose.mainWindow.videoView.uninit()
+eofClose.mainWindow.close()
+Preference.keepOpenOnFileEnd = true
 print("Native route real-render checks: \(passes) passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

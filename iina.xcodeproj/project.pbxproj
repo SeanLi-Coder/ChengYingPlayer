@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D4F520010000000000000001 /* NativeAppTestDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F520020000000000000001 /* NativeAppTestDriver.swift */; };
 		D4F510010000000000000001 /* PlaybackTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F510020000000000000001 /* PlaybackTransport.swift */; };
 		D4F510010000000000000002 /* MPVPlaybackTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F510020000000000000002 /* MPVPlaybackTransport.swift */; };
 		D4F510010000000000000003 /* NativePlaybackTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F510020000000000000003 /* NativePlaybackTransport.swift */; };
@@ -453,6 +454,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D4F520020000000000000001 /* NativeAppTestDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tools/NativeAppTests/NativeAppTestDriver.swift; sourceTree = SOURCE_ROOT; };
 		D4F510020000000000000001 /* PlaybackTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackTransport.swift; sourceTree = "<group>"; };
 		D4F510020000000000000002 /* MPVPlaybackTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MPVPlaybackTransport.swift; sourceTree = "<group>"; };
 		D4F510020000000000000003 /* NativePlaybackTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlaybackTransport.swift; sourceTree = "<group>"; };
@@ -2009,6 +2011,7 @@
 		D4F500030000000000000001 /* NativePlayback */ = {
 			isa = PBXGroup;
 			children = (
+				D4F520020000000000000001 /* NativeAppTestDriver.swift */,
 				D4F510020000000000000004 /* NativePlaybackSurface.swift */,
 				D4F500020000000000000001 /* CYNMediaDecoder.h */,
 				D4F500020000000000000002 /* CYNMediaDecoder.m */,
@@ -3141,6 +3144,7 @@
 				D4F510010000000000000002 /* MPVPlaybackTransport.swift in Sources */,
 				D4F510010000000000000003 /* NativePlaybackTransport.swift in Sources */,
 				D4F510010000000000000004 /* NativePlaybackSurface.swift in Sources */,
+				D4F520010000000000000001 /* NativeAppTestDriver.swift in Sources */,
 				D4C700052F6A000100000005 /* VideoToolsViewController.swift in Sources */,
 				D4C700062F6A000100000006 /* VideoToolsShortcuts.swift in Sources */,
 				D4C700072F6A000100000007 /* VideoToolsLoopPolicy.swift in Sources */,

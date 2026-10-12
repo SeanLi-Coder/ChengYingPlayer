@@ -77,6 +77,11 @@ final class EventBoundary {
 }
 
 class PlayerBoundary {
+  // This suite exercises the existing MPV sizing path. Native geometry has
+  // separate real-decoder/surface route coverage.
+  let isUsingNativePlayback = false
+  struct NativeMediaBoundary { let rotationDegrees: Int }
+  var nativePlaybackMedia: NativeMediaBoundary? { nil }
   var info = PlayerInfo()
   var mpv = MPVBoundary()
   var events = EventBoundary()

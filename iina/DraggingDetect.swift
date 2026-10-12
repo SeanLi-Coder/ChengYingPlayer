@@ -157,14 +157,28 @@ extension PlayerCore {
       paths = Utility.resolvePaths(paths)
       // check 3d lut files
       if paths.count == 1 && Utility.lut3dExt.contains(paths[0].lowercasedPathExtension) {
-        let result = addVideoFilter(MPVFilter(lavfiName: "lut3d", label: "iina_quickl3d", paramDict: [
-          "file": paths[0],
-          "interp": "nearest"
-          ]))
-        if result {
-          sendOSD(.addFilter("3D LUT"))
+        // Copy the resolved path now. A drag session and its pasteboard do not
+        // belong to the asynchronous compatibility handoff.
+        let path = paths[0]
+        let applyLUT: (PlayerCore) -> Bool = { player in
+          let result = player.addVideoFilter(MPVFilter(lavfiName: "lut3d", label: "iina_quickl3d", paramDict: [
+            "file": path,
+            "interp": "nearest"
+            ]))
+          if result {
+            player.sendOSD(.addFilter("3D LUT"))
+          }
+          return result
         }
-        return result
+        if isUsingNativePlayback {
+          requireMPVCompatibility(reason: "dropped_lut") { [weak self] in
+            guard let self else { return }
+            _ = applyLUT(self)
+          }
+          // The drag was accepted; filter success is reported only after restore.
+          return true
+        }
+        return applyLUT(self)
       }
 
       let urls = paths.map{ URL(fileURLWithPath: $0) }
@@ -172,14 +186,19 @@ extension PlayerCore {
       guard let loadedFileCount = openURLs(urls) else { return true }
       if loadedFileCount == 0 {
         // if no playable files, try add subtitle files
-        var loadedSubtitle = false
-        for url in urls {
-          if !url.hasDirectoryPath && Utility.supportedFileExt[.sub]!.contains(url.pathExtension.lowercased()) {
-            loadExternalSubFile(url)
-            loadedSubtitle = true
-          }
+        let subtitleURLs = urls.filter {
+          !$0.hasDirectoryPath && Utility.supportedFileExt[.sub]!.contains($0.pathExtension.lowercased())
         }
-        return loadedSubtitle
+        guard !subtitleURLs.isEmpty else { return false }
+        if isUsingNativePlayback {
+          requireMPVCompatibility(reason: "dropped_subtitles") { [weak self] in
+            guard let self else { return }
+            subtitleURLs.forEach { self.loadExternalSubFile($0) }
+          }
+          return true
+        }
+        subtitleURLs.forEach { loadExternalSubFile($0) }
+        return true
       } else if loadedFileCount == 1 {
         // openURLs already decided whether this was an explicit list or a single local file.
         return true
@@ -188,8 +207,8 @@ extension PlayerCore {
         return true
       }
     } else if types.contains(.nsURL) {
-      guard let url = pb.propertyList(forType: .nsURL) as? [String] else { return false }
-      openURLString(url[0])
+      guard let url = pb.propertyList(forType: .nsURL) as? [String], let first = url.first else { return false }
+      openURLString(first)
       return true
     } else if let droppedString = pb.string(forType: .string) {
       if Regex.url.matches(droppedString) || Regex.filePath.matches(droppedString) {

@@ -26,6 +26,8 @@ final class MainWindowDouble: NSResponder {
   var setupCount = 0
   var showCount = 0
   var volumeEnabled = false
+  var isOntop = false
+  var floatingChanges: [Bool] = []
   let quickSettingView = QuickSettingDouble()
   struct FullscreenState { var isFullscreen = false }
   var fsState = FullscreenState()
@@ -39,6 +41,10 @@ final class MainWindowDouble: NSResponder {
   func setupUI() { setupCount += 1; updateVolume() }
   func updateVolume() { volumeEnabled = player.hasSelectedPlaybackAudio }
   func updateSpeedLabel(speed: Double) {}
+  func setWindowFloatingOnTop(_ onTop: Bool) {
+    isOntop = onTop
+    floatingChanges.append(onTop)
+  }
   func handleVideoSizeChange() {
     guard let media = player.nativePlaybackMedia else { return }
     let rotated = media.rotationDegrees == 90 || media.rotationDegrees == 270
@@ -78,7 +84,11 @@ func == (lhs: PlayerCore, rhs: PlayerCore?) -> Bool { lhs === rhs }
 enum SleepPreventer { static func updateSleepPrevention() {} }
 final class NowPlayingInfoManager {
   static let shared = NowPlayingInfoManager()
-  func updateInfo() {}
+  var titleUpdates: [(url: URL, title: String, duration: Double)] = []
+  func updateInfo(withTitle: Bool = false) {
+    guard withTitle, let player = PlayerCore.lastActive, let url = player.info.currentURL else { return }
+    titleUpdates.append((url, player.getMediaTitle(withExtension: false), player.info.videoDuration?.second ?? 0))
+  }
 }
 final class VideoTime { var second: Double; init(_ value: Double) { second = value } }
 struct MPVPlaylistItem { let filename: String; let isCurrent: Bool; let isPlaying: Bool; let title: String? }
@@ -105,6 +115,7 @@ extension Notification.Name {
 final class MPVController {
   weak var player: PlayerCore?
   var renderInitializations = 0, quitCalls = 0, firstLoads = 0
+  var titleReads = 0
   var mpvRenderContext: Int?
   var flags = [MPVProperty.idleActive: true, MPVOption.PlaybackControl.pause: true]
   init(player: PlayerCore) { self.player = player }
@@ -120,7 +131,10 @@ final class MPVController {
   func setString(_ key: String, _ value: String) {}
   func setInt(_ key: String, _ value: Int) {}
   func getFlag(_ key: String) -> Bool { flags[key] ?? false }
-  func getString(_ key: String) -> String? { nil }
+  func getString(_ key: String) -> String? {
+    if key == MPVProperty.mediaTitle { titleReads += 1 }
+    return nil
+  }
   func getDouble(_ key: String) -> Double { 0 }
   func command(_ name: MPVCommand, args: [String] = [], level: Logger.Level = .debug) {
     if name == .loadfile { player?.noteMPVMediaCommand() }
@@ -154,10 +168,21 @@ enum Preference {
   enum Key { case videoViewAcceptsFirstMouse, enableDisplayIdle, loadIccProfile, enableToneMapping, toneMappingTargetPeak,
     toneMappingAlgorithm, enableAdvancedSettings, useUserDefinedConfDir, currentInputConfigName, savedVideoFilters,
     savedAudioFilters, subAutoLoadSearchPath, subAutoLoadIINA, resumeLastPosition, scaleRemainingTime, pauseWhenOpen,
-    fullScreenWhenOpen, enableHdrSupport }
+    fullScreenWhenOpen, enableHdrSupport, alwaysFloatOnTop, keepOpenOnFileEnd, playlistAutoPlayNext }
   static var pauseWhenOpen = false
+  static var alwaysFloatOnTop = false
+  static var keepOpenOnFileEnd = true
+  static var playlistAutoPlayNext = true
   static var effectiveAudioDeviceName = "auto"
-  static func bool(for key: Key) -> Bool { key == .pauseWhenOpen ? pauseWhenOpen : false }
+  static func bool(for key: Key) -> Bool {
+    switch key {
+    case .pauseWhenOpen: return pauseWhenOpen
+    case .alwaysFloatOnTop: return alwaysFloatOnTop
+    case .keepOpenOnFileEnd: return keepOpenOnFileEnd
+    case .playlistAutoPlayNext: return playlistAutoPlayNext
+    default: return false
+    }
+  }
   static func integer(for key: Key) -> Int { 0 }
   static func array(for key: Key) -> [Any]? { [] }
   static func string(for key: Key) -> String? {

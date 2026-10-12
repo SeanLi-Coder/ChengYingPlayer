@@ -79,6 +79,9 @@ final class MainWindowBoundary {
 
 final class PlayerCore {
   var isUsingNativePlayback = false
+  func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
+    preconditionFailure("Unexpected native route in MPV viewport tests")
+  }
   static var keyBindings: [String: KeyBinding] = [:]
   let info = PlaybackInfo()
   let mpv = MPVController()

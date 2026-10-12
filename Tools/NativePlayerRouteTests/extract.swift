@@ -18,15 +18,21 @@ func method(_ signature: String) -> String {
   return String(source[begin..<end])
 }
 let negative = ProcessInfo.processInfo.environment["NATIVE_ROUTE_NEGATIVE_CONTROL"]
-precondition(negative == nil || negative == "skip-initial-resume", "Unknown negative control")
+precondition(negative == nil || negative == "skip-initial-resume" || negative == "skip-native-title-update",
+             "Unknown negative control")
 let methods = [
   "  func captureMPVEventRevision()", "  func acceptsMPVEventRevision(", "  func noteMPVMediaCommand()",
   "  private func attemptNativeOpen(", "  private func beginNativeOpen(", "  private func receiveNativeSnapshot(",
   "  func requireMPVCompatibility(", "  private func retireNativePlayback(", "  private func open(_",
   "  private func openMainWindow(", "  func initVideo()", "  func shutdown()", "  func stop()",
-  "  func notifyWindowVideoSizeChanged()",
+  "  func notifyWindowVideoSizeChanged()", "  func getMediaTitle(",
 ].map { signature -> String in
   let body = method(signature)
+  if negative == "skip-native-title-update", signature == "  private func receiveNativeSnapshot(" {
+    let removed = "      if self === PlayerCore.lastActive { NowPlayingInfoManager.shared.updateInfo(withTitle: true) }\n"
+    precondition(body.components(separatedBy: removed).count == 2, "Title negative control production landmark changed")
+    return body.replacingOccurrences(of: removed, with: "")
+  }
   guard negative == "skip-initial-resume", signature == "  func notifyWindowVideoSizeChanged()" else { return body }
   let removed = "        playbackTransport.setPaused(false, context: .init(verbosity: .verbose))\n"
   precondition(body.components(separatedBy: removed).count == 2, "Negative control production landmark changed")

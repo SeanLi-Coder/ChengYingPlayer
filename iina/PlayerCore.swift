@@ -500,6 +500,8 @@ class PlayerCore: NSObject {
       reason = "custom_subtitle_search"
     } else if Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) == .playlist {
       reason = "playlist_repeat"
+    } else if !Preference.bool(for: .keepOpenOnFileEnd) && Preference.bool(for: .playlistAutoPlayNext) {
+      reason = "close_window_on_eof"
     } else if !mpv.getFlag(MPVProperty.idleActive) || mpv.getString(MPVProperty.path) != nil {
       reason = "mpv_not_pristine_idle"
     } else { reason = nil }
@@ -595,6 +597,7 @@ class PlayerCore: NSObject {
 
   private func receiveNativeSnapshot(_ snapshot: NativePlaybackSnapshot) {
     guard ![.stopping, .shuttingDown, .shutDown].contains(info.state) else { return }
+    let previousState = info.state
     if snapshot.phase == .failed {
       if case .decoder(let domain, let code)? = snapshot.failure,
          domain == CYNMediaDecoderErrorDomain, code == CYNMediaDecoderError.unsupported.rawValue {
@@ -643,6 +646,9 @@ class PlayerCore: NSObject {
     if info.state == .loaded {
       currentController.setupUI()
       notifyWindowVideoSizeChanged()
+      // Replacing media in an already-main window produces no new activation
+      // event. Publish its complete title/timeline explicitly on first ready.
+      if self === PlayerCore.lastActive { NowPlayingInfoManager.shared.updateInfo(withTitle: true) }
       if let url = info.currentURL { HistoryController.shared.add(url, duration: snapshot.duration) }
       postNotification(.iinaFileLoaded)
       events.emit(.fileLoaded, data: info.currentURL?.absoluteString ?? "")
@@ -651,6 +657,10 @@ class PlayerCore: NSObject {
       info.justOpenedFile = false; info.justStartedFile = false
     } else if snapshot.phase == .playing { info.state = .playing }
     else if [.paused, .ended].contains(snapshot.phase) { info.state = .paused }
+    if info.state != previousState, [.playing, .paused].contains(info.state),
+       Preference.bool(for: .alwaysFloatOnTop) {
+      mainWindow.setWindowFloatingOnTop(info.state == .playing)
+    }
     mainWindow.updateSpeedLabel(speed: currentPlaybackSpeed)
     syncUI([.time, .playButton, .volume])
     refreshSyncUITimer()
@@ -3511,6 +3521,10 @@ class PlayerCore: NSObject {
   }
 
   func getMediaTitle(withExtension: Bool = true) -> String {
+    if isUsingNativePlayback {
+      let url = withExtension ? info.currentURL : info.currentURL?.deletingPathExtension()
+      return url?.lastPathComponent ?? ""
+    }
     let mediaTitle = mpv.getString(MPVProperty.mediaTitle)
     let mediaPath = withExtension ? info.currentURL?.path : info.currentURL?.deletingPathExtension().path
     return mediaTitle ?? mediaPath ?? ""

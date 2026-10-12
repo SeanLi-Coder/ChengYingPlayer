@@ -188,6 +188,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   // MARK: - App Delegate
 
   func applicationWillFinishLaunching(_ notification: Notification) {
+#if CHENGYING_NATIVE_APP_TESTS
+    NativeAppTestDriver.prepareForLaunch()
+#endif
     // Must setup preferences before logging so log level is set correctly.
     registerUserDefaultValues()
 
@@ -405,6 +408,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     NSApplication.shared.servicesProvider = self
 
     AppDelegate.shared.menuController?.updatePluginMenu()
+#if CHENGYING_NATIVE_APP_TESTS
+    NativeAppTestDriver.startAfterLaunch()
+#endif
   }
 
   private func installFileAccessMenuItem() {

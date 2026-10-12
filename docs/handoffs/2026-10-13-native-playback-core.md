@@ -66,6 +66,28 @@ MPV 事件路由 ASan/TSan 各 **85 项**及两个预期失败负对照；窗口
 可通过手动 workflow 的 `upload_development_build` 取短期开发构建用于隔离验收；
 这不会创建 Release、更新 appcast 或替换已安装 App。开发构建不得当成稳定更新交付。
 
+后续接入复核补修：同一主窗口换视频时主动更新系统 Now Playing 标题／时长，native 标题
+不查询闲置 MPV；播放／暂停的置顶偏好按状态变化更新。尚未迁移的 EOF 自动关窗配置明确
+回退兼容路径。真实 route 回归增至 **46/0**；仅移除标题刷新一行的负对照准确触发两项失败。
+拖入外部字幕／LUT 也必须先完成兼容切换，异步动作只持有提前复制的文件路径，不持有拖放对象。
+
+第二轮 CI `38287243954` 的媒体 job 在旧窗口尺寸测试的抽取边界处编译失败：缺少新增 native
+路由字段，不是生产视频像素失败。正在补旧测试的明确 legacy 边界；不修改原有断言，也不将
+这轮 CI 说成成功。完整 App 构建 job 与后续测试状态仍须另行核对。
+
+三个 legacy 测试边界补齐后的本机结果：WindowSizing **70**、VideoViewport 两语言各
+**1098**、HDRPreference **42**、HDRColorState **149**、PlaybackMode **126 + 6**、
+PlaybackModeUI 三语言各 **51**，原 VideoTools 三语言各 **942 + 132** 与 ClipPreviewNavigation
+**317** 均通过。拖放回归 **104/0**（ASan），移除新增路由的负对照按预期失败；这些不能替代完整 CI。
+
+新增 `Tools/NativeAppTests` 完整 App 测试构建，用编译条件 `CHENGYING_NATIVE_APP_TESTS`
+启用专门驱动；正常 Release 中驱动与 AppDelegate 两处调用均不编译。测试构建在编译前使用
+唯一测试 bundle ID 和独立 DerivedData，产物由 `TestAppWorkspace` 托管，只允许 disposable
+GitHub-hosted macOS runner 运行；不修改正式配置文件、已签名包身份或本机已安装 App。
+真实 PlayerCore、MainWindow nib、控件、renderer、MPV 均不替换为 mock，覆盖 18 个固定阶段，
+结果需完整集合、每项通过、实际 App 退出 0 和隔离目录清理成功。编译边界 typecheck、生成
+H.264 B 帧素材的色块／字幕验证只算准备验证，**尚不代表完整 App 18 项已通过**。
+
 ## 实现文件
 
 - `iina/NativePlayback/CYNMediaDecoder.{h,m}`：只读本地文件、FFmpeg 收帧／drain、
