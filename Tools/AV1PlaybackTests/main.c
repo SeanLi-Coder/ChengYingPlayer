@@ -10,9 +10,25 @@
 #include <string.h>
 #include <time.h>
 
+static char decoder_log[65536];
+static size_t decoder_log_size;
+
+static void capture_log(const mpv_event *event) {
+    if (event->event_id != MPV_EVENT_LOG_MESSAGE || decoder_log_size >= sizeof(decoder_log) - 1)
+        return;
+    const mpv_event_log_message *message = event->data;
+    size_t available = sizeof(decoder_log) - decoder_log_size;
+    int written = snprintf(decoder_log + decoder_log_size, available, "[%s/%s] %s",
+                           message->prefix, message->level, message->text);
+    if (written > 0)
+        decoder_log_size += (size_t)written < available ? (size_t)written : available - 1;
+}
+
 static void require(bool condition, const char *message) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s\n", message);
+        if (decoder_log_size)
+            fprintf(stderr, "BEGIN BOUNDED SYNTHETIC DECODER LOG\n%s\nEND DECODER LOG\n", decoder_log);
         exit(1);
     }
 }
@@ -98,6 +114,7 @@ static void wait_event(mpv_handle *player, mpv_event_id expected) {
     double deadline = now() + 15;
     while (now() < deadline) {
         mpv_event *event = mpv_wait_event(player, 0.1);
+        capture_log(event);
         if (event->event_id == expected) return;
         if (event->event_id == MPV_EVENT_END_FILE) {
             mpv_event_end_file *end = event->data;
@@ -111,6 +128,8 @@ static void wait_event(mpv_handle *player, mpv_event_id expected) {
 }
 
 static void play_fixture(const char *path, int depth, const char *mode, bool hardware) {
+    decoder_log_size = 0;
+    decoder_log[0] = '\0';
     mpv_handle *player = mpv_create();
     require(player != NULL, "Create isolated mpv player");
     option(player, "config", "no");
@@ -123,6 +142,7 @@ static void play_fixture(const char *path, int depth, const char *mode, bool har
     option(player, "hwdec", mode);
     option(player, "hwdec-codecs", "av1");
     option(player, "vd-lavc-threads", "2");
+    require(mpv_request_log_messages(player, "v") >= 0, "Enable bounded decoder diagnostics");
     require(mpv_initialize(player) >= 0, "Initialize actual libmpv");
     const char *load[] = {"loadfile", path, "replace", NULL};
     require(mpv_command(player, load) >= 0, "Load synthetic AV1 fixture");
@@ -130,6 +150,14 @@ static void play_fixture(const char *path, int depth, const char *mode, bool har
     wait_event(player, MPV_EVENT_PLAYBACK_RESTART);
     char *active = mpv_get_property_string(player, "hwdec-current");
     require(active != NULL, "Read actual AV1 decoder path");
+    char *decoder = mpv_get_property_string(player, "video-codec");
+    char *pixel_format = mpv_get_property_string(player, "video-dec-params/pixelformat");
+    printf("INFO: AV1 %d-bit requested=%s active=%s decoder=%s pixel-format=%s\n",
+           depth, mode, active, decoder ? decoder : "unavailable",
+           pixel_format ? pixel_format : "unavailable");
+    fflush(stdout);
+    mpv_free(decoder);
+    mpv_free(pixel_format);
     if (strcmp(mode, "no") == 0 || !hardware) {
         require(strcmp(active, "no") == 0, "Software AV1 fallback is actually selected");
     } else {
@@ -157,6 +185,7 @@ static void play_fixture(const char *path, int depth, const char *mode, bool har
     int eof = 0;
     while (!eof && now() < deadline) {
         mpv_event *event = mpv_wait_event(player, 0.1);
+        capture_log(event);
         if (event->event_id == MPV_EVENT_END_FILE) {
             mpv_event_end_file *end = event->data;
             require(end->reason != MPV_END_FILE_REASON_ERROR, "AV1 complete playback has no error");

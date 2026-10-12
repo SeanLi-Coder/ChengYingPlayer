@@ -245,6 +245,10 @@ jobs:
       - name: Test Dolby Vision compatible base-layer source regression
         run: bash Tools/HDRSourceTests/run.sh
 
+      - name: Test AV1 playback support and fallback with the actual linked libraries
+        timeout-minutes: 5
+        run: bash Tools/AV1PlaybackTests/run.sh
+
       - name: Build bundled video tools
         run: |
           ./other/build_media_binaries.sh
@@ -260,10 +264,6 @@ jobs:
       - name: Test screenshot defaults, retained preferences, and real JPG exports
         timeout-minutes: 5
         run: bash Tools/ScreenshotPreferenceTests/run.sh
-
-      - name: Test AV1 playback support and fallback with the actual linked libraries
-        timeout-minutes: 5
-        run: bash Tools/AV1PlaybackTests/run.sh
 
       - name: Test automatic seek sampling with actual libmpv events
         timeout-minutes: 5
