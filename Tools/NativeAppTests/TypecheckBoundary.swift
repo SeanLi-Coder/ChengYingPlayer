@@ -5,8 +5,14 @@ import AVFoundation
 
 enum MPVProperty { static let idleActive = "idle-active" }
 enum PlayerState { case idle, playing, paused, shutDown }
-enum NativePlaybackPhase { case paused }
-struct NativePlaybackSnapshot { var phase: NativePlaybackPhase; var volume: Float }
+enum NativePlaybackPhase { case paused, playing }
+struct NativePlaybackSnapshot {
+  var phase: NativePlaybackPhase
+  var volume: Float
+  var generation: UInt64
+  var revision: UInt64
+  var position: Double
+}
 enum NativePlaybackQueryResult { case ready(NativePlaybackSnapshot), unavailable }
 final class NativePlaybackSession {
   func captureCurrentState(completion: @escaping (NativePlaybackQueryResult) -> Void) {}

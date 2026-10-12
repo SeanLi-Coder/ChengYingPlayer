@@ -20,12 +20,14 @@ sys.path.insert(0, str(ROOT))
 from other.test_app_workspace import TestAppWorkspace
 
 REQUIRED_CHECKS = {
-    "pristine_real_mpv_service", "native_first_frame_autoplay", "real_mainwindow_nib_outlets",
+    "pristine_real_mpv_service", "native_autoplay_ready", "native_autoplay_shared_clock_advances",
+    "real_mainwindow_nib_outlets", "paused_initial_frame_matches_red",
     "initial_volume_and_slider_zero", "native_window_has_no_compatibility_gl", "real_pause_menu_action",
     "paused_clock_stays_still", "real_volume_slider_action", "paused_seek_presents_green_frame",
     "rapid_replace_presents_latest_blue_frame", "retired_layer_detached", "replacement_resets_volume_and_slider",
     "real_window_close_retires_native_session", "embedded_subtitle_routes_to_real_compatibility",
     "compatibility_open_remains_silent", "second_pristine_real_mpv_service",
+    "second_native_paused_blue_frame", "second_real_resume_menu_action", "resumed_native_shared_clock_advances",
     "native_and_compatibility_ready_for_real_quit", "all_real_cores_shutdown_before_termination",
 }
 PIXEL_POINTS = [(x, y) for y in (8, 48, 86) for x in (8, 80, 150)]

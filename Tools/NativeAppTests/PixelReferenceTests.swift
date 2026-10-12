@@ -50,4 +50,11 @@ check(!PixelComparator.matchesReference(image, Array(reference.dropLast())), "In
 var invalid = reference
 invalid[0] = -1
 check(!PixelComparator.matchesReference(image, invalid), "Out-of-range reference cannot pass")
-print("PASS: \(checks) actual driver pixel comparator checks")
+check(PixelComparator.matchesVolumePercent(Double(Float(0.7)) * 100, 70),
+      "Actual Float renderer volume round-trips through percent within representational tolerance")
+check(PixelComparator.matchesVolumePercent(70, 70), "Exact requested volume is accepted")
+for value: Double in [69, 0, .nan, .infinity, -.infinity] {
+  check(!PixelComparator.matchesVolumePercent(value, 70), "Wrong or invalid volume cannot pass")
+}
+check(!PixelComparator.matchesVolumePercent(70, .nan), "Invalid expected volume cannot pass")
+print("PASS: \(checks) actual driver pixel and volume comparator checks")

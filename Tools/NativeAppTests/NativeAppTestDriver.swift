@@ -139,10 +139,13 @@ final class NativeAppTestDriver {
     self.player = player
     wait("pristine_real_mpv_service", until: { player.mpv.getFlag(MPVProperty.idleActive) }) {
       player.openURL(self.fixture("red/red.mp4"), shouldAutoLoad: false)
-      self.wait("native_first_frame_autoplay", until: {
-        player.isUsingNativePlayback && player.info.state == .playing &&
-          (player.playbackPosition ?? 0) > 0.1 && self.pixel(player, is: .red)
-      }) { self.checkInitialWindow(player) }
+      self.wait("native_autoplay_ready", until: {
+        player.isUsingNativePlayback && player.info.state == .playing
+      }) {
+        self.verifyClock(player, advancing: true, label: "native_autoplay_shared_clock_advances") {
+          self.checkInitialWindow(player)
+        }
+      }
     }
   }
 
@@ -174,15 +177,44 @@ final class NativeAppTestDriver {
       fail("real_pause_menu_action"); return
     }
     wait("real_pause_menu_action", until: { player.info.state == .paused && player.playbackIsPaused }) {
-      let pausedAt = player.playbackPosition ?? -1
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-        guard abs((player.playbackPosition ?? -2) - pausedAt) < 0.03 else {
-          self.fail("paused_clock_stays_still"); return
+      self.wait("paused_initial_frame_matches_red", until: { self.pixel(player, is: .red) }) {
+        self.verifyClock(player, advancing: false, label: "paused_clock_stays_still") {
+          self.exerciseVolume(player)
         }
-        self.record("paused_clock_stays_still")
-        self.exerciseVolume(player)
       }
     }
+  }
+
+  private func verifyClock(_ player: PlayerCore, advancing: Bool, label: String,
+                           then continuation: @escaping () -> Void) {
+    guard let session = player.nativePlaybackSession else { fail(label); return }
+    let phase: NativePlaybackPhase = advancing ? .playing : .paused
+    // These queries execute on the real session worker and read its shared
+    // renderer clock. UI cache changes or a requested rate alone are not proof.
+    session.captureCurrentState { firstResult in
+      guard case .ready(let first) = firstResult, first.phase == phase,
+            first.position.isFinite, first.volume == 0 else { self.fail(label); return }
+      let began = ProcessInfo.processInfo.systemUptime
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        guard player.nativePlaybackSession === session else { self.fail(label); return }
+        session.captureCurrentState { secondResult in
+          guard case .ready(let second) = secondResult, second.phase == phase,
+                second.generation == first.generation, second.revision == first.revision,
+                second.position.isFinite, second.volume == 0 else { self.fail(label); return }
+          let elapsed = ProcessInfo.processInfo.systemUptime - began
+          let delta = second.position - first.position
+          guard advancing ? (delta > 0.05 && delta < elapsed * 2 + 0.1) : abs(delta) < 0.03 else {
+            self.fail(label); return
+          }
+          self.record(label)
+          continuation()
+        }
+      }
+    }
+  }
+
+  private static func matchesVolumePercent(_ actual: Double, _ expected: Double) -> Bool {
+    actual.isFinite && expected.isFinite && abs(actual - expected) < 0.0001
   }
 
   private func exerciseVolume(_ player: PlayerCore) {
@@ -193,7 +225,7 @@ final class NativeAppTestDriver {
           let session = player.nativePlaybackSession else { fail("real_volume_slider_action"); return }
     session.captureCurrentState { result in
       guard case .ready(let snapshot) = result, snapshot.phase == .paused,
-            abs(snapshot.volume - 0.7) < 0.001, player.info.volume == 70 else {
+            abs(snapshot.volume - 0.7) < 0.001, Self.matchesVolumePercent(player.info.volume, 70) else {
         self.fail("real_volume_slider_action"); return
       }
       self.record("real_volume_slider_action")
@@ -251,18 +283,30 @@ final class NativeAppTestDriver {
     // The first core stays loaded in compatibility, so this is a genuinely new core.
     let second = PlayerCore.newPlayerCore
     var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
-    arguments["pauseWhenOpen"] = false
+    arguments["pauseWhenOpen"] = true
     UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
     wait("second_pristine_real_mpv_service", until: { second.mpv.getFlag(MPVProperty.idleActive) }) {
       second.openURL(self.fixture("blue/blue.mp4"), shouldAutoLoad: false)
-      self.wait("native_and_compatibility_ready_for_real_quit", until: {
-        second.isUsingNativePlayback && second.info.state == .playing &&
-          (second.playbackPosition ?? 0) > 0.1 && self.pixel(second, is: .blue) &&
+      self.wait("second_native_paused_blue_frame", until: {
+        second.isUsingNativePlayback && second.info.state == .paused && second.playbackIsPaused &&
+          self.pixel(second, is: .blue) &&
           self.player?.info.state == .paused
       }) {
-        self.awaitingQuit = true
-        self.writeReport(complete: false, passed: false)
-        NSApp.terminate(nil)
+        guard NSApp.sendAction(#selector(MainMenuActionHandler.menuTogglePause(_:)),
+                               to: second.mainWindow.menuActionHandler, from: NSMenuItem()) else {
+          self.fail("second_real_resume_menu_action"); return
+        }
+        self.record("second_real_resume_menu_action")
+        self.wait("native_and_compatibility_ready_for_real_quit", until: {
+          second.isUsingNativePlayback && second.info.state == .playing &&
+            self.player?.info.state == .paused
+        }) {
+          self.verifyClock(second, advancing: true, label: "resumed_native_shared_clock_advances") {
+            self.awaitingQuit = true
+            self.writeReport(complete: false, passed: false)
+            NSApp.terminate(nil)
+          }
+        }
       }
     }
   }
@@ -274,8 +318,12 @@ final class NativeAppTestDriver {
     // buffer, not worker counters or an enqueued-but-never-presented sample.
     guard #available(macOS 14.4, *),
           let layer = player.nativePlaybackOutput?.displayLayer,
-          let buffer = layer.sampleBufferRenderer.displayedPixelBuffer(),
           let reference = pixelReferences[expected.rawValue] else { return false }
+    let renderer = layer.sampleBufferRenderer
+    // The SDK explicitly returns nil from copyDisplayedPixelBuffer while its
+    // clock has a nonzero rate. Never use this paused-image API as autoplay proof.
+    guard CMTimebaseGetEffectiveRate(renderer.timebase) == 0,
+          let buffer = renderer.displayedPixelBuffer() else { return false }
     return Self.matchesReference(buffer, reference)
   }
 

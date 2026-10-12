@@ -19,7 +19,7 @@ class RunnerTests(unittest.TestCase):
     @staticmethod
     def partial_result():
         return {"format": 1, "run_id": "fixture", "complete": False, "passed": False,
-                "checks": [{"label": "native_first_frame_autoplay", "passed": True}]}
+                "checks": [{"label": "native_autoplay_ready", "passed": True}]}
 
     def test_timeout_preserves_partial_evidence_before_cleanup(self):
         with tempfile.TemporaryDirectory(prefix="native-report-") as directory:
@@ -101,6 +101,9 @@ class RunnerTests(unittest.TestCase):
         start = source.index("  private static func matchesReference(")
         end = source.index("\n  }", start) + len("\n  }")
         comparator = source[start:end].replace("private ", "")
+        start = source.index("  private static func matchesVolumePercent(")
+        end = source.index("\n  }", start) + len("\n  }")
+        comparator += "\n" + source[start:end].replace("private ", "")
         with tempfile.TemporaryDirectory(prefix="native-pixel-comparator-") as directory:
             root = Path(directory).resolve()
             extracted = root / "Comparator.swift"
@@ -134,6 +137,44 @@ class RunnerTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("'displayedPixelBuffer()' is only available in macOS 14.4 or newer", result.stderr)
         print("PASS: macOS 12 driver typecheck rejects the exact legacy availability guard")
+
+    def test_pixel_readback_is_paused_and_autoplay_uses_real_worker_clock(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+
+        def method(name):
+            start = source.index("  private func " + name + "(")
+            end = source.index("\n  }", start) + len("\n  }")
+            return source[start:end]
+
+        pixel = method("pixel")
+        self.assertIn("guard CMTimebaseGetEffectiveRate(renderer.timebase) == 0,", pixel)
+        self.assertLess(pixel.index("CMTimebaseGetEffectiveRate"), pixel.index("renderer.displayedPixelBuffer()"))
+        self.assertEqual(source.count(".displayedPixelBuffer()"), 1)
+        start = method("start")
+        self.assertNotIn("self.pixel(", start)
+        self.assertIn('verifyClock(player, advancing: true, label: "native_autoplay_shared_clock_advances")', start)
+        initial = method("checkInitialWindow")
+        self.assertLess(initial.index("menuTogglePause"), initial.index("paused_initial_frame_matches_red"))
+        self.assertIn('verifyClock(player, advancing: false, label: "paused_clock_stays_still")', initial)
+        clock = method("verifyClock")
+        self.assertEqual(clock.count("session.captureCurrentState"), 2)
+        self.assertNotIn("playbackPosition", clock)
+        self.assertIn("second.generation == first.generation", clock)
+        self.assertIn("second.revision == first.revision", clock)
+        self.assertIn("second.position - first.position", clock)
+        self.assertIn("first.volume == 0", clock)
+        self.assertIn("second.volume == 0", clock)
+        quit = method("prepareActiveQuit")
+        self.assertIn('arguments["pauseWhenOpen"] = true', quit)
+        self.assertLess(quit.index("second.info.state == .paused"), quit.index("self.pixel(second, is: .blue)"))
+        self.assertLess(quit.index("self.pixel(second, is: .blue)"), quit.index("menuTogglePause"))
+        self.assertLess(quit.index("verifyClock(second, advancing: true"), quit.index("NSApp.terminate(nil)"))
+        self.assertNotIn("self.pixel(", quit[quit.index('"native_and_compatibility_ready_for_real_quit"'):])
+        self.assertTrue({"native_autoplay_shared_clock_advances", "paused_initial_frame_matches_red",
+                         "second_native_paused_blue_frame", "second_real_resume_menu_action",
+                         "resumed_native_shared_clock_advances"}.issubset(runner.REQUIRED_CHECKS))
+        # These source-contract checks enforce test sequencing only; the CI
+        # application must still execute every real playback and pixel check.
 
     def test_non_ci_rejected_before_build(self):
         with self.assertRaises(ValueError):
