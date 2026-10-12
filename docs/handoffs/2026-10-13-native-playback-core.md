@@ -308,6 +308,9 @@ nil、尺寸／像素格式／planes／lock 错误，并记录实际 timebase、
 读回判定为 false 的 TSan 负对照 `1VBFDZ` **116/1、退出 1**，记录 330 条、无覆盖。
 即使负对照实际读到了图像，也不会把失败改判通过；两轮无 TSan 报告、所有源码及六份
 合成素材后验 SHA-256 均一致。这是采证能力，不是原 `twnu4i` 偶发故障的修复或解释。
+随后按事先固定的两轮 TSan 复现计划串行运行原完整前序，`3uuAgw` 与 `hJ1r2H`
+均为 **117/0**；素材仍有真实 75 个 B 帧，前后源码／素材 hash 一致。没有为等到通过
+追加无限重跑；两轮没有再现旧问题，不改变旧失败未定位的结论。
 
 新生产源码的默认三分钟 4K 重跑已完成：`build/native-playback-soak.Q9odqV/`，
 **292/0，182.45 秒**，九项输入文件 SHA-256 前后一致。实际读回 3840×2160 NV12／P010，
@@ -447,11 +450,32 @@ ControlledCore **41/0** 和两负控有效，Live **build-only** 退出 0、测�
 root 另核验菜单 9 项＋22 个入口守卫、拖放 ASan 104 项、App runner 29 项通过；
 `build/native-opening-root-regression.qNDsLq/` 保留结果。
 
-更早 `8e1fc6bb` 的开发 CI `38316865546` 尚在构建；media-helper job 已因旧 SeekTiming
-fixture 漏 `cancelNativePreview` 声明而失败。只补 MPV-only fail-fast 声明，不伪造 native
+更早 `8e1fc6bb` 的开发 CI `38316865546` 两个 job 都在旧 SeekTiming
+fixture 漏 `cancelNativePreview` 声明处失败，未到生产 App 编译／完整 App 75 项。
+只补 MPV-only fail-fast 声明，不伪造 native
 成功；37 项 seek 回归和真实 libmpv 38 项通过，后者 `vo=null`，不是画面验收。
-此 CI 不含首开修补或 fixture 修复，不修改其失败结果、不重复派发取消正在运行的 App 验证。
+此 CI 不含首开修补或 fixture 修复，不修改其失败结果。
+在它结束后才派发冻结 `82b40531` 的开发 CI `38319384831`，不含后续未提交的旋转／交接
+测试；没有取消旧运行，也未打开开发包上传或发布。
 默认仍为 MPV，未改变发行、安装、权限或用户配置。
+
+## 已加载媒体的完整 App 交接验收候选（尚待执行）
+
+`Tools/NativeAppTests` 保留原 75 个门禁，再加 17 个实际菜单／窗口／MPV 状态检查，
+合计 **92 项**。新建从未使用 MPV 的真实 core，原生暂停在绿色 4.2 秒，设置 A=0／B=5.5、
+音量 37%、倍速 1.25、缩放 1.5 和横纵平移；通过真实音频延迟菜单触发兼容交接。
+不是直接调用兼容 helper 并伪造成功回调。必须保留同一窗口／媒体，卸下原生 layer、
+Session、Output、Surface，并从实际 libmpv 属性和音量 slider 核对恢复值。
+音频延迟最终变为 0.25 才证明延后菜单已执行；暂停后再观察 0.2 秒，随后真实关闭此
+窗口并 shutdown，最后继续原先两个 active core 的退出测试，不删除多出的 core。
+
+driver SHA-256 为 `b75335b7f58d3a06c07e3d8a6f13a55b840cba65b16d13c89929f7ae62567b7e`。
+本机仅运行准备测试：`python3 -B Tools/NativeAppTests/test_runner.py` **31 项通过**，
+包括 macOS 12 正负 typecheck、73 个像素／音量比较、46 个 Surface 几何比较、20 个
+新增交接数值比较和 AppKit 退出正负对照。证据 `build/native-app-handoff-preparation.wqaOJe/`，
+源码 hash 核对一致。既有 110 秒 driver／150 秒进程期限不变，增加分阶段耗时诊断。
+**完整 App 92 项尚未运行**；正在运行的 `38319384831` 仍冻结于先前的 75 项提交。
+本机未安装或执行测试 App；MPV 恢复属性不代表物理屏幕画质、音频同步或 M4 硬解验收。
 
 ## 实现文件
 

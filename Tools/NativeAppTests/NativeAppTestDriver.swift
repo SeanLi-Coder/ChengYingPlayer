@@ -22,6 +22,8 @@ final class NativeAppTestDriver {
   private var quitNativeLayer: AVSampleBufferDisplayLayer?
   private var quitRequestedAt: TimeInterval?
   private var shutdownNotifications: [ObjectIdentifier: Int] = [:]
+  private var handoffStartedAt: TimeInterval?
+  private var startedAt: TimeInterval?
 
   private init(root: URL, runID: String, pixelReferences: [String: [Int]]) {
     self.root = root
@@ -123,6 +125,7 @@ final class NativeAppTestDriver {
   }
 
   private func start() {
+    startedAt = ProcessInfo.processInfo.systemUptime
     shutdownObserver = NotificationCenter.default.addObserver(forName: .iinaPlayerShutdown,
                                                               object: nil, queue: .main) { [weak self] note in
       guard let self, let core = note.object as? PlayerCore else { return }
@@ -995,7 +998,182 @@ final class NativeAppTestDriver {
         self.fail("compatibility_open_remains_silent"); return
       }
       self.record("compatibility_open_remains_silent")
-      self.prepareActiveQuit()
+      self.exerciseLoadedHandoff()
+    }
+  }
+
+  private func exerciseLoadedHandoff() {
+    handoffStartedAt = ProcessInfo.processInfo.systemUptime
+    // Keep the original core loaded so newPlayerCore cannot reuse its MPV history.
+    let candidate = PlayerCore.newPlayerCore
+    guard let original = player, candidate !== original, original.info.state == .paused else {
+      fail("handoff_pristine_real_mpv_service"); return
+    }
+    wait("handoff_pristine_real_mpv_service", until: {
+      candidate.mpv.getFlag(MPVProperty.idleActive) && candidate.mpv.getString(MPVProperty.path) == nil &&
+        candidate.nativePlaybackSession == nil && candidate.mpv.mpvRenderContext == nil
+    }) {
+      candidate.openURL(self.fixture("red/red.mp4"), shouldAutoLoad: false)
+      self.waitForNativePaused(candidate, position: 0, color: .red,
+        label: "handoff_native_paused_red_ready", extra: {
+          candidate.info.currentURL == self.fixture("red/red.mp4") && candidate.mainWindow.window?.isVisible == true
+        }) {
+        guard let window = candidate.mainWindow.window else { self.fail("handoff_key_window_ready"); return }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(nil)
+        candidate.mainWindow.beginControlInteraction()
+        self.wait("handoff_key_window_ready", until: { NSApp.keyWindow === window }) {
+          self.configureHandoffRange(candidate)
+        }
+      }
+    }
+  }
+
+  private func configureHandoffRange(_ player: PlayerCore) {
+    guard sendMarkerKey(player, start: true) else { fail("handoff_zero_a_marker"); return }
+    waitForNativePaused(player, position: 0, color: .red, label: "handoff_zero_a_marker",
+      extra: { self.markersMatch(player, start: 0, end: nil) }) {
+      player.seek(absoluteSecond: 5.5)
+      self.waitForNativePaused(player, position: 5.5, color: .green, label: "handoff_end_capture_green") {
+        guard self.sendMarkerKey(player, start: false) else { self.fail("handoff_ab_range_ready"); return }
+        self.waitForNativePaused(player, position: 0, color: .red, label: "handoff_ab_range_ready",
+          extra: { self.markersMatch(player, start: 0, end: 5.5) }) {
+          player.seek(absoluteSecond: 4.2)
+          self.waitForNativePaused(player, position: 4.2, color: .green, label: "handoff_paused_green_target") {
+            self.configureHandoffState(player)
+          }
+        }
+      }
+    }
+  }
+
+  private func configureHandoffState(_ player: PlayerCore) {
+    for _ in 0..<5 {
+      guard sendViewportKey(player, action: .zoomIn) else { fail("handoff_native_nondefault_state"); return }
+    }
+    guard sendViewportKey(player, action: .panRight), sendViewportKey(player, action: .panUp),
+          let slider = player.mainWindow.volumeSlider, let sliderAction = slider.action,
+          let session = player.nativePlaybackSession else { fail("handoff_native_nondefault_state"); return }
+    slider.doubleValue = 37
+    let speed = NSMenuItem()
+    speed.representedObject = 1.25
+    guard NSApp.sendAction(sliderAction, to: slider.target, from: slider),
+          NSApp.sendAction(#selector(MainMenuActionHandler.menuChangeSpeed(_:)),
+                           to: player.mainWindow.menuActionHandler, from: speed) else {
+      fail("handoff_native_nondefault_state"); return
+    }
+    session.captureCurrentState { result in
+      guard case .ready(let snapshot) = result, player.nativePlaybackSession === session,
+            snapshot.phase == .paused, !snapshot.wantsPlayback,
+            abs(snapshot.position - 4.2) < 0.0000001,
+            abs(Double(snapshot.volume) - 0.37) < 0.000001,
+            abs(Double(snapshot.rate) - 1.25) < 0.000001,
+            self.markersMatch(player, start: 0, end: 5.5),
+            self.viewportMatches(player, scale: 1.5, panX: 0.05 / 1.5, panY: -0.05 / 1.5),
+            self.pixel(player, is: .green), let window = player.mainWindow.window,
+            let layer = player.nativePlaybackOutput?.displayLayer else {
+        self.fail("handoff_native_nondefault_state"); return
+      }
+      self.record("handoff_native_nondefault_state")
+      // A real existing menu command forces compatibility without writing any
+      // media. Its observable audio-delay change proves deferred replay occurred.
+      let delay = NSMenuItem()
+      delay.representedObject = 0.25
+      guard NSApp.sendAction(#selector(MainMenuActionHandler.menuChangeAudioDelay(_:)),
+                             to: player.mainWindow.menuActionHandler, from: delay) else {
+        self.fail("handoff_real_audio_delay_menu_action"); return
+      }
+      self.record("handoff_real_audio_delay_menu_action")
+      self.verifyHandoffRestoration(player, window: window, retiredLayer: layer)
+    }
+  }
+
+  private func verifyHandoffRestoration(_ player: PlayerCore, window: NSWindow,
+                                         retiredLayer: AVSampleBufferDisplayLayer) {
+    wait("handoff_same_window_mpv_ready", until: {
+      !player.isUsingNativePlayback && player.info.state == .paused &&
+        player.info.currentURL == self.fixture("red/red.mp4") &&
+        player.mpv.getString(MPVProperty.path) == self.fixture("red/red.mp4").path &&
+        player.mainWindow.window === window && window.isVisible &&
+        player.mainWindow.videoView.window === window &&
+        player.mainWindow.videoView.hasInitializedOpenGL && player.mpv.mpvRenderContext != nil
+    }) {
+      guard retiredLayer.superlayer == nil, player.nativePlaybackSession == nil,
+            player.nativePlaybackOutput == nil, player.mainWindow.videoView.nativeSurface == nil else {
+        self.fail("handoff_native_resources_detached"); return
+      }
+      self.record("handoff_native_resources_detached")
+      self.wait("handoff_mpv_transport_restored", until: {
+        self.handoffMPVTransportMatches(player)
+      }) {
+        self.wait("handoff_mpv_viewport_and_ab_restored", until: {
+          self.handoffMPVViewportAndRangeMatch(player) && self.markersMatch(player, start: 0, end: 5.5)
+        }) {
+          self.wait("handoff_deferred_menu_action_applied", until: {
+            abs(player.mpv.getDouble(MPVOption.Audio.audioDelay) - 0.25) < 0.000001
+          }) {
+            let position = player.mpv.getDouble(MPVProperty.timePos)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+              guard self.handoffMPVTransportMatches(player), self.handoffMPVViewportAndRangeMatch(player),
+                    player.mainWindow.window === window,
+                    abs(player.mpv.getDouble(MPVProperty.timePos) - position) < 0.03,
+                    abs(player.mpv.getDouble(MPVOption.Audio.audioDelay) - 0.25) < 0.000001 else {
+                self.fail("handoff_paused_mpv_stays_still"); return
+              }
+              self.record("handoff_paused_mpv_stays_still")
+              self.closeHandoffCore(player, window: window)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func handoffMPVTransportMatches(_ player: PlayerCore) -> Bool {
+    !player.isUsingNativePlayback && player.info.state == .paused &&
+      player.info.currentURL == fixture("red/red.mp4") &&
+      player.mpv.getString(MPVProperty.path) == fixture("red/red.mp4").path &&
+      player.mpv.getFlag(MPVOption.PlaybackControl.pause) &&
+      Self.matchesHandoffValue(player.mpv.getDouble(MPVProperty.timePos), 4.2, tolerance: 0.05) &&
+      Self.matchesHandoffValue(player.mpv.getDouble(MPVOption.Audio.volume), 37, tolerance: 0.0001) &&
+      Self.matchesHandoffValue(player.mpv.getDouble(MPVOption.PlaybackControl.speed), 1.25, tolerance: 0.000001) &&
+      Self.matchesHandoffValue(player.mainWindow.volumeSlider.doubleValue, 37, tolerance: 0.0001)
+  }
+
+  private func handoffMPVViewportAndRangeMatch(_ player: PlayerCore) -> Bool {
+    // Read the real libmpv properties, not the accepted native model that has
+    // already been retired. A=0 must remain an enabled point, never the "no" sentinel.
+    guard let a = player.mpv.getString(MPVOption.PlaybackControl.abLoopA), a != "no",
+          let b = player.mpv.getString(MPVOption.PlaybackControl.abLoopB), b != "no",
+          let count = player.mpv.getString(MPVOption.PlaybackControl.abLoopCount), count == "inf" else { return false }
+    return Self.matchesHandoffValue(player.mpv.getDouble(MPVOption.Video.videoZoom), log2(1.5), tolerance: 0.000001) &&
+      Self.matchesHandoffValue(player.mpv.getDouble(MPVOption.Video.videoPanX), 0.05 / 1.5, tolerance: 0.000001) &&
+      Self.matchesHandoffValue(player.mpv.getDouble(MPVOption.Video.videoPanY), -0.05 / 1.5, tolerance: 0.000001) &&
+      Self.matchesHandoffValue(player.mpv.getDouble(MPVOption.PlaybackControl.abLoopA), 0, tolerance: 0.000001) &&
+      Self.matchesHandoffValue(player.mpv.getDouble(MPVOption.PlaybackControl.abLoopB), 5.5, tolerance: 0.000001)
+  }
+
+  private static func matchesHandoffValue(_ actual: Double, _ expected: Double, tolerance: Double) -> Bool {
+    actual.isFinite && expected.isFinite && tolerance.isFinite && tolerance > 0 && abs(actual - expected) < tolerance
+  }
+
+  private func closeHandoffCore(_ player: PlayerCore, window: NSWindow) {
+    player.mainWindow.endControlInteraction()
+    window.performClose(nil)
+    wait("handoff_real_close_stops_mpv", until: {
+      player.info.state == .idle && !window.isVisible && player.mpv.getFlag(MPVProperty.idleActive)
+    }) {
+      player.shutdown()
+      self.wait("handoff_extra_core_shutdown", until: {
+        player.info.state == .shutDown && player.nativePlaybackSession == nil &&
+          player.nativePlaybackOutput == nil && player.mpv.mpvRenderContext == nil && player.mainWindow.videoView.isUninited &&
+          self.player?.info.state == .paused
+      }) {
+        // The original two-core active-quit scenario remains unchanged. This
+        // additional registered core has already proven its own full teardown.
+        self.prepareActiveQuit()
+      }
     }
   }
 
@@ -1138,18 +1316,22 @@ final class NativeAppTestDriver {
 
   private func record(_ label: String) {
     if label.hasPrefix("preview_") { logPreviewState() }
+    if label.hasPrefix("handoff_") { logHandoffElapsed(label) }
     checks.append(["label": label, "passed": true])
     print("NATIVE_APP_TEST_PASS: \(label)")
+    logTotalElapsed(label)
     writeReport(complete: false, passed: false)
   }
 
   private func fail(_ label: String) {
     guard !terminal else { return }
     if label.hasPrefix("preview_") { logPreviewState() }
+    if label.hasPrefix("handoff_") { logHandoffElapsed(label) }
     terminal = true
     checks.append(["label": label, "passed": false])
     writeReport(complete: true, passed: false)
     fputs("NATIVE_APP_TEST_FAIL: \(label)\n", stderr)
+    logTotalElapsed(label)
     exit(1)
   }
 
@@ -1159,6 +1341,16 @@ final class NativeAppTestDriver {
     // Main-owned cached state is diagnostic only. Worker-clock assertions are
     // still made separately, without reading worker-owned fields from AppKit.
     print("NATIVE_APP_PREVIEW_STATE: native=\(player.isUsingNativePlayback) preview=\(player.nativePreviewInProgress) phase=\(String(describing: player.info.state)) cachedPosition=\(player.playbackPosition ?? -1) start=\(range?.start ?? -1) end=\(range?.end ?? -1) paused=\(player.playbackIsPaused) sidebarHidden=\(player.mainWindow.sidebarAutoHidden) gl=\(player.mainWindow.videoView.hasInitializedOpenGL)")
+  }
+
+  private func logHandoffElapsed(_ label: String) {
+    let elapsed = handoffStartedAt.map { ProcessInfo.processInfo.systemUptime - $0 } ?? -1
+    print("NATIVE_APP_HANDOFF_ELAPSED: stage=\(label) seconds=\(elapsed)")
+  }
+
+  private func logTotalElapsed(_ label: String) {
+    let elapsed = startedAt.map { ProcessInfo.processInfo.systemUptime - $0 } ?? -1
+    print("NATIVE_APP_TEST_ELAPSED: stage=\(label) seconds=\(elapsed)")
   }
 
   private func writeReport(complete: Bool, passed: Bool) {

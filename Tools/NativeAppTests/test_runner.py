@@ -502,7 +502,103 @@ class RunnerTests(unittest.TestCase):
                             str(main), "-o", str(executable)], check=True, timeout=90)
             subprocess.run([str(executable)], check=True, timeout=15)
 
-    def test_every_baseline_ab_delayed_viewport_and_preview_check_is_required(self):
+    def test_loaded_handoff_uses_real_menu_mpv_properties_and_owned_window(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+
+        def method(name):
+            start = source.index("  private func " + name + "(")
+            end = source.index("\n  }", start) + len("\n  }")
+            return source[start:end]
+
+        begin = method("exerciseLoadedHandoff")
+        for proof in ("PlayerCore.newPlayerCore", "candidate !== original", "original.info.state == .paused",
+                      "getString(MPVProperty.path) == nil", "candidate.mpv.mpvRenderContext == nil",
+                      'self.fixture("red/red.mp4")', "candidate.mainWindow.beginControlInteraction()"):
+            self.assertIn(proof, begin)
+        setup = method("configureHandoffState")
+        for proof in ("sendViewportKey", "slider.doubleValue = 37", "speed.representedObject = 1.25",
+                      "menuChangeSpeed", "session.captureCurrentState", "snapshot.phase == .paused",
+                      "!snapshot.wantsPlayback", "Double(snapshot.volume) - 0.37", "Double(snapshot.rate) - 1.25",
+                      "self.pixel(player, is: .green)", "delay.representedObject = 0.25",
+                      "NSApp.sendAction(#selector(MainMenuActionHandler.menuChangeAudioDelay(_:))"):
+            self.assertIn(proof, setup)
+        self.assertLess(setup.index("session.captureCurrentState"), setup.index("menuChangeAudioDelay"))
+        restore = method("verifyHandoffRestoration")
+        for proof in ("player.mainWindow.window === window", "window.isVisible",
+                      'self.fixture("red/red.mp4").path', "player.mainWindow.videoView.hasInitializedOpenGL",
+                      "player.mpv.mpvRenderContext != nil", "retiredLayer.superlayer == nil",
+                      "player.nativePlaybackSession == nil", "player.nativePlaybackOutput == nil",
+                      "player.mainWindow.videoView.nativeSurface == nil", "self.handoffMPVTransportMatches(player)",
+                      "self.handoffMPVViewportAndRangeMatch(player)", "self.markersMatch(player, start: 0, end: 5.5)",
+                      "getDouble(MPVOption.Audio.audioDelay) - 0.25", "deadline: .now() + 0.2"):
+            self.assertIn(proof, restore)
+        raw = method("handoffMPVTransportMatches") + method("handoffMPVViewportAndRangeMatch")
+        for property_name in ("MPVProperty.timePos", "MPVOption.PlaybackControl.pause", "MPVOption.Audio.volume",
+                              "MPVOption.PlaybackControl.speed", "MPVOption.Video.videoZoom", "MPVOption.Video.videoPanX",
+                              "MPVOption.Video.videoPanY", "MPVOption.PlaybackControl.abLoopA",
+                              "MPVOption.PlaybackControl.abLoopB", "MPVOption.PlaybackControl.abLoopCount"):
+            self.assertIn(property_name, raw)
+        self.assertIn('a != "no"', raw)
+        self.assertIn('count == "inf"', raw)
+        self.assertIn("log2(1.5)", raw)
+        self.assertNotIn("nativeViewport", raw)
+        self.assertNotIn("requireMPVCompatibility", setup + restore + begin)
+        close = method("closeHandoffCore")
+        self.assertLess(close.index("window.performClose(nil)"), close.index("player.shutdown()"))
+        self.assertLess(close.index("player.shutdown()"), close.index("player.info.state == .shutDown"))
+        self.assertLess(close.index("player.info.state == .shutDown"), close.index("self.prepareActiveQuit()"))
+        for proof in ("player.info.state == .idle", "player.mpv.mpvRenderContext == nil",
+                      "player.mainWindow.videoView.isUninited", "self.player?.info.state == .paused"):
+            self.assertIn(proof, close)
+        self.assertIn("deadline: .now() + 110", method("start"))
+        self.assertEqual(runner.run_application.__kwdefaults__["timeout"], 150)
+        # Preparation contracts only; the real App must separately execute all
+        # new checks on the disposable runner. No mock callback counts as handoff.
+
+    def test_actual_handoff_numeric_comparator_rejects_wrong_state(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private static func matchesHandoffValue(")
+        end = source.index("\n  }", start) + len("\n  }")
+        comparator = source[start:end].replace("private ", "")
+        harness = r'''
+import Foundation
+struct Check {
+COMPARATOR
+}
+var checks = 0
+func expect(_ value: Bool) { checks += 1; precondition(value, "Handoff comparator check failed") }
+expect(Check.matchesHandoffValue(4.2, 4.2, tolerance: 0.05))
+expect(Check.matchesHandoffValue(4.21, 4.2, tolerance: 0.05))
+expect(!Check.matchesHandoffValue(0, 4.2, tolerance: 0.05))
+expect(!Check.matchesHandoffValue(4.3, 4.2, tolerance: 0.05))
+expect(Check.matchesHandoffValue(37, 37, tolerance: 0.0001))
+expect(!Check.matchesHandoffValue(0, 37, tolerance: 0.0001))
+expect(Check.matchesHandoffValue(1.25, 1.25, tolerance: 0.000001))
+expect(!Check.matchesHandoffValue(1, 1.25, tolerance: 0.000001))
+expect(Check.matchesHandoffValue(log2(1.5), log2(1.5), tolerance: 0.000001))
+expect(!Check.matchesHandoffValue(1.5, log2(1.5), tolerance: 0.000001))
+expect(!Check.matchesHandoffValue(-0.05 / 1.5, 0.05 / 1.5, tolerance: 0.000001))
+expect(Check.matchesHandoffValue(0, 0, tolerance: 0.000001))
+expect(!Check.matchesHandoffValue(0, 5.5, tolerance: 0.000001))
+expect(!Check.matchesHandoffValue(.nan, 0, tolerance: 0.000001))
+expect(!Check.matchesHandoffValue(.infinity, 0, tolerance: 0.000001))
+expect(!Check.matchesHandoffValue(0, .nan, tolerance: 0.000001))
+expect(!Check.matchesHandoffValue(0, 0, tolerance: 0))
+expect(!Check.matchesHandoffValue(0, 0, tolerance: -1))
+expect(!Check.matchesHandoffValue(0, 0, tolerance: .nan))
+expect(!Check.matchesHandoffValue(0, 0, tolerance: .infinity))
+print("Handoff numeric comparator checks: \(checks)")
+'''
+        with tempfile.TemporaryDirectory(prefix="native-handoff-comparator-") as directory:
+            root = Path(directory)
+            main = root / "main.swift"
+            main.write_text(harness.replace("COMPARATOR", comparator))
+            executable = root / "comparator"
+            subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-warnings-as-errors", str(main),
+                            "-o", str(executable)], check=True, timeout=90)
+            subprocess.run([str(executable)], check=True, timeout=10)
+
+    def test_every_baseline_ab_delayed_viewport_preview_and_handoff_check_is_required(self):
         baseline = {
             "pristine_real_mpv_service", "native_autoplay_ready", "native_autoplay_shared_clock_advances",
             "real_mainwindow_nib_outlets", "paused_initial_frame_matches_red",
@@ -552,8 +648,18 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(len(viewport), 13)
         self.assertEqual(len(baseline | ab | delayed | viewport), 60)
         self.assertEqual(len(preview), 15)
-        self.assertEqual(len(runner.REQUIRED_CHECKS), 75)
-        self.assertEqual(runner.REQUIRED_CHECKS, baseline | ab | delayed | viewport | preview)
+        handoff = {
+            "handoff_pristine_real_mpv_service", "handoff_native_paused_red_ready", "handoff_key_window_ready",
+            "handoff_zero_a_marker", "handoff_end_capture_green", "handoff_ab_range_ready", "handoff_paused_green_target",
+            "handoff_native_nondefault_state", "handoff_real_audio_delay_menu_action", "handoff_same_window_mpv_ready",
+            "handoff_native_resources_detached", "handoff_mpv_transport_restored", "handoff_mpv_viewport_and_ab_restored",
+            "handoff_deferred_menu_action_applied", "handoff_paused_mpv_stays_still", "handoff_real_close_stops_mpv",
+            "handoff_extra_core_shutdown",
+        }
+        self.assertEqual(len(baseline | ab | delayed | viewport | preview), 75)
+        self.assertEqual(len(handoff), 17)
+        self.assertEqual(len(runner.REQUIRED_CHECKS), 92)
+        self.assertEqual(runner.REQUIRED_CHECKS, baseline | ab | delayed | viewport | preview | handoff)
         source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
         for label in runner.REQUIRED_CHECKS:
             self.assertIn('"' + label + '"', source)

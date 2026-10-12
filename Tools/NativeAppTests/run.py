@@ -54,6 +54,12 @@ REQUIRED_CHECKS = {
     "preview_stop_button_restores_state", "preview_stopped_stays_stopped", "preview_manual_seek_cancels",
     "preview_manual_seek_stays_cancelled", "preview_panel_close_remains_native",
     "preview_window_close_begins_with_applied_range", "preview_window_close_cancels_and_detaches",
+    "handoff_pristine_real_mpv_service", "handoff_native_paused_red_ready", "handoff_key_window_ready",
+    "handoff_zero_a_marker", "handoff_end_capture_green", "handoff_ab_range_ready", "handoff_paused_green_target",
+    "handoff_native_nondefault_state", "handoff_real_audio_delay_menu_action", "handoff_same_window_mpv_ready",
+    "handoff_native_resources_detached", "handoff_mpv_transport_restored", "handoff_mpv_viewport_and_ab_restored",
+    "handoff_deferred_menu_action_applied", "handoff_paused_mpv_stays_still", "handoff_real_close_stops_mpv",
+    "handoff_extra_core_shutdown",
 }
 PIXEL_POINTS = [(x, y) for y in (8, 48, 86) for x in (8, 80, 150)]
 MAX_REPORT_BYTES = 1024 * 1024

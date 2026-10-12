@@ -8,7 +8,12 @@ extension Notification.Name {
   static let iinaPlayerShutdown = Notification.Name("fixture.player-shutdown")
 }
 
-enum MPVProperty { static let idleActive = "idle-active" }
+enum MPVProperty { static let idleActive = "idle-active", path = "path", timePos = "time-pos" }
+enum MPVOption {
+  enum PlaybackControl { static let pause = "pause", speed = "speed", abLoopA = "ab-loop-a", abLoopB = "ab-loop-b", abLoopCount = "ab-loop-count" }
+  enum Audio { static let volume = "volume", audioDelay = "audio-delay" }
+  enum Video { static let videoZoom = "video-zoom", videoPanX = "video-pan-x", videoPanY = "video-pan-y" }
+}
 enum PlayerState { case idle, playing, paused, shutDown }
 enum LoopMode { case off, file }
 enum Preference {
@@ -20,6 +25,7 @@ enum NativePlaybackPhase { case paused, playing }
 struct NativePlaybackSnapshot {
   var phase: NativePlaybackPhase
   var volume: Float
+  var rate: Float
   var generation: UInt64
   var revision: UInt64
   var position: Double
@@ -34,6 +40,8 @@ final class MPVController {
   var mpv: OpaquePointer?
   var mpvRenderContext: OpaquePointer?
   func getFlag(_ property: String) -> Bool { false }
+  func getDouble(_ property: String) -> Double { 0 }
+  func getString(_ property: String) -> String? { nil }
 }
 final class PlaybackInfo {
   enum LoopStatus { case cleared, aSet, bSet }
@@ -82,6 +90,8 @@ final class MainMenuActionHandler: NSObject {
   @objc func menuFileLoop(_ sender: NSMenuItem) {}
   @objc func menuABLoop(_ sender: NSMenuItem) {}
   @objc func menuShowVideoTools(_ sender: NSMenuItem) {}
+  @objc func menuChangeSpeed(_ sender: NSMenuItem) {}
+  @objc func menuChangeAudioDelay(_ sender: NSMenuItem) {}
 }
 final class PlayerCore {
   enum NativeLoopAction { case moveB(Double) }
@@ -109,4 +119,5 @@ final class PlayerCore {
   func getLoopMode() -> LoopMode { .off }
   func setLoopMode(_ mode: LoopMode) {}
   func requestNativeLoopAction(_ action: NativeLoopAction, completion: @escaping (NativeLoopActionResult) -> Void) {}
+  func shutdown() {}
 }
