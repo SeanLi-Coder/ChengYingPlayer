@@ -7,6 +7,7 @@ ffmpeg_bin="${FFMPEG_BIN:-$repo_root/deps/executable/ffmpeg}"
 ffprobe_bin="${FFPROBE_BIN:-$repo_root/deps/executable/ffprobe}"
 session_source="$repo_root/iina/NativePlayback/NativePlaybackSession.swift"
 output_source="$repo_root/iina/NativePlayback/NativeSampleBufferOutput.swift"
+main_source="$repo_root/Tools/NativePrerollAudioTests/main.swift"
 clang_sanitizer=""
 swift_sanitizer=""
 sanitizer_debug=""
@@ -16,6 +17,17 @@ if [[ "${NATIVE_PREROLL_SANITIZER:-}" == thread ]]; then
   sanitizer_debug="-g"
 elif [[ -n "${NATIVE_PREROLL_SANITIZER:-}" ]]; then
   printf 'Unsupported sanitizer; use thread.\n' >&2
+  exit 2
+fi
+if [[ "${NATIVE_PREROLL_DIAGNOSTIC_NEGATIVE:-0}" == 1 ]]; then
+  if [[ "${NATIVE_PREROLL_NEGATIVE:-0}" != 0 || "${NATIVE_PREROLL_FLUSH_DELAY:-0}" != 0 ]]; then
+    printf 'The diagnostic negative control must not be combined with production-source controls.\n' >&2
+    exit 2
+  fi
+  python3 Tools/NativePrerollAudioTests/diagnostic_negative.py "$main_source" "$test_dir/main.swift"
+  main_source="$test_dir/main.swift"
+elif [[ "${NATIVE_PREROLL_DIAGNOSTIC_NEGATIVE:-0}" != 0 ]]; then
+  printf 'Unsupported diagnostic negative control; use 1.\n' >&2
   exit 2
 fi
 if [[ "${NATIVE_PREROLL_NEGATIVE:-0}" != 0 ]]; then
@@ -55,9 +67,14 @@ done
 "$ffmpeg_bin" -hide_banner -loglevel error -nostdin \
   -f lavfi -i 'sine=frequency=660:sample_rate=48000:duration=1' -c:a pcm_f32le "$test_dir/audio-only.wav"
 shasum -a 256 iina/NativePlayback/CYNMediaDecoder.h iina/NativePlayback/CYNMediaDecoder.m \
+  iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSession.swift \
   "$output_source" iina/NativePlayback/NativePlaybackSampleGate.swift \
-  "$session_source" Tools/NativePrerollAudioTests/main.swift Tools/NativePrerollAudioTests/run.sh \
-  Tools/NativePrerollAudioTests/negative.py Tools/NativePrerollAudioTests/delay_flush.py > "$test_dir/source-sha256.txt"
+  "$session_source" "$main_source" Tools/NativePrerollAudioTests/main.swift Tools/NativePrerollAudioTests/run.sh \
+  Tools/NativePrerollAudioTests/negative.py Tools/NativePrerollAudioTests/delay_flush.py \
+  Tools/NativePrerollAudioTests/diagnostic_negative.py > "$test_dir/source-sha256.txt"
+shasum -a 256 "$test_dir/control.mkv" "$test_dir/control.mp4" \
+  "$test_dir/delayed.mkv" "$test_dir/delayed.mp4" "$test_dir/excessive.mkv" \
+  "$test_dir/audio-only.wav" > "$test_dir/fixture-sha256.txt"
 git rev-parse HEAD > "$test_dir/base-commit.txt"
 xcrun clang ${clang_sanitizer:+"$clang_sanitizer"} ${sanitizer_debug:+"$sanitizer_debug"} \
   -target arm64-apple-macos12 -fobjc-arc -fmodules -std=gnu11 -I deps/include -c \
@@ -66,12 +83,19 @@ xcrun swiftc ${swift_sanitizer:+"$swift_sanitizer"} ${sanitizer_debug:+"$sanitiz
   -swift-version 5 -target arm64-apple-macos14.4 \
   -import-objc-header iina/NativePlayback/CYNMediaDecoder.h \
   "$output_source" iina/NativePlayback/NativePlaybackSampleGate.swift \
-  "$session_source" Tools/NativePrerollAudioTests/main.swift "$test_dir/decoder.o" \
+  "$session_source" "$main_source" "$test_dir/decoder.o" \
   deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib \
   deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib \
   -Xlinker -rpath -Xlinker "$repo_root/deps/lib" -framework AppKit -framework AVFoundation \
   -framework CoreMedia -framework CoreVideo -framework AudioToolbox -o "$test_dir/preroll-tests"
 shasum -a 256 -c "$test_dir/source-sha256.txt"
 printf 'Artifacts: %s\n' "$test_dir"
+set +e
 /usr/bin/perl -e 'alarm 110; exec @ARGV' "$test_dir/preroll-tests" "$test_dir" 2>&1 | tee "$test_dir/results.log"
-shasum -a 256 -c "$test_dir/source-sha256.txt"
+pipeline_status=("${PIPESTATUS[@]}")
+result="${pipeline_status[0]}"
+if [[ "$result" == 0 && "${pipeline_status[1]}" != 0 ]]; then result="${pipeline_status[1]}"; fi
+set -e
+shasum -a 256 -c "$test_dir/source-sha256.txt" > "$test_dir/source-validation.log"
+shasum -a 256 -c "$test_dir/fixture-sha256.txt" > "$test_dir/fixture-validation.log"
+exit "$result"

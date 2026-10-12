@@ -56,3 +56,44 @@ application queue bounds, not total process memory promises; codec internals
 and AVFoundation allocations are outside them. The test does not claim
 arbitrary audio/video interleaving support, physically visible presentation,
 audible audio continuity, or synchronization verified through speakers.
+
+## Bounded failed-readback evidence
+
+The original 117 checks, three-second pixel-readback verdict and 105/110-second
+watchdogs are unchanged. Each harness keeps a fixed 1,024-entry numerical ring
+of accepted-sample timestamps, snapshot phases and existing worker queries.
+Only a failed pixel verdict prints this ring, after recording the original
+failure; it does not wait for another image or turn a later image into a pass.
+No pixel values, media contents, personal filenames or browser data are logged.
+
+The readback distinguishes a raw nil buffer, incorrect dimensions/format/plane
+count, a pixel-buffer lock failure and a missing plane base address. A nonzero
+clock rate is separately recorded because no readback is attempted then.
+Renderer status/error code, both timebases, readiness, flush generation and
+accepted counters are read on the existing worker queue. View/layer ownership,
+visibility and bounds are sampled on main. The old worker-side reflected FIFO
+budget assertions remain unchanged; diagnostics add no reflected session state.
+These samples are not a single atomic view of WindowServer presentation.
+
+Readiness is not proof of an image: in the prior isolated diagnosis a nil buffer
+and a subsequent valid buffer had the same ready-for-display and media-data
+readiness values. A nil readback is not proof of a physically black display.
+Locks, time calls and extra property reads introduce observer overhead and may
+change scheduling. This instrumentation is evidence collection, not a fix or
+an explanation of the earlier intermittent `twnu4i` failure.
+
+`NATIVE_PREROLL_DIAGNOSTIC_NEGATIVE=1` mechanically changes exactly one checked
+verdict expression in a disposable `main.swift`: the lifecycle "Seek shows a
+current video image" check remains false for its original three seconds.
+Production sources, actual readback and all other checks remain unchanged.
+Expected output is 116 passes, one failure, `READBACK_FAILURE_TIMELINE` and exit
+status 1. A successful buffer in this artificial negative must still be logged
+as reason 0; this control does not reproduce the original nil-buffer failure.
+This mode cannot be combined with the FIFO or delayed-flush controls.
+
+Each run records the base commit plus SHA-256 manifests of all compiled source
+inputs, source-transform scripts and all six synthetic fixtures. Post-run
+source/fixture validation logs are written even when the executable fails.
+The runner preserves the executable or log-writer failure status; a manifest
+mismatch also fails. Diagnostic text and manifests can be collected without
+publishing the fixture media or any personal files.

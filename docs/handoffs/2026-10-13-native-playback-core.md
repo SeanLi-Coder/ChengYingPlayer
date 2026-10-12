@@ -300,6 +300,15 @@ deadline 结果强制为 false 的 TSan 负对照 `3P4rJx` 实际仍得到两次
 **208/1、退出 1**，输出 224 条记录、零覆盖及 worker 状态，未出现 TSan 报告。
 原暂停 seek 图像 **116/1** 和 CI A/B **208/1** 仍是待定位问题，没有新增发行。
 
+暂停读回另补 `Tools/NativePrerollAudioTests` 的最多 1024 条数值记录，区分 renderer 原始
+nil、尺寸／像素格式／planes／lock 错误，并记录实际 timebase、flush、ready 状态及窗口
+附着／可见性；不保存像素内容，不扩展原有 FIFO 预算断言的 Session 可变字段反射。
+保留原 **117 项、3 秒读回时限和进程看门狗**，只有原断言失败后才输出时间线。
+新诊断 TSan 首轮 `build/native-preroll-audio-tests.iv5xTc/` **117/0**；只强制一个
+读回判定为 false 的 TSan 负对照 `1VBFDZ` **116/1、退出 1**，记录 330 条、无覆盖。
+即使负对照实际读到了图像，也不会把失败改判通过；两轮无 TSan 报告、所有源码及六份
+合成素材后验 SHA-256 均一致。这是采证能力，不是原 `twnu4i` 偶发故障的修复或解释。
+
 新生产源码的默认三分钟 4K 重跑已完成：`build/native-playback-soak.Q9odqV/`，
 **292/0，182.45 秒**，九项输入文件 SHA-256 前后一致。实际读回 3840×2160 NV12／P010，
 三个 session 的 weak 引用均释放，损坏格式和未知颜色均为零；三轮空图读回次数为 5／4／2，

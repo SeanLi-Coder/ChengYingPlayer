@@ -19,24 +19,84 @@ func waitUntil(_ seconds: Double = 5, _ predicate: () -> Bool) -> Bool {
   } while ProcessInfo.processInfo.systemUptime < deadline
   return predicate()
 }
-func pixels(_ buffer: CVPixelBuffer?) -> [Int] {
-  guard let buffer, CVPixelBufferGetWidth(buffer) == 160, CVPixelBufferGetHeight(buffer) == 90,
-        CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-        CVPixelBufferGetPlaneCount(buffer) == 2,
-        CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { return [] }
+struct PixelInspection {
+  var image: [Int] = []
+  // 0=ok, 1=raw nil, 2=dimensions, 3=format, 4=planes, 5=lock,
+  // 6=base address, 7=nonzero clock rate (no readback attempted).
+  var reason = 1
+  var width = 0
+  var height = 0
+  var format: OSType = 0
+  var planes = 0
+  var lockCode: CVReturn = 0
+  var numbers: [Double] {
+    [Double(reason), Double(width), Double(height), Double(format), Double(planes), Double(lockCode)]
+  }
+}
+func inspectPixels(_ buffer: CVPixelBuffer?) -> PixelInspection {
+  var result = PixelInspection()
+  guard let buffer else { return result }
+  result.width = CVPixelBufferGetWidth(buffer)
+  result.height = CVPixelBufferGetHeight(buffer)
+  result.format = CVPixelBufferGetPixelFormatType(buffer)
+  result.planes = CVPixelBufferGetPlaneCount(buffer)
+  guard result.width == 160, result.height == 90 else { result.reason = 2; return result }
+  guard result.format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange else { result.reason = 3; return result }
+  guard result.planes == 2 else { result.reason = 4; return result }
+  result.lockCode = CVPixelBufferLockBaseAddress(buffer, .readOnly)
+  guard result.lockCode == kCVReturnSuccess else { result.reason = 5; return result }
   defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
   guard let yPlane = CVPixelBufferGetBaseAddressOfPlane(buffer, 0)?.assumingMemoryBound(to: UInt8.self),
-        let uvPlane = CVPixelBufferGetBaseAddressOfPlane(buffer, 1)?.assumingMemoryBound(to: UInt8.self) else { return [] }
-  var result: [Int] = []
+        let uvPlane = CVPixelBufferGetBaseAddressOfPlane(buffer, 1)?.assumingMemoryBound(to: UInt8.self) else {
+    result.reason = 6; return result
+  }
   for y in [8, 44, 80] {
     for x in [8, 80, 150] {
       let offset = y / 2 * CVPixelBufferGetBytesPerRowOfPlane(buffer, 1) + x / 2 * 2
-      result += [Int(yPlane[y * CVPixelBufferGetBytesPerRowOfPlane(buffer, 0) + x]),
-                 Int(uvPlane[offset]), Int(uvPlane[offset + 1])]
+      result.image += [Int(yPlane[y * CVPixelBufferGetBytesPerRowOfPlane(buffer, 0) + x]),
+                      Int(uvPlane[offset]), Int(uvPlane[offset + 1])]
     }
   }
+  result.reason = 0
   return result
 }
+func pixels(_ buffer: CVPixelBuffer?) -> [Int] { inspectPixels(buffer).image }
+
+/// Fixed-size numerical evidence only. No pixel values, media buffers or file
+/// paths are retained, and no per-sample printing changes normal scheduling.
+final class ReadbackTimeline {
+  struct Entry {
+    let time: Double
+    let event: Int
+    let values: [Double]
+  }
+  private let lock = NSLock()
+  private var entries = [Entry?](repeating: nil, count: 1024)
+  private var total = 0
+  func record(_ event: Int, _ values: [Double]) {
+    precondition(values.count <= 32)
+    let entry = Entry(time: ProcessInfo.processInfo.systemUptime, event: event, values: values)
+    lock.lock()
+    entries[total % entries.count] = entry
+    total += 1
+    lock.unlock()
+  }
+  func dump() {
+    lock.lock()
+    let count = min(total, entries.count)
+    let first = total - count
+    let rows = (first..<total).compactMap { entries[$0 % entries.count] }.sorted { $0.time < $1.time }
+    let dropped = total - count
+    lock.unlock()
+    print("READBACK_FAILURE_TIMELINE: entries=\(rows.count) capacity=1024 dropped=\(dropped)")
+    print("READBACK_EVENTS: 1=sample [generation,revision,video,start,end]; 2=snapshot [generation,revision,phase,position,rate,wantsPlayback,videoSamples,audioSamples,queuedBytes]; 3=output; 4=wait_begin [clock]; 5=deadline [visible]")
+    print("READBACK_PHASES: 0=idle 1=opening 2=seeking 3=paused 4=playing 5=ended 6=failed 7=closed")
+    print("READBACK_OUTPUT: reason,width,height,format,planes,lockCode,syncClock,syncRate,videoClock,videoRate,requestedRate,flushGeneration,flushingVideo,videoReady,audioReady,hasOutputError,acceptedVideo,acceptedAudio,rendererStatus,rendererError,requiresFlush,sufficient,readyForDisplay,attached,layerHidden,windowVisible,occlusionVisible,layerWidth,layerHeight")
+    print("READBACK_REASONS: 0=ok 1=raw_nil 2=dimensions 3=format 4=planes 5=lock_failed 6=base_address 7=rate_nonzero")
+    for row in rows { print("READBACK_EVENT \(row.time) \(row.event) \(row.values)") }
+  }
+}
+
 struct Reference {
   var audio: [(start: Double, end: Double)] = []
   var image: [Int] = []
@@ -110,9 +170,13 @@ final class Harness {
   var observations: [NativePlaybackSampleObservation] = []
   var allMuted = true
   var peakQueue = 0
+  let readbackTimeline: ReadbackTimeline
   init() {
+    let timeline = ReadbackTimeline()
+    readbackTimeline = timeline
     var receive: ((NativePlaybackSampleObservation) -> Void)?
     session = NativePlaybackSession(sampleObserver: { item in
+      timeline.record(1, [Double(item.generation), Double(item.revision), item.video ? 1 : 0, item.start, item.end])
       DispatchQueue.main.async { receive?(item) }
     })
     worker = Mirror(reflecting: session).children.first { $0.label == "worker" }!.value as! DispatchQueue
@@ -122,6 +186,10 @@ final class Harness {
       self.latest = value
       self.allMuted = self.allMuted && value.volume == 0
       self.peakQueue = max(self.peakQueue, value.queuedBytes)
+      let phases: [NativePlaybackPhase] = [.idle, .opening, .seeking, .paused, .playing, .ended, .failed, .closed]
+      timeline.record(2, [Double(value.generation), Double(value.revision),
+        Double(phases.firstIndex(of: value.phase)!), value.position, Double(value.rate),
+        value.wantsPlayback ? 1 : 0, Double(value.videoSamples), Double(value.audioSamples), Double(value.queuedBytes)])
     }
     session.output.displayLayer.frame = window.contentView!.bounds
     window.contentView!.layer!.addSublayer(session.output.displayLayer)
@@ -136,14 +204,32 @@ final class Harness {
     }
   }
   func state() -> State? {
+    // Presentation ownership is observed on main, not from the worker query.
+    let layer = session.output.displayLayer
+    let presentation: [Double] = [layer.isReadyForDisplay ? 1 : 0, layer.superlayer != nil ? 1 : 0,
+      layer.isHidden ? 1 : 0, window.isVisible ? 1 : 0, window.occlusionState.contains(.visible) ? 1 : 0,
+      layer.bounds.width, layer.bounds.height]
     var result: State?
-    worker.async { [session] in
+    worker.async { [session, readbackTimeline] in
       let fields = Dictionary(uniqueKeysWithValues: Mirror(reflecting: session).children.compactMap {
         child -> (String, Any)? in child.label.map { ($0, child.value) }
       })
       let output = session.output
       let rate = output.actualRate
-      let image = rate == 0 ? pixels(output.displayLayer.sampleBufferRenderer.displayedPixelBuffer()) : []
+      let renderer = output.displayLayer.sampleBufferRenderer
+      var inspection = PixelInspection()
+      if rate == 0 { inspection = inspectPixels(renderer.displayedPixelBuffer()) }
+      else { inspection.reason = 7 }
+      let image = inspection.image
+      let outputState: [Double] = [output.currentTime.seconds, rate,
+        CMTimebaseGetTime(renderer.timebase).seconds, CMTimebaseGetRate(renderer.timebase),
+        Double(output.requestedRate), Double(output.flushGeneration), output.isFlushingVideo ? 1 : 0,
+        output.isReady(video: true) ? 1 : 0, output.isReady(video: false) ? 1 : 0,
+        output.error != nil ? 1 : 0, Double(output.acceptedVideoSamples), Double(output.acceptedAudioSamples),
+        Double(renderer.status.rawValue), Double((renderer.error as NSError?)?.code ?? 0),
+        renderer.requiresFlushToResumeDecoding ? 1 : 0,
+        renderer.hasSufficientMediaDataForReliablePlaybackStart ? 1 : 0]
+      readbackTimeline.record(3, inspection.numbers + outputState + presentation)
       let held = fields["heldPrerollAudio"].map { Mirror(reflecting: $0).children.count } ?? 0
       let state = State(rate: rate, clock: output.currentTime.seconds, volume: output.volume, image: image,
         heldCount: held - (fields["heldPrerollAudioHead"] as? Int ?? 0),
@@ -170,6 +256,7 @@ final class Harness {
   }
   func expectImage(_ expected: [Int], clock: Double, _ label: String) {
     var observed: State?
+    readbackTimeline.record(4, [clock])
     let visible = waitUntil(3) {
       observed = state()
       return observed?.image == expected && !expected.isEmpty && observed?.rate == 0
@@ -177,7 +264,9 @@ final class Harness {
     check(visible, label)
     check(observed.map { abs($0.clock - clock) < 0.000001 && $0.volume == 0 } == true,
       "Pixel readback does not advance the shared clock or enable audio")
-    print("DISPLAY: clock=\(observed?.clock ?? -1) rate=\(observed?.rate ?? -1) held=\(observed?.heldCount ?? -1) image=\(observed?.image.prefix(3).description ?? "nil")")
+    readbackTimeline.record(5, [visible ? 1 : 0])
+    if !visible { readbackTimeline.dump() }
+    print("DISPLAY: clock=\(observed?.clock ?? -1) rate=\(observed?.rate ?? -1) held=\(observed?.heldCount ?? -1) imageAvailable=\(observed?.image.isEmpty == false)")
   }
   func close() {
     var done = false
@@ -249,7 +338,8 @@ if let expected = reference(fixtures.appendingPathComponent("delayed.mkv")), lif
   let backwardRevision = lifecycle.latest?.revision
   lifecycle.session.seek(to: 0)
   check(waitUntil { lifecycle.latest?.revision != backwardRevision && lifecycle.latest?.phase == .paused && lifecycle.latest?.position == 0 }, "Backward seek can stage delayed audio again")
-  print("BACKWARD: phase=\(String(describing: lifecycle.latest?.phase)) failure=\(String(describing: lifecycle.latest?.failure)) state=\(String(describing: lifecycle.state()))")
+  let backwardState = lifecycle.state()
+  print("BACKWARD: phase=\(String(describing: lifecycle.latest?.phase)) clock=\(backwardState?.clock ?? -1) rate=\(backwardState?.rate ?? -1) held=\(backwardState?.heldCount ?? -1) imageAvailable=\(backwardState?.image.isEmpty == false)")
   check(lifecycle.state().map { $0.heldCount > 0 } == true, "Backward seek recreates only the new FIFO")
   let beforeShortLoop = lifecycle.observations.count
   lifecycle.session.setLoop(try! NativePlaybackInterval(start: 0, end: 0.5), repeatFile: false)
@@ -266,7 +356,8 @@ if let expected = reference(fixtures.appendingPathComponent("delayed.mkv")), lif
     let observed = lifecycle.state()
     return lifecycle.latest?.phase == .paused && (observed?.heldCount ?? 0) > 0
   }, "A/B containing delayed video stages bounded audio")
-  print("AB: phase=\(String(describing: lifecycle.latest?.phase)) failure=\(String(describing: lifecycle.latest?.failure)) state=\(String(describing: lifecycle.state()))")
+  let loopState = lifecycle.state()
+  print("AB: phase=\(String(describing: lifecycle.latest?.phase)) clock=\(loopState?.clock ?? -1) rate=\(loopState?.rate ?? -1) held=\(loopState?.heldCount ?? -1) imageAvailable=\(loopState?.image.isEmpty == false)")
   lifecycle.session.setPaused(false)
   let before = lifecycle.observations.count
   check(waitUntil(8) {
