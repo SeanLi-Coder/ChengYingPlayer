@@ -166,6 +166,8 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   BOOL _hasPacket, _demuxEOF, _videoFlushed, _audioFlushed, _videoEOF, _audioEOF, _resamplerEOF;
   int64_t _originUS, _nextAudioSample;
   CMTime _nextVideoTime;
+  CMTime _originVideoStart;
+  BOOL _readingFromOrigin, _observedOriginVideoStart;
 }
 @end
 
@@ -211,6 +213,8 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   _info = nil;
   _videoIndex = _audioIndex = -1;
   _hasPacket = _demuxEOF = _videoFlushed = _audioFlushed = _videoEOF = _audioEOF = _resamplerEOF = NO;
+  _originVideoStart = kCMTimeInvalid;
+  _readingFromOrigin = _observedOriginVideoStart = NO;
   _failure = nil;
 }
 - (AVCodecContext *)openStream:(int)index video:(BOOL)video error:(NSError **)error {
@@ -293,7 +297,13 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
     [self fail:CYNMediaDecoderErrorInvalidInput message:@"Native playback currently accepts local regular files only." error:error];
     return nil;
   }
-  _input.fd = open(url.fileSystemRepresentation, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+  return [self openOwnedDescriptor:open(url.fileSystemRepresentation, O_RDONLY | O_CLOEXEC | O_NONBLOCK) error:error];
+}
+
+// The caller has retired every old demux/codec context. This method takes
+// ownership of the descriptor even when initialization fails.
+- (CYNMediaInfo *)openOwnedDescriptor:(int)descriptor error:(NSError **)error {
+  _input.fd = descriptor;
   struct stat status;
   if (_input.fd < 0 || fstat(_input.fd, &status) != 0 || !S_ISREG(status.st_mode)) {
     [self close];
@@ -390,6 +400,11 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
     }
     _video = [self openStream:_videoIndex video:YES error:error];
     if (!_video) return nil;
+    if (stream->start_time != AV_NOPTS_VALUE && stream->time_base.num > 0 && stream->time_base.den > 0) {
+      int64_t start = av_rescale_q(stream->start_time, stream->time_base, AV_TIME_BASE_Q), normalized;
+      if (start != INT64_MIN && !__builtin_sub_overflow(start, _originUS, &normalized))
+        _originVideoStart = CMTimeMake(normalized, AV_TIME_BASE);
+    }
     _info.hasVideo = YES;
     _info.width = parameters->width; _info.height = parameters->height;
     if (![self populateAspectSummary:_info streamRatio:stream->sample_aspect_ratio
@@ -436,6 +451,7 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   }
   _videoEOF = !_video; _audioEOF = !_audio; _resamplerEOF = !_audio;
   _nextVideoTime = kCMTimeZero; _nextAudioSample = 0;
+  _readingFromOrigin = YES;
   if ([self checkCancelled:error]) return nil;
   return _info;
 }
@@ -675,6 +691,13 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
     [self fail:CYNMediaDecoderErrorUnsupported message:@"The video timestamps exceed the native time range." error:error];
     return nil;
   }
+  // A first frame observed after an indexed seek is not the media's first
+  // video frame. Only origin decoding may refine the header's start time.
+  if (_readingFromOrigin && !_observedOriginVideoStart &&
+      (frame->best_effort_timestamp != AV_NOPTS_VALUE || frame->pts != AV_NOPTS_VALUE)) {
+    _originVideoStart = pts;
+    _observedOriginVideoStart = YES;
+  }
   CMTime duration = frame->duration > 0 ? CMTimeMake(av_rescale_q(frame->duration, _format->streams[_videoIndex]->time_base,
                                                                   (AVRational){1, 1000000}), 1000000)
                     : (_info.frameRate > 0 ? CMTimeMakeWithSeconds(1.0 / _info.frameRate, 1000000) : kCMTimeInvalid);
@@ -899,6 +922,56 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   }
   return nil;
 }
+- (int)duplicateInputDescriptor {
+  return fcntl(_input.fd, F_DUPFD_CLOEXEC, 0);
+}
+
+- (BOOL)restartFromOrigin:(NSError **)error {
+  CYNMediaInfo *previousInfo = _info;
+  int64_t previousOrigin = _originUS;
+  CMTime previousVideoStart = _originVideoStart;
+  BOOL previouslyObserved = _observedOriginVideoStart;
+  int descriptor = [self duplicateInputDescriptor];
+  // dup shares an open-file offset. The old AVIO and codecs must be completely
+  // retired on this same worker before rewinding or reading the new context.
+  [self close];
+  if (descriptor < 0) {
+    if ([self checkCancelled:error]) return NO;
+    return [self fail:CYNMediaDecoderErrorDecode message:@"The open media input could not be retained for an early seek." error:error];
+  }
+  _input.fd = descriptor;
+  NSError *restartError = nil;
+  if (![self checkCancelled:&restartError] && lseek(descriptor, 0, SEEK_SET) < 0)
+    [self fail:CYNMediaDecoderErrorDecode message:@"The open media input could not be rewound." error:&restartError];
+  CYNMediaInfo *reopened = restartError ? nil : [self openOwnedDescriptor:descriptor error:&restartError];
+  if (reopened) {
+    // The session retains its original capability summary. Rebuilding a
+    // decoder must not silently admit changed content or a different origin.
+    NSArray<NSString *> *keys = @[@"duration", @"width", @"height", @"frameRate", @"hasVideo", @"hasAudio",
+      @"rotationDegrees", @"audioSampleRate", @"audioChannels", @"videoCodec", @"audioCodec",
+      @"videoStreamCount", @"audioStreamCount", @"subtitleStreamCount", @"attachedPictureStreamCount",
+      @"chapterCount", @"selectedVideoStreamIndex", @"selectedAudioStreamIndex", @"sampleAspectRatioKnown",
+      @"sampleAspectNumerator", @"sampleAspectDenominator", @"displayWidth", @"displayHeight",
+      @"videoTransfer", @"hasStaticHDRMetadata", @"isHDR"];
+    if (_originUS != previousOrigin || ![[reopened dictionaryWithValuesForKeys:keys]
+                                          isEqual:[previousInfo dictionaryWithValuesForKeys:keys]]) {
+      [self fail:CYNMediaDecoderErrorDecode message:@"The open media input changed while rebuilding an early seek." error:&restartError];
+    } else if (previouslyObserved) {
+      _originVideoStart = previousVideoStart;
+      _observedOriginVideoStart = YES;
+    }
+  }
+  if (!restartError) [self checkCancelled:&restartError];
+  if (!reopened || restartError) {
+    [self close];
+    _failure = restartError ?: [NSError errorWithDomain:CYNMediaDecoderErrorDomain code:CYNMediaDecoderErrorDecode
+      userInfo:@{NSLocalizedDescriptionKey:@"The open media input could not be rebuilt."}];
+    if (error) *error = _failure;
+    return NO;
+  }
+  return YES;
+}
+
 - (BOOL)seekToSeconds:(double)seconds error:(NSError **)error {
   if (error) *error = nil;
   if ([self checkCancelled:error]) return NO;
@@ -909,6 +982,14 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   int64_t target;
   if (scaled >= 0x1p63L || __builtin_add_overflow((int64_t)scaled, _originUS, &target))
     return [self fail:CYNMediaDecoderErrorInvalidInput message:@"The seek time exceeds the native time range." error:error];
+  // Container seeks commonly select the video index. Before its first keyframe
+  // they can report success yet omit earlier audio. Re-read the same open file
+  // from its origin, preserving all samples for the caller's exact range gate.
+  // Unknown first-video timing is not fabricated as zero. Normal indexed seeks
+  // after a known video start keep their existing fast path.
+  if (seconds == 0 || (_video && (!CMTIME_IS_NUMERIC(_originVideoStart) ||
+      CMTimeCompare(CMTimeMake((int64_t)scaled, AV_TIME_BASE), _originVideoStart) < 0)))
+    return [self restartFromOrigin:error];
   if (avformat_seek_file(_format, -1, INT64_MIN, target, target, 0) < 0) {
     if ([self checkCancelled:error]) return NO;
     return [self fail:CYNMediaDecoderErrorDecode message:@"The media container could not seek to this time." error:error];
@@ -924,6 +1005,7 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   _audioDescription = NULL;
   _nextVideoTime = CMTimeMakeWithSeconds(seconds, AV_TIME_BASE);
   _nextAudioSample = llround(seconds * _info.audioSampleRate);
+  _readingFromOrigin = NO;
   return YES;
 }
 @end
