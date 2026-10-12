@@ -161,5 +161,172 @@ check(eofClose.mpv.renderInitializations > 0,
 eofClose.mainWindow.videoView.uninit()
 eofClose.mainWindow.close()
 Preference.keepOpenOnFileEnd = true
+
+func exactState(_ player: PlayerCore) -> NativePlaybackSnapshot? {
+  var result: NativePlaybackQueryResult?
+  player.nativePlaybackSession?.captureCurrentState { result = $0 }
+  check(awaitCondition { result != nil }, "Exact opening query returns on the real worker")
+  if case .ready(let value)? = result { return value }
+  return nil
+}
+enum OpeningAction: String, CaseIterable {
+  case none, pause, resume, space, doubleSpace, button, doubleButton, resumeThenPause, pauseThenResume
+  func perform(_ player: PlayerCore) {
+    switch self {
+    case .none: break
+    case .pause: player.pause()
+    case .resume: player.resume()
+    case .space: player.togglePause()
+    case .doubleSpace: player.togglePause(); player.togglePause()
+    case .button: player.mainWindow.playButtonAction(NSButton())
+    case .doubleButton: player.mainWindow.playButtonAction(NSButton()); player.mainWindow.playButtonAction(NSButton())
+    case .resumeThenPause: player.resume(); player.pause()
+    case .pauseThenResume: player.pause(); player.resume()
+    }
+  }
+  func expectedPause(preference: Bool) -> Bool {
+    switch self {
+    case .none, .doubleSpace, .doubleButton: return preference
+    case .pause, .resumeThenPause: return true
+    case .resume, .pauseThenResume: return false
+    case .space, .button: return !preference
+    }
+  }
+}
+for preference in [false, true] {
+  Preference.pauseWhenOpen = preference
+  for action in OpeningAction.allCases {
+    let candidate = PlayerCore()
+    var gate: AdmissionGate?
+    candidate.mainWindow.onWindowCreated = { gate = candidate.testHoldReadySnapshots() }
+    candidate.testOpen(red)
+    check(awaitCondition { gate?.held.first?.phase == .paused }, "Initial real paused snapshot reaches controlled admission boundary")
+    let initial = exactState(candidate)
+    check(candidate.info.state == .loading && candidate.mainWindow.setupCount == 0 && initial?.wantsPlayback == false,
+          "No UI admission or autoplay has happened before the real snapshot is delivered")
+    action.perform(candidate)
+    let label = "preference=\(preference) action=\(action.rawValue)"
+    check(candidate.playbackIsPaused == action.expectedPause(preference: preference), "Accepted opening intent matches \(label)")
+    pump(0.1)
+    let beforeAdmission = exactState(candidate)
+    check(beforeAdmission?.phase == .paused && beforeAdmission?.wantsPlayback == false &&
+          abs((beforeAdmission?.position ?? -1) - (initial?.position ?? -2)) < 0.000001,
+          "Real clock cannot start before media admission: \(label)")
+    gate?.release()
+    check(awaitCondition { candidate.info.state.loaded && candidate.mainWindow.setupCount == 1 },
+          "Original ready callback runs real media admission exactly once: \(label)")
+    let admitted = exactState(candidate)
+    check(admitted?.wantsPlayback == !action.expectedPause(preference: preference) &&
+          candidate.playbackIsPaused == action.expectedPause(preference: preference),
+          "Admitted native playback applies the last opening intent: \(label)")
+    check(candidate.playbackVolume == 0 && candidate.info.volume == 0 &&
+          !candidate.mainWindow.videoView.hasInitializedOpenGL && candidate.mpv.firstLoads == 0,
+          "Initial intent does not change silent-open or native backend ownership")
+    candidate.mainWindow.onWindowCreated = nil
+    retire(candidate)
+  }
+}
+
+for preference in [false, true] {
+  Preference.pauseWhenOpen = preference
+  for action in [OpeningAction.pause, .resume] {
+    let candidate = PlayerCore()
+    candidate.mainWindow.onSetup = {
+      check(candidate.nativeInitialPlaybackPending && candidate.info.state == .loaded,
+            "UI setup is still inside initial playback admission")
+      action.perform(candidate)
+    }
+    candidate.testOpen(red)
+    check(awaitCondition { candidate.info.state.loaded && candidate.mainWindow.setupCount == 1 }, "UI setup intent reaches real readiness")
+    let state = exactState(candidate)
+    check(state?.wantsPlayback == !action.expectedPause(preference: preference), "Latest UI-setup intent overrides the opening preference")
+    candidate.mainWindow.onSetup = nil
+    retire(candidate)
+  }
+}
+
+// Queue an exact compatibility query during setup, before notify queues the
+// accepted autoplay command. Its worker result still says paused, while the
+// adapter already owns a newer resume intent when the main callback executes.
+Preference.pauseWhenOpen = false
+let setupCompatibility = PlayerCore()
+setupCompatibility.mainWindow.onSetup = {
+  setupCompatibility.requireMPVCompatibility(reason: "Synthetic setup handoff") {}
+}
+setupCompatibility.testOpen(red)
+check(awaitCondition { setupCompatibility.mpv.firstLoads == 1 && !setupCompatibility.isUsingNativePlayback },
+      "Setup handoff waits for real native retirement")
+check(setupCompatibility.testCompatibilityPaused == false,
+      "Compatibility retains accepted autoplay instead of its older paused worker snapshot")
+setupCompatibility.mainWindow.onSetup = nil
+setupCompatibility.mainWindow.videoView.uninit()
+setupCompatibility.mainWindow.close()
+
+Preference.pauseWhenOpen = true
+let replacedOpening = PlayerCore()
+var replacedGate: AdmissionGate?
+replacedOpening.mainWindow.onWindowCreated = { replacedGate = replacedOpening.testHoldReadySnapshots() }
+replacedOpening.testOpen(red)
+check(awaitCondition { replacedGate?.held.first?.phase == .paused }, "Replacement starts with a real held admission callback")
+let oldGeneration = replacedOpening.videoToolsMediaGeneration
+let oldOpeningLayer = replacedOpening.nativePlaybackOutput?.displayLayer
+replacedOpening.resume()
+replacedOpening.testOpen(red)
+check(awaitCondition { replacedOpening.videoToolsMediaGeneration > oldGeneration && replacedOpening.info.state == .paused },
+      "Same-URL replacement admits a new paused generation")
+replacedGate?.release()
+let replacementState = exactState(replacedOpening)
+check(replacementState?.wantsPlayback == false && replacedOpening.playbackVolume == 0 &&
+      replacedOpening.mainWindow.setupCount == 1 && oldOpeningLayer?.superlayer == nil,
+      "Old opening resume and delayed callback cannot leak into the new generation")
+replacedOpening.mainWindow.onWindowCreated = nil
+retire(replacedOpening)
+
+for operation in ["stop", "close", "shutdown"] {
+  let candidate = PlayerCore()
+  var gate: AdmissionGate?
+  candidate.mainWindow.onWindowCreated = { gate = candidate.testHoldReadySnapshots() }
+  candidate.testOpen(red)
+  check(awaitCondition { gate?.held.first?.phase == .paused }, "Cancellation starts with a held real initial callback")
+  candidate.resume()
+  var token: NSObjectProtocol?
+  if operation == "shutdown" { candidate.shutdown() }
+  else if operation == "close" {
+    // The surrounding MainWindow delegate is a boundary. Forward a genuine
+    // NSWindow close notification to the production Core stop implementation.
+    token = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification,
+      object: candidate.mainWindow.window, queue: .main) { _ in candidate.stop() }
+    candidate.mainWindow.window?.close()
+  } else { candidate.stop() }
+  gate?.release()
+  check(awaitCondition { !candidate.isUsingNativePlayback }, "\(operation) retires the real pending native session")
+  check(candidate.mainWindow.setupCount == 0 && candidate.mainWindow.showCount == 0 &&
+        candidate.info.state == (operation == "shutdown" ? .shuttingDown : .idle),
+        "Delayed initial callback cannot reopen or autoplay after \(operation)")
+  if let token { NotificationCenter.default.removeObserver(token) }
+  candidate.mainWindow.onWindowCreated = nil
+  candidate.mainWindow.videoView.uninit()
+  candidate.mainWindow.close()
+}
+
+let unsupportedTracks = PlayerCore()
+var unsupportedGate: AdmissionGate?
+unsupportedTracks.mainWindow.onWindowCreated = { unsupportedGate = unsupportedTracks.testHoldReadySnapshots() }
+unsupportedTracks.testOpen(directory.appendingPathComponent("multi-audio.mp4"))
+check(awaitCondition { unsupportedGate?.held.first?.media?.audioStreamCount == 2 }, "Real decoder reports both synthetic audio tracks")
+unsupportedTracks.resume()
+let unsupportedProbe = exactState(unsupportedTracks)
+check(unsupportedProbe?.wantsPlayback == false && unsupportedTracks.mainWindow.setupCount == 0,
+      "Early resume does not start unadmitted multi-track media")
+unsupportedGate?.release()
+check(awaitCondition { unsupportedTracks.mpv.firstLoads == 1 && !unsupportedTracks.isUsingNativePlayback },
+      "Unmodified track admission routes unsupported media to compatibility")
+check(unsupportedTracks.mainWindow.setupCount == 0 && unsupportedTracks.logs.contains("Native compatibility: unmigrated_container_tracks") &&
+      unsupportedTracks.testCompatibilityPaused == false,
+      "Unsupported track metadata cannot be disguised as successful native readiness")
+unsupportedTracks.mainWindow.onWindowCreated = nil
+unsupportedTracks.mainWindow.videoView.uninit()
+unsupportedTracks.mainWindow.close()
+
 print("Native route real-render checks: \(passes) passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

@@ -56,9 +56,15 @@ final class NativePlaybackTransport {
   var onSnapshot: ((NativePlaybackSnapshot) -> Void)?
   var volumePercent = 70.0
   var rate = 1.2
+  private var capturedState: NativePlaybackSnapshot?
+  var isPaused: Bool {
+    guard let capturedState else { preconditionFailure("Pause state requires an explicit controlled snapshot") }
+    return capturedState.phase != .playing
+  }
   var captures: [(CaptureResult) -> Void] = []
   func captureCurrentState(_ completion: @escaping (CaptureResult) -> Void) { captures.append(completion) }
   func answer(_ result: CaptureResult) {
+    if case .ready(let snapshot) = result { capturedState = snapshot }
     let pending = captures
     captures = []
     pending.forEach { $0(result) }

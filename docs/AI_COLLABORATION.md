@@ -52,6 +52,13 @@ native→MPV 交接验收。队列预算、早期 seek 重建代价和目标机�
 无窗口真实 AppKit 正反对照随后复现测试从 GCD 主队列发起 `terminateLater` 会饿死关闭回调，
 已改 driver 为生产既有的 common RunLoop 入口，并加强实际两核末态／资源检查；29 项准备
 测试通过，完整 App 75 项尚待 CI，不能将最小对照当作整窗退出验收。
+首开阶段的 pause/resume 另已用真实 worker 复现并修补：准入前只记录最后操作，媒体／HDR／
+几何检查通过后才启动时钟，不再被开片偏好覆盖。扩展 route 普通／ASan／TSan 各 287 项
+通过，三个撤销修补的单变量负控均失败；旧预览三模式各 235 项仍通过。
+这些是抽取真实 Core 方法的边界测试，不等于完整 nib／Space 键事件验收。
+开发 CI `38316865546` 冻结于更早的 `8e1fc6bb`，不含此首开修补；其 media-helper job 因
+旧 SeekTiming fixture 未声明新 preview 接口而编译失败。已补 fail-fast 边界并通过
+37 项普通检查和真实 libmpv seek 38 项，但不能改写该 CI 的失败结果；完整构建 job 仍待完成。
 
 ## 2026-10-12 REA 播放内核函数体研究（未换核、未新增发行）
 

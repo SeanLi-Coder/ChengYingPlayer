@@ -408,12 +408,50 @@ MPV handle 销毁可能在同步 shutdown 通知返回后，因而只诊断指�
 
 额外待迁移门禁：
 
-- 正常 native 首次 admission 的 `receiveNativeSnapshot`／`notifyWindowVideoSizeChanged`
-  未被上述初始回退案例覆盖；极早 pause/resume 的 admission 与自动播放意图仍需单独验证。
+- 正常 native 首次 admission 不由上述预览测试证明；后续独立首开修补和 287 项证据见下节，
+  完整 App 的极早键盘／nib 操作仍须单独验证。
 - native→MPV 过渡时连续旋转快捷键可能在 retiring／预览恢复期间丢掉累计动作；原 MPV
   rotation coordinator 能排队不代表过渡层已将每次按键送达。本轮未改此行为。
 - 既有暂停图像不可读与固定 A/B 回绕截止偶发失败仍未定位。新增诊断和本次专项通过
   不能取消旧失败记录，也不能据此切默认后端或发布稳定包。
+
+## 首开暂停／继续意图（专项通过，未切默认）
+
+旧实现用真实 session 的暂停探测状态充当用户开片意图：默认自动播放时第一次 Space
+可能变成 resume，反过来提前 resume 会让时钟在媒体检查前前进；最终 notify 又可能按
+偏好覆盖用户刚刚暂停。`build/native-player-route-tests.7Erktm/` 保留旧实现 **230/16**。
+新实现把 `.loading` 到首个 `.loaded` UI setup 期间作为尚未完成的 admission，pause/resume
+只记录最后意图，只有原有轨道／HDR／SAR／几何检查通过才真正发出命令。
+getter 和 play-button 使用同一意图；兼容采点保留 transport 已接受的较新操作，
+不用落后的 worker phase 覆盖。换片、同 URL 重开、停止和关闭仍按媒体代次取消。
+
+冻结 SHA-256：Core `3b62c01141c646931dc434e61bd7a7158495a871dcfe6040f6183138c10f49b0`；
+Window `3f55adba31ab41a6bf7f0c0b249af3a3f8a7585fa488806da3d18ef334ec45b4`。
+`Tools/NativePlayerRouteTests/run.sh` 普通、`NATIVE_PLAYBACK_SANITIZER=address`、`thread`
+各 **287/0**，证据分别为 `build/native-player-route-tests.xqvmka/`、`qLp3Ga/`、`PSbmjJ/`。
+保留原 48 项，新增真实 paused 快照延迟交付、两个开片偏好、多次 toggle／真实 button
+方法、setupUI 期间操作、同文件重开和停止／关闭／退出取消。真实两音轨素材仍明确回退，
+early resume 不得伪造准入成功。首开探测阶段 worker 时钟必须保持暂停。
+源码及依赖前后 SHA 一致，生成源码／素材 hash 验证通过，内层期限未延长。
+
+同源三项单变量负控均退出 1：`start-before-admission` 为 **278/9** (`Qs9f2K`)，
+`ignore-opening-intent` 为 **277/10** (`4XweOT`)，`ignore-opening-getter` 为 **274/13**
+(`yIafyf`)。Sanitizer 插桩不包括预编译 FFmpeg 或系统 framework。
+真实 Core／transport／session／VideoView 执行，不代表完整 NSResponder Space 分发、
+原 nib 或真实 MPV 交接；NSWindow close 测试通过明确 observer 边界调用真实 Core.stop。
+
+同源旧预览普通／ASan／TSan **各 235/0**，兼容意图负控 **235 项中 5 失败**、退出 1；
+ControlledCore **41/0** 和两负控有效，Live **build-only** 退出 0、测试 App 清理完成。
+测试 fixture 改用实际 PlayerState 和真实稳定快照投影，未删旧断言。
+记录为 `build/native-opening-legacy-regression.QTc9Ra/RESULT.txt`。
+root 另核验菜单 9 项＋22 个入口守卫、拖放 ASan 104 项、App runner 29 项通过；
+`build/native-opening-root-regression.qNDsLq/` 保留结果。
+
+更早 `8e1fc6bb` 的开发 CI `38316865546` 尚在构建；media-helper job 已因旧 SeekTiming
+fixture 漏 `cancelNativePreview` 声明而失败。只补 MPV-only fail-fast 声明，不伪造 native
+成功；37 项 seek 回归和真实 libmpv 38 项通过，后者 `vo=null`，不是画面验收。
+此 CI 不含首开修补或 fixture 修复，不修改其失败结果、不重复派发取消正在运行的 App 验证。
+默认仍为 MPV，未改变发行、安装、权限或用户配置。
 
 ## 实现文件
 

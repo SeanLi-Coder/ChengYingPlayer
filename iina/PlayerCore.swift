@@ -517,7 +517,13 @@ class PlayerCore: NSObject {
 
   var playbackVolume: Double { playbackTransport.volumePercent }
   var currentPlaybackSpeed: Double { playbackTransport.rate }
-  var playbackIsPaused: Bool { playbackTransport.isPaused }
+  var nativeInitialPlaybackPending: Bool {
+    nativeTransport != nil && !nativeRetiring && !nativeTerminationRequested &&
+      info.state.active && (!nativeReady || info.state == .loaded)
+  }
+  var playbackIsPaused: Bool {
+    nativeInitialPlaybackPending ? (nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)) : playbackTransport.isPaused
+  }
   var playbackPosition: Double? { playbackTransport.position }
   var playbackAtEOF: Bool { playbackTransport.isAtEOF || (isUsingNativePlayback && nativeRestoredPreviewEOF) }
 
@@ -1043,7 +1049,7 @@ class PlayerCore: NSObject {
     // Before readiness there is no admitted native playback to retain. Keep
     // initial fallback viable, carrying explicit pause/resume instead; once
     // readiness changes, a newer intent regains normal cancellation priority.
-    let initiallyReady = nativeReady
+    let initiallyReady = !nativeInitialPlaybackPending
     let deadline = ProcessInfo.processInfo.systemUptime + 2
     log("Native compatibility: \(reason)")
     func capture() {
@@ -1051,15 +1057,15 @@ class PlayerCore: NSObject {
         guard let self, let transport, self.nativeTransport === transport,
               self.playbackEventRoute.revision == request,
               self.videoToolsMediaGeneration == generation, !self.nativeRetiring,
-              (!initiallyReady && !self.nativeReady || self.nativePreviewIntentRevision == previewIntent),
+              (!initiallyReady && self.nativeInitialPlaybackPending || self.nativePreviewIntentRevision == previewIntent),
               !self.nativePreviewInProgress else { return }
         var restore: NativeCompatibilityRestore?
         switch result {
         case .ready(let snapshot):
           restore = NativeCompatibilityRestore(url: url, position: self.nativeRestoredPreviewEOF ? snapshot.duration : snapshot.position,
             volume: transport.volumePercent, rate: transport.rate,
-            paused: self.nativeReady ? snapshot.phase != .playing :
-              (self.nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)),
+            paused: self.nativeInitialPlaybackPending ?
+              (self.nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)) : transport.isPaused,
             completion: completion)
         case .unavailable:
           if self.nativeReady {
@@ -1076,7 +1082,7 @@ class PlayerCore: NSObject {
               guard let self, let transport, self.nativeTransport === transport,
                     self.playbackEventRoute.revision == request,
                     self.videoToolsMediaGeneration == generation, !self.nativeRetiring,
-                    (!initiallyReady && !self.nativeReady || self.nativePreviewIntentRevision == previewIntent),
+                    (!initiallyReady && self.nativeInitialPlaybackPending || self.nativePreviewIntentRevision == previewIntent),
                     !self.nativePreviewInProgress else { return }
               capture()
             }
@@ -1600,7 +1606,7 @@ class PlayerCore: NSObject {
     guard info.state.active else { return }
     if isUsingNativePlayback {
       invalidateNativePreviewRequest()
-      if !nativeReady { nativeInitialPauseIntent = true }
+      if nativeInitialPlaybackPending { nativeInitialPauseIntent = true; return }
     }
     log("Pausing playback")
     playbackTransport.setPaused(true, context: .init(verbosity: .verbose))
@@ -1613,7 +1619,7 @@ class PlayerCore: NSObject {
     guard !UpdateWorkAdmission.shared.isBlocked else { return }
     if isUsingNativePlayback {
       invalidateNativePreviewRequest()
-      if !nativeReady { nativeInitialPauseIntent = false }
+      if nativeInitialPlaybackPending { nativeInitialPauseIntent = false; return }
     }
     log("Resuming playback")
     mainWindow.videoView.displayActive()
@@ -3542,8 +3548,15 @@ class PlayerCore: NSObject {
       // If the media was loaded manually then playback was paused to avoid audio starting to play
       // before video is ready to be displayed. Now that the video is ready playback can be resumed
       // unless the IINA "Pause" setting is enabled under "When media is opened".
-      let paused = playbackIsPaused
-      if paused, !Preference.bool(for: .pauseWhenOpen), nativeCompatibilityRestore == nil {
+      let paused = playbackTransport.isPaused
+      if nativeInitialPlaybackPending {
+        // Keep the decoder's initial probe paused until every capability and
+        // display-geometry check passed, including the initial UI setup call.
+        let desiredPause = nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)
+        if !desiredPause { mainWindow.videoView.displayActive() }
+        playbackTransport.setPaused(desiredPause, context: .init(verbosity: .verbose))
+        nativeInitialPauseIntent = nil
+      } else if !isUsingNativePlayback, paused, !Preference.bool(for: .pauseWhenOpen), nativeCompatibilityRestore == nil {
         log("Resuming playback now that file has been loaded")
         mainWindow.videoView.displayActive()
         playbackTransport.setPaused(false, context: .init(verbosity: .verbose))

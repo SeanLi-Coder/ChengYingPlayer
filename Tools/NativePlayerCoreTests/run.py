@@ -42,6 +42,9 @@ def main():
     model = bridge[bridge.index("struct VideoToolsViewport:"):bridge.index("struct VideoToolsPlayerSnapshot")]
     generated = "import Cocoa\n" + model + "\nfinal class PlayerCore: CoreBoundary {\n"
     generated += core[gate_start:gate_end] + "\n" + core[fields_start:preview_start] + core[preview_end:fields_end]
+    pending_start = core.index("  var nativeInitialPlaybackPending: Bool {")
+    pending_end = core.index("\n  }", pending_start) + len("\n  }")
+    generated += "\n" + core[pending_start:pending_end] + "\n"
     bodies = {name: method(core, name) for name in methods}
     if args.negative_control:
         guard = "    guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }\n"

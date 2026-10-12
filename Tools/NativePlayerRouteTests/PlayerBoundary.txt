@@ -20,6 +20,9 @@
   private var pendingAutoLoad = false
   private let playlistMutationLock = NSRecursiveLock()
   private var backgroundTaskInUse = false
+  var videoToolsLoopRecovery = VideoToolsLoopRecovery()
+  func videoToolsEnforceLoopBounds() {}
+  func seek(absoluteSecond: Double) { fatalError("EOF replay is outside initial admission tests") }
   private(set) var notifications: [Notification.Name] = []
   private(set) var logs: [String] = []
   enum SyncUIOption { case time, playButton, volume, playlist }
@@ -48,3 +51,9 @@
   }
   func testSetVolume(_ percent: Double) { _ = playbackTransport.setVolumePercent(percent) }
   func testPause(_ pause: Bool) { _ = playbackTransport.setPaused(pause) }
+  func testHoldReadySnapshots() -> AdmissionGate {
+    let gate = AdmissionGate()
+    gate.install(nativeTransport!)
+    return gate
+  }
+  var testCompatibilityPaused: Bool? { nativeCompatibilityRestore?.paused }

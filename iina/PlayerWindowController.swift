@@ -892,7 +892,8 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
   }
 
   @IBAction func playButtonAction(_ sender: NSButton) {
-    player.info.state == .paused ? player.resume() : player.pause()
+    if player.isUsingNativePlayback { player.togglePause() }
+    else { player.info.state == .paused ? player.resume() : player.pause() }
   }
 
   @IBAction func muteButtonAction(_ sender: NSButton) {

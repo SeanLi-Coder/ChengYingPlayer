@@ -17,6 +17,7 @@ final class MainWindowDouble: NSResponder {
     storedVideoView = video
     created.contentView = video
     player.initVideo()
+    onWindowCreated?()
     return created
   }
   var videoView: VideoView { _ = window; return storedVideoView! }
@@ -24,6 +25,8 @@ final class MainWindowDouble: NSResponder {
   var pendingShow = false
   var rotation = 0
   var setupCount = 0
+  var onWindowCreated: (() -> Void)?
+  var onSetup: (() -> Void)?
   var showCount = 0
   var volumeEnabled = false
   var isOntop = false
@@ -38,7 +41,7 @@ final class MainWindowDouble: NSResponder {
   init(player: PlayerCore) { self.player = player; super.init() }
   required init?(coder: NSCoder) { fatalError("Unavailable") }
   func showWindow(_ sender: Any?) { showCount += 1; window?.orderFront(nil) }
-  func setupUI() { setupCount += 1; updateVolume() }
+  func setupUI() { setupCount += 1; updateVolume(); onSetup?() }
   func updateVolume() { volumeEnabled = player.hasSelectedPlaybackAudio }
   func updateSpeedLabel(speed: Double) {}
   func syncSlider() {}
@@ -58,6 +61,28 @@ final class MainWindowDouble: NSResponder {
   func menuShowPlaylistPanel(_ sender: NSButton) {}
   func hideSideBar() {}
   func close() { storedWindow?.orderOut(nil); storedWindow?.close() }
+}
+/// Delays only delivery of actual ready snapshots to Core. The adapter and
+/// session remain real, and no media metadata or phase is fabricated.
+final class AdmissionGate {
+  private(set) var held: [NativePlaybackSnapshot] = []
+  private var forward: ((NativePlaybackSnapshot) -> Void)?
+  private var released = false
+  func install(_ transport: NativePlaybackTransport) {
+    forward = transport.onSnapshot
+    transport.onSnapshot = { [weak self] snapshot in
+      guard let self else { return }
+      if !self.released, snapshot.media != nil, [.paused, .playing].contains(snapshot.phase) {
+        self.held.append(snapshot)
+      } else { self.forward?(snapshot) }
+    }
+  }
+  func release() {
+    released = true
+    let snapshots = held
+    held.removeAll()
+    snapshots.forEach { forward?($0) }
+  }
 }
 final class QuickSettingDouble { func setHdrAvailability(to: Bool) {} }
 final class InitialWindowDouble { var pendingShow = false; func close() {} }
@@ -100,6 +125,7 @@ enum OSDMessage { case custom(String) }
 final class UpdateWorkAdmission {
   static let shared = UpdateWorkAdmission()
   var isOpeningMediaBlocked = false
+  var isBlocked = false
 }
 final class HistoryController {
   static let shared = HistoryController()

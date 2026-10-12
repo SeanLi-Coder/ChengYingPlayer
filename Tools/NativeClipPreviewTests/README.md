@@ -34,6 +34,8 @@ NATIVE_PREVIEW_NEGATIVE_CONTROL=stale-compatibility bash Tools/NativeClipPreview
   时间字段采用 AppKit 控件，但布局、提示更新、任务状态及时间字符串解析是明确的外部边界；
   这不是完整面板布局或输入法验收。完整旧工具与真实 MPV 预览回归仍需保留。
 - 媒体装入及替换是受控边界，真实 Session 执行解码、seek、区间与时钟查询。
+  状态枚举使用真实 `PlayerState`；稳定 Session 快照投影为 playing／paused，避免把已就绪的测试媒体
+  永久停留在初始 loaded 阶段。首开 pending 与暂停 getter 从生产代码机械提取；准入本身仍是边界。
   兼容测试在真实 native shutdown 完成后记录待装载的 position/pause/A/B，
   **MPV 的装载、ready 和画面是边界，不代表真实主窗口跨内核交接通过**。
 - 核实连续输入只保留最后请求、无效输入保留基线、同 URL 新 generation、采点取消与重入关闭、

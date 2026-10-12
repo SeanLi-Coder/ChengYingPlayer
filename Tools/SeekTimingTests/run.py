@@ -45,6 +45,9 @@ final class TimingController {
 """ + members + "\n}\n" + """
 final class SeekCore {
   let isUsingNativePlayback = false
+  func cancelNativePreview(restoreLoop: Bool) {
+    preconditionFailure("Unexpected native preview in MPV timing tests")
+  }
   func cancelNativeLoopRequests() {
     preconditionFailure("Unexpected native seek in MPV timing tests")
   }

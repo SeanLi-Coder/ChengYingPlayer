@@ -427,6 +427,29 @@ jobs:
           python3 -B Tools/PlaybackMenuRoutingTests/run.py
           bash Tools/NativeDropRoutingTests/run.sh
 
+      - name: Test native initial playback intent with sanitizers
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 6
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          NATIVE_PLAYBACK_SANITIZER=address bash Tools/NativePlayerRouteTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativePlayerRouteTests/run.sh
+
+      - name: Preserve native initial playback evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-route-test-evidence-${{ github.sha }}
+          path: |
+            build/native-player-route-tests.*/results.log
+            build/native-player-route-tests.*/source-before.sha256
+            build/native-player-route-tests.*/source-after.sha256
+            build/native-player-route-tests.*/source-comparison.log
+            build/native-player-route-tests.*/generated.sha256
+            build/native-player-route-tests.*/generated-validation.log
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Test native clip preview ownership and cancellation
         if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
         timeout-minutes: 6

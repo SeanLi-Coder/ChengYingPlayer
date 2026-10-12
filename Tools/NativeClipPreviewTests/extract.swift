@@ -27,13 +27,14 @@ func coreMethod(_ start: String) -> String {
   return String(source[a..<b])
 }
 let eofGetter = source.split(separator: "\n").first { $0.contains("var playbackAtEOF: Bool") }!
+let playbackGetters = ["  var nativeInitialPlaybackPending: Bool {", "  var playbackIsPaused: Bool {"].map(coreMethod).joined(separator: "\n")
 let commands = ["  func pause()", "  func resume()", "  func seek(absoluteSecond:"].map(coreMethod).joined(separator: "\n")
 let compatibilityMembersEnd = source.range(of: "  private var playbackTransport:", range: end..<source.endIndex)!.lowerBound
 let compatibilityMembers = String(source[end..<compatibilityMembersEnd])
 var compatibilityMethods = ["  func requireMPVCompatibility(", "  private func retireNativePlayback("].map(coreMethod).joined(separator: "\n")
 if ProcessInfo.processInfo.environment["NATIVE_PREVIEW_NEGATIVE_CONTROL"] == "stale-compatibility" {
-  let original = ",\n              (!initiallyReady && !self.nativeReady || self.nativePreviewIntentRevision == previewIntent),\n              !self.nativePreviewInProgress"
-  let retry = ",\n                    (!initiallyReady && !self.nativeReady || self.nativePreviewIntentRevision == previewIntent),\n                    !self.nativePreviewInProgress"
+  let original = ",\n              (!initiallyReady && self.nativeInitialPlaybackPending || self.nativePreviewIntentRevision == previewIntent),\n              !self.nativePreviewInProgress"
+  let retry = ",\n                    (!initiallyReady && self.nativeInitialPlaybackPending || self.nativePreviewIntentRevision == previewIntent),\n                    !self.nativePreviewInProgress"
   precondition(compatibilityMethods.contains(original) && compatibilityMethods.contains(retry))
   compatibilityMethods = compatibilityMethods.replacingOccurrences(of: original, with: "")
     .replacingOccurrences(of: retry, with: "")
@@ -42,8 +43,7 @@ let generated = """
 import Foundation
 import AVFoundation
 final class PlayerCore {
-  struct Info { var videoDuration: VideoTime?; var state = State.loaded; var currentURL: URL? }
-  enum State { case loaded, idle, stopping, shuttingDown, shutDown; var loaded: Bool { self == .loaded }; var active: Bool { loaded } }
+  struct Info { var videoDuration: VideoTime?; var state = PlayerState.idle; var currentURL: URL? }
   var info = Info()
   var nativeTransport: NativePlaybackTransport?
   var nativeReady = true
@@ -101,9 +101,20 @@ final class PlayerCore {
     nativeTransport = transport
     nativeReady = true
     nativeInitialPauseIntent = nil
-    info.state = .loaded
+    info.state = .loading
     info.currentURL = url
-    transport.onSnapshot = { [weak self] value in self?.info.videoDuration = VideoTime(value.duration) }
+    transport.onSnapshot = { [weak self] value in
+      guard let self else { return }
+      self.info.videoDuration = VideoTime(value.duration)
+      // Admission itself is a controlled boundary. Project actual stable
+      // session phases so an admitted fixture is not permanently opening.
+      guard self.nativeReady, !self.nativeRetiring, self.info.state.active else { return }
+      switch value.phase {
+      case .paused, .ended: self.info.state = .paused
+      case .playing: self.info.state = .playing
+      default: break
+      }
+    }
     transport.session.open(url, autoplay: false)
   }
   func close() {
@@ -119,6 +130,7 @@ final class PlayerCore {
 \(production)
 \(compatibilityMembers)
 \(eofGetter)
+\(playbackGetters)
 \(commands)
 \(compatibilityMethods)
 }

@@ -17,9 +17,9 @@ func method(_ signature: String) -> String {
   }
   return String(source[begin..<end])
 }
-let negative = ProcessInfo.processInfo.environment["NATIVE_ROUTE_NEGATIVE_CONTROL"]
-precondition(negative == nil || negative == "skip-initial-resume" || negative == "skip-native-title-update",
-             "Unknown negative control")
+let negative = ProcessInfo.processInfo.environment["NATIVE_ROUTE_NEGATIVE_CONTROL"] ?? ""
+precondition(["", "skip-initial-resume", "skip-native-title-update", "start-before-admission",
+              "ignore-opening-intent", "ignore-opening-getter"].contains(negative), "Unknown negative control")
 let methods = [
   "  func captureMPVEventRevision()", "  func acceptsMPVEventRevision(", "  func noteMPVMediaCommand()",
   "  private func attemptNativeOpen(", "  private func beginNativeOpen(", "  private func receiveNativeSnapshot(",
@@ -27,6 +27,7 @@ let methods = [
   "  private func openMainWindow(", "  func initVideo()", "  func shutdown()", "  func stop()",
   "  func notifyWindowVideoSizeChanged()", "  func getMediaTitle(",
   "  func syncAbLoop()",
+  "  func pause()", "  func resume()", "  func togglePause(",
 ].map { signature -> String in
   let body = method(signature)
   if negative == "skip-native-title-update", signature == "  private func receiveNativeSnapshot(" {
@@ -34,12 +35,30 @@ let methods = [
     precondition(body.components(separatedBy: removed).count == 2, "Title negative control production landmark changed")
     return body.replacingOccurrences(of: removed, with: "")
   }
-  guard negative == "skip-initial-resume", signature == "  func notifyWindowVideoSizeChanged()" else { return body }
-  let removed = "        playbackTransport.setPaused(false, context: .init(verbosity: .verbose))\n"
-  precondition(body.components(separatedBy: removed).count == 2, "Negative control production landmark changed")
-  return body.replacingOccurrences(of: removed, with: "")
+  if negative == "start-before-admission", signature == "  func pause()" || signature == "  func resume()" {
+    let value = signature == "  func pause()" ? "true" : "false"
+    let original = "if nativeInitialPlaybackPending { nativeInitialPauseIntent = \(value); return }"
+    precondition(body.components(separatedBy: original).count == 2, "Early command negative landmark changed")
+    return body.replacingOccurrences(of: original, with: "if nativeInitialPlaybackPending { nativeInitialPauseIntent = \(value) }")
+  }
+  if negative == "ignore-opening-intent", signature == "  func notifyWindowVideoSizeChanged()" {
+    let original = "let desiredPause = nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)"
+    precondition(body.components(separatedBy: original).count == 2, "Opening intent negative landmark changed")
+    return body.replacingOccurrences(of: original, with: "let desiredPause = Preference.bool(for: .pauseWhenOpen)")
+  }
+  if negative == "skip-initial-resume", signature == "  func notifyWindowVideoSizeChanged()" {
+    let removed = "        playbackTransport.setPaused(desiredPause, context: .init(verbosity: .verbose))\n"
+    precondition(body.components(separatedBy: removed).count == 2, "Autoplay negative landmark changed")
+    return body.replacingOccurrences(of: removed, with: "")
+  }
+  return body
 }.joined(separator: "\n\n")
-let declarations = section("  private var nativeTransport:", "  var receivedEndFileWhileLoading:")
+var declarations = section("  private var nativeTransport:", "  var receivedEndFileWhileLoading:")
+if negative == "ignore-opening-getter" {
+  let original = "nativeInitialPlaybackPending ? (nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)) : playbackTransport.isPaused"
+  precondition(declarations.components(separatedBy: original).count == 2, "Opening getter negative landmark changed")
+  declarations = declarations.replacingOccurrences(of: original, with: "playbackTransport.isPaused")
+}
 let boundary = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerRouteTests/PlayerBoundary.txt"), encoding: .utf8)
 let bridge = try String(contentsOf: root.appendingPathComponent("iina/VideoTools/VideoToolsPlayerBridge.swift"), encoding: .utf8)
 guard let modelStart = bridge.range(of: "struct VideoToolsViewport:")?.lowerBound,
@@ -53,6 +72,10 @@ guard let stateStart = infoSource.range(of: "  var state: PlayerState = .idle {"
   fatalError("Production state-machine extraction boundaries changed")
 }
 let state = String(infoSource[stateStart..<stateEnd])
+let windowSource = try String(contentsOf: root.appendingPathComponent("iina/PlayerWindowController.swift"), encoding: .utf8)
+let buttonStart = windowSource.range(of: "  @IBAction func playButtonAction(")!.lowerBound
+let buttonEnd = windowSource.range(of: "\n  }", range: buttonStart..<windowSource.endIndex)!.upperBound
+let button = String(windowSource[buttonStart..<buttonEnd])
 let output = """
 import AppKit
 import AVFoundation
@@ -68,6 +91,9 @@ final class PlaybackInfoDouble: PlaybackInfoFields {
   unowned let player: PlayerCore
   init(player: PlayerCore) { self.player = player; super.init() }
 \(state)
+}
+extension MainWindowDouble {
+\(button)
 }
 """
 try output.write(to: destination, atomically: true, encoding: .utf8)

@@ -222,6 +222,7 @@ final class PlayerCore: NSObject {
   let nativePreviewInProgress = false
   let nativePreviewIntentRevision: UInt64 = 0
   var nativeReady: Bool { preconditionFailure("Unexpected native readiness in live MPV clip tests") }
+  var nativeInitialPlaybackPending: Bool { preconditionFailure("Unexpected native opening state in live MPV clip tests") }
   var nativeInitialPauseIntent: Bool? {
     get { preconditionFailure("Unexpected native opening intent in live MPV clip tests") }
     set { preconditionFailure("Unexpected native opening intent in live MPV clip tests") }
