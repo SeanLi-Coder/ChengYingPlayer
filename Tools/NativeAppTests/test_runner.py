@@ -16,6 +16,38 @@ SPEC.loader.exec_module(runner)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_cleanup_completion_does_not_hide_application_failure(self):
+        with tempfile.TemporaryDirectory(prefix="native-cleanup-report-") as directory:
+            owner = runner.TestAppWorkspace(prefix="fixture-", dir=directory)
+            summary = {"passed": False, "cleanup": "pending"}
+            with patch.object(runner, "TestAppWorkspace", return_value=owner), \
+                    patch.object(owner, "cleanup", side_effect=lambda: setattr(owner, "cleaned", True)):
+                with self.assertRaisesRegex(ValueError, "App assertion failed"):
+                    with runner.owned_application_workspace(summary):
+                        raise ValueError("App assertion failed")
+            self.assertEqual(summary, {"passed": False, "cleanup": "completed"})
+
+    def test_cleanup_failure_keeps_both_failures_and_never_reports_completion(self):
+        with tempfile.TemporaryDirectory(prefix="native-cleanup-report-") as directory:
+            owner = runner.TestAppWorkspace(prefix="fixture-", dir=directory)
+            summary = {"passed": False, "cleanup": "pending"}
+            with patch.object(runner, "TestAppWorkspace", return_value=owner), \
+                    patch.object(owner, "cleanup", side_effect=RuntimeError("Cleanup blocked")):
+                with self.assertRaises(BaseExceptionGroup) as caught:
+                    with runner.owned_application_workspace(summary):
+                        raise ValueError("App assertion failed")
+            self.assertEqual([str(error) for error in caught.exception.exceptions],
+                             ["App assertion failed", "Cleanup blocked"])
+            self.assertEqual(summary, {"passed": False, "cleanup": "unconfirmed"})
+
+    def test_failed_workspace_creation_is_not_reported_as_cleanup(self):
+        summary = {"passed": False, "cleanup": "pending"}
+        with patch.object(runner, "TestAppWorkspace", side_effect=OSError("Workspace unavailable")):
+            with self.assertRaises(OSError):
+                with runner.owned_application_workspace(summary):
+                    self.fail("A missing workspace must not be used")
+        self.assertEqual(summary, {"passed": False, "cleanup": "not_started"})
+
     @staticmethod
     def partial_result():
         return {"format": 1, "run_id": "fixture", "complete": False, "passed": False,
@@ -239,12 +271,32 @@ class RunnerTests(unittest.TestCase):
             self.assertIn(proof, paused)
         cycle = method("checkABMenuCycle")
         self.assertEqual(cycle.count("sendABMenu(player)"), 3)
-        self.assertLess(cycle.index('"ab_menu_cycle_clears_range"'), cycle.index("self.replaceRapidly(player)"))
+        self.assertLess(cycle.index('"ab_menu_cycle_clears_range"'), cycle.index("self.exerciseDelayedFirstVideo(player)"))
         self.assertIn("player.mainWindow.endControlInteraction()", cycle)
         # This checks the test's production-entry-point contract; only execution
         # inside the complete CI App can establish actual UI/playback success.
 
-    def test_every_baseline_and_ab_check_is_required(self):
+    def test_delayed_stage_requires_real_paused_pixels_before_resuming(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private func exerciseDelayedFirstVideo(")
+        end = source.index("\n  }", start) + len("\n  }")
+        stage = source[start:end]
+        for proof in ('arguments["pauseWhenOpen"] = true',
+                      'player.openURL(fixture("delayed/delayed.mp4"), shouldAutoLoad: false)',
+                      "waitForNativePaused(player, position: 0, color: .delayedRed",
+                      'verifyClock(player, advancing: false, label: "delayed_paused_shared_clock_stays_still")',
+                      "NSApp.sendAction(#selector(MainMenuActionHandler.menuTogglePause(_:))",
+                      "player.mpv.mpvRenderContext == nil", "!player.mainWindow.videoView.hasInitializedOpenGL",
+                      'verifyClock(player, advancing: true, label: "delayed_resume_shared_clock_advances")'):
+            self.assertIn(proof, stage)
+        self.assertLess(stage.index('"delayed_paused_first_frame_at_zero"'), stage.index("menuTogglePause"))
+        self.assertLess(stage.index('"delayed_resume_shared_clock_advances"'), stage.index("self.replaceRapidly(player)"))
+        self.assertNotIn("videoSamples", stage)
+        self.assertNotIn("acceptedVideoSamples", stage)
+        # This is a sequencing contract, not a substitute for executing the
+        # compiled complete App with its real renderer and window on CI.
+
+    def test_every_baseline_ab_and_delayed_check_is_required(self):
         baseline = {
             "pristine_real_mpv_service", "native_autoplay_ready", "native_autoplay_shared_clock_advances",
             "real_mainwindow_nib_outlets", "paused_initial_frame_matches_red",
@@ -266,8 +318,14 @@ class RunnerTests(unittest.TestCase):
             "ab_menu_cycle_sets_a", "ab_menu_end_position_is_green", "ab_menu_cycle_sets_b",
             "ab_menu_cycle_clears_range", "ab_cleanup_remains_native_without_gl",
         }
+        delayed = {
+            "delayed_native_paused_open_ready", "delayed_paused_first_frame_at_zero",
+            "delayed_paused_shared_clock_stays_still", "delayed_real_resume_menu_action",
+            "delayed_resume_ready", "delayed_resume_shared_clock_advances",
+        }
         self.assertEqual(len(baseline), 23)
-        self.assertEqual(runner.REQUIRED_CHECKS, baseline | ab)
+        self.assertEqual(len(baseline | ab), 41)
+        self.assertEqual(runner.REQUIRED_CHECKS, baseline | ab | delayed)
         source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
         for label in runner.REQUIRED_CHECKS:
             self.assertIn('"' + label + '"', source)
@@ -335,9 +393,9 @@ class RunnerTests(unittest.TestCase):
             runner.make_fixtures(root, "fixture-run")
             marker = json.loads((root / "native-app-fixture.json").read_text())
             self.assertEqual(marker["run_id"], "fixture-run")
-            self.assertEqual(len(marker["fixtures"]), 3)
+            self.assertEqual(marker["fixtures"], ["red/red.mp4", "blue/blue.mp4", "compat/compat.mp4", "delayed/delayed.mp4"])
             references = marker["pixel_references"]
-            self.assertEqual(set(references), {"red", "green", "blue"})
+            self.assertEqual(set(references), {"red", "green", "blue", "delayed_red"})
             self.assertTrue(all(len(values) == 27 and all(0 <= value <= 255 for value in values)
                                 for values in references.values()))
             self.assertLess((root / "native-app-fixture.json").stat().st_size, 4096)
@@ -358,7 +416,7 @@ class RunnerTests(unittest.TestCase):
                 self.assertTrue(all(value < 45 for index, value in enumerate(pixel) if index != dominant))
             # Read planar YUV independently from the NV12-producing helper.
             for color, source, seconds in (("red", "red/red.mp4", 0.4), ("green", "red/red.mp4", 4.2),
-                                            ("blue", "blue/blue.mp4", 0.4)):
+                                            ("blue", "blue/blue.mp4", 0.4), ("delayed_red", "delayed/delayed.mp4", 1.7)):
                 planar = subprocess.check_output([str(ffmpeg), "-hide_banner", "-loglevel", "error", "-ss", str(seconds),
                     "-i", str(root / source), "-frames:v", "1", "-an", "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1"], timeout=15)
                 expected = []
@@ -370,6 +428,21 @@ class RunnerTests(unittest.TestCase):
             probe = json.loads(subprocess.check_output([str(ffprobe), "-v", "error", "-show_streams", "-of", "json",
                                                        str(root / "compat/compat.mp4")], timeout=15))
             self.assertTrue(any(item["codec_name"] == "mov_text" for item in probe["streams"]))
+            probe = json.loads(subprocess.check_output([str(ffprobe), "-v", "error", "-show_streams", "-of", "json",
+                                                       str(root / "delayed/delayed.mp4")], timeout=15))
+            delayed_video = next(item for item in probe["streams"] if item["codec_type"] == "video")
+            delayed_audio = next(item for item in probe["streams"] if item["codec_type"] == "audio")
+            self.assertEqual(float(delayed_video["start_time"]), 1.5)
+            self.assertEqual(float(delayed_audio["start_time"]), 0)
+            self.assertEqual(delayed_video["pix_fmt"], "yuv420p")
+            self.assertEqual(delayed_video["color_space"], "bt709")
+            self.assertGreater(delayed_video["has_b_frames"], 0)
+            frames = json.loads(subprocess.check_output([str(ffprobe), "-v", "error", "-show_frames",
+                "-show_entries", "frame=media_type,best_effort_timestamp_time", "-of", "json",
+                str(root / "delayed/delayed.mp4")], timeout=15))["frames"]
+            first_video_index = next(index for index, item in enumerate(frames) if item["media_type"] == "video")
+            self.assertGreaterEqual(sum(item["media_type"] == "audio" for item in frames[:first_video_index]), 48)
+            self.assertEqual(float(frames[first_video_index]["best_effort_timestamp_time"]), 1.5)
 
 
 if __name__ == "__main__":

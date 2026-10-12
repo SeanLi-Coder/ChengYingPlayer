@@ -228,6 +228,18 @@ func testNative(_ url: URL) {
   seek(2.8, .absoluteSeconds, target: 2.8)
   check(adapter!.setPaused(false) == .accepted && waitUntil { adapter!.isAtEOF },
     "Native EOF query follows actual drained media, not command acceptance")
+  check(adapter!.isPaused && adapter!.snapshot?.wantsPlayback == false,
+    "Drained EOF reports paused worker intent")
+  check(adapter!.setPaused(!adapter!.isPaused) == .accepted && !adapter!.isPaused,
+    "The first EOF toggle exposes accepted resume intent immediately")
+  check(adapter!.setPaused(!adapter!.isPaused) == .accepted && adapter!.isPaused,
+    "The second same-turn EOF toggle accepts pause rather than resuming twice")
+  check(waitUntil { adapter!.snapshot?.phase == .paused && (adapter!.snapshot?.position ?? 100) < 1 } &&
+    adapter!.snapshot?.wantsPlayback == false,
+    "Two rapid EOF toggles leave the restarted real worker paused")
+  seek(2.8, .absoluteSeconds, target: 2.8)
+  check(adapter!.setPaused(false) == .accepted && waitUntil { adapter!.isAtEOF },
+    "The EOF toggle fixture reaches real EOF again before testing a single resume")
   check(adapter!.setPaused(false) == .accepted && waitUntil { !adapter!.isPaused && (adapter!.position ?? 100) < 1 },
     "Native resume from EOF restarts media")
   var replacedQuery: NativePlaybackQueryResult?
@@ -236,6 +248,8 @@ func testNative(_ url: URL) {
   session!.open(url, autoplay: false)
   check(waitUntil { adapter!.snapshot?.generation == 2 && adapter!.snapshot?.phase == .paused } &&
     adapter!.volumePercent == 0, "Opening another native file clears previous 70-percent volume")
+  check(adapter!.isPaused && adapter!.snapshot?.wantsPlayback == false,
+    "A paused new media generation clears previous playback intent")
   check(waitUntil { replacedQuery != nil }, "A query superseded by a same-turn open always completes")
   if case .superseded? = replacedQuery {
     check(true, "A same-turn open never returns the previous media snapshot")
@@ -254,6 +268,8 @@ func testNative(_ url: URL) {
   }
   session!.shutdown { closed = true }
   check(waitUntil { closed && adapter!.snapshot?.phase == .closed }, "Native shutdown completes asynchronously")
+  check(adapter!.isPaused && adapter!.snapshot?.wantsPlayback == false,
+    "Closed native media reports paused worker intent")
   check(waitUntil { shutdownQuery != nil }, "Query pending during shutdown does not hang")
   if case .superseded? = shutdownQuery {
     check(true, "Shutdown invalidates a pending query instead of returning obsolete state")
@@ -276,6 +292,18 @@ func testNative(_ url: URL) {
   adapter = nil
   session = nil
   check(waitUntil { weakAdapter.value == nil && weakSession.value == nil }, "Native adapter callbacks do not retain session or adapter")
+}
+
+func testNativeFailedIntent(_ url: URL) {
+  let session = NativePlaybackSession()
+  let transport = NativePlaybackTransport(session: session)
+  session.open(url.appendingPathExtension("missing-fixture"), autoplay: true)
+  check(waitUntil { transport.snapshot?.phase == .failed }, "Missing synthetic fixture reports an explicit decoder failure")
+  check(transport.isPaused && transport.snapshot?.wantsPlayback == false,
+        "A failed autoplay request cannot leave the transport reporting playback")
+  var closed = false
+  session.shutdown { closed = true }
+  check(waitUntil { closed }, "Failed native intent fixture shuts down")
 }
 
 func testNativeLoopTransport(_ url: URL) {
@@ -333,6 +361,7 @@ NSApp.setActivationPolicy(.prohibited)
 testMPV()
 testNative(URL(fileURLWithPath: CommandLine.arguments[1]))
 testNativeLoopTransport(URL(fileURLWithPath: CommandLine.arguments[1]))
+testNativeFailedIntent(URL(fileURLWithPath: CommandLine.arguments[1]))
 print("RESULT: \(passed) passed; \(failed) failed")
 print("LIMIT: Native command and clock checks do not certify displayed pixels or audible output.")
 exit(failed == 0 ? 0 : 1)

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -37,6 +38,9 @@ REQUIRED_CHECKS = {
     "ab_relative_seek_stays_at_start", "ab_menu_clear_preserves_file_loop",
     "ab_menu_cycle_sets_a", "ab_menu_end_position_is_green", "ab_menu_cycle_sets_b",
     "ab_menu_cycle_clears_range", "ab_cleanup_remains_native_without_gl",
+    "delayed_native_paused_open_ready", "delayed_paused_first_frame_at_zero",
+    "delayed_paused_shared_clock_stays_still", "delayed_real_resume_menu_action",
+    "delayed_resume_ready", "delayed_resume_shared_clock_advances",
 }
 PIXEL_POINTS = [(x, y) for y in (8, 48, 86) for x in (8, 80, 150)]
 MAX_REPORT_BYTES = 1024 * 1024
@@ -122,7 +126,7 @@ def pixel_reference(ffmpeg, source, seconds):
 
 def make_fixtures(root, run_id):
     ffmpeg = ROOT / "deps/executable/ffmpeg"
-    for name in ("red", "blue", "compat"):
+    for name in ("red", "blue", "compat", "delayed"):
         (root / name).mkdir()
     base = [str(ffmpeg), "-hide_banner", "-loglevel", "error", "-nostdin"]
     settings = ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-bf", "2", "-g", "40",
@@ -135,6 +139,10 @@ def make_fixtures(root, run_id):
         [str(root / "red/red.mp4")], check=True, timeout=45)
     subprocess.run(base + ["-f", "lavfi", "-i", "color=blue:s=160x96:r=20:d=9"] + audio + settings +
         [str(root / "blue/blue.mp4")], check=True, timeout=45)
+    subprocess.run(base + ["-f", "lavfi", "-i", "color=red:s=160x96:r=20:d=3",
+        "-f", "lavfi", "-i", "sine=frequency=330:sample_rate=48000:duration=4.5",
+        "-vf", "setpts=PTS+1.5/TB", "-fps_mode", "passthrough"] + settings +
+        [str(root / "delayed/delayed.mp4")], check=True, timeout=45)
     subtitle = root / "compat/subtitle.srt"
     subtitle.write_text("1\n00:00:00,000 --> 00:00:08,500\nSynthetic compatibility fixture\n", encoding="utf-8")
     subprocess.run(base + ["-i", str(root / "red/red.mp4"), "-i", str(subtitle), "-map", "0:v",
@@ -142,11 +150,12 @@ def make_fixtures(root, run_id):
         str(root / "compat/compat.mp4")], check=True, timeout=45)
     (root / "native-app-fixture.json").write_text(json.dumps({
         "format": 1, "run_id": run_id,
-        "fixtures": ["red/red.mp4", "blue/blue.mp4", "compat/compat.mp4"],
+        "fixtures": ["red/red.mp4", "blue/blue.mp4", "compat/compat.mp4", "delayed/delayed.mp4"],
         "pixel_references": {
             "red": pixel_reference(ffmpeg, root / "red/red.mp4", 0.4),
             "green": pixel_reference(ffmpeg, root / "red/red.mp4", 4.2),
             "blue": pixel_reference(ffmpeg, root / "blue/blue.mp4", 0.4),
+            "delayed_red": pixel_reference(ffmpeg, root / "delayed/delayed.mp4", 1.7),
         },
     }) + "\n", encoding="utf-8")
 
@@ -159,6 +168,20 @@ def build_command(workspace, source_packages, bundle_id):
             "CODE_SIGNING_ALLOWED=YES", "CODE_SIGNING_REQUIRED=YES",
             f"PRODUCT_BUNDLE_IDENTIFIER={bundle_id}",
             "SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) CHENGYING_NATIVE_APP_TESTS"]
+
+
+@contextmanager
+def owned_application_workspace(summary):
+    owner = None
+    try:
+        owner = TestAppWorkspace(prefix="native-full-app-")
+        with owner as path:
+            yield Path(path)
+    finally:
+        # A failed assertion does not imply failed cleanup, and completed
+        # cleanup must never turn that assertion into a passing App result.
+        summary["cleanup"] = ("not_started" if owner is None else
+                              "completed" if owner.cleaned else "unconfirmed")
 
 
 def main():
@@ -174,7 +197,7 @@ def main():
     report.mkdir(parents=True, exist_ok=False)
     run_id = str(uuid.uuid4())
     bundle_id = "io.chengying.tests.native-app." + run_id.replace("-", "")
-    summary = {"format": 1, "run_id": run_id, "passed": False, "cleanup": "pending"}
+    summary = {"format": 1, "run_id": run_id, "passed": False, "cleanup": "not_started"}
     try:
         production = args.production_app.resolve(strict=True)
         production_info = plistlib.loads((production / "Contents/Info.plist").read_bytes())
@@ -185,8 +208,7 @@ def main():
         if b"NATIVE_APP_TEST_" in release_strings or b"CHENGYING_NATIVE_APP_TEST_ROOT" in release_strings:
             raise RuntimeError("The CI-only driver was unexpectedly compiled into the regular App.")
         summary["regular_build_excludes_test_driver"] = True
-        with TestAppWorkspace(prefix="native-full-app-") as owned:
-            workspace = Path(owned)
+        with owned_application_workspace(summary) as workspace:
             fixtures = workspace / "fixtures"
             fixtures.mkdir()
             make_fixtures(fixtures, run_id)
@@ -209,11 +231,10 @@ def main():
                 raise RuntimeError("The complete App produced no test result.")
             summary["app_exit_code"] = result.returncode
             summary["checks"] = validate_result(result_data, run_id=run_id, exit_code=result.returncode)
-        summary.update(passed=True, cleanup="completed")
+        if summary["cleanup"] != "completed":
+            raise RuntimeError("Owned application workspace cleanup was not confirmed.")
+        summary["passed"] = True
         print("PASS: Complete native App test and owned workspace cleanup", flush=True)
-    except BaseException:
-        summary["cleanup"] = "unconfirmed"
-        raise
     finally:
         (report / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 

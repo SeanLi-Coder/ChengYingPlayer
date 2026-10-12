@@ -40,6 +40,9 @@ NATIVE_AB_NEGATIVE_CONTROL=stale-capture \
 
 NATIVE_AB_NEGATIVE_CONTROL=reentrant-cancel \
   FFMPEG_BIN="$PWD/deps/executable/ffmpeg" bash Tools/NativeABLoopTests/run.sh
+
+NATIVE_AB_NEGATIVE_CONTROL=pause-intent \
+  FFMPEG_BIN="$PWD/deps/executable/ffmpeg" bash Tools/NativeABLoopTests/run.sh
 ```
 
 Each negative control must exit with status 1 and report the intended failed
@@ -52,6 +55,10 @@ nonzero exit is insufficient evidence.
 - `reentrant-cancel` delivers canceled callbacks synchronously instead of after
   clearing the command identity and queue. It must fail
   `Reentrant cancellation completes each request exactly once without leaving a queued action`.
+- `pause-intent` replaces the worker-intent query with the old phase-only
+  paused check. It must fail
+  `Automatic A/B preroll preserves worker playback intent instead of reporting paused`
+  and `Space during a real automatic A/B wrap pauses the worker`.
 
 Additional failed checks can follow the deliberately broken invariant; the
 positive run must still pass without either environment override.
@@ -59,7 +66,9 @@ positive run must still pass without either environment override.
 ## Scope and limits
 
 The extractor copies the current `PlayerCore` A/B controls and selected
-`PlayerWindowController` slider/knob methods mechanically. The harness compiles
+`PlayerWindowController` slider/knob methods mechanically. The native transport is
+also copied mechanically so the pause-intent negative control can corrupt only
+its generated copy. The harness compiles
 the real `VideoToolsPlayerBridge`, native transport, decoder, sample gate,
 sample-buffer output, and playback session. A short SDR FFV1 video with silent
 PCM audio is generated locally; no user media, browser data, preferences, or
@@ -68,7 +77,10 @@ permission settings are read or changed.
 Covered behavior includes optional A = 0, ordered asynchronous captures, invalid
 B rejection, canceled/reentrant callbacks, generation changes, explicit seek
 cancellation, marker visibility and invalid-drag rollback, preservation of the
-file-loop preference, and timestamp bounds over repeated A/B loops. Compatibility
+file-loop preference, timestamp bounds over repeated A/B loops, and the real
+`togglePause` command during automatic loop and explicit seek preroll. It verifies
+worker playback intent separately from decoder/output phase, rapid pause/resume
+commands, new-media paused/muted state, and menu error/cancellation feedback. Compatibility
 restoration of markers is checked against an explicit MPV property sink.
 
 Application services, slider objects, the MPV property sink, and test open/close

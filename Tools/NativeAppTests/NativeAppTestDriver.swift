@@ -7,7 +7,7 @@ import CoreVideo
 /// All player, controller, nib and rendering objects below are production objects.
 final class NativeAppTestDriver {
   private static var instance: NativeAppTestDriver?
-  private static let fixtureNames = ["red/red.mp4", "blue/blue.mp4", "compat/compat.mp4"]
+  private static let fixtureNames = ["red/red.mp4", "blue/blue.mp4", "compat/compat.mp4", "delayed/delayed.mp4"]
   private let root: URL
   private let runID: String
   private let pixelReferences: [String: [Int]]
@@ -53,7 +53,7 @@ final class NativeAppTestDriver {
           payload["run_id"] as? String == runID,
           payload["fixtures"] as? [String] == fixtureNames,
           let references = payload["pixel_references"] as? [String: [Int]],
-          Set(references.keys) == Set(["red", "green", "blue"]),
+          Set(references.keys) == Set(["red", "green", "blue", "delayed_red"]),
           references.values.allSatisfy({ $0.count == 27 && $0.allSatisfy { (0...255).contains($0) } }),
           !manager.fileExists(atPath: root.appendingPathComponent("result.json").path) else { preflightFailure() }
     for name in fixtureNames {
@@ -224,6 +224,12 @@ final class NativeAppTestDriver {
           NSApp.sendAction(action, to: slider.target, from: slider),
           let session = player.nativePlaybackSession else { fail("real_volume_slider_action"); return }
     session.captureCurrentState { result in
+      // Keep fixed numeric state in CI evidence without logging media paths.
+      if case .ready(let snapshot) = result {
+        print("NATIVE_APP_TEST_VOLUME: phase=\(snapshot.phase) output=\(snapshot.volume) info=\(player.info.volume) slider=\(slider.doubleValue)")
+      } else {
+        print("NATIVE_APP_TEST_VOLUME: capture_not_ready")
+      }
       guard case .ready(let snapshot) = result, snapshot.phase == .paused,
             abs(snapshot.volume - 0.7) < 0.001, Self.matchesVolumePercent(player.info.volume, 70) else {
         self.fail("real_volume_slider_action"); return
@@ -376,7 +382,7 @@ final class NativeAppTestDriver {
             self.waitForNativePaused(player, position: 0, color: .red, label: "ab_cleanup_remains_native_without_gl",
               extra: { player.getLoopMode() == .off && self.markersMatch(player, start: nil, end: nil) }) {
               player.mainWindow.endControlInteraction()
-              self.replaceRapidly(player)
+              self.exerciseDelayedFirstVideo(player)
             }
           }
         }
@@ -484,6 +490,43 @@ final class NativeAppTestDriver {
     }
   }
 
+  private func exerciseDelayedFirstVideo(_ player: PlayerCore) {
+    var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+    arguments["pauseWhenOpen"] = true
+    UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+    player.openURL(fixture("delayed/delayed.mp4"), shouldAutoLoad: false)
+    wait("delayed_native_paused_open_ready", until: {
+      player.info.currentURL == self.fixture("delayed/delayed.mp4") &&
+        player.isUsingNativePlayback && player.info.state == .paused && player.playbackIsPaused &&
+        player.mainWindow.window?.isVisible == true && player.playbackVolume == 0 &&
+        player.mainWindow.volumeSlider.doubleValue == 0
+    }) {
+      // The selected video starts at 1.5 seconds, while audio starts at zero.
+      // A ready flag or decoded-frame count cannot substitute for this actual
+      // zero-rate, zero-clock image readback through the real player window.
+      self.waitForNativePaused(player, position: 0, color: .delayedRed,
+        label: "delayed_paused_first_frame_at_zero") {
+        self.verifyClock(player, advancing: false, label: "delayed_paused_shared_clock_stays_still") {
+          guard NSApp.sendAction(#selector(MainMenuActionHandler.menuTogglePause(_:)),
+                                 to: player.mainWindow.menuActionHandler, from: NSMenuItem()) else {
+            self.fail("delayed_real_resume_menu_action"); return
+          }
+          self.record("delayed_real_resume_menu_action")
+          self.wait("delayed_resume_ready", until: {
+            player.isUsingNativePlayback && player.info.state == .playing && !player.playbackIsPaused &&
+              player.info.currentURL == self.fixture("delayed/delayed.mp4") &&
+              player.playbackVolume == 0 && !player.mainWindow.videoView.hasInitializedOpenGL &&
+              player.mpv.mpvRenderContext == nil
+          }) {
+            self.verifyClock(player, advancing: true, label: "delayed_resume_shared_clock_advances") {
+              self.replaceRapidly(player)
+            }
+          }
+        }
+      }
+    }
+  }
+
   private func exerciseCompatibility(_ player: PlayerCore) {
     player.openURL(fixture("compat/compat.mp4"), shouldAutoLoad: false)
     wait("embedded_subtitle_routes_to_real_compatibility", timeout: 20, until: {
@@ -532,7 +575,7 @@ final class NativeAppTestDriver {
     }
   }
 
-  private enum Color: String { case red, green, blue }
+  private enum Color: String { case red, green, blue, delayedRed = "delayed_red" }
 
   private func pixel(_ player: PlayerCore, is expected: Color) -> Bool {
     // Inspect the immutable display-layer reference and its actually displayed

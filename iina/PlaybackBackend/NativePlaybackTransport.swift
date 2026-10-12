@@ -59,7 +59,12 @@ final class NativePlaybackTransport: PlaybackTransport {
   }
   var isPaused: Bool {
     dispatchPrecondition(condition: .onQueue(.main))
-    return pendingPause?.value ?? (snapshot?.phase != .playing)
+    guard let snapshot, ![.idle, .closed, .failed].contains(snapshot.phase) else { return true }
+    // Preroll is an output state, not a request to pause. In particular an
+    // automatic A/B wrap must still let the next Space key pause playback.
+    // EOF is paused unless an explicit accepted resume/pause is still pending;
+    // that intent must win so two rapid toggles at EOF do not both resume.
+    return pendingPause?.value ?? (snapshot.phase == .ended || !snapshot.wantsPlayback)
   }
   var position: Double? {
     dispatchPrecondition(condition: .onQueue(.main))

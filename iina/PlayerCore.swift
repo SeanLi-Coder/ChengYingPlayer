@@ -1757,8 +1757,16 @@ class PlayerCore: NSObject {
   func abLoop() {
     if isUsingNativePlayback {
       requestNativeLoopAction(.cycle) { [weak self] result in
-        guard let self, case .applied = result else { return }
-        self.sendOSD(.abLoop(self.info.abLoopStatus))
+        guard let self else { return }
+        switch result {
+        case .applied: self.sendOSD(.abLoop(self.info.abLoopStatus))
+        case .invalid:
+          let key = self.nativeLoopA == nil ? "videotools.error.invalid_range" : "videotools.error.loop_end"
+          self.sendOSD(.custom(NSLocalizedString(key, comment: "Invalid loop marker")))
+        case .unavailable:
+          self.sendOSD(.custom(NSLocalizedString("playback.loop_capture_unavailable", comment: "Loop marker capture unavailable")))
+        case .superseded: break
+        }
       }
       return
     }

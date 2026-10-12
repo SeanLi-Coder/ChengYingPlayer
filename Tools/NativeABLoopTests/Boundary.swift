@@ -15,7 +15,7 @@ final class VideoTime {
 }
 enum ABLoopStatus { case cleared, aSet, bSet }
 enum TestState {
-  case loaded, idle, shuttingDown, shutDown
+  case loaded, paused, idle, shuttingDown, shutDown
   var loaded: Bool { self == .loaded }
   var active: Bool { loaded }
 }

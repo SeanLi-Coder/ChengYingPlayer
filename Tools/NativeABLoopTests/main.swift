@@ -136,6 +136,14 @@ check(waitUntil { cancelled != nil } && cancelled == .superseded && cancellation
 settle()
 check(player.playbackLoopA == nil && player.playbackLoopB == nil && cancellationCalls == 1,
       "An old worker callback cannot resurrect a cleared marker")
+let messagesBeforeCancelledMenu = player.messages.count
+player.abLoop()
+player.requestNativeLoopAction(.clear)
+var menuCancellationDelivered = false
+DispatchQueue.main.async { menuCancellationDelivered = true }
+check(waitUntil { menuCancellationDelivered } && player.messages.count == messagesBeforeCancelledMenu,
+      "A superseded native menu capture does not emit stale success or error feedback")
+settle()
 seek(0)
 var ordered: [PlayerCore.NativeLoopActionResult] = []
 player.requestNativeLoopAction(.captureA) { ordered.append($0) }
@@ -151,6 +159,18 @@ check(waitUntil { player.info.abLoopStatus == .aSet && player.testPendingLoopReq
       "Rapid menu invocations establish A and finish both commands in order")
 settle()
 check(player.playbackLoopB == nil, "The second same-frame menu invocation cannot invent a valid B")
+if case .custom(let message)? = player.messages.last {
+  check(message == NSLocalizedString("videotools.error.loop_end", comment: ""),
+        "Invalid native menu endpoint reports the same localized error as the keyboard")
+} else { check(false, "Invalid native menu endpoint reports the same localized error as the keyboard") }
+let unavailableMessages = player.messages.count
+player.nativeReady = false
+player.abLoop()
+player.nativeReady = true
+if player.messages.count == unavailableMessages + 1, case .custom(let message)? = player.messages.last {
+  check(message == NSLocalizedString("playback.loop_capture_unavailable", comment: ""),
+        "Unavailable native menu capture reports preparation feedback")
+} else { check(false, "Unavailable native menu capture reports preparation feedback") }
 seek(0.65)
 check(action(.captureA) == .applied, "Nonzero loop start is captured precisely")
 seek(0.95)
@@ -176,6 +196,72 @@ check(!samples.isEmpty && samples.allSatisfy { $0.start >= 0.65 && $0.end <= 0.9
       "Every observed audio/video sample remains inside the exact half-open range")
 check(player.mpv.reads == 0 && player.mpv.writes == 0 && player.compatibilityRequests == 0,
       "Native markers, menu controls and navigation never touch the idle MPV core")
+
+// Observe actual automatic-loop and explicit-seek snapshots, then invoke the
+// production togglePause method in the same main-thread callback as the UI.
+let transport = player.nativeTransport!
+let previousSnapshotHandler = transport.onSnapshot
+var sawPlayingBeforeWrap = false
+var toggledDuringWrap = false
+let automaticRevision = transport.snapshot!.revision
+transport.onSnapshot = { snapshot in
+  previousSnapshotHandler?(snapshot)
+  if snapshot.phase == .playing { sawPlayingBeforeWrap = true }
+  guard !toggledDuringWrap, sawPlayingBeforeWrap, snapshot.phase == .seeking,
+        snapshot.revision == automaticRevision else { return }
+  toggledDuringWrap = true
+  check(snapshot.wantsPlayback && !player.playbackIsPaused,
+        "Automatic A/B preroll preserves worker playback intent instead of reporting paused")
+  player.togglePause()
+  check(player.playbackIsPaused, "Space during an automatic A/B wrap immediately accepts pause intent")
+}
+player.resume()
+check(waitUntil { toggledDuringWrap && transport.snapshot?.phase == .paused },
+      "Space during a real automatic A/B wrap pauses the worker")
+check(transport.snapshot?.wantsPlayback == false && player.playbackIsPaused,
+      "The paused loop snapshot confirms worker pause intent")
+transport.onSnapshot = previousSnapshotHandler
+
+player.resume()
+check(waitUntil { transport.snapshot?.phase == .playing }, "Seek-pause test resumes the real loop")
+let playingSeekRevision = transport.snapshot!.revision
+var pausedDuringSeek = false
+transport.onSnapshot = { snapshot in
+  previousSnapshotHandler?(snapshot)
+  guard !pausedDuringSeek, snapshot.phase == .seeking, snapshot.revision > playingSeekRevision else { return }
+  pausedDuringSeek = true
+  check(snapshot.wantsPlayback && !player.playbackIsPaused,
+        "A playing explicit seek keeps the real playback intent")
+  player.togglePause()
+}
+player.seek(absoluteSecond: 0.75)
+check(waitUntil { pausedDuringSeek && transport.snapshot?.phase == .paused },
+      "Space during a playing seek pauses after decoded preroll")
+check(transport.snapshot?.wantsPlayback == false, "Seek-time pause reaches the worker intent")
+transport.onSnapshot = previousSnapshotHandler
+
+let pausedSeekRevision = transport.snapshot!.revision
+var resumedDuringSeek = false
+transport.onSnapshot = { snapshot in
+  previousSnapshotHandler?(snapshot)
+  guard !resumedDuringSeek, snapshot.phase == .seeking, snapshot.revision > pausedSeekRevision else { return }
+  resumedDuringSeek = true
+  check(!snapshot.wantsPlayback && player.playbackIsPaused,
+        "A paused explicit seek retains worker pause intent")
+  player.togglePause()
+  check(!player.playbackIsPaused, "Space during paused seek immediately accepts resume intent")
+  player.togglePause()
+  player.togglePause()
+  check(!player.playbackIsPaused, "Rapid pause and resume in one seeking callback accumulate accepted intent")
+}
+player.seek(absoluteSecond: 0.8)
+check(waitUntil { resumedDuringSeek && transport.snapshot?.phase == .playing },
+      "Space during paused seek resumes the worker after preroll")
+check(transport.snapshot?.wantsPlayback == true, "Seek-time resume reaches the worker intent")
+transport.onSnapshot = previousSnapshotHandler
+player.pause()
+settle()
+
 player.abLoop()
 check(waitUntil { player.playbackLoopA == nil }, "The real menu cycle clears an active loop")
 settle()
@@ -198,6 +284,9 @@ check(waitUntil { closed != nil } && closed == .superseded && player.playbackLoo
       "Closing cancels pending capture without writing into the next media")
 player.testOpen(url)
 check(waitUntil { player.nativeTransport?.snapshot?.phase == .paused }, "A replacement native session opens")
+check(player.nativeTransport?.snapshot?.wantsPlayback == false && player.playbackIsPaused &&
+      player.nativeTransport?.volumePercent == 0,
+      "A replacement media generation starts muted and paused without inheriting old playback intent")
 check(player.playbackLoopA == nil && player.playbackLoopB == nil, "No marker survives into another media generation")
 player.nativeReady = false
 check(action(.captureA) == .unavailable, "A not-yet-ready native route rejects capture explicitly")

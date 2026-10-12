@@ -9,6 +9,8 @@ struct NativePlaybackSnapshot {
   let generation: UInt64
   let revision: UInt64
   let phase: NativePlaybackPhase
+  /// Worker-owned playback intent survives seek and automatic loop preroll.
+  let wantsPlayback: Bool
   let position: Double
   let duration: Double
   let volume: Float
@@ -125,6 +127,15 @@ final class NativePlaybackSession {
   private var repeatFile = false
   private var lowerBound: Double = 0
   private var pending: CYNMediaSample?
+  private struct HeldPrerollAudio {
+    let sample: CMSampleBuffer
+    let start: Double
+    let end: Double
+    let bytes: Int
+  }
+  private var heldPrerollAudio: [HeldPrerollAudio?] = []
+  private var heldPrerollAudioHead = 0
+  private var heldPrerollAudioBytes = 0
   private var eof = false
   private var videoBoundary = false
   private var audioBoundary = false
@@ -145,7 +156,13 @@ final class NativePlaybackSession {
   private var queuedBytes = 0
   private var recentOutputFlushes: [TimeInterval] = []
   private let maximumQueuedBytes = 128 * 1024 * 1024
+  // This budget covers submitted output plus held preroll audio. As before,
+  // decode may retain one additional pending sample (also at most 128 MiB).
+  // Decoder internals and framework-owned copies are not an RSS guarantee.
   private let maximumLead: Double = 0.5
+  private let maximumPrerollAudioLead: Double = 3
+  private let maximumHeldPrerollAudioBytes = 8 * 1024 * 1024
+  private let maximumHeldPrerollAudioSamples = 256
 
   init(sampleObserver: ((NativePlaybackSampleObservation) -> Void)? = nil) {
     dispatchPrecondition(condition: .onQueue(.main))
@@ -385,6 +402,7 @@ final class NativePlaybackSession {
     decoder = nil
     media = nil
     pending = nil
+    clearHeldPrerollAudio()
     loop = nil
     failure = nil
     eof = false
@@ -427,6 +445,7 @@ final class NativePlaybackSession {
     output.setRate(0)
     output.flush(removeImage: true)
     pending = nil
+    clearHeldPrerollAudio()
     outstanding.removeAll(keepingCapacity: true)
     queuedBytes = 0
     eof = false
@@ -476,7 +495,8 @@ final class NativePlaybackSession {
 
   private func snapshotOnWorker() -> NativePlaybackSnapshot {
     NativePlaybackSnapshot(generation: generation, revision: revision,
-      phase: phase, position: phase == .idle || phase == .closed ? 0 : positionOnWorker(),
+      phase: phase, wantsPlayback: wantsPlayback,
+      position: phase == .idle || phase == .closed ? 0 : positionOnWorker(),
       duration: media?.duration ?? 0, volume: volume, rate: rate, media: media,
       videoSamples: videoSamples, audioSamples: audioSamples,
       hardwareVideoSamples: hardwareVideoSamples, videoToolboxSamples: videoToolboxSamples,
@@ -489,6 +509,7 @@ final class NativePlaybackSession {
     output.setRate(0)
     output.flush(removeImage: true)
     pending = nil
+    clearHeldPrerollAudio()
     decoder?.close()
     decoder = nil
     _ = identity.install(nil, revision: request)
@@ -512,6 +533,57 @@ final class NativePlaybackSession {
       guard let self, token == self.scheduledPump else { return }
       self.pump()
     }
+  }
+
+  private func clearHeldPrerollAudio() {
+    heldPrerollAudio.removeAll(keepingCapacity: true)
+    heldPrerollAudioHead = 0
+    heldPrerollAudioBytes = 0
+  }
+
+  /// A paused audio renderer cannot drain. Keep a small FIFO only while looking
+  /// for the first video frame, so interleaved audio cannot block that frame.
+  /// Preserve source timestamps and never advance the clock to make room.
+  private func holdPrerollAudio(_ sample: CMSampleBuffer, start: Double, end: Double,
+                                bytes: Int) throws {
+    guard end - lowerBound <= maximumPrerollAudioLead,
+          heldPrerollAudio.count - heldPrerollAudioHead < maximumHeldPrerollAudioSamples,
+          bytes <= maximumHeldPrerollAudioBytes - heldPrerollAudioBytes,
+          bytes <= maximumQueuedBytes - queuedBytes else {
+      throw NativePlaybackFailure.bufferLimit
+    }
+    heldPrerollAudio.append(HeldPrerollAudio(sample: sample, start: start, end: end, bytes: bytes))
+    heldPrerollAudioBytes += bytes
+    queuedBytes += bytes
+    pending = nil
+  }
+
+  /// Drain before reading more input, including after demux EOF. Held samples
+  /// already count against the output/staging budget; transferring ownership
+  /// to the renderer must neither double-charge nor release that budget early.
+  private func drainHeldPrerollAudio(clock: Double, budget: inout Int) throws -> Bool {
+    while heldPrerollAudioHead < heldPrerollAudio.count {
+      guard budget > 0, identity.accepts(revision) else { return false }
+      guard let item = heldPrerollAudio[heldPrerollAudioHead] else {
+        throw NativePlaybackFailure.malformedSample
+      }
+      guard item.start <= clock + maximumLead, output.isReady(video: false) else { return false }
+      do { try output.enqueue(item.sample, video: false) }
+      catch NativeSampleBufferOutput.OutputError.backpressure { return false }
+      budget -= 1
+      heldPrerollAudio[heldPrerollAudioHead] = nil
+      heldPrerollAudioHead += 1
+      heldPrerollAudioBytes -= item.bytes
+      outstanding.append((item.end, item.bytes))
+      finalEnd = max(finalEnd, item.end)
+      hasAudio = true
+      audioSamples += 1
+      sampleObserver?(NativePlaybackSampleObservation(generation: generation, revision: revision,
+        video: false, start: item.start, end: item.end, hardwareDecoded: false,
+        videoToolboxDecoded: false))
+    }
+    clearHeldPrerollAudio()
+    return true
   }
 
   private func finishPrerollIfReady() -> Bool {
@@ -559,7 +631,7 @@ final class NativePlaybackSession {
       // even though the session has already marked both streams primed.
       if preroll {
         let anchored = output.currentTime.seconds
-        guard output.actualRate == 0, anchored.isFinite,
+        guard !output.isFlushingVideo, output.actualRate == 0, anchored.isFinite,
               abs(anchored - lowerBound) <= 0.001 else {
           schedulePump()
           return
@@ -568,14 +640,26 @@ final class NativePlaybackSession {
       if finishPrerollIfReady() && !wantsPlayback { return }
       if finishPlaybackIfNeeded() { return }
       var budget = 8
+      if !preroll || hasVideo, try !drainHeldPrerollAudio(clock: clock, budget: &budget) {
+        publish()
+        if preroll || wantsPlayback { schedulePump() }
+        return
+      }
       if preroll && hasVideo && hasAudio { budget = 0 }
       while !eof && budget > 0 && identity.accepts(revision) {
         if finishPlaybackIfNeeded() { return }
+        // Preroll can finish inside this loop during autoplay. Do not let a
+        // newly decoded audio sample overtake the FIFO before the next pump.
+        if !preroll || hasVideo, try !drainHeldPrerollAudio(clock: clock, budget: &budget) { break }
+        if budget == 0 { break }
         budget -= 1
         if pending == nil { pending = try decoder.readSample() }
         guard identity.accepts(revision) else { return }
         guard let decoded = pending else { eof = true; break }
         let isVideo = decoded.isVideo
+        let rawBytes = CMSampleBufferGetImageBuffer(decoded.sampleBuffer).map(CVPixelBufferGetDataSize)
+          ?? CMSampleBufferGetTotalSampleSize(decoded.sampleBuffer)
+        guard rawBytes >= 0, rawBytes <= maximumQueuedBytes else { throw NativePlaybackFailure.bufferLimit }
         let upperBound = loop?.end ?? (media.duration > 0 ? media.duration : nil)
         let gated = try NativePlaybackSampleGate.clip(decoded.sampleBuffer, video: isVideo,
           start: lowerBound, end: upperBound)
@@ -598,6 +682,13 @@ final class NativePlaybackSession {
           let bytes = CMSampleBufferGetImageBuffer(sample).map(CVPixelBufferGetDataSize)
             ?? CMSampleBufferGetTotalSampleSize(sample)
           guard bytes >= 0, bytes <= maximumQueuedBytes else { throw NativePlaybackFailure.bufferLimit }
+          if preroll && !hasVideo && media.hasVideo && !isVideo &&
+              (heldPrerollAudioHead < heldPrerollAudio.count || !output.isReady(video: false)) {
+            // A clipped PCM range can still retain its larger backing block.
+            // Charge conservatively for that original allocation as well.
+            try holdPrerollAudio(sample, start: pts, end: end, bytes: max(bytes, rawBytes))
+            continue
+          }
           if !preroll && pts > clock + maximumLead { budget = 0; break }
           guard queuedBytes <= maximumQueuedBytes - bytes, output.isReady(video: isVideo) else {
             if preroll { prerollBackpressure = true }
@@ -648,7 +739,8 @@ final class NativePlaybackSession {
       seekOnWorker(to: loop.start, revision: revision)
       return true
     }
-    guard loop == nil, eof, position >= finalEnd else { return false }
+    guard loop == nil, eof, pending == nil,
+          heldPrerollAudioHead == heldPrerollAudio.count, position >= finalEnd else { return false }
     if repeatFile {
       seekOnWorker(to: 0, revision: revision)
     } else {

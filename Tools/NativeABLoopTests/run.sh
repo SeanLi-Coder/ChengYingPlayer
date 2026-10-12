@@ -17,7 +17,7 @@ xcrun clang ${clang_flags[@]+"${clang_flags[@]}"} -target arm64-apple-macos12 -f
 xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm64-apple-macos12 \
   -import-objc-header iina/NativePlayback/CYNMediaDecoder.h \
   iina/MPVOption.swift iina/MPVProperty.swift \
-  iina/PlaybackBackend/PlaybackTransport.swift iina/PlaybackBackend/NativePlaybackTransport.swift \
+  iina/PlaybackBackend/PlaybackTransport.swift "$test_dir/NativePlaybackTransport.swift" \
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift \
   iina/NativePlayback/NativePlaybackSession.swift \
   iina/VideoTools/VideoToolsPlayerBridge.swift iina/VideoTools/VideoToolsLoopPolicy.swift \

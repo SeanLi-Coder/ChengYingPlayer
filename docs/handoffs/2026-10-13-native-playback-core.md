@@ -185,8 +185,12 @@ native decoder／output／session／surface／transport／主窗口方法路由�
   无效拖动回滚、paused 像素与精确时钟）；准备检查 17 项、比较器 73 项及 macOS 12
   warnings-as-errors 编译通过。**41 项实窗测试尚未执行完成，不计为验收通过。**
 
-此前仅含 API guard 修正的 `ceeaa21b` CI `38296853923` 的媒体 job 已通过，完整构建 job
-仍在运行；该版本不含后来的 clock／pixel 修正和本轮 A/B，不能代替最新版本验收。
+此前仅含 API guard 修正的 `ceeaa21b` CI `38296853923` 的媒体 job 已通过；生产 App 和
+测试 App 都完成编译，实窗前七项通过，随后 `real_volume_slider_action` 失败，整个 build job
+失败。该版本不含 `3a01dfbf` 的 clock／pixel 修正和 Float 音量比较修正，也不含本轮 A/B，
+不能代替最新版本验收。证据已下载至本机 `build/native-app-ci-38296853923.45IHOL/`，
+旧 runner 将失败后的 cleanup 统一记为 unconfirmed，不能据此报告清理成功。新的 runner
+分别记录 owned workspace 的实际 cleaned 状态与 App 失败，清理成功也不得抹去测试失败。
 
 一项保留旧图以减少 loop flush 闪烁的实验已撤回：候选实测出现旧图残留，未纳入生产或
 CI，仍保留原 `flush(removeImage: true)`。失败证据留在本机 ignored
@@ -194,6 +198,59 @@ CI，仍保留原 `flush(removeImage: true)`。失败证据留在本机 ignored
 另已独立复现首视频延迟 1 秒、音频从 0 开始的 paused-open 阻塞：两种合成编码均先接受
 47 个音频样本、视频为 0、音频背压、时钟为 0；恢复播放后可继续。普通同步素材通过。
 真实 App 当前先 paused-open，因此这是待修复的准入缺陷，不只是测例限制。
+
+## 延迟首帧、早期 seek 与暂停意图修补（最终验证中）
+
+在两种合成容器独立复现：初次完整解码各有 188 个音频样本，从 0 开始；先 seek 到 2 秒
+再 seek 到 0，旧 indexed seek 在 MKV 只留下 141 个、首 PTS 1.003，在 MP4 只留下
+142 个、首 PTS 0.981333。这是解码器丢失原点音频，不是窗口等待或 FIFO 计数误差。
+当前实现对原点、已知首视频之前的目标和未知首视频时间采用同一已打开 regular-file FD
+重建解复用与解码，不重新打开路径；在串行 worker 先退出旧上下文，再 rewind 该 FD 副本。
+保留 normalized origin 和能力摘要、取消状态及错误，原输入路径被替换不改变已打开身份。
+普通后段仍走索引定位；原点循环会付出重建成本，不能据此声称性能更优。
+
+session 为寻找首视频时被音频背压阻挡的样本提供有界 FIFO，保持原始 PTS 和顺序；
+在恢复播放后先排 FIFO 再解新样本，包括同一轮 preroll 转 playing 和 demux EOF。
+stop/open/seek/fail 都清理旧 FIFO，FIFO 转入 renderer 不重复计费。限制为 256 块、
+8 MiB、相对目标三秒音频 lead，并与已提交输出共用 128 MiB；另有最多一个 128 MiB
+decoder pending sample。**不是整个进程内存上限，也不支持任意长音视频间隔**。
+超出限制明确失败，不偷偷推进暂停时钟、重排时间戳或丢音频以腾空间。
+
+自动 A/B 回绕的 `.seeking` 不再等于用户暂停：snapshot 发布 worker 的 `wantsPlayback`，
+transport 使用真实意图；idle/closed/failed 仍暂停，EOF 时已有 accepted pause/resume
+意图优先，避免同一轮两次空格都被当作 resume。菜单无效 A/B 和采点暂不可用补明确提示。
+准备阶段局部测试为 A/B 普通／TSan 各 151、transport 各 145，旧 phase-only 单变量
+负对照准确重现空格不暂停。解码器重建后的同源码最终回归另行核实，不混算先前结果。
+
+完整 App 驱动目前共 **47 项**：保留原 41 项，增加首视频延迟 1.5 秒而音频从 0 开始的
+合成文件、真实 paused 时钟 0 像素、静止时钟、真实菜单恢复与时钟前进。准备测试
+**21 项**、实际比较器 **73 项**、macOS 12 编译与旧 availability guard 负对照通过。
+其中三项新增测试分别检查 App 失败但清理成功、App 与清理同时失败、隔离目录创建失败；
+结果标记严格区分，不能把清理成功当播放验收通过。47 项真实 App 尚待最新候选 CI。
+
+早期 seek 修补的普通、ASan、TSan 各通过原 9,265 项、新增 26,210 项以及 Swift EOF
+308 样本检查；旧 indexed 行为负对照精确失败于 PCM 字节／PTS／duration 完整性。
+证据见 `build/native-decoder-tests.rFeaYO/results.log`（TSan）、
+`build/native-decoder-tests.VQwgjd/results.log`（预期失败）。同 FD 不等于文件内容不可变：
+能力摘要不是整个文件哈希，不承诺外部进程原地修改字节时仍保持原内容。
+
+冻结 session `5542c2670f188ff5c89a5d2d3f07b9937360057834db347ed7b765a32ddea3d1`
+在原 session 套件 **209/0**（`build/native-playback-session-tests.mEhXLd/`），
+自然输出定向套件 **117/0**（`build/native-preroll-audio-tests.U0Ltvz/`）。另以自有测试副本
+把每次真实 video flush 的完成确认延后 300 ms，并保留实际 flush、计数和 DispatchGroup，
+13 次重叠 flush 的正向 **126/0**（`build/native-preroll-audio-tests.SXtDoI/`）。只撤销
+session 的 pending-flush 准入和 preroll FIFO 排序保护，**110 通过／16 预期失败**，
+即使样本总数仍为 188/188，逐样本时间戳顺序检查仍能抓到乱序
+（`build/native-preroll-audio-tests.UCXBbm/`）。这不是平台自然需要 300 ms 的结论。
+以上定向素材的 x264 lossless 设置实际禁用了 B 帧；不能把这些结果称为强重排 B 帧验收。
+后续 fixture 将明确验证 B 帧并重新运行，最终 sanitizer／4K 结果另记，不挪用旧十分钟结果。
+
+同一冻结生产源码的最终串行结果保存于 `build/native-final-regression.zF0iHi/`：
+NativeABLoop 普通／TSan 各 **151/0**，PlaybackTransport 普通／TSan 各 **145/0**，
+ControlledCore ASan／TSan 各 **37 项通过**，六组退出 0、没有 sanitizer 诊断。
+phase-only 负对照为 **147/4、退出 1**，准确复现 A/B 回绕时空格不能暂停。
+前后输入 SHA-256 清单完全相同；旧 `6wlOQX` 是中间版本，不作为最终证据。
+这些是命令行生产方法／核心回归，不等于完整 App、实体音视频设备或 M4 验收。
 
 ## 实现文件
 
