@@ -114,6 +114,9 @@ jobs:
           bash Tools/PlaybackLifecycleTests/run.sh
           bash Tools/ThumbnailLifecycleTests/run.sh
           bash Tools/ThumbnailCacheTests/run.sh
+          python3 -B Tools/NowPlayingArtworkTests/run.py --sanitize address
+          python3 -B Tools/NowPlayingArtworkTests/run.py --sanitize thread
+          python3 -B Tools/NowPlayingArtworkTests/run.py --negative-control
           bash Tools/RenderLifecycleTests/run.sh
           python3 -B Tools/PlayerCloseTests/run.py --priority
           bash Tools/WindowLifecycleTests/run.sh

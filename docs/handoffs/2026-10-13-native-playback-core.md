@@ -72,13 +72,41 @@ MPV 事件路由 ASan/TSan 各 **85 项**及两个预期失败负对照；窗口
 拖入外部字幕／LUT 也必须先完成兼容切换，异步动作只持有提前复制的文件路径，不持有拖放对象。
 
 第二轮 CI `38287243954` 的媒体 job 在旧窗口尺寸测试的抽取边界处编译失败：缺少新增 native
-路由字段，不是生产视频像素失败。正在补旧测试的明确 legacy 边界；不修改原有断言，也不将
-这轮 CI 说成成功。完整 App 构建 job 与后续测试状态仍须另行核对。
+路由字段，不是生产视频像素失败。后续已补旧测试的明确 legacy 边界；不修改原有断言，也不将
+这轮 CI 说成成功。该轮 build job 也确认在 Xcode App 编译前失败，具体证据与补测结果见下文。
 
 三个 legacy 测试边界补齐后的本机结果：WindowSizing **70**、VideoViewport 两语言各
 **1098**、HDRPreference **42**、HDRColorState **149**、PlaybackMode **126 + 6**、
 PlaybackModeUI 三语言各 **51**，原 VideoTools 三语言各 **942 + 132** 与 ClipPreviewNavigation
 **317** 均通过。拖放回归 **104/0**（ASan），移除新增路由的负对照按预期失败；这些不能替代完整 CI。
+
+同轮 CI `38287243954` 的 build job 随后确认也在旧 PlaybackModeLive 抽取边界编译失败，
+发生于 Xcode App 编译前；缺少 native 路由占位和带代次的 MPV hook 查询，并非该轮 App 已构建成功。
+失败输出保留在 `build/native-ci-38287243954-{media,build}-failure.log`。
+后续运行 `38289716396` 在依赖构建阶段主动取消，避免重复已知失败，不计为通过。
+已为 PlaybackModeLive 补明确 MPV 分支的不可达 native 边界，不修改原断言。本机补跑结果：
+
+- PlaybackModeLive：真实 libmpv **58**；PlaybackLifecycle live filter：ASan **18**。
+- SilentVideoOpen：真实 libmpv + ASan **363**；ClipPreviewLive 全部案例 **324/0**，
+  实际渲染 **309 帧**，自有临时测试 App 已清理。
+- ScreenshotPreference：**147**；PlaylistPlayback：策略 **3854**、真实 libmpv **51**。
+- MediaInfo：本地化 **156 键**，视频 **115**、图片 **175**、loader **15 + 6 个负对照**、
+  routing **14**、窗口三语言各 **83**。
+- VideoViewport Live 的独立边界仅补 `isUsingNativePlayback = false`，原实像素回归
+  普通与 drop-redraw 恢复各 **149 项／54 帧**；ThumbnailDecoder ASan **161**；PlayerClose
+  生产源码 typecheck 和两组辅助检查 **11 + 16** 均通过。
+- 原 legacy 4K soak **180 秒通过**：6 次载入、3 次换片、15 次 seek、9 次速度变更，
+  稳态 RSS 增长 **32.8 MiB**、footprint 变化 **−297.5 MiB**。本次是 4K 源解码后输出
+  640×360 的软件渲染验证，`software_verified=1`、`hardware_verified=0`，
+  不代表 native 后端长期稳定性、M4 AV1 硬解或 4K 屏幕输出验收。
+
+本机旧依赖限制保留为失败证据：原 PlaybackRotation 首例 `unload / eof` 在 libmpv
+`loadfile.c:1922` 的 `mpctx->stop_play` 断言退出 **134**，未放宽断言或标记通过；输出见
+`build/native-ci-local-rotation-failure.log`。本机 `deps/playback-build-record/patches.tsv`
+只有两项 ICC 补丁，缺少源码清单五项中的 `mpv-unload-seek-state` 等补丁；实际本机
+libmpv SHA-256 为 `5a76b8188eecf781a22567f6902f67e8da82da99495e633da1aa2d3edd65e81e`。
+该运行不能代表 CI 新构建的依赖，也不能将上述 fixture 通过等同于全部媒体测试通过。
+本轮未替换本机依赖；完整新 App 编译与受限 native 主窗口验收仍待新的完整 CI。
 
 新增 `Tools/NativeAppTests` 完整 App 测试构建，用编译条件 `CHENGYING_NATIVE_APP_TESTS`
 启用专门驱动；正常 Release 中驱动与 AppDelegate 两处调用均不编译。测试构建在编译前使用
@@ -87,6 +115,12 @@ GitHub-hosted macOS runner 运行；不修改正式配置文件、已签名包�
 真实 PlayerCore、MainWindow nib、控件、renderer、MPV 均不替换为 mock，覆盖 18 个固定阶段，
 结果需完整集合、每项通过、实际 App 退出 0 和隔离目录清理成功。编译边界 typecheck、生成
 H.264 B 帧素材的色块／字幕验证只算准备验证，**尚不代表完整 App 18 项已通过**。
+
+线程边界复核另修一项旧 Now Playing 竞态：Quick Look 重试预算以前在 artwork worker
+递增、主线程换片时归零，失效 worker 可能消耗新媒体预算。现先回主线程验证 ticket，
+再检查／预留三次上限；封面优先级与 OSC 回退不变。`Tools/NowPlayingArtworkTests/run.py`
+抽取实际协调方法，普通／ASan／TSan 各 **53 项**，含 1,000 次换片；精确旧方法负对照
+稳定触发失效任务预算断言。系统封面生成与发布接口是受控边界，不是系统 Now Playing 实窗验收。
 
 ## 实现文件
 

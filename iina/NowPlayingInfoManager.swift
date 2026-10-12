@@ -51,7 +51,7 @@ class NowPlayingInfoManager {
   private let artworkQLGenerationMaxRetries = 3
 
   /// Number of times IINA has requested  [QLThumbnailGenerator](https://developer.apple.com/documentation/quicklookthumbnailing/qlthumbnailgenerator)
-  /// generate a thumbnail for the current media item.
+  /// generate a thumbnail for the current media item. Owned by the main thread.
   private var artworkQLGenerationRetries = 0
 
   /// Ticket used to coordinate with background tasks performing work to update the artwork shown by Now Playing.
@@ -336,6 +336,7 @@ class NowPlayingInfoManager {
   /// - Important: This method **must** be run on the main thread to avoid data races.
   /// - Parameter url: The URL of the media item.
   private func discardArtwork(_ url: URL) {
+    dispatchPrecondition(condition: .onQueue(.main))
     // Because showing artwork is a complex operation there is an internal setting that can be
     // changed to disable this feature should any problems with it be discovered.
     guard Preference.bool(for: .enableNowPlayingArtwork) else { return }
@@ -575,42 +576,33 @@ class NowPlayingInfoManager {
         return
       }
 
-      // If we already have a Quick Look thumbnail then nothing more to do. NOTE that we are
-      // reading artworkKind from a background thread and it may not represent the media item
-      // currently being processed in artworkQueue and could change at any point in time. This
-      // is not a problem has actions are coordinated using the ticket once running on the main
-      // thread.
-      guard artworkKind.need(.qlThumbnail) else {
-        DispatchQueue.main.async { [self] in
-          defer { artworkUpdateComplete() }
-          guard artworkTicket == ticket else { return }
+      // Recheck ownership on main before reserving the per-media retry budget.
+      // A discarded worker must never consume the next media item's attempts.
+      DispatchQueue.main.async { [self] in
+        guard artworkTicket == ticket else {
+          artworkUpdateComplete()
+          return
+        }
+        guard artworkKind.need(.qlThumbnail) else {
           log("Already using a Quick Look thumbnail for artwork", url, level: .verbose)
+          artworkUpdateComplete()
+          return
         }
-        return
-      }
 
-      // Quick Look thumbnail generation may initially fail due to thumbnail creation taking too
-      // long. But because the generator caches thumbnails a following request for the same
-      // thumbnail may succeed. Thus we want to retry generation requests, but limit the number
-      // of retries as the generator may be failing due to it not supporting the kind of media.
-      if artworkQLGenerationRetries == artworkQLGenerationMaxRetries {
-        log("Maximum number of Quick Look thumbnail generation attempts reached", level: .verbose)
-      }
-      artworkQLGenerationRetries += 1
-      guard artworkQLGenerationRetries <= artworkQLGenerationMaxRetries else {
-        // Skip Quick Look generation and fall back to using an OSC thumbnail for the artwork.
-        DispatchQueue.main.async { [self] in
-          defer { artworkUpdateComplete() }
-          guard artworkTicket == ticket else { return }
+        // Quick Look may initially time out but succeed from its cache later.
+        // Keep the budget bounded and leave the final OSC fallback unchanged.
+        guard artworkQLGenerationRetries < artworkQLGenerationMaxRetries else {
+          log("Maximum number of Quick Look thumbnail generation attempts reached", level: .verbose)
           useOSCThumbnail(player, url)
+          artworkUpdateComplete()
+          return
         }
-        return
-      }
+        artworkQLGenerationRetries += 1
 
-      // Try and generate a Quick Look thumbnail. Because QLThumbnailGenerator generates thumbnails
-      // in the background and then calls a completion handler, the fallback to an OSC thumbnail
-      // is handled in generateQLThumbnail.
-      generateQLThumbnail(player, url, ticket)
+        // Its asynchronous completion owns artworkUpdateComplete, including
+        // stale-ticket completion and a failed-generation OSC fallback.
+        generateQLThumbnail(player, url, ticket)
+      }
     }
   }
 

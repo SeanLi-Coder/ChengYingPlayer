@@ -132,6 +132,15 @@ final class LiveMPV {
 }
 
 class PlaybackModeFixture {
+  // These tests execute the unchanged MPV branch against real libmpv. Native
+  // session repeat and route ownership are covered by their dedicated suites.
+  let isUsingNativePlayback = false
+  var nativeLoopMode = LoopMode.off
+  var nativePlaybackSession: NativeSessionFixture? { nil }
+  func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
+    preconditionFailure("Unexpected native route in live MPV repeat tests")
+  }
+  func acceptsMPVEventRevision(_ revision: UInt64) -> Bool { revision == 0 }
   enum State { case active, shuttingDown, shutDown }
   struct Info { var state = State.active }
   var info = Info()
@@ -140,9 +149,16 @@ class PlaybackModeFixture {
   init(keepOpen: String = "yes") { mpv = LiveMPV(keepOpen: keepOpen) }
 }
 
+final class NativeSessionFixture {
+  func setLoop(_ range: ClosedRange<Double>?, repeatFile: Bool) {
+    preconditionFailure("Unexpected native loop command in live MPV repeat tests")
+  }
+}
+
 class PlaybackModeHookFixture {
   let player: PlaybackModePlayer
   init(player: PlaybackModePlayer) { self.player = player }
+  func captureRoutedMPVEventRevision() -> UInt64? { 0 }
   func addHook(_ name: MPVHook, priority: Int32, hook: MPVHookValue) {
     player.mpv.addHook(name, priority: priority, hook: hook)
   }

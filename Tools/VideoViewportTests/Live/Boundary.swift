@@ -8,6 +8,7 @@ final class PlayerCore {
     var state = State()
     var vid: Int? = 1
   }
+  let isUsingNativePlayback = false
   let info = Info()
   let mpv = LiveMPV()
 }

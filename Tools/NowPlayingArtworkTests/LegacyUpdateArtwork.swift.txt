@@ -1,0 +1,70 @@
+// Exact pre-fix method from ae892b21; negative control only.
+  ///   - tracks: The current list of video tracks.
+  private func updateArtwork(_ player: PlayerCore, _ url: URL, _ tracks: [MPVTrack]) {
+    guard !artworkUpdateInProgress else {
+      // An artwork update is currently in progress in the background. Something could have
+      // changed, such as a video track being added, or OSC thumbnails becoming available that
+      // could change the artwork selection. Do not allow concurrent processing. Remember an
+      // updated is pending and process it once the current update has completed.
+      if !artworkUpdatePending {
+        log("Artwork update pending", level: .verbose)
+      }
+      artworkUpdatePending = true
+      return
+    }
+    artworkUpdateInProgress = true
+    // Copy state that can change for use by the background task.
+    let isNetworkResource = player.info.isNetworkResource
+    let ticket = artworkTicket
+    let tracks = player.info.videoTracks
+    artworkQueue.async { [self] in
+      // Look for front cover artwork. If found, no need to do anything more.
+      guard !searchTracksForArtwork(player, url, ticket, tracks) else { return }
+
+      // When streaming artwork can be found in video tracks either because the stream contains
+      // embedded artwork or an image to use for artwork was specified using --cover-art-files.
+      // But the other sources of artwork, Quick Look and the OSC thumbnails are not available when
+      // streaming.
+      guard !isNetworkResource else {
+        DispatchQueue.main.async { self.artworkUpdateComplete() }
+        return
+      }
+
+      // If we already have a Quick Look thumbnail then nothing more to do. NOTE that we are
+      // reading artworkKind from a background thread and it may not represent the media item
+      // currently being processed in artworkQueue and could change at any point in time. This
+      // is not a problem has actions are coordinated using the ticket once running on the main
+      // thread.
+      guard artworkKind.need(.qlThumbnail) else {
+        DispatchQueue.main.async { [self] in
+          defer { artworkUpdateComplete() }
+          guard artworkTicket == ticket else { return }
+          log("Already using a Quick Look thumbnail for artwork", url, level: .verbose)
+        }
+        return
+      }
+
+      // Quick Look thumbnail generation may initially fail due to thumbnail creation taking too
+      // long. But because the generator caches thumbnails a following request for the same
+      // thumbnail may succeed. Thus we want to retry generation requests, but limit the number
+      // of retries as the generator may be failing due to it not supporting the kind of media.
+      if artworkQLGenerationRetries == artworkQLGenerationMaxRetries {
+        log("Maximum number of Quick Look thumbnail generation attempts reached", level: .verbose)
+      }
+      artworkQLGenerationRetries += 1
+      guard artworkQLGenerationRetries <= artworkQLGenerationMaxRetries else {
+        // Skip Quick Look generation and fall back to using an OSC thumbnail for the artwork.
+        DispatchQueue.main.async { [self] in
+          defer { artworkUpdateComplete() }
+          guard artworkTicket == ticket else { return }
+          useOSCThumbnail(player, url)
+        }
+        return
+      }
+
+      // Try and generate a Quick Look thumbnail. Because QLThumbnailGenerator generates thumbnails
+      // in the background and then calls a completion handler, the fallback to an OSC thumbnail
+      // is handled in generateQLThumbnail.
+      generateQLThumbnail(player, url, ticket)
+    }
+  }
