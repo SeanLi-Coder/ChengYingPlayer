@@ -19,6 +19,34 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 参考前一轮 REA 研究的高层职责划分；未复制 Movist Pro 的代码、反编译输出、二进制或资源。
 不声称已经得到 Movist 的同一内核或性能。
 
+### 最新整窗阻挡（2026-10-13）
+
+开发 CI `38319384831` 冻结于 `82b40531`，完整生产 App 与测试 App 编译成功，
+media-helper job 和之前的独立 native 检查通过；完整 App **43 项通过、1 项失败**，
+失败标签为 `preview_real_tools_menu_attached`，后续预览与退出阶段未执行。
+不能将准备测试中的预期 `TERMINATION_PROBE_FAIL` 负控当作此次失败原因。
+隔离测试 App 清理完成，证据保留于 `build/native-app-ci-38319384831.UfOmmJ/`。
+
+已定位实际生产入口差异：`MainMenuActionHandler.canShowVideoTools` 读取
+`PlaybackInfo.isAudio`，它只按 MPV 的音／视频轨道数组分类。native 路由故意不伪造 MPV
+轨道，两数组为空时得到 unknown，因此菜单动作即便被 `NSApp.sendAction` 正常分发，
+内部 guard 仍拒绝打开工具面板。此前日志 `sidebarHidden=false` 只说明没有自动隐藏，
+不证明工具面板已经挂载。候选 driver 已增加实际 sidebar 状态、tab、panel 数量／挂载和
+控件就绪的有界诊断，不改原 92 个断言或运行期限。准备测试 31 项通过，不是整窗通过。
+
+后续提交 `3cba854c` 的 92 项驱动以及 `37a532d8` 的旋转交接不在该失败 CI 中；
+必须由修补后的独立运行验收，不把不同源码的结果混写成一次成功。
+
+最小菜单修补改用已完成准入的真实 native `media.hasVideo`，不填造 MPV tracks；
+加载／本地文件存在／窗口可见／非迷你或交互模式等门禁原样保留，旧内核仍使用原分类。
+`Tools/NativeVideoToolsMenuTests/run.py` 机械抽取实际菜单、分类与准入方法，并用真实
+AppKit 分发；普通／ASan／TSan 各 **151 项通过**，恢复原门禁的单变量负控恰有
+native 视频的菜单校验和实际面板请求四项失败（退出 1，编译和分发本身正常）。
+窗口与 decoder 元数据在此是显式边界，不是实际 nib 或预览图像验收。
+证据前缀 `build/native-video-tools-menu-tests.`，四次后缀分别为
+`tbzbzstq`、`x1bpu_ko`、`gnfffpj6`、`3cjkbtds`；源码及生成输入的后验 SHA 均一致。
+旧菜单路由 9 项及 22 个入口检查通过；完整 App 的原面板断言与超时不变，等待新 CI。
+
 ## 主窗口接入切片（同日继续，尚未完成 App 验收）
 
 内部环境变量 `CHENGYING_NATIVE_PLAYBACK=1` 才会尝试新路径；没有新增面向用户的默认开关。

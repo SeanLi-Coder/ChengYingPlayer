@@ -1341,6 +1341,11 @@ final class NativeAppTestDriver {
     // Main-owned cached state is diagnostic only. Worker-clock assertions are
     // still made separately, without reading worker-owned fields from AppKit.
     print("NATIVE_APP_PREVIEW_STATE: native=\(player.isUsingNativePlayback) preview=\(player.nativePreviewInProgress) phase=\(String(describing: player.info.state)) cachedPosition=\(player.playbackPosition ?? -1) start=\(range?.start ?? -1) end=\(range?.end ?? -1) paused=\(player.playbackIsPaused) sidebarHidden=\(player.mainWindow.sidebarAutoHidden) gl=\(player.mainWindow.videoView.hasInitializedOpenGL)")
+    let main = player.mainWindow
+    let settings = main.quickSettingView
+    let panels = settings.children.compactMap { $0 as? VideoToolsViewController }
+    let attached = panels.contains { $0.isViewLoaded && $0.view.window === main.window }
+    print("NATIVE_APP_PREVIEW_PANEL: windowLoaded=\(main.loaded) windowVisible=\(main.window?.isVisible == true) sidebar=\(String(describing: main.sideBarStatus)) sidebarVisible=\(main.isSidebarVisible) settingsLoaded=\(settings.isViewLoaded) tab=\(String(describing: settings.currentTab)) panelCount=\(panels.count) panelAttached=\(attached) controlsReady=\(previewControls(player) != nil)")
   }
 
   private func logHandoffElapsed(_ label: String) {

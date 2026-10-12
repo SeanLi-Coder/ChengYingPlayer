@@ -207,12 +207,17 @@ extension MainMenuActionHandler {
 
 extension MainMenuActionHandler {
   private var canShowVideoTools: Bool {
+    // Native media has no synthetic MPV tracks. Admit its tools only after the
+    // real video capability checks and initial window setup have completed.
+    let hasSupportedVideo = player.isUsingNativePlayback ?
+      (!player.nativeInitialPlaybackPending && player.nativePlaybackMedia?.hasVideo == true) :
+      player.info.isAudio == .notAudio
     guard !player.isInMiniPlayer,
           player.mainWindow.loaded,
           player.mainWindow.window?.isVisible == true,
           !player.mainWindow.isInInteractiveMode,
           player.info.state.loaded,
-          player.info.isAudio == .notAudio,
+          hasSupportedVideo,
           !player.info.isNetworkResource,
           let url = player.info.currentURL,
           url.isFileURL else { return false }

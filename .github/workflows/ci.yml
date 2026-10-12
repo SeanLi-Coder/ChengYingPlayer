@@ -425,7 +425,21 @@ jobs:
           bash Tools/NativeABLoopTests/run.sh
           NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeABLoopTests/run.sh
           python3 -B Tools/PlaybackMenuRoutingTests/run.py
+          python3 -B Tools/NativeVideoToolsMenuTests/run.py
+          python3 -B Tools/NativeVideoToolsMenuTests/run.py --sanitizer thread
           bash Tools/NativeDropRoutingTests/run.sh
+
+      - name: Preserve native video tools menu evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-video-tools-menu-evidence-${{ github.sha }}
+          path: |
+            build/native-video-tools-menu-tests.*/*.log
+            build/native-video-tools-menu-tests.*/*.sha256
+            build/native-video-tools-menu-tests.*/summary.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Test native initial playback intent with sanitizers
         if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
