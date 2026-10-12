@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
+import stat
 import subprocess
 import sys
 import uuid
@@ -26,6 +28,8 @@ REQUIRED_CHECKS = {
     "compatibility_open_remains_silent", "second_pristine_real_mpv_service",
     "native_and_compatibility_ready_for_real_quit", "all_real_cores_shutdown_before_termination",
 }
+PIXEL_POINTS = [(x, y) for y in (8, 48, 86) for x in (8, 80, 150)]
+MAX_REPORT_BYTES = 1024 * 1024
 
 
 def validate_environment(environment):
@@ -46,6 +50,64 @@ def validate_result(result, *, run_id, exit_code):
             {item.get("label") for item in checks} != REQUIRED_CHECKS):
         raise RuntimeError("Complete App checks are missing, repeated or unsuccessful.")
     return checks
+
+
+def preserve_result(fixture_root, report, run_id):
+    """Retain bounded, run-owned evidence before workspace cleanup, even on timeout."""
+    output = fixture_root / "result.json"
+    try:
+        details = output.lstat()
+    except FileNotFoundError:
+        return None
+    if (not stat.S_ISREG(details.st_mode) or output.resolve() != output or
+            details.st_size <= 0 or details.st_size > MAX_REPORT_BYTES):
+        raise RuntimeError("The test result is not a bounded regular report.")
+    descriptor = os.open(output, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) !=
+                (details.st_dev, details.st_ino)):
+            raise RuntimeError("The test result changed while opening it.")
+        data = stream.read(MAX_REPORT_BYTES + 1)
+    if not data or len(data) > MAX_REPORT_BYTES:
+        raise RuntimeError("The test result exceeds its evidence limit.")
+    result = json.loads(data)
+    if (not isinstance(result, dict) or set(result) != {"format", "run_id", "complete", "passed", "checks"} or
+            type(result.get("format")) is not int or result.get("format") != 1 or result.get("run_id") != run_id or
+            type(result.get("complete")) is not bool or type(result.get("passed")) is not bool or
+            not isinstance(result.get("checks"), list) or len(result["checks"]) > len(REQUIRED_CHECKS) + 1 or
+            any(not isinstance(item, dict) or set(item) != {"label", "passed"} or
+                not isinstance(item["label"], str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,127}", item["label"]) or
+                type(item["passed"]) is not bool for item in result["checks"])):
+        raise RuntimeError("The test result does not belong to the current run.")
+    (report / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    return result
+
+
+def run_application(command, *, workspace, environment, log, fixtures, report, run_id, timeout=150):
+    result_data = None
+    try:
+        result = subprocess.run(command, cwd=workspace, env=environment, stdin=subprocess.DEVNULL,
+                                stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+    finally:
+        # A partial report is diagnostic evidence only. validate_result still
+        # requires clean process exit, all checks and the final shutdown record.
+        result_data = preserve_result(fixtures, report, run_id)
+    return result, result_data
+
+
+def pixel_reference(ffmpeg, source, seconds):
+    raw = subprocess.check_output([str(ffmpeg), "-hide_banner", "-loglevel", "error", "-nostdin",
+        "-ss", str(seconds), "-i", str(source), "-frames:v", "1", "-an", "-pix_fmt", "nv12",
+        "-f", "rawvideo", "pipe:1"], timeout=15)
+    width, height = 160, 96
+    if len(raw) != width * height * 3 // 2:
+        raise RuntimeError("The independent fixture decode changed its dimensions.")
+    result = []
+    for x, y in PIXEL_POINTS:
+        chroma = width * height + (y // 2) * width + (x // 2) * 2
+        result += [raw[y * width + x], raw[chroma], raw[chroma + 1]]
+    return result
 
 
 def make_fixtures(root, run_id):
@@ -71,6 +133,11 @@ def make_fixtures(root, run_id):
     (root / "native-app-fixture.json").write_text(json.dumps({
         "format": 1, "run_id": run_id,
         "fixtures": ["red/red.mp4", "blue/blue.mp4", "compat/compat.mp4"],
+        "pixel_references": {
+            "red": pixel_reference(ffmpeg, root / "red/red.mp4", 0.4),
+            "green": pixel_reference(ffmpeg, root / "red/red.mp4", 4.2),
+            "blue": pixel_reference(ffmpeg, root / "blue/blue.mp4", 0.4),
+        },
     }) + "\n", encoding="utf-8")
 
 
@@ -126,13 +193,10 @@ def main():
             environment.update({"CHENGYING_NATIVE_PLAYBACK": "1", "NSUnbufferedIO": "YES",
                 "CHENGYING_NATIVE_APP_TEST_ROOT": str(fixtures), "CHENGYING_NATIVE_APP_TEST_RUN_ID": run_id})
             with (report / "app.log").open("wb") as log:
-                result = subprocess.run([str(executable), "--no-stdin"], cwd=workspace, env=environment,
-                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, timeout=150)
-            output = fixtures / "result.json"
-            if not output.is_file() or output.is_symlink():
+                result, result_data = run_application([str(executable), "--no-stdin"], workspace=workspace,
+                    environment=environment, log=log, fixtures=fixtures, report=report, run_id=run_id)
+            if result_data is None:
                 raise RuntimeError("The complete App produced no test result.")
-            result_data = json.loads(output.read_text())
-            (report / "result.json").write_text(json.dumps(result_data, indent=2) + "\n")
             summary["app_exit_code"] = result.returncode
             summary["checks"] = validate_result(result_data, run_id=run_id, exit_code=result.returncode)
         summary.update(passed=True, cleanup="completed")

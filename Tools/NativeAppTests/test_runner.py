@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check isolation and generated media before the complete CI-only App run."""
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -15,6 +16,102 @@ SPEC.loader.exec_module(runner)
 
 
 class RunnerTests(unittest.TestCase):
+    @staticmethod
+    def partial_result():
+        return {"format": 1, "run_id": "fixture", "complete": False, "passed": False,
+                "checks": [{"label": "native_first_frame_autoplay", "passed": True}]}
+
+    def test_timeout_preserves_partial_evidence_before_cleanup(self):
+        with tempfile.TemporaryDirectory(prefix="native-report-") as directory:
+            root = Path(directory).resolve()
+            report = root / "report"
+            report.mkdir()
+            partial = self.partial_result()
+            (root / "result.json").write_text(json.dumps(partial))
+            with patch.object(runner.subprocess, "run", side_effect=subprocess.TimeoutExpired("fixture", 1)):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    runner.run_application(["fixture"], workspace=root, environment={}, log=io.BytesIO(),
+                                           fixtures=root, report=report, run_id="fixture", timeout=1)
+            self.assertEqual(json.loads((report / "result.json").read_text()), partial)
+            with self.assertRaises(RuntimeError):
+                runner.validate_result(partial, run_id="fixture", exit_code=0)
+
+    def test_nonzero_exit_preserves_failure_without_passing(self):
+        with tempfile.TemporaryDirectory(prefix="native-report-") as directory:
+            root = Path(directory).resolve()
+            report = root / "report"
+            report.mkdir()
+            failed = dict(self.partial_result(), complete=True)
+            failed["checks"].append({"label": "paused_seek_presents_green_frame", "passed": False})
+            (root / "result.json").write_text(json.dumps(failed))
+            with patch.object(runner.subprocess, "run", return_value=subprocess.CompletedProcess(["fixture"], 1)):
+                execution, saved = runner.run_application(["fixture"], workspace=root, environment={}, log=io.BytesIO(),
+                    fixtures=root, report=report, run_id="fixture")
+            self.assertEqual(saved, failed)
+            self.assertEqual(json.loads((report / "result.json").read_text()), failed)
+            with self.assertRaises(RuntimeError):
+                runner.validate_result(saved, run_id="fixture", exit_code=execution.returncode)
+
+    def test_wrong_run_malformed_and_oversized_reports_are_not_preserved(self):
+        with tempfile.TemporaryDirectory(prefix="native-report-") as directory:
+            root = Path(directory).resolve()
+            report = root / "report"
+            report.mkdir()
+            invalid = [dict(self.partial_result(), run_id="other-run"),
+                       dict(self.partial_result(), checks=[{"label": "/private/path", "passed": True}]),
+                       dict(self.partial_result(), complete="true"), []]
+            for payload in invalid:
+                (root / "result.json").write_text(json.dumps(payload))
+                with self.assertRaises(RuntimeError):
+                    runner.preserve_result(root, report, "fixture")
+                self.assertFalse((report / "result.json").exists())
+            (root / "result.json").write_bytes(b" " * (runner.MAX_REPORT_BYTES + 1))
+            with self.assertRaises(RuntimeError):
+                runner.preserve_result(root, report, "fixture")
+            self.assertFalse((report / "result.json").exists())
+
+    def test_symlink_and_nonregular_reports_are_not_preserved(self):
+        with tempfile.TemporaryDirectory(prefix="native-report-") as directory:
+            root = Path(directory).resolve()
+            report = root / "report"
+            report.mkdir()
+            target = root / "other.json"
+            target.write_text(json.dumps(self.partial_result()))
+            output = root / "result.json"
+            output.symlink_to(target)
+            with self.assertRaises(RuntimeError):
+                runner.preserve_result(root, report, "fixture")
+            output.unlink()
+            output.mkdir()
+            with self.assertRaises(RuntimeError):
+                runner.preserve_result(root, report, "fixture")
+            self.assertFalse((report / "result.json").exists())
+
+    def test_timeout_without_report_keeps_original_failure(self):
+        with tempfile.TemporaryDirectory(prefix="native-report-") as directory:
+            root = Path(directory).resolve()
+            self.assertIsNone(runner.preserve_result(root, root, "fixture"))
+            with patch.object(runner.subprocess, "run", side_effect=subprocess.TimeoutExpired("fixture", 1)):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    runner.run_application(["fixture"], workspace=root, environment={}, log=io.BytesIO(),
+                                           fixtures=root, report=root, run_id="fixture", timeout=1)
+
+    def test_actual_driver_pixel_comparator(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private static func matchesReference(")
+        end = source.index("\n  }", start) + len("\n  }")
+        comparator = source[start:end].replace("private ", "")
+        with tempfile.TemporaryDirectory(prefix="native-pixel-comparator-") as directory:
+            root = Path(directory).resolve()
+            extracted = root / "Comparator.swift"
+            extracted.write_text("import CoreVideo\nimport Foundation\nstruct PixelComparator {\n" + comparator + "\n}\n")
+            main = root / "main.swift"
+            main.write_text(SOURCE.with_name("PixelReferenceTests.swift").read_text())
+            executable = root / "PixelTests"
+            subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-warnings-as-errors", str(extracted),
+                            str(main), "-o", str(executable)], check=True, timeout=90)
+            subprocess.run([str(executable)], check=True, timeout=15)
+
     def test_non_ci_rejected_before_build(self):
         with self.assertRaises(ValueError):
             runner.validate_environment({})
@@ -52,11 +149,16 @@ class RunnerTests(unittest.TestCase):
 
     def test_generated_media_matches_pixel_and_fallback_contract(self):
         with tempfile.TemporaryDirectory(prefix="native-app-fixtures-") as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             runner.make_fixtures(root, "fixture-run")
             marker = json.loads((root / "native-app-fixture.json").read_text())
             self.assertEqual(marker["run_id"], "fixture-run")
             self.assertEqual(len(marker["fixtures"]), 3)
+            references = marker["pixel_references"]
+            self.assertEqual(set(references), {"red", "green", "blue"})
+            self.assertTrue(all(len(values) == 27 and all(0 <= value <= 255 for value in values)
+                                for values in references.values()))
+            self.assertLess((root / "native-app-fixture.json").stat().st_size, 4096)
             ffprobe = runner.ROOT / "deps/executable/ffprobe"
             ffmpeg = runner.ROOT / "deps/executable/ffmpeg"
             probe = json.loads(subprocess.check_output([str(ffprobe), "-v", "error", "-show_streams", "-of", "json",
@@ -72,6 +174,17 @@ class RunnerTests(unittest.TestCase):
                 pixel = raw[(48 * 160 + 80) * 3: (48 * 160 + 80) * 3 + 3]
                 self.assertGreater(pixel[dominant], 200)
                 self.assertTrue(all(value < 45 for index, value in enumerate(pixel) if index != dominant))
+            # Read planar YUV independently from the NV12-producing helper.
+            for color, source, seconds in (("red", "red/red.mp4", 0.4), ("green", "red/red.mp4", 4.2),
+                                            ("blue", "blue/blue.mp4", 0.4)):
+                planar = subprocess.check_output([str(ffmpeg), "-hide_banner", "-loglevel", "error", "-ss", str(seconds),
+                    "-i", str(root / source), "-frames:v", "1", "-an", "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1"], timeout=15)
+                expected = []
+                for y in (8, 48, 86):
+                    for x in (8, 80, 150):
+                        offset = y // 2 * 80 + x // 2
+                        expected += [planar[y * 160 + x], planar[160 * 96 + offset], planar[160 * 96 * 5 // 4 + offset]]
+                self.assertEqual(references[color], expected)
             probe = json.loads(subprocess.check_output([str(ffprobe), "-v", "error", "-show_streams", "-of", "json",
                                                        str(root / "compat/compat.mp4")], timeout=15))
             self.assertTrue(any(item["codec_name"] == "mov_text" for item in probe["streams"]))

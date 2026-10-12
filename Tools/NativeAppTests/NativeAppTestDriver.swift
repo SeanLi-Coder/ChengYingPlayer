@@ -10,6 +10,7 @@ final class NativeAppTestDriver {
   private static let fixtureNames = ["red/red.mp4", "blue/blue.mp4", "compat/compat.mp4"]
   private let root: URL
   private let runID: String
+  private let pixelReferences: [String: [Int]]
   private var checks: [[String: Any]] = []
   private var observer: NSObjectProtocol?
   private var terminal = false
@@ -17,9 +18,10 @@ final class NativeAppTestDriver {
   private var pollRevision = 0
   private var player: PlayerCore?
 
-  private init(root: URL, runID: String) {
+  private init(root: URL, runID: String, pixelReferences: [String: [Int]]) {
     self.root = root
     self.runID = runID
+    self.pixelReferences = pixelReferences
   }
 
   static func prepareForLaunch() {
@@ -50,6 +52,9 @@ final class NativeAppTestDriver {
           payload["format"] as? Int == 1,
           payload["run_id"] as? String == runID,
           payload["fixtures"] as? [String] == fixtureNames,
+          let references = payload["pixel_references"] as? [String: [Int]],
+          Set(references.keys) == Set(["red", "green", "blue"]),
+          references.values.allSatisfy({ $0.count == 27 && $0.allSatisfy { (0...255).contains($0) } }),
           !manager.fileExists(atPath: root.appendingPathComponent("result.json").path) else { preflightFailure() }
     for name in fixtureNames {
       let url = root.appendingPathComponent(name)
@@ -58,7 +63,7 @@ final class NativeAppTestDriver {
             values.isRegularFile == true, values.isSymbolicLink != true,
             let size = values.fileSize, size > 0, size <= 16 * 1024 * 1024 else { preflightFailure() }
     }
-    instance = NativeAppTestDriver(root: root, runID: runID)
+    instance = NativeAppTestDriver(root: root, runID: runID, pixelReferences: references)
     // The argument domain wins over registration and persistence without changing
     // the release domain. The unique test bundle ID also isolates caches/support.
     var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
@@ -262,7 +267,7 @@ final class NativeAppTestDriver {
     }
   }
 
-  private enum Color { case red, green, blue }
+  private enum Color: String { case red, green, blue }
 
   private func pixel(_ player: PlayerCore, is expected: Color) -> Bool {
     // Inspect the immutable display-layer reference and its actually displayed
@@ -270,17 +275,41 @@ final class NativeAppTestDriver {
     guard #available(macOS 14.0, *),
           let layer = player.nativePlaybackOutput?.displayLayer,
           let buffer = layer.sampleBufferRenderer.displayedPixelBuffer(),
+          let reference = pixelReferences[expected.rawValue] else { return false }
+    return Self.matchesReference(buffer, reference)
+  }
+
+  private static func matchesReference(_ buffer: CVPixelBuffer, _ reference: [Int]) -> Bool {
+    guard reference.count == 27, reference.allSatisfy({ (0...255).contains($0) }),
+          CVPixelBufferGetWidth(buffer) == 160, CVPixelBufferGetHeight(buffer) == 96,
           CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
           CVPixelBufferGetPlaneCount(buffer) == 2,
+          CVPixelBufferGetWidthOfPlane(buffer, 0) == 160, CVPixelBufferGetHeightOfPlane(buffer, 0) == 96,
+          CVPixelBufferGetWidthOfPlane(buffer, 1) == 80, CVPixelBufferGetHeightOfPlane(buffer, 1) == 48,
+          CVPixelBufferGetBytesPerRowOfPlane(buffer, 0) >= 160,
+          CVPixelBufferGetBytesPerRowOfPlane(buffer, 1) >= 160,
           CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { return false }
     defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-    guard let base = CVPixelBufferGetBaseAddressOfPlane(buffer, 1) else { return false }
-    let chroma = base.assumingMemoryBound(to: UInt8.self)
-    switch expected {
-    case .red: return chroma[1] > 210 && chroma[0] < 130
-    case .green: return chroma[0] < 100 && chroma[1] < 100
-    case .blue: return chroma[0] > 210 && chroma[1] < 140
+    guard let luma = CVPixelBufferGetBaseAddressOfPlane(buffer, 0),
+          let chroma = CVPixelBufferGetBaseAddressOfPlane(buffer, 1) else { return false }
+    var index = 0
+    // Independently decoded FFmpeg references include luma as well as both
+    // chroma channels. Nine distributed points reject a correct corner in an
+    // otherwise broken or incorrectly sized displayed image.
+    for y in [8, 48, 86] {
+      for x in [8, 80, 150] {
+        let row = luma.advanced(by: y * CVPixelBufferGetBytesPerRowOfPlane(buffer, 0))
+          .assumingMemoryBound(to: UInt8.self)
+        let uv = chroma.advanced(by: (y / 2) * CVPixelBufferGetBytesPerRowOfPlane(buffer, 1))
+          .assumingMemoryBound(to: UInt8.self)
+        let values = [Int(row[x]), Int(uv[(x / 2) * 2]), Int(uv[(x / 2) * 2 + 1])]
+        for value in values {
+          guard abs(value - reference[index]) <= 1 else { return false }
+          index += 1
+        }
+      }
     }
+    return true
   }
 
   private func fixture(_ name: String) -> URL { root.appendingPathComponent(name) }

@@ -116,6 +116,24 @@ GitHub-hosted macOS runner 运行；不修改正式配置文件、已签名包�
 结果需完整集合、每项通过、实际 App 退出 0 和隔离目录清理成功。编译边界 typecheck、生成
 H.264 B 帧素材的色块／字幕验证只算准备验证，**尚不代表完整 App 18 项已通过**。
 
+完整 App 测试后来加严：marker 保存 FFmpeg 独立解码的九点 YUV 参考，真实 displayed buffer
+必须是 160×96 NV12，九点三个分量均在一个码值内，而非只检查左上角色度。runner 在超时／
+非零退出时也在清理前保留合法、限大小、run ID 一致的固定结果文件；不接受部分报告为通过。
+准备回归 **12 项**，包含实际生产比较函数的 **65 项**像素正反对照；声明边界与普通 Release
+排除驱动的 typecheck 通过。这些仍不能代替实际完整 App 执行。
+
+第三轮 `38292407187`（`c0469d5e`）的媒体 job 已通过此前失败的 native controls 步骤，
+随后旧 ChromeLifecycle fixture 因缺少侧栏新路由接口编译失败。仅补五行明确 legacy 边界，
+原四组 Chrome 检查 **632／40／185 + 4／865** 本机全过；后续相关抽取测试复核包括
+RenderLifecycle **48 + 3855**、WindowLifecycle **188**、ThumbnailLifecycle **32**、
+PlaybackLifecycle **76**、SeekTiming **37** 和原字幕匹配／列表／缓存检查，未改原断言。
+失败日志保留于 `build/native-ci-38292407187-media-failure.log`。该轮完整 build job 尚在运行，
+不取消它的独立验证，也不将单个旧测试修补写为整体 CI 已成功。
+
+隔离范围是唯一 player bundle 域和 disposable CI 主机，不是完整 HOME 沙箱。
+当前固定测试不打开下载／字幕／AI 面板，也不启动其固定路径的数据服务；以后若扩展这些
+步骤，须先补数据路径隔离，不能仅依赖更换测试 bundle ID。
+
 线程边界复核另修一项旧 Now Playing 竞态：Quick Look 重试预算以前在 artwork worker
 递增、主线程换片时归零，失效 worker 可能消耗新媒体预算。现先回主线程验证 ticket，
 再检查／预留三次上限；封面优先级与 OSC 回退不变。`Tools/NowPlayingArtworkTests/run.py`
@@ -227,3 +245,52 @@ H.264 B 帧素材的色块／字幕验证只算准备验证，**尚不代表完�
 5. 明确支持矩阵、功能补齐及兼容选择，保留已有音视频品质和每文件音量零策略。
 6. 完整 App 构建、真实窗口回归、目标 M4 验收通过后，才切默认路径并进行原有签名／
    增量更新／公开交付发行流程。当前不是发布候选，不给未验收换核包打稳定标签。
+
+## 2026-10-13 新内核 4K 独立压力验证（非完整 App 验收）
+
+新增 `Tools/NativePlaybackSoakTests/`，只包含 tracked 测试、Mach 内存采样辅助和说明。
+未修改生产路径、默认后端或 CI workflow。生成本地 H.264/AAC 8-bit 与 HEVC Main10/AAC
+10-bit 合成素材，实际经过生产 decoder → session → output → surface，创建自己的
+640×360 CLI AppKit 窗口，不生成／安装 `.app`，不读取用户媒体，不截取桌面。
+
+读回的是生产 renderer 的实际 `displayedPixelBuffer()`：必须为 **3840×2160**，H.264
+保持 NV12 8-bit，HEVC 保持 P010 10-bit；不是只检查源文件的 4K 标签。独立 FFmpeg
+解码建立四个源区间的 YUV 参考；每次暂停 seek 比较九个位置的像素（允许一个码值差），
+要求实际共享时钟 rate 为零且位置距目标不超过 1 ms。每次 seek 还验证实际接受的
+audio/video sample 计数都增加，日志保留 refill 增量、声道数／采样率与实际 clock/rate。
+接受音频样本不等于可听音频或 A/V drift 验收，素材和输出始终静音。
+
+测试版本与证据不得混淆：
+
+- 最初 `NATIVE_SOAK_SECONDS=60 bash Tools/NativePlaybackSoakTests/run.sh`：
+  250 项／0 失败，62.49 秒，`build/native-playback-soak.muCH1S/results.log`。
+  当时持续段只检查至少四种不同像素 signature。
+- 加入 seek 双轨 refill 断言后的初版 180 秒：289 项／0 失败，182.44 秒，
+  `build/native-playback-soak.dlW2pC/results.log`。仍不是最终持续像素断言版本。
+- 只读 review 指出“变化过四种”不能证明颜色正确，因此最终版改为每次非空读回
+  必须匹配独立源参考、最终 phase 集合恰为 `{0,1,2,3}`；未知颜色单独失败。
+  冻结版 `bash Tools/NativePlaybackSoakTests/run.sh`：**292 项／0 失败**，182.26 秒，
+  三个独立 session 各运行约 60 秒，证据为 `build/native-playback-soak.WbPdz3/`。
+- 最终版负对照：
+  `NATIVE_SOAK_WRONG_REFERENCE=1 NATIVE_SOAK_SECONDS=60 bash Tools/NativePlaybackSoakTests/run.sh`。
+  仅把期望参考改成下一个源区间；16 项中恰有首次像素比较失败，退出 1，正常完成
+  异步关闭和释放，证据为 `build/native-playback-soak.oQJFvE/`。正负对照的
+  `source-sha256.txt` 完全一致；不是换一套 mock 代码构造失败。
+
+最终版涵盖 39 次显式 seek、36 次快速替换 open、0.5/1/1.75 三种实际时钟速率、
+stop 清图后重开与三个独立关闭周期。**三次关闭后 weak session 引用都已归零**。
+三轮持续段均读到四个正确源区间，损坏尺寸／格式和未知颜色都为零；含启动／循环 flush
+的持续段无图像观察次数为 **2／0／2**。未单独测量每次空图持续时间和原因，已如实保留，
+不能声称无缝循环或完全没有卡顿。
+读回次数也不是唯一呈现帧数，不据此报告渲染 FPS。
+
+应用侧已发布的在途 sample 记账峰值为 124,623,360 字节，未越过 128 MiB 预算。
+每秒 Mach RSS／physical footprint 与 generation、revision、phase、queue 采样保留于日志；
+本次进程峰值分别为 249,331,712／192,299,968 字节。第二到第三轮关闭后的差值分别
+为 -51,593,216／-79,446,064 字节。这些只描述一次 M2 Pro 运行，**不是总内存保证、
+零泄漏证明或相对 Movist／libmpv 的性能优势**；FFmpeg、VideoToolbox、IOSurface 与
+系统 renderer 缓存不由应用 128 MiB 预算完全约束。
+
+H.264 取得独立 hardware sample 证据；HEVC 仅确认 VideoToolbox 路径，不把允许软件
+fallback 的 sample 宣称为硬解。均匀色块素材便于精确像素比对，不代表复杂电影、
+数小时文件、M4 Max AV1、实体 HDR／EDR、真实声卡、完整主窗口操作或默认后端切换验收。
