@@ -29,22 +29,83 @@ struct OutputState {
   let flushGeneration: UInt64
   let videoSamples: UInt64
   let audioSamples: UInt64
+  let requestedRate: Float
+  let flushingVideo: Bool
+  let videoReady: Bool
+  let audioReady: Bool
+  let hasError: Bool
 }
 
 // White-box diagnostics honor the production output's worker-only contract.
 // Do not infer renderer state merely from cached UI snapshots.
-func outputState(_ session: NativePlaybackSession) -> OutputState? {
+func inspectOutput(_ session: NativePlaybackSession, timeout: TimeInterval = 5) -> OutputState? {
+  // Only the immutable queue reference is reflected. Mutable session state is
+  // never inspected, and every output property below is read on its worker.
   let worker = Mirror(reflecting: session).children.first { $0.label == "worker" }!.value as! DispatchQueue
   let output = session.output
   var state: OutputState?
   worker.async {
     let observed = OutputState(position: output.currentTime.seconds, volume: output.volume, rate: output.actualRate,
       flushGeneration: output.flushGeneration, videoSamples: output.acceptedVideoSamples,
-      audioSamples: output.acceptedAudioSamples)
+      audioSamples: output.acceptedAudioSamples, requestedRate: output.requestedRate,
+      flushingVideo: output.isFlushingVideo, videoReady: output.isReady(video: true),
+      audioReady: output.isReady(video: false), hasError: output.error != nil)
     DispatchQueue.main.async { state = observed }
   }
-  check(waitUntil { state != nil }, "Renderer diagnostics return without blocking main")
+  _ = waitUntil(timeout) { state != nil }
   return state
+}
+
+func outputState(_ session: NativePlaybackSession) -> OutputState? {
+  let state = inspectOutput(session)
+  check(state != nil, "Renderer diagnostics return without blocking main")
+  return state
+}
+
+/// Numeric-only observations from existing callbacks; no media or session is
+/// retained. Dumping happens only after the original deadline already failed.
+final class FailureTimeline {
+  struct Entry {
+    let time: TimeInterval
+    let event: Int
+    let values: [Double]
+  }
+  private let lock = NSLock()
+  private var entries = [Entry?](repeating: nil, count: 512)
+  private var total = 0
+
+  func record(_ event: Int, _ values: [Double]) {
+    let entry = Entry(time: ProcessInfo.processInfo.systemUptime, event: event, values: values)
+    lock.lock()
+    entries[total % entries.count] = entry
+    total += 1
+    lock.unlock()
+  }
+
+  func record(_ sample: NativePlaybackSampleObservation) {
+    record(sample.video ? 1 : 2, [Double(sample.generation), Double(sample.revision), sample.start, sample.end])
+  }
+
+  func record(_ snapshot: NativePlaybackSnapshot) {
+    let phases: [NativePlaybackPhase] = [.idle, .opening, .seeking, .paused, .playing, .ended, .failed, .closed]
+    record(3, [Double(snapshot.generation), Double(snapshot.revision),
+      Double(phases.firstIndex(of: snapshot.phase)!), snapshot.position, Double(snapshot.rate),
+      snapshot.wantsPlayback ? 1 : 0, Double(snapshot.videoSamples), Double(snapshot.audioSamples),
+      Double(snapshot.queuedBytes)])
+  }
+
+  func dump() {
+    lock.lock()
+    let count = min(total, entries.count)
+    let first = total - count
+    let rows = (first..<total).compactMap { entries[$0 % entries.count] }.sorted { $0.time < $1.time }
+    let dropped = total - count
+    lock.unlock()
+    print("FAILURE_TIMELINE: entries=\(rows.count) capacity=512 dropped=\(dropped)")
+    print("FAILURE_EVENTS: 1=video 2=audio [generation,revision,start,end]; 3=snapshot [generation,revision,phase,position,rate,wantsPlayback,videoSamples,audioSamples,queuedBytes]; 4=loop_start [revision]; 5=deadline [samples,wraps]")
+    print("FAILURE_PHASES: 0=idle 1=opening 2=seeking 3=paused 4=playing 5=ended 6=failed 7=closed")
+    for row in rows { print("FAILURE_EVENT \(row.time) \(row.event) \(row.values)") }
+  }
 }
 
 final class Observations {
@@ -182,7 +243,11 @@ let directory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true
 let pcmURL = directory.appendingPathComponent("pcm.mkv")
 let aacURL = directory.appendingPathComponent("aac.mp4")
 let observations = Observations()
-var session: NativePlaybackSession? = NativePlaybackSession(sampleObserver: observations.append)
+let failureTimeline = FailureTimeline()
+var session: NativePlaybackSession? = NativePlaybackSession(sampleObserver: {
+  observations.append($0)
+  failureTimeline.record($0)
+})
 weak var weakSession = session
 var snapshot: NativePlaybackSnapshot?
 var snapshots: [NativePlaybackSnapshot] = []
@@ -190,6 +255,7 @@ session!.onSnapshot = {
   precondition(Thread.isMainThread)
   snapshot = $0
   snapshots.append($0)
+  failureTimeline.record($0)
   if $0.phase == .failed { print("DIAGNOSTIC: native failure \(String(describing: $0.failure))") }
 }
 let host = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 180))
@@ -254,6 +320,7 @@ if snapshot?.phase == .paused {
   check(waitUntil { (snapshot?.revision ?? 0) > oldRevision && snapshot?.phase == .paused },
     "A/B seek reaches a ready paused state")
   let loopRevision = snapshot?.revision ?? 0
+  failureTimeline.record(4, [Double(loopRevision)])
   session!.setPaused(false)
   settle(1.5)
   let loopSamples = observations.read().filter { $0.generation == 2 && $0.revision == loopRevision }
@@ -261,10 +328,22 @@ if snapshot?.phase == .paused {
     "Every enqueued A/B sample stays within the half-open interval")
   let loopVideos = loopSamples.filter(\.video)
   let wraps = zip(loopVideos, loopVideos.dropFirst()).filter { $0.1.start < $0.0.start - 0.1 }.count
+  failureTimeline.record(5, [Double(loopSamples.count), Double(wraps)])
   print("DIAGNOSTIC: loop samples=\(loopSamples.count) wraps=\(wraps) minStart=\(loopSamples.map(\.start).min() ?? -1) maxEnd=\(loopSamples.map(\.end).max() ?? -1) phase=\(snapshot?.phase.rawValue ?? "none")")
-  check(wraps >= 2, "A/B restarts at least twice without leaving the interval")
+  let wrapsMeetDeadline = wraps >= 2
+  check(wrapsMeetDeadline, "A/B restarts at least twice without leaving the interval")
   check(snapshot?.phase != .failed && (snapshot?.queuedBytes ?? Int.max) <= 128 * 1024 * 1024,
     "Repeated A/B playback retains bounded queue accounting")
+  if !wrapsMeetDeadline {
+    failureTimeline.dump()
+    // This is a later read-only observation, not extra time to pass the test.
+    // No further sample count may replace the already recorded failure.
+    if let observed = inspectOutput(session!, timeout: 1) {
+      print("FAILURE_OUTPUT_AFTER_DEADLINE: clock=\(observed.position) rate=\(observed.rate) requestedRate=\(observed.requestedRate) flushGeneration=\(observed.flushGeneration) flushingVideo=\(observed.flushingVideo) videoReady=\(observed.videoReady) audioReady=\(observed.audioReady) acceptedVideo=\(observed.videoSamples) acceptedAudio=\(observed.audioSamples) hasError=\(observed.hasError)")
+    } else {
+      print("FAILURE_OUTPUT_AFTER_DEADLINE: unavailable within 1 second; original failure is unchanged")
+    }
+  }
   session!.setLoop(nil)
   session!.open(aacURL, autoplay: true)
   check(waitUntil(7) { snapshot?.generation == 3 && (snapshot?.phase == .ended || snapshot?.phase == .failed) }

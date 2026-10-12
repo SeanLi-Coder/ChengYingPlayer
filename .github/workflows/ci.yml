@@ -362,6 +362,11 @@ jobs:
           name: native-core-test-evidence-${{ github.sha }}
           path: |
             build/native-playback-session-tests.*/results.log
+            build/native-playback-session-tests.*/mode.txt
+            build/native-playback-session-tests.*/source-sha256.txt
+            build/native-playback-session-tests.*/source-validation.log
+            build/native-playback-session-tests.*/fixture-sha256.txt
+            build/native-playback-session-tests.*/fixture-validation.log
             build/native-playback-rendered-tests.*/results.log
           if-no-files-found: ignore
           retention-days: 3
