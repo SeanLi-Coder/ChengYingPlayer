@@ -377,6 +377,15 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       event, hasMedia: player.info.state.loaded, isTextInput: isTextInput,
       isModal: NSApp.modalWindow != nil || window.attachedSheet != nil
     ) else { return false }
+    if [.panLeft, .panRight, .panUp, .panDown].contains(action) {
+      // The local event monitor runs before AppKit selection/navigation. Do not
+      // steal Shift-arrows from lists, collections, controls, or their subviews.
+      var focusedView = responder as? NSView
+      while let view = focusedView {
+        if view is NSControl || view is NSCollectionView { return false }
+        focusedView = view.superview
+      }
+    }
     switch action {
     case .consume:
       break

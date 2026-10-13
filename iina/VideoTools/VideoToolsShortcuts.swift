@@ -65,12 +65,14 @@ enum VideoToolsShortcuts {
     if (123...126).contains(keyCode) {
       // AppKit marks arrow keys as numeric-pad/function events even without those keys held.
       let arrowModifiers = modifiers.subtracting([.numericPad, .function])
-      guard arrowModifiers == [.command, .shift] else { return nil }
+      guard arrowModifiers == [.shift] else { return nil }
+      // Move the viewing position toward the arrow, sliding the enlarged picture
+      // in the opposite direction. Keep the viewport model's picture-space axes.
       switch keyCode {
-      case 123: return .panLeft
-      case 124: return .panRight
-      case 125: return .panDown
-      default: return .panUp
+      case 123: return .panRight
+      case 124: return .panLeft
+      case 125: return .panUp
+      default: return .panDown
       }
     }
 

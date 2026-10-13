@@ -292,7 +292,9 @@ jobs:
         run: PATH="$PWD/deps/executable:$PATH" PLAYLIST_REQUIRE_LIVE_TESTS=1 bash Tools/PlaylistPlaybackTests/run.sh
 
       - name: Test real playback mode transitions and EOF
-        run: PATH="$PWD/deps/executable:$PATH" bash Tools/PlaybackModeLiveTests/run.sh
+        run: |
+          python3 -B Tools/PlaybackModeLiveTests/run_wait_tests.py
+          PATH="$PWD/deps/executable:$PATH" bash Tools/PlaybackModeLiveTests/run.sh
 
       - name: Test automatic clip previews with native editing and real rendered video
         timeout-minutes: 5

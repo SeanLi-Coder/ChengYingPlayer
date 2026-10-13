@@ -26,6 +26,7 @@ xcrun swiftc -o "$test_dir/PlaybackModeLiveTests" \
   "$project_root/iina/MPVHook.swift" \
   "$project_root/iina/PlaylistPlaybackPolicy.swift" \
   "$test_dir/Player.swift" \
+  "$project_root/Tools/PlaybackModeLiveTests/PlaybackModeWait.swift" \
   "$project_root/Tools/PlaybackModeLiveTests/main.swift" \
   "$deps_dir/lib/libmpv.2.dylib" -Xlinker -rpath -Xlinker "$deps_dir/lib"
 "$test_dir/PlaybackModeLiveTests" "$test_dir"

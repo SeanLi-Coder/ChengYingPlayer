@@ -24,8 +24,12 @@ does not copy the viewport arithmetic into a test implementation.
 
 A real `NSOpenGLView` inside a real `NSWindow` presents decoded frames using the
 libmpv OpenGL render API. GPU framebuffer reads measure reference-rectangle size
-and position: equal/minus scaling, all four Command-Shift arrows including key
-repeat, down/up coordinate direction, reset, and centering after zooming out.
+and position: equal/minus scaling, all four Shift arrows including key repeat,
+reversed keyboard direction, reset, and centering after zooming out. Shift-Left
+moves the picture right, Shift-Right moves it left, Shift-Down moves it up, and
+Shift-Up moves it down. Only the keyboard mapping is reversed; the production
+viewport model retains its original coordinate convention. The native controller
+and shortcut suites separately verify modifier rejection and text/focus guards.
 Every sampled step verifies that the window frame, `window-scale`, and the
 `dwidth`/`dheight` values used by app window-resize callbacks are unchanged. Non-default
 paused position and playback speed are preserved; active playback continues;
@@ -100,6 +104,10 @@ CHENGYING_VIEWPORT_TEST_DROP_RESET_REDRAW=1 CHENGYING_VIEWPORT_TEST_LEGACY_REDRA
 For a separately verified playback build, set `CHENGYING_VIEWPORT_PLAYBACK_ROOT`
 to its directory containing `include/` and `lib/`. The test reports the selected
 library SHA-256 and actual loaded dylib path; it does not replace `deps/`.
+Set `CHENGYING_VIEWPORT_FFMPEG` to an existing verified FFmpeg executable when
+reusing an isolated fixture-generation toolchain. By default it uses the
+repository's `deps/executable/ffmpeg`. Neither option changes the synthetic media
+specification or the pixel, decode-mode, and watchdog checks.
 
 This is a bounded live renderer/bridge test, not a full application UI automation.
 It does not instantiate the complete application's `CAOpenGLLayer`, its actual

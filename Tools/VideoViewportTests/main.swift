@@ -194,10 +194,13 @@ focus(window, responder: surface)
 check(NSApp.keyWindow === window, "The fixture owns a real key playback window")
 let frame = window.frame
 func key(_ code: UInt16, _ modifiers: NSEvent.ModifierFlags = [], repeated: Bool = false) -> NSEvent {
-  NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
-                  timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                  context: nil, characters: "", charactersIgnoringModifiers: "",
-                  isARepeat: repeated, keyCode: code)!
+  let arrowCharacters: [UInt16: Int] = [123: NSLeftArrowFunctionKey, 124: NSRightArrowFunctionKey,
+                                      125: NSDownArrowFunctionKey, 126: NSUpArrowFunctionKey]
+  let characters = arrowCharacters[code].flatMap(UnicodeScalar.init).map(String.init) ?? ""
+  return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
+                         timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                         context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                         isARepeat: repeated, keyCode: code)!
 }
 PlayerCore.keyBindings = ["key-24": KeyBinding(action: "window-scale"), "key-27": KeyBinding(action: "window-scale")]
 controller.keyDown(with: key(24))
@@ -216,15 +219,35 @@ if case .custom(let message) = controller.player.osds.last {
   check(false, "Zoom OSD is a localized custom message")
 }
 controller.player.mpv.values[MPVOption.Video.videoZoom] = 1.0
-let commandShiftArrows: NSEvent.ModifierFlags = [.command, .shift, .numericPad, .function]
-for (code, expectedX, expectedY): (UInt16, Double, Double) in [(123, -0.025, 0), (124, 0.025, 0), (126, 0, -0.025), (125, 0, 0.025)] {
-  controller.player.mpv.values[MPVOption.Video.videoPanX] = 0.0
-  controller.player.mpv.values[MPVOption.Video.videoPanY] = 0.0
-  controller.keyDown(with: key(code, commandShiftArrows))
-  check(close(controller.player.mpv.getDouble(MPVOption.Video.videoPanX), expectedX)
-        && close(controller.player.mpv.getDouble(MPVOption.Video.videoPanY), expectedY),
-        "Real Command-Shift-arrow event pans in the expected direction: \(code)")
-  check(window.frame == frame, "Arrow pan cannot move the video window: \(code)")
+let shiftArrows: NSEvent.ModifierFlags = [.shift, .numericPad, .function]
+let arrowDirections: [(UInt16, Double, Double)] = [(123, 0.025, 0), (124, -0.025, 0), (125, 0, -0.025), (126, 0, 0.025)]
+for (code, expectedX, expectedY) in arrowDirections {
+  for intrinsicFlags: NSEvent.ModifierFlags in [[], .numericPad, .function, [.numericPad, .function]] {
+    for capsLock: NSEvent.ModifierFlags in [[], .capsLock] {
+      let modifiers = intrinsicFlags.union(.shift).union(capsLock)
+      controller.player.mpv.values[MPVOption.Video.videoPanX] = 0.0
+      controller.player.mpv.values[MPVOption.Video.videoPanY] = 0.0
+      controller.keyDown(with: key(code, modifiers))
+      check(close(controller.player.mpv.getDouble(MPVOption.Video.videoPanX), expectedX)
+            && close(controller.player.mpv.getDouble(MPVOption.Video.videoPanY), expectedY),
+            "Real Shift-arrow event reverses the previous pan direction: \(code), flags \(modifiers.rawValue)")
+      controller.keyDown(with: key(code, modifiers, repeated: true))
+      check(close(controller.player.mpv.getDouble(MPVOption.Video.videoPanX), expectedX * 2)
+            && close(controller.player.mpv.getDouble(MPVOption.Video.videoPanY), expectedY * 2),
+            "Held Shift-arrow continues in the reversed direction: \(code), flags \(modifiers.rawValue)")
+      check(window.frame == frame, "Arrow pan cannot move the video window: \(code)")
+    }
+    let readsBeforeRejectedArrow = controller.player.mpv.reads.count
+    let writesBeforeRejectedArrow = controller.player.mpv.writes.count
+    for modifiers: NSEvent.ModifierFlags in [intrinsicFlags, intrinsicFlags.union([.command, .shift]),
+                                            intrinsicFlags.union([.option, .shift]), intrinsicFlags.union([.control, .shift])] {
+      check(!controller.handleVideoToolsShortcutEvent(key(code, modifiers)),
+            "Ordinary or additionally modified arrows retain their existing bindings: \(code), flags \(modifiers.rawValue)")
+    }
+    check(controller.player.mpv.reads.count == readsBeforeRejectedArrow
+          && controller.player.mpv.writes.count == writesBeforeRejectedArrow,
+          "Rejected arrow combinations never access viewport properties: \(code)")
+  }
 }
 controller.keyDown(with: key(29, [.command, .shift]))
 check(viewportKeys.allSatisfy { controller.player.mpv.values[$0] as? Double == 0 },
@@ -241,7 +264,7 @@ surface.addSubview(textView)
 window.makeFirstResponder(textView)
 check(window.firstResponder === textView, "The fixture installs a real text responder")
 let writesBeforeInput = controller.player.mpv.writes.count
-for event in [key(24), key(27), key(124, commandShiftArrows)] {
+for event in [key(24), key(27)] + arrowDirections.map({ key($0.0, shiftArrows) }) {
   check(!controller.handleVideoToolsShortcutEvent(event), "Text input and text navigation remain available to the editor")
 }
 check(controller.player.mpv.writes.count == writesBeforeInput, "Typing in text editors never transforms the video")
@@ -252,8 +275,72 @@ surface.addSubview(field)
 window.makeFirstResponder(field)
 check(window.firstResponder is NSTextInputClient, "An NSTextField uses the real shared field editor")
 check(!controller.handleVideoToolsShortcutEvent(key(24)), "Native field editing does not intercept the equal key")
+for (code, _, _) in arrowDirections {
+  check(!controller.handleVideoToolsShortcutEvent(key(code, shiftArrows)),
+        "The native field editor retains Shift-arrow text selection: \(code)")
+}
 window.makeFirstResponder(surface)
 field.removeFromSuperview()
+
+final class FixtureTableDataSource: NSObject, NSTableViewDataSource {
+  let rows = ["Fixture A", "Fixture B", "Fixture C", "Fixture D"]
+  func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+  func tableView(_ tableView: NSTableView, objectValueFor tableColumn: NSTableColumn?, row: Int) -> Any? { rows[row] }
+}
+func preservesControlArrows(_ control: NSView, _ context: String) {
+  check(window.makeFirstResponder(control) && window.firstResponder === control,
+        "The native \(context) owns keyboard focus")
+  let reads = controller.player.mpv.reads.count
+  let writes = controller.player.mpv.writes.count
+  for (code, _, _) in arrowDirections {
+    for repeated in [false, true] {
+      check(!controller.handleVideoToolsShortcutEvent(key(code, shiftArrows, repeated: repeated)),
+            "The native \(context) retains Shift-arrow input: \(code), repeat \(repeated)")
+    }
+  }
+  check(controller.player.mpv.reads.count == reads && controller.player.mpv.writes.count == writes,
+        "Shift-arrow input in \(context) never reads or writes viewport properties")
+}
+let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 260, height: 140))
+table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("fixture-name")))
+table.allowsMultipleSelection = true
+let tableDataSource = FixtureTableDataSource()
+table.dataSource = tableDataSource
+surface.addSubview(table)
+table.reloadData()
+table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+preservesControlArrows(table, "file table")
+let extendSelection = key(125, shiftArrows)
+if !controller.handleVideoToolsShortcutEvent(extendSelection) { table.keyDown(with: extendSelection) }
+check(table.selectedRowIndexes == IndexSet(integersIn: 1...2),
+      "A real table Shift-Down event extends the selected range without losing the original row")
+check(table.numberOfRows == 4 && tableDataSource.rows == ["Fixture A", "Fixture B", "Fixture C", "Fixture D"],
+      "Shift-arrow range selection preserves all table data")
+let outline = NSOutlineView(frame: NSRect(x: 0, y: 0, width: 260, height: 140))
+let outlineColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("fixture-outline"))
+outline.addTableColumn(outlineColumn)
+outline.outlineTableColumn = outlineColumn
+let collection = NSCollectionView(frame: NSRect(x: 0, y: 0, width: 260, height: 140))
+collection.isSelectable = true
+let slider = NSSlider(value: 0.5, minValue: 0, maxValue: 1, target: nil, action: nil)
+slider.frame = NSRect(x: 0, y: 0, width: 200, height: 24)
+for (control, context): (NSView, String) in [(table, "file table"), (outline, "folder outline"),
+                                          (collection, "collection view"), (slider, "slider control")] {
+  if control.superview == nil { surface.addSubview(control) }
+  preservesControlArrows(control, context)
+  let child = PlaybackSurface(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+  control.addSubview(child)
+  preservesControlArrows(child, "\(context) descendant")
+  window.makeFirstResponder(surface)
+  child.removeFromSuperview()
+  control.removeFromSuperview()
+}
+check(window.makeFirstResponder(surface), "Playback regains focus after native controls")
+let resumedPanWrites = controller.player.mpv.writes.count
+check(controller.handleVideoToolsShortcutEvent(key(124, shiftArrows)),
+      "Shift-arrow panning resumes when focus returns to the video surface")
+check(controller.player.mpv.writes.count == resumedPanWrites + 3,
+      "Returning to the video surface restores the production viewport bridge")
 
 let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 100),
                      styleMask: [.titled], backing: .buffered, defer: false)
@@ -262,12 +349,18 @@ window.beginSheet(sheet)
 settle()
 check(window.attachedSheet === sheet, "The fixture presents a real attached sheet")
 check(!controller.handleVideoToolsShortcutEvent(key(24)), "Dialog sheets cannot trigger video zoom")
+for (code, _, _) in arrowDirections {
+  check(!controller.handleVideoToolsShortcutEvent(key(code, shiftArrows)), "Dialog sheets retain Shift-arrow navigation: \(code)")
+}
 window.endSheet(sheet)
 sheet.orderOut(nil)
 waitFor("The real dialog sheet finishes detaching") { window.attachedSheet == nil }
 focus(window, responder: surface)
 controller.player.mainWindow.isInInteractiveMode = true
 check(!controller.handleVideoToolsShortcutEvent(key(24)), "Interactive crop mode retains its own keyboard interaction")
+for (code, _, _) in arrowDirections {
+  check(!controller.handleVideoToolsShortcutEvent(key(code, shiftArrows)), "Interactive crop mode retains Shift-arrow input: \(code)")
+}
 controller.player.mainWindow.isInInteractiveMode = false
 let second = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 300, height: 200),
                       styleMask: [.titled], backing: .buffered, defer: false)
@@ -275,6 +368,9 @@ second.isReleasedWhenClosed = false
 focus(second)
 check(NSApp.keyWindow === second, "A second native window can hold keyboard focus")
 check(!controller.handleVideoToolsShortcutEvent(key(24)), "A background player cannot steal another window's shortcut")
+for (code, _, _) in arrowDirections {
+  check(!controller.handleVideoToolsShortcutEvent(key(code, shiftArrows)), "A background player cannot steal Shift-arrow input: \(code)")
+}
 second.orderOut(nil)
 focus(window, responder: surface)
 
@@ -282,19 +378,35 @@ controller.player.info.vid = nil
 let audioReads = controller.player.mpv.reads.count
 let audioWrites = controller.player.mpv.writes.count
 controller.keyDown(with: key(24))
+for (code, _, _) in arrowDirections { controller.keyDown(with: key(code, shiftArrows)) }
 check(controller.player.mpv.reads.count == audioReads && controller.player.mpv.writes.count == audioWrites,
-      "Audio-only equal-key presses do not access video properties")
+      "Audio-only zoom and Shift-arrow presses do not access video properties")
 check(controller.legacyBindings.isEmpty && window.frame == frame,
       "Audio-only viewport keys do not fall through to legacy window resizing")
 controller.player.info.vid = 1
 controller.player.info.state = .idle
 check(!controller.handleVideoToolsShortcutEvent(key(24)), "An idle player does not claim viewing shortcuts")
+for (code, _, _) in arrowDirections {
+  check(!controller.handleVideoToolsShortcutEvent(key(code, shiftArrows)), "An idle player does not claim Shift-arrow input: \(code)")
+}
 controller.player.info.state = .playing
 check(!controller.handleVideoToolsShortcutEvent(key(24, .command)), "Command-equal remains available to other app commands")
 check(!controller.handleVideoToolsShortcutEvent(key(123)), "Plain arrow keys retain playback navigation")
 controller.keyDown(with: key(49))
 check(controller.fallbackEvents == 1 && PluginInputManager.dispatches == 1,
       "Unrelated keys still reach the existing plugin and responder path")
+let ordinaryArrowBindings: [(UInt16, String)] = [(123, "seek -5"), (124, "seek 5"), (125, "add volume -5"), (126, "add volume 5")]
+let plainArrowReads = controller.player.mpv.reads.count
+let plainArrowWrites = controller.player.mpv.writes.count
+for (code, action) in ordinaryArrowBindings {
+  PlayerCore.keyBindings["key-\(code)"] = KeyBinding(action: action)
+  let previousBindingCount = controller.legacyBindings.count
+  controller.keyDown(with: key(code, [.numericPad, .function]))
+  check(controller.legacyBindings.count == previousBindingCount + 1 && controller.legacyBindings.last?.action == action,
+        "Plain arrow reaches its existing seek or volume binding through production dispatch: \(code)")
+}
+check(controller.player.mpv.reads.count == plainArrowReads && controller.player.mpv.writes.count == plainArrowWrites,
+      "Plain seek and volume arrows never access viewport properties")
 check(window.frame == frame, "All viewport keyboard operations preserve the initial native window frame")
 window.orderOut(nil)
 window.close()

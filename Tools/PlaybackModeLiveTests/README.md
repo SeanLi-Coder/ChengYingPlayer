@@ -7,6 +7,26 @@ FFmpeg:
 bash Tools/PlaybackModeLiveTests/run.sh
 ```
 
+The waiter has a separate deterministic test that does not initialize libmpv,
+create an App, or use audio/video output:
+
+```sh
+python3 -B Tools/PlaybackModeLiveTests/run_wait_tests.py
+```
+
+It compiles the same `PlaybackModeWait` helper used by the live test, including
+the eight-second deadline and rejection of results obtained at or after it. A
+disposable negative-control copy restores the former second condition read and
+must fail the true-then-false case immediately, not by timing out.
+
+Historical CI run `38422286763` failed while settling paused A-B media before
+any playback-mode change. Its entire step, including compilation, lasted about
+2.55 seconds, below the eight-second wait. The old waiter reread its non-atomic
+condition after a successful sample and could therefore fail before its deadline.
+This deterministic defect is fixed without changing the live success predicates
+or increasing time limits. The original log did not capture `seeking` or both
+samples, so it does not establish this as the unique cause of that CI failure.
+
 An optional first argument selects another complete dependency directory. Missing
 dependencies fail the test; there is no capability skip. The runner generates two
 short synthetic videos in a disposable directory and links the actual libmpv.

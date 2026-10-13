@@ -109,9 +109,7 @@ final class LiveMPV {
   }
 
   func until(_ message: String, timeout: TimeInterval = 8, _ condition: () -> Bool) {
-    let end = Date().addingTimeInterval(timeout)
-    while !condition() && Date() < end { event() }
-    guard condition() else {
+    guard PlaybackModeWait.until(timeout: timeout, pump: { self.event() }, condition: condition) else {
       fatalError("FAIL: \(message); path=\(getString("path") ?? "nil") time=\(number("time-pos") ?? -1) pause=\(String(describing: flag("pause"))) eof=\(String(describing: flag("eof-reached"))) loaded=\(loadedPaths.count)")
     }
   }

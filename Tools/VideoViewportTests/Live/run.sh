@@ -9,7 +9,7 @@ if [[ "$mode" != hardware && "$mode" != software ]]; then
   echo 'ERROR: VIDEO_VIEWPORT_LIVE_MODE must be hardware or software.' >&2
   exit 2
 fi
-ffmpeg="$project_root/deps/executable/ffmpeg"
+ffmpeg="${CHENGYING_VIEWPORT_FFMPEG:-$project_root/deps/executable/ffmpeg}"
 playback_root="${CHENGYING_VIEWPORT_PLAYBACK_ROOT:-$project_root/deps}"
 if [[ ! -x "$ffmpeg" || ! -f "$playback_root/lib/libmpv.2.dylib" ]]; then
   echo 'ERROR: The actual shipped playback libraries and source-built FFmpeg are required.' >&2

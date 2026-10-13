@@ -105,27 +105,27 @@ func runVideoToolsShortcutTests() {
           "Numeric-pad zoom key \(keyCode) does not ignore Shift")
   }
 
-  let panShortcuts: [(UInt16, Action)] = [(123, .panLeft), (124, .panRight), (125, .panDown), (126, .panUp)]
-  let panBaseModifiers: NSEvent.ModifierFlags = [.command, .shift]
+  let panShortcuts: [(UInt16, Action)] = [(123, .panRight), (124, .panLeft), (125, .panUp), (126, .panDown)]
+  let panBaseModifiers: NSEvent.ModifierFlags = [.shift]
   for (keyCode, action) in panShortcuts {
     for intrinsicFlags: NSEvent.ModifierFlags in [[], .numericPad, .function, [.numericPad, .function]] {
       let modifiers = panBaseModifiers.union(intrinsicFlags)
-      for commandSide in [UInt64(0), leftCommand, rightCommand, leftCommand | rightCommand] {
-        check(resolve(keyCode, modifiers: modifiers, deviceFlags: commandSide) == action,
-              "Pan key \(keyCode) accepts either Command key and intrinsic arrow flags \(intrinsicFlags.rawValue)")
-      }
+      check(resolve(keyCode, modifiers: modifiers) == action,
+            "Shift-arrow \(keyCode) uses reversed pan direction with intrinsic flags \(intrinsicFlags.rawValue)")
       check(resolve(keyCode, modifiers: modifiers, isRepeat: true) == action,
             "Pan key \(keyCode) supports continuous key repeat")
       check(resolve(keyCode, modifiers: modifiers.union(.capsLock)) == action,
             "Caps Lock preserves pan key \(keyCode)")
-      for extraModifier: NSEvent.ModifierFlags in [.control, .option] {
+      for extraModifier: NSEvent.ModifierFlags in [.command, .control, .option] {
         check(resolve(keyCode, modifiers: modifiers.union(extraModifier)) == nil,
               "Additional modifier prevents pan key \(keyCode)")
       }
-      for missingModifier: NSEvent.ModifierFlags in [.command, .shift] {
-        check(resolve(keyCode, modifiers: modifiers.subtracting(missingModifier)) == nil,
-              "Pan key \(keyCode) requires both Command and Shift")
+      for commandSide in [leftCommand, rightCommand, leftCommand | rightCommand] {
+        check(resolve(keyCode, modifiers: modifiers.union(.command), deviceFlags: commandSide) == nil,
+              "Command-Shift-arrow \(keyCode) no longer triggers pan with either Command key")
       }
+      check(resolve(keyCode, modifiers: intrinsicFlags) == nil,
+            "Pan key \(keyCode) requires Shift while ordinary arrows retain playback bindings")
       check(resolve(keyCode, modifiers: modifiers, isTextInput: true) == nil,
             "Text entry keeps pan key \(keyCode)")
       check(resolve(keyCode, modifiers: modifiers, isModal: true) == nil,
@@ -174,7 +174,7 @@ func runVideoToolsShortcutTests() {
     let arrowEvent = NSEvent.keyEvent(
       with: .keyDown,
       location: .zero,
-      modifierFlags: [.command, .shift, .numericPad, .function],
+      modifierFlags: [.shift, .numericPad, .function],
       timestamp: 0,
       windowNumber: 0,
       context: nil,
