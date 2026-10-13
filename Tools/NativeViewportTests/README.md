@@ -53,3 +53,10 @@ NATIVE_VIEWPORT_NEGATIVE_CONTROL=legacy-route bash Tools/NativeViewportTests/run
 `pan-y` 仅反转 normalized Y 的符号，必须破坏上移与几何检查；`legacy-route` 仅恢复原来的
 native 快捷键兼容分派，必须触发“没有请求 MPV 兼容”和连续缩放/平移断言。
 每个命令原样保留其余断言，不修改生产文件。
+
+2026-10-13 在 `35d99248` 的 generic-owner 接口整合后重新运行：正向 `tIBbum`
+172/0、exit 0；`pan-y` 的 `dd6zVk` 为 63/109、exit 1，准确破坏原几何／上移断言；
+`legacy-route` 的 `r73W56` 为 165/7、exit 1，准确破坏原缩放／平移／兼容分派断言。
+源码及本轮记录的依赖前后 SHA 一致，证据 `build/postcommit-preview-viewport.wwLUgN`。
+这是原 runner 的明确负对照契约，不是将任意非零退出认定为通过。
+`NATIVE_VIEWPORT_BUILD_ONLY=1` 只执行编译，不运行窗口行为，不能作为上述结果的替代。

@@ -212,7 +212,7 @@ checks. The first real UI-method extraction (`kBl4mX`) failed compilation becaus
 the test retained its old `syncVolumeFromMPV` service stub; the stub was removed
 and the actual production method is now compiled. No production check was removed.
 
-Latest frozen Core SHA-256:
+Previous frozen Core SHA-256 (including the 18 controls below):
 `a30bcd0004517da6e55bd6cef80140d6f875dc7ad8269c3e53c7fa30b10297dc`.
 Ordinary `build/native-core-queue-tests.8TH6bc`, AddressSanitizer `RD4anl`, and
 ThreadSanitizer `HRuQt2` each passed 206/0, exit 0, with matching
@@ -249,3 +249,15 @@ production source changed during this final sequence. These controls do not
 resolve the separately retained historical paused-preroll or installer CI
 failures merely because this bounded run passed.
 Full App, new default routing, and release validation remain outside this result.
+
+## Post-generic-owner integration rerun
+
+Commit `35d99248`, Core SHA-256
+`bbd871b4025075e16082d7844add6d0e9651f53515087b1d1c3e892c9422b91e`:
+ordinary `zNNiWV`, AddressSanitizer `NYrDd1`, and ThreadSanitizer `D2RWp5`
+each passed 206/0. Their input manifests and generated Core/Services/Transport
+copies match, all generated checksums remain valid, and there are no sanitizer
+diagnostics. No assertion or timeout was changed for these runs.
+The 18 negative controls above were not executed again on this Core; only their
+generation/unique-landmark checks passed in
+`build/generic-interface-validation.gBTPQc`. This is not a full App acceptance.

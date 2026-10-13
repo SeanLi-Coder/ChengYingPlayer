@@ -41,3 +41,10 @@ reject at `Busy bridge refuses a temporary preview snapshot` (14 passed / 1 fail
 case). Both negative runs exited 1 after successful compile, load and rendering.
 The paired AppKit + playback-stub `VideoToolsTests` case passed 17 checks.
 This test does not claim GPU/HDR/audio or complete-App acceptance.
+
+The default complete suite was then run on commit `35d99248`: 359 assertions,
+zero failed cases, 318 rendered frames, exit 0. It included every existing case
+and the new busy case, without a changed assertion or timeout. Source and local
+libmpv/FFmpeg checksums matched before and after; evidence is retained in
+`build/postcommit-preview-viewport.wwLUgN`. This still does not run the complete
+production application or its native handoff event bridge.
