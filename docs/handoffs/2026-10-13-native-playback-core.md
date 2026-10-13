@@ -7,7 +7,8 @@
 
 **换核尚未完成，不是已发布版本。** 新后端已加入 Xcode 编译工程，能独立解码、同步播放
 音视频和呈现实际画面。`PlayerCore` 与主窗口正在接入严格受限的内部 native 路由；
-正式默认及字幕仍使用 libmpv；内部 native 路由已接入剪辑预览，完整 App 回归尚未全部通过。
+正式默认及字幕仍使用 libmpv；内部 native 路由已接入剪辑预览。冻结 0455ab7c 的完整
+App 92 项及队列 54 项已通过，但整条 CI 尚未通过，也未覆盖后续交接修补。
 没有改变默认播放路径、版本号、用户偏好、已安装 App、更新源或签名身份。
 不要仅因新文件进入编译工程，或下述测试通过，就宣布正式播放器已经换核。
 
@@ -24,12 +25,20 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 最新开发 CI `38381002473` 于 2026-10-13 10:05:47 UTC 派发，冻结
 `0455ab7c7dc207e3bc46349eda1ea6c148c1b891`，正在执行。
 `upload_development_build=false`；没有新发行或可交付 App 验收结论。
+该冻结版本的生产 App 与隔离测试 App 均编译通过，实际 baseline 92/92、独立队列
+54/54 全过，两进程 exit 0 且没有超时。五份 build/process identity-validation 均通过，
+outer summary 确认清理完成、普通 App 不含测试驱动。原 nib／菜单／滑条、像素读回、
+剪辑自动预览、静音开片、非默认状态真实两核交接及所有 Core 退出得到实际整窗验证。
+队列还验证真实重复项身份、循环／导航、整表恢复、半安装关窗后重开。原报告在
+`build/native-ci-38381002473-app.v4Pomn`，artifact ID `11804927964`。
+media-helper job 因旧 PlaylistFilterTests 边界编译失败，后续局部修补不能改写该次失败。
+本次整窗通过不包含之后的窗口全屏／置顶和字幕／LUT 交接修补；仍须新冻结 CI。
 本次包含以下较早失败之后的修补；不得把后续文档提交当成该 CI 的源码变更。
 
 最新整窗候选保留原 92 项，新增独立进程的 54 项队列检查，不能互相替代。
 两种开片暂停偏好、实际切换途中关窗并立即开片、替换后的 MPV 列表、静音、
 渲染视图所有权及三个 Core 关闭均必须通过。44 项准备测试已过，包括 macOS 12
-类型检查及实际像素／列表比较器；完整 App 执行仍待验证。冻结提交 `67dbc550`
+类型检查及实际像素／列表比较器；当时完整 App 执行待验证。冻结提交 `67dbc550`
 的开发 CI `38356250711` 已结束且失败：media-helper job 在 HDRColorStateTests 旧边界
 编译处失败，build job 在 ClipPreviewLiveTests 缺 `nativePreviewBaseline` 的旧边界
 编译处失败。完整 App 编译与队列／bridge／整窗均未到达；日志证据在

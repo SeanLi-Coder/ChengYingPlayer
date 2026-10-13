@@ -1,5 +1,22 @@
 # Complete native playback application checks
 
+## Latest frozen full-application result
+
+CI run `38381002473` at `0455ab7c7dc207e3bc46349eda1ea6c148c1b891`
+completed the real baseline **92/92** and separate queue **54/54** scenarios.
+Both processes exited 0 without timeout. All five build/process identity reports
+passed; the outer summary confirmed managed cleanup and exclusion of the test
+driver from the normal production build. Each scenario has its own distinct
+required labels and ends with all registered real cores shut down.
+
+Evidence is retained in `build/native-ci-38381002473-app.v4Pomn` from artifact
+`11804927964`. This is the first complete pass of these two scenarios, not a claim
+that the whole workflow passed: its media-helper job failed to compile an older
+PlaylistFilter boundary. It also does not cover subsequent uncommitted window
+state and subtitle/LUT handoff changes, physical audio/HDR, M4 AV1 acceleration,
+or a default-backend/release change. Earlier failures below remain historical
+results for their own frozen sources.
+
 `run.py` builds and runs a disposable, uniquely identified application only on a
 GitHub-hosted macOS runner. It rejects local execution. The driver is included
 only under `CHENGYING_NATIVE_APP_TESTS`; no test code is enabled in the release
