@@ -66,6 +66,13 @@ VideoToolbox 能力枚举约 34 ms、第二次不足 1 ms，不足以解释每�
 CI 新增开片准入、调度和反例门禁；该分支尚未发布、未替换已安装 App。整体换核与
 续播的既有发布门禁、M4 验收限制继续有效。
 
+本轮冻结提交 `211b2153efaee6a9f83d7fb830e3ccdcdc4e8f60` 已推送。
+[开发 CI 38430341318](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/38430341318)
+于 2026-10-13 16:25:13 UTC 派发，最近核实时两个 job 正在运行，
+`upload_development_build=false`。尚无该冻结版本的完整 App／整条 CI 通过结论；
+没有创建稳定 tag、发行或替换用户 App。后续状态须以实际 run 和证据为准，
+不能把这段文档提交的 SHA 当作本次 CI 的冻结源码。
+
 ## 2026-10-13 独立播放内核迁移（实现中、未替换默认路径）
 
 用户要求实际换核，已在 `codex/native-playback-core` 实现独立的 FFmpeg 解码、CoreMedia

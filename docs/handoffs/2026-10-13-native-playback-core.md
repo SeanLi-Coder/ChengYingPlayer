@@ -29,6 +29,9 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 [合作记录中的延迟修补](../AI_COLLABORATION.md#2026-10-14-开片与精确定位延迟修补待同源整窗验收)
 和 [NativeSeekLatencyTests](../../Tools/NativeSeekLatencyTests/README.md)。
 正式默认、发行与 M4 AV1 验收状态均未改变，不能把受控输出计时当作 Movist／完整 App 对照。
+冻结提交 `211b2153efaee6a9f83d7fb830e3ccdcdc4e8f60` 已推送；开发 CI
+`38430341318` 于 2026-10-13 16:25:13 UTC 派发且最近核实时仍在运行，App 上传关闭。
+本地正向／负控和 AAC 已知失败分别保留，不能提前宣布完整 App 验收或发布完成。
 
 ### 当前整合检查点
 
