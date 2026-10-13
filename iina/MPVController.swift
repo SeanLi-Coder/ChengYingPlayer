@@ -1811,9 +1811,10 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
       }
       DispatchQueue.main.async { [self] in
         guard player.acceptsMPVEventRevision(revision) else { return }
-        player.info.volume = data
+        let volume = player.pendingPlaybackVolume ?? data
+        player.info.volume = volume
         player.syncUI(.volume)
-        player.sendOSD(.volume(data))
+        player.sendOSD(.volume(volume))
       }
 
     case MPVOption.Audio.audioDelay:

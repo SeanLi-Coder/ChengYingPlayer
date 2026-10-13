@@ -20,6 +20,7 @@ python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control queue-sto
 python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control queue-stop-list-owner
 python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control queue-stop-reader-drain
 python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control queue-stop-preparation
+python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control pending-volume
 ```
 
 真实 libmpv 使用 `vo=null` / `ao=null`，不读用户视频、浏览器或设置。生成三秒视频，
@@ -121,3 +122,22 @@ runner `0e88ef7e3956a170441c56787e7ddb1aa728c9e04a8099918de22eac7f7fabdb`。
 - 上述所有最终运行均通过源码／生成物前后 SHA 校验；三正向运行无 sanitizer 诊断。
   这是 bridge 和抽取真实 idle 回调的验证，不代替完整 Core／窗口／像素验收，也不关闭
   历史 CI installer 191/1 的未定位问题。
+
+## 2026-10-13 待恢复音量事件展示
+
+`MPVController` 的 volume 属性回调在主线程 route guard 后读取
+`player.pendingPlaybackVolume ?? data`，缓存、UI 同步与 OSD 使用同一值；正常 MPV
+路径不增加属性查询。fixture 显式提供 pending volume 服务边界，不在测试中重新实现
+Core 的 owner 校验。受控 C 事件验证 nil 时使用原始 payload、主线程交付时采用最新
+pending 值、显式零值、以及交付前 pending 退役后重新采用原始 payload。这不是
+真实 Core 兼容恢复集成的证明。
+
+冻结 controller `8f2d804aa29e79c88b3add8ecd903944abdb499375a0a6653f858673e5529d6a`，
+Core `a30bcd0004517da6e55bd6cef80140d6f875dc7ad8269c3e53c7fa30b10297dc`，
+runner `536ab5ed47fab0d4e6b46ab5858c885fcf200082896920b51a2e5c5824eaf879`：
+
+- 普通 `769_679b`：210/0；ASan `lxndtzov`：237/0；TSan `qvc2ve91`：232/0。
+- 新单变量 `pending-volume` 负控 `lumu52l0` 仅撤掉 pending fallback，精确在
+  `Pending restore volume is resolved at delivery for info UI and OSD` 退出 1；验证器退出 0。
+- 四次运行源码／生成物前后 SHA 一致，三正向运行无 sanitizer 诊断。既有停止协议
+  及测试断言未改变；此前十二个停止／路由负控的精确证据保留于上一节，本次未重跑。

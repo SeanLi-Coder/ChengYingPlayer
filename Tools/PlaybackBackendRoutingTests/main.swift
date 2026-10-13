@@ -123,6 +123,48 @@ check(player.events.values[.init("mpv.custom-double.changed")] as? Double == 0.6
 check(player.events.values[.init("mpv.custom-string.changed")] as? String == "original-string",
       "String payload is copied from char pointer before asynchronous delivery")
 
+// This explicitly supplies Core's pending-intent service boundary. The event
+// branch is production code; these controlled C events do not prove Core owner
+// validation or actual compatibility restoration.
+let volumePlayer = PlayerCore()
+let volumeController = MPVController(volumePlayer)
+var reportedVolume = 17.25
+withUnsafeMutablePointer(to: &reportedVolume) {
+  property(volumeController, name: MPVOption.Audio.volume, format: MPV_FORMAT_DOUBLE, data: $0)
+}
+pump()
+check(volumePlayer.info.volume == 17.25 && volumePlayer.syncedVolumeValues == [17.25] &&
+      volumePlayer.volumeOSDValues == [17.25],
+      "Without pending restore volume the ordinary MPV payload drives info UI and OSD")
+volumePlayer.pendingPlaybackVolume = 21
+reportedVolume = 0
+withUnsafeMutablePointer(to: &reportedVolume) {
+  property(volumeController, name: MPVOption.Audio.volume, format: MPV_FORMAT_DOUBLE, data: $0)
+}
+volumePlayer.pendingPlaybackVolume = 37
+pump()
+check(volumePlayer.info.volume == 37 && volumePlayer.syncedVolumeValues.last == 37 &&
+      volumePlayer.volumeOSDValues.last == 37,
+      "Pending restore volume is resolved at delivery for info UI and OSD")
+volumePlayer.pendingPlaybackVolume = 0
+reportedVolume = 81
+withUnsafeMutablePointer(to: &reportedVolume) {
+  property(volumeController, name: MPVOption.Audio.volume, format: MPV_FORMAT_DOUBLE, data: $0)
+}
+pump()
+check(volumePlayer.info.volume == 0 && volumePlayer.syncedVolumeValues.last == 0 &&
+      volumePlayer.volumeOSDValues.last == 0,
+      "A pending zero volume remains an explicit intent")
+reportedVolume = 42
+withUnsafeMutablePointer(to: &reportedVolume) {
+  property(volumeController, name: MPVOption.Audio.volume, format: MPV_FORMAT_DOUBLE, data: $0)
+}
+volumePlayer.pendingPlaybackVolume = nil
+pump()
+check(volumePlayer.info.volume == 42 && volumePlayer.syncedVolumeValues.last == 42 &&
+      volumePlayer.volumeOSDValues.last == 42,
+      "Retired pending volume restores ordinary MPV delivery without a stale override")
+
 controller.addSavedLoopModeHook()
 var continued = 0
 let restoreCalls = player.actions.filter { $0 == "restoreLoop" }.count

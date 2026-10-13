@@ -150,6 +150,11 @@ def extract_production(args):
         if generated.count(original) != 2:
             raise RuntimeError("Queue stop preparation boundary changed")
         generated = generated.replace(original, "_ = owner", 1)
+    elif args.negative_control == "pending-volume":
+        original = "let volume = player.pendingPlaybackVolume ?? data"
+        if generated.count(original) != 1:
+            raise RuntimeError("Pending restore volume boundary changed")
+        generated = generated.replace(original, "let volume = data")
     return generated, player
 
 
@@ -159,7 +164,7 @@ def main():
     parser.add_argument("--negative-control", choices=["epoch", "first-start", "queue-owner", "queue-start-context",
                                                      "queue-stop-completion", "queue-stop-current", "queue-stop-route",
                                                      "queue-stop-event-gate", "queue-stop-keep-list", "queue-stop-list-owner",
-                                                     "queue-stop-reader-drain", "queue-stop-preparation"])
+                                                     "queue-stop-reader-drain", "queue-stop-preparation", "pending-volume"])
     args = parser.parse_args()
     sources = [ROOT / name for name in COMPILED_SOURCES + ["iina/MPVController.swift", "iina/PlayerCore.swift",
         "Tools/PlaybackBackendRoutingTests/run.py", "deps/include/mpv/client.h"]]
@@ -211,7 +216,8 @@ def main():
                         "queue-stop-keep-list": "Repeated owned stop preserves the retained prefix while refreshing its route",
                         "queue-stop-list-owner": "Cancelled stop cannot clear foreign entries or falsely acknowledge idle",
                         "queue-stop-reader-drain": "Actual idle cannot reopen until the old reader backlog is drained",
-                        "queue-stop-preparation": "Special stop suppresses premature ordinary idle and media callbacks after START"}[args.negative_control]
+                        "queue-stop-preparation": "Special stop suppresses premature ordinary idle and media callbacks after START",
+                        "pending-volume": "Pending restore volume is resolved at delivery for info UI and OSD"}[args.negative_control]
             if result.returncode != 1 or "FAIL: " + expected not in result.stderr:
                 raise RuntimeError("Negative control did not fail at the intended invariant: " + result.stderr)
             print("PASS: Negative control rejected: " + expected)

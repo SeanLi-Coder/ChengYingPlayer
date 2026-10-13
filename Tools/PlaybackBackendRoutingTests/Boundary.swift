@@ -77,6 +77,10 @@ class RoutingPlayerFixture {
   var receivedEndFileWhileLoading = false
   var pendingUrl: URL?
   var pendingNativeQueueStopOwner: UUID?
+  // Explicit Core service boundary; owner validation is not implemented here.
+  var pendingPlaybackVolume: Double?
+  var volumeOSDValues: [Double] = []
+  var syncedVolumeValues: [Double] = []
   var pendingAutoLoad = false
   var onOpen: ((URL) -> Void)?
   var currentController: TestWindow { mainWindow }
@@ -87,10 +91,16 @@ class RoutingPlayerFixture {
   func mpvHasShutdown() { record("shutdown") }
   func onVideoReconfig() { record("reconfig") }
   func fileStarted(path: String) { record("start") }
-  func sendOSD(_ value: OSDMessage) { record("osd") }
+  func sendOSD(_ value: OSDMessage) {
+    record("osd")
+    if case .volume(let volume) = value { volumeOSDValues.append(volume) }
+  }
   func fileLoaded() { record("loaded") }
   func videoToolsEnforceLoopBounds() { record("loop") }
-  func syncUI(_ value: UIUpdate) { record("sync") }
+  func syncUI(_ value: UIUpdate) {
+    record("sync")
+    if case .volume = value { syncedVolumeValues.append(info.volume) }
+  }
   func playbackRestarted() { record("restart") }
   func fileEnded(_ stopped: Bool) { record("end") }
   func screenshotCallback() { record("screenshot") }
