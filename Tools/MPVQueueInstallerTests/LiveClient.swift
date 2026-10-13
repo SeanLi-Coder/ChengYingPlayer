@@ -30,6 +30,12 @@ final class LiveQueueClient: MPVQueueInstallationBackend {
   var eventEntryID: Int64?
   var loadedReadback: MPVQueueInstallationSnapshot?
   var dropLoadedEvents = false
+  private(set) var diagnostics: [String] = []
+
+  private func record(_ value: String) {
+    diagnostics.append(value)
+    if diagnostics.count > 40 { diagnostics.removeFirst(diagnostics.count - 40) }
+  }
 
   init(directory: URL) {
     guard let mpv = mpv_create() else { fatalError("Cannot create real libmpv") }
@@ -62,12 +68,14 @@ final class LiveQueueClient: MPVQueueInstallationBackend {
        arguments[0] == "playlist-play-index" && rejectActivation { actual = ["invalid-installer-test-command"] }
     if arguments[0] == "playlist-play-index", let index = replaceSelectedIndex { actual[1] = String(index) }
     let status = rawCommand(actual)
+    record("command=\(arguments[0]) status=\(status)")
     afterCommand?(arguments)
     return missingCommandResult || missingActivationResult && arguments[0] == "playlist-play-index" ? nil : status
   }
   func queueSetPaused() -> Int32? {
     pauseCalls += 1
     let status = mpv_set_property_string(handle, rejectPause ? "invalid-installer-test-property" : "pause", "yes")
+    record("pause status=\(status)")
     afterPause?()
     return status
   }
@@ -98,6 +106,7 @@ final class LiveQueueClient: MPVQueueInstallationBackend {
                            playing: row["playing"] as? Bool ?? false))
     }
     let snapshot = MPVQueueInstallationSnapshot(entries: entries, idle: idle, paused: paused, activePath: string("path"))
+    record("snapshot ids=\(entries.map(\.id)) current=\(entries.filter(\.current).map(\.id)) playing=\(entries.filter(\.playing).map(\.id)) idle=\(idle) paused=\(paused) hasPath=\(snapshot.activePath != nil)")
     afterSnapshot?()
     return snapshot
   }

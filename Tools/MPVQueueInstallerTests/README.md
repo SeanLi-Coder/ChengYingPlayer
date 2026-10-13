@@ -17,6 +17,10 @@ env PATH=/usr/bin:/bin:/usr/sbin:/sbin NATIVE_PLAYBACK_SANITIZER=thread bash Too
 The default fixture encoder is `/opt/homebrew/bin/ffmpeg`; `FFMPEG_BIN` may name
 another installed FFmpeg. The shell runner otherwise uses system tools, including
 `/usr/bin/grep`, rather than requiring `rg`. Every test binary has a 75-second watchdog.
+`NATIVE_PLAYBACK_DEPS` can select an isolated candidate dependency tree. The
+default remains repository `deps`; the shared verifier checks all nine playback
+libraries, SDK headers, install names, architectures, signatures and dependency
+closure, rejects loader overrides, and verifies the same identities after execution.
 Source hashes, generated source/fixture hashes, exit statuses, and logs remain in
 the owned directory, including when compilation or an assertion fails. A changed
 source hash cannot produce a successful runner exit.
@@ -79,11 +83,44 @@ fixture encoder (`02IZof`, exit 1) and invalid sanitizer (`H9NA2V`, exit 2) reta
 their failure statuses, before/after source hashes, and any generated fixture
 hashes without being treated as passing test runs.
 
+## Subsequent CI failure and bounded diagnostics
+
+Development CI `38337569102` at `e4369f41` passed the ordinary 191 checks and six
+negative controls, but its ThreadSanitizer positive run failed one of 191 checks:
+`partial: current-owner cancellation verifies empty idle cleanup`. There was no
+sanitizer race report. The original evidence remains at
+`build/native-ci-38337569102.GQRT14/queue/mpv-queue-installer-tests.sKaHFN`.
+The failure has not yet been reproduced locally or attributed to production or
+the test harness; later passing runs do not close it.
+
+The real client now retains a bounded 40-event trace of command return values and
+actual playlist IDs/flags on failure. It does not log media paths, manufacture
+readiness, retry failed assertions, or lengthen deadlines. A focused stress mode
+can exercise up to 500 fresh real-client partial cancellations:
+
+```sh
+NATIVE_PLAYBACK_DEPS="$PWD/build/native-av1-playback.7FMHum" \
+  MPV_QUEUE_PARTIAL_CANCELLATIONS=200 NATIVE_PLAYBACK_SANITIZER=thread \
+  bash Tools/MPVQueueInstallerTests/run.sh
+```
+
+With that candidate tree, 200 cancellations produced 600 checks/0 failures
+(`FtLwVq`). Full ordinary (`mAHRe0`), ASan (`jlKCQb`) and TSan (`pm09SF`) runs
+each produced 191/0 and all six exact negatives. After moving the initial hash
+collection behind the failure-evidence trap, final TSan (`8IDtyH`) again passed
+191/0 and six exact negatives; missing encoder (`wfT6yq`) retained exit 1 and
+before/after evidence. These directories share the prefix above. Source, generated
+files and verified dependency identities remained unchanged. The production
+installer itself was not changed to obtain these results. CI now collects the
+bounded trace and a separate 200-cancellation run rather than hiding the prior
+failure or treating a successful rerun as a fix.
+
 ## Required production integration boundaries
 
 An empty/idle snapshot does **not** prove that an MPV handle has never played
 media or has no old event backlog. Core must retain its pristine-media-command
-admission and event/handle epoch gates. The installer is not yet connected to Core.
+admission and event/handle epoch gates. Controller integration is committed and
+Core integration is under verification; this standalone suite does not prove it.
 
 The eventual event bridge must copy START/END entry IDs immediately on the MPV
 worker, and freeze the preceding START ID for FILE_LOADED before any external

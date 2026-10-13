@@ -44,6 +44,27 @@ final class InstallationRig {
   }
 }
 
+if CommandLine.arguments.count == 3 {
+  guard let repetitions = Int(CommandLine.arguments[2]), (1...500).contains(repetitions) else {
+    fatalError("Invalid partial-cancellation repetition count")
+  }
+  for iteration in 0..<repetitions {
+    let rig = InstallationRig()
+    let token = rig.begin(Array(repeating: red, count: 20))
+    rig.installer.advance()
+    rig.installer.cancel(token)
+    rig.run()
+    let empty = rig.isEmpty
+    if rig.outcomes != [.cancelled(.verifiedEmpty)] || !empty {
+      print("CANCELLATION_DIAGNOSTIC: iteration=\(iteration) outcomes=\(rig.outcomes) empty=\(empty) trace=\(rig.client.diagnostics)")
+    }
+    check(rig.outcomes == [.cancelled(.verifiedEmpty)] && empty,
+          "Repeated partial cancellation verifies empty idle cleanup")
+  }
+  print("Queue installer stress: \(passed + failed) checks, \(failed) failures")
+  exit(failed == 0 ? 0 : 1)
+}
+
 for (name, urls, selected) in [
   ("single", [red], 0), ("first", [red, blue], 0), ("last", [red, blue], 1),
   ("duplicate-middle", [red, red, blue], 1), ("duplicate-last", [red, blue, red], 2),
@@ -108,7 +129,11 @@ for point in ["before", "partial", "started"] {
     check(rig.client.actualStarts.count == 1 && rig.outcomes.isEmpty, "Cancellation is tested after a real selected start")
   }
   rig.installer.cancel(token); rig.run()
-  check(rig.outcomes == [.cancelled(.verifiedEmpty)] && rig.isEmpty, "\(point): current-owner cancellation verifies empty idle cleanup")
+  let empty = rig.isEmpty
+  if rig.outcomes != [.cancelled(.verifiedEmpty)] || !empty {
+    print("CANCELLATION_DIAGNOSTIC: point=\(point) outcomes=\(rig.outcomes) empty=\(empty) trace=\(rig.client.diagnostics)")
+  }
+  check(rig.outcomes == [.cancelled(.verifiedEmpty)] && empty, "\(point): current-owner cancellation verifies empty idle cleanup")
 }
 for operation in ["stop", "clear"] {
   let rig = InstallationRig()
