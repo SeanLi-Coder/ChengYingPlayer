@@ -12,6 +12,7 @@ sources=(
   "$project_root/iina/PlayerState.swift"
   "$project_root/iina/VideoTools/VideoToolsRotationIntent.swift"
   "$project_root/iina/PlaybackBackend/NativePlaybackQueue.swift"
+  "$project_root/iina/PlaybackBackend/MPVQueueInstaller.swift"
   "$project_root/iina/MediaInfo/MediaInfoModels.swift"
   "$test_dir/Player.swift"
   "$test_dir/Controller.swift"

@@ -82,6 +82,12 @@ final class MockMPV {
   func command(_ command: MPVCommand, level: Logger.Level) { commands.append(command.rawValue) }
   func mpvQuit() { commands.append("quit") }
   func prepareForFirstMPVMediaLoad() { prepared += 1 }
+  func stopCancelledNativeQueue(owner: UUID) {
+    preconditionFailure("Queue cancellation requires the real MPV bridge tests")
+  }
+  func prepareCancelledNativeQueueStop(owner: UUID) {
+    preconditionFailure("Queue cancellation requires the real MPV bridge tests")
+  }
   func playlistAppend(_ path: String) { appended.append(path) }
 }
 final class MockWindow {

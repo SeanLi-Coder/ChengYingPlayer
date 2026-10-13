@@ -62,6 +62,12 @@ final class PlaybackMPV {
   func getFlag(_ name: String) -> Bool { paused }
   func setFlag(_ name: String, _ value: Bool, level: Logger.Level) { paused = value }
   func command(_ command: MPVCommand, level: Logger.Level) { stopped += 1 }
+  func stopCancelledNativeQueue(owner: UUID) {
+    preconditionFailure("Queue cancellation requires the real MPV bridge tests")
+  }
+  func prepareCancelledNativeQueueStop(owner: UUID) {
+    preconditionFailure("Queue cancellation requires the real MPV bridge tests")
+  }
   func mpvQuit() { quit += 1 }
 }
 

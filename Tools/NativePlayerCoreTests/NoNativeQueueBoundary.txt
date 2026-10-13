@@ -14,7 +14,7 @@ __PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__
     return false
   }
   private func resetNativeQueue() {
-    precondition(nativeQueue == nil && nativeQueueInstallation == nil && !hasPendingNativeQueueRestore,
+    precondition(nativeQueue == nil && nativeQueueInstallation == nil && pendingNativeQueueStopOwner == nil && !hasPendingNativeQueueRestore,
                  "Queue retirement requires NativeCoreQueueTests")
   }
   private func recordNativeQueueSeek(_ result: PlaybackTransportResult) {

@@ -26,6 +26,7 @@ let thumbnailGenerationFallback = declarations.contains("var thumbnailGeneration
 let rotationFields = section(player, "  private var permanentRotationIntent", "\n  /// Both window shortcuts")
 let rotationMethods = section(player, "  @discardableResult\n  func cancelPendingPermanentRotation(", "  /// An abandoned rotation action")
 let noEnqueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt"), encoding: .utf8)
+let queueInstallation = section(player, "  private final class NativeQueueInstallation {", "  var hasNativePlaybackQueue:")
 let playerSource = """
 import Foundation
 
@@ -35,6 +36,7 @@ final class PlayerUnderTest: PlayerFixture {
 \(rotationFields)
 \(rotationMethods)
 \(noEnqueue)
+\(queueInstallation)
 \(start)
 \(stop)
 \(shutdown)

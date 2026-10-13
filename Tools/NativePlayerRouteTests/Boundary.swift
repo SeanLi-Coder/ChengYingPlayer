@@ -156,6 +156,12 @@ final class MPVController {
   func mpvInitRendering() { renderInitializations += 1; mpvRenderContext = 1 }
   func mpvQuit() { quitCalls += 1 }
   func prepareForFirstMPVMediaLoad() { firstLoads += 1 }
+  func stopCancelledNativeQueue(owner: UUID) {
+    preconditionFailure("Queue cancellation requires the real MPV bridge tests")
+  }
+  func prepareCancelledNativeQueueStop(owner: UUID) {
+    preconditionFailure("Queue cancellation requires the real MPV bridge tests")
+  }
   func setDouble(_ key: String, _ value: Double) {}
   func setFlag(_ key: String, _ value: Bool, level: Logger.Level = .debug) { flags[key] = value }
   func setString(_ key: String, _ value: String) {}

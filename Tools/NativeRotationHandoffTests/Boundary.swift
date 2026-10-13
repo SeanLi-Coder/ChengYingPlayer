@@ -68,6 +68,12 @@ final class MockMPV {
   var commands: [String] = []
   var prepared = 0
   func prepareForFirstMPVMediaLoad() { prepared += 1 }
+  func stopCancelledNativeQueue(owner: UUID) {
+    preconditionFailure("Queue cancellation requires the real MPV bridge tests")
+  }
+  func prepareCancelledNativeQueueStop(owner: UUID) {
+    preconditionFailure("Queue cancellation requires the real MPV bridge tests")
+  }
   func mpvQuit() { commands.append("quit") }
   func command(_ value: MPVCommand, level: Logger.Level) { commands.append(value.rawValue) }
   func getFlag(_ name: String) -> Bool { true }
@@ -86,6 +92,9 @@ final class CoreInfo {
 class CoreBoundary: NSObject {
   enum NativePreviewResult { case applied, unavailable, superseded }
   var nativePreviewInProgress = false
+  // This single-media fixture controls preview completion, not queue intent capture.
+  // Queue preview baselines are exercised by the real NativeCoreQueueTests harness.
+  let nativePreviewBaseline: Bool? = nil
   var nativePreviewIntentRevision: UInt64 = 0
   let nativeRestoredPreviewEOF = false
   let playbackAtEOF = false

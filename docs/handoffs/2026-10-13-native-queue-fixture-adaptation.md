@@ -89,3 +89,38 @@ decoder SHA-256 was
 
 No files were staged or committed by this test owner; the coordinator owns the
 ordered integration and subsequent CI/release decision.
+
+## Cancelled-installation service adaptation
+
+The coordinator subsequently added fail-fast declarations for
+`prepareCancelledNativeQueueStop(owner:)` and `stopCancelledNativeQueue(owner:)`
+to the four controlled MPV boundaries. These single-media fixtures must never
+acknowledge a queue stop. The shared no-queue reset also requires no pending stop
+owner. Lifecycle extraction now includes the actual installation-holder
+declarations and compiles the real installer types.
+
+The rotation/URL boundary declares a nil captured-preview baseline: those
+single-media tests control preview completion and do not model queue intent.
+The production pause/resume guards remain extracted unchanged; the real queue
+preview contract is covered separately by `NativeCoreQueueTests`.
+
+Before the final early-prepare call, Core SHA-256
+`1e48890fffc5435ddd2837b247bbb293d05657f23787931556832197cc022cc1`
+passed these new runs:
+
+- Route: `build/native-player-route-tests.67jU2g`, 335/0.
+- Rotation: `build/rotation-handoff-tests.23n4Py`, 176/0; four original controls
+  failed by exactly 4/10/2/48, wrapper/source/generated checks all succeeded.
+- URL TSan: `build/url-enqueue-tests.pczYE5`, 118/0; eight original controls
+  failed by 27/9/7/2/3/4/2/2, wrapper and source checks succeeded.
+
+The first rotation attempt `build/rotation-handoff-tests.nkjfIy` failed to compile
+because its controlled boundary lacked `nativePreviewBaseline`. It executed no
+assertions; its failure is retained, not labeled a production playback failure.
+
+After adding the early-prepare call, final Core SHA-256
+`98ff0c4cf304201eb481f40a14b80ff23d7a654a5d80986358a62272937714f7`
+passed lifecycle 76 (x86_64 macOS 10.15 typecheck and ASan execution), controlled
+Core TSan 41, and both original Core negative controls. The ordinary GUI runs
+above remain tied to their earlier SHA, not relabeled as final-source acceptance.
+No test App was created and no user preference or installed application changed.
