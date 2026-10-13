@@ -115,6 +115,7 @@ for (modeName, mode) in modes {
     }
   }
   var first = try NativeQueueState(plan: plan, intent: .paused, repeatMode: mode)
+  _ = first.acceptLoaded(first.mediaToken)
   check(first.previous() == .rewind(first.currentRequest) && first.selectedIndex == 0 && first.intent == .paused,
         "Manual first previous \(modeName) rewinds and preserves pause")
   var middle = try NativeQueueState(plan: plan, selectedIndex: 1, repeatMode: mode)
@@ -238,13 +239,27 @@ for (name, mode) in modes {
   _ = pauseBeforeEnd.setIntent(.paused)
   check(pauseBeforeEnd.ended(token) == .ended && pauseBeforeEnd.phase == .ended && pauseBeforeEnd.selectedIndex == 0,
         "Pause before delayed EOF \(name) reaches an ended state without advancing")
-  check(pauseBeforeEnd.setIntent(.playing) == .rewind(pauseBeforeEnd.currentRequest) && pauseBeforeEnd.mediaToken != token,
-        "Resume after delayed EOF \(name) starts a new rewind generation")
-  let rewindToken = pauseBeforeEnd.mediaToken
+  check(pauseBeforeEnd.setIntent(.playing) == .rewind(pauseBeforeEnd.currentRequest) && pauseBeforeEnd.mediaToken == token,
+        "Resume after delayed EOF \(name) keeps the current media generation")
+  let rewindRequest = pauseBeforeEnd.currentRequest
   _ = pauseBeforeEnd.setIntent(.paused)
-  check(pauseBeforeEnd.acceptLoaded(rewindToken) && pauseBeforeEnd.intent == .paused,
+  check(pauseBeforeEnd.completeRewind(rewindRequest, accepted: true) && pauseBeforeEnd.intent == .paused,
         "A later pause wins the EOF rewind completion \(name)")
 }
+var rejectedRewind = try NativeQueueState(plan: plan, intent: .paused)
+_ = rejectedRewind.acceptLoaded(rejectedRewind.mediaToken)
+let unchangedMedia = rejectedRewind.mediaToken
+_ = rejectedRewind.previous()
+let rejectedRequest = rejectedRewind.currentRequest
+check(!rejectedRewind.acceptLoaded(rejectedRequest.token), "A rewind cannot be acknowledged as a new media open")
+check(rejectedRewind.ended(unchangedMedia) == .rejected(.inactive), "Queued EOF cannot advance a pending rewind")
+check(rejectedRewind.completeRewind(rejectedRequest, accepted: false) && rejectedRewind.phase == .ready && rejectedRewind.intent == .paused,
+      "Rejected same-media rewind restores its previous phase and intent")
+_ = rejectedRewind.previous()
+let replacementRewind = rejectedRewind.currentRequest
+check(!rejectedRewind.completeRewind(rejectedRequest, accepted: true), "Old rewind acknowledgement cannot consume a later request")
+check(rejectedRewind.completeRewind(replacementRewind, accepted: true) && rejectedRewind.mediaToken == unchangedMedia,
+      "Accepted same-media rewind preserves source identity")
 var endBeforePause = try NativeQueueState(plan: plan)
 let endFirstToken = endBeforePause.mediaToken
 _ = endBeforePause.acceptLoaded(endFirstToken)

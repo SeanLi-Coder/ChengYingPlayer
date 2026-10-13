@@ -73,7 +73,7 @@ final class NativePlaybackTransport: PlaybackTransport {
   }
   var isAtEOF: Bool {
     dispatchPrecondition(condition: .onQueue(.main))
-    return snapshot?.phase == .ended
+    return pendingSeek == nil && snapshot?.phase == .ended
   }
 
   private var isClosed: Bool { snapshot?.phase == .closed }

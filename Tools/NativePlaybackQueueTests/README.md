@@ -1,9 +1,9 @@
 # Standalone native queue state model
 
-This candidate is deliberately **not** connected to PlayerCore, Session, MPV,
-the Xcode project, default admission, or a release. It proves only bounded value
-state decisions. A model completion marked `verified` is not real playlist
-installation evidence.
+These tests prove only bounded value-state decisions. The current opt-in Core
+integration has separate real Session/MPV tests in `NativeCoreQueueTests`; this
+model test alone does not prove that integration or change default admission.
+A model completion marked `verified` is not real playlist installation evidence.
 
 ```sh
 PATH=/usr/bin:/bin:/usr/sbin:/sbin bash Tools/NativePlaybackQueueTests/run.sh
@@ -19,8 +19,12 @@ bash Tools/NativePlaybackQueueTests/run_mpv_probe.sh
   most 1 MiB aggregate encoded URL bytes. It does not read files, resolve aliases,
   enumerate folders, grant access, or probe media eligibility.
 - `NativeQueueState` is a single-owner value model. A plan replacement and stop
-  invalidate its epoch. Each selection/reload/rewind creates a new media
-  generation, including reselecting the identical URL/item. UInt64 counters use
+  invalidate its epoch. Each selection/reload creates a new media
+  generation, including reselecting the identical URL/item. A rewind retains the
+  same media token and Session, creates a revision-bound seek request, and must
+  be acknowledged by `completeRewind` after actual command acceptance. Rejected
+  rewind restores the prior phase; stale completion cannot consume a newer seek.
+  UInt64 counters use
   checked increments. It is not a lock, actor, or cross-thread storage primitive.
 - Load completion checks media identity without overwriting newer pause intent.
   Natural EOF checks the same identity and is consumed once. Pause before a
@@ -52,21 +56,22 @@ bash Tools/NativePlaybackQueueTests/run_mpv_probe.sh
 
 ## Tests and negative controls
 
-The 150 deterministic checks run the real standalone model, not a policy copy.
+The 155 deterministic checks run the real standalone model, not a policy copy.
 They cover count/byte limits, stable identities/order, invalid replacement,
 latest opening intent, same-URL generations, EOF/mode combinations, both EOF-pause
 orders, stale/duplicate callbacks, revision ABA, consume-before-effects,
 installation-time intent, explicit failure/retry, stop, and replacement.
 
 Each run also removes exactly one guard/change in an isolated source copy:
-checkpoint revision checking (exactly 4 failures), generation advancement
-(exactly 7 failures), or EOF token validation (exactly 1 failure). All three must
+checkpoint revision checking (exactly 4 failures), new-open generation advancement
+(exactly 4 failures), EOF token validation (exactly 1 failure), or incorrectly
+advancing the generation on same-media rewind (exactly 5 failures). All four must
 exit 1 with the complete named failure set; positive tests must exit 0. Logs,
 source snapshots, and before/after hashes remain in the printed owned directory.
 Sanitizers here do not prove concurrent access safety: mutations are intentionally
 single-owner. Runners use only standard system tools, not `rg`.
 
-Candidate SHA-256
+Historical pre-integration candidate SHA-256
 `33c5ef9281e9027e052d0d4c24fdeaa4f9075e5570b78cc68b5b08c67dc268cd`
 passed 150/0 in normal, AddressSanitizer, and ThreadSanitizer modes on 2026-10-13.
 Each mode also produced exactly 4/7/1 negative-control failures with exit 1; each
@@ -78,6 +83,16 @@ All used the system-only PATH shown above. Evidence under `build/`:
 | Normal | `native-queue-model-tests.1xpUCE` |
 | AddressSanitizer | `native-queue-model-tests.t6fEOf` |
 | ThreadSanitizer | `native-queue-model-tests.nouke6` |
+
+The integration review subsequently disproved the old rewind-as-open assumption:
+it discarded volume, viewport and A/B state. The current model instead retains
+media identity for a revision-acknowledged seek. SHA-256
+`a66adc1709ab8365a2d252b82213fdfd75924cdd369d4a38fe51f8ab77e01a13`
+passed 155/0 in normal (`WT3ibt`), AddressSanitizer (`qnIOtk`), and
+ThreadSanitizer (`PuEOG8`), each under `build/native-queue-model-tests.*`.
+Every mode verified the four exact 4/4/1/5 negative failure sets, unchanged
+source hashes, and no sanitizer report. The first attempt `2TEWRU` retained a
+negative-generator landmark error; it is not a passing run.
 
 ## Real MPV boundary observation
 

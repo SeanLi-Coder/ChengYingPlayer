@@ -7,13 +7,23 @@ sources=(iina/PlaybackBackend/NativePlaybackQueue.swift iina/PlaylistPlaybackPol
   Tools/NativePlaybackQueueTests/main.swift Tools/NativePlaybackQueueTests/prepare.swift
   Tools/NativePlaybackQueueTests/run.sh Tools/NativePlaybackQueueTests/verify_negative.swift)
 shasum -a 256 "${sources[@]}" > "$test_dir/source-before.sha256"
+finish() {
+  status=$?
+  trap - EXIT
+  shasum -a 256 "${sources[@]}" > "$test_dir/source-after.sha256" || status=1
+  diff -u "$test_dir/source-before.sha256" "$test_dir/source-after.sha256" > "$test_dir/source-comparison.log" || status=1
+  printf '%s\n' "$status" > "$test_dir/exit-status.txt"
+  printf 'Artifacts: %s\n' "$test_dir"
+  exit "$status"
+}
+trap finish EXIT
 swift_flags=()
 case "${NATIVE_PLAYBACK_SANITIZER:-}" in
   '') ;;
   address|thread) swift_flags+=("-sanitize=$NATIVE_PLAYBACK_SANITIZER" -g) ;;
   *) printf 'Unknown sanitizer\n'; exit 2 ;;
 esac
-for control in positive stale-checkpoint same-generation stale-eof; do
+for control in positive stale-checkpoint same-generation stale-eof rewind-generation; do
   work="$test_dir/$control"
   mkdir "$work"
   xcrun swift Tools/NativePlaybackQueueTests/prepare.swift iina/PlaybackBackend/NativePlaybackQueue.swift \
@@ -37,6 +47,3 @@ for control in positive stale-checkpoint same-generation stale-eof; do
     xcrun swift Tools/NativePlaybackQueueTests/verify_negative.swift "$control" "$work/failures.log"
   fi
 done
-shasum -a 256 "${sources[@]}" > "$test_dir/source-after.sha256"
-diff -u "$test_dir/source-before.sha256" "$test_dir/source-after.sha256" > "$test_dir/source-comparison.log"
-printf 'Artifacts: %s\n' "$test_dir"

@@ -7,7 +7,8 @@ var text = try String(contentsOf: source, encoding: .utf8)
 let replacements: [String: (String, String)] = [
   "stale-checkpoint": ("          checkpoint.revision == revision,\n", ""),
   "same-generation": ("generation = nextGeneration; phase = .loading", "_ = nextGeneration; phase = .loading"),
-  "stale-eof": ("    guard token == mediaToken else { return .rejected(.stale) }\n", "")
+  "stale-eof": ("    guard token == mediaToken else { return .rejected(.stale) }\n", ""),
+  "rewind-generation": ("      revision = next; phase = .loading", "      generation += 1; revision = next; phase = .loading")
 ]
 if mode != "positive" {
   guard let replacement = replacements[mode], text.components(separatedBy: replacement.0).count == 2 else {
