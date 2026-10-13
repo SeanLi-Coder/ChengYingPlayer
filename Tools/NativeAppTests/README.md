@@ -29,7 +29,7 @@ python3 -B Tools/NativeAppTests/run.py \
   --production-app /ci/assembled/ChengYing.app
 ```
 
-Add `--include-queue` to also execute the separate 47-check queue scenario using
+Add `--include-queue` to also execute the separate 54-check queue scenario using
 the same test build. The default still executes only the original 92-check
 scenario. Both processes must succeed when the flag is present. The queue run
 gets its own UUID, fixture marker and `queue/{app.log,result.json,summary.json}`;
@@ -173,7 +173,7 @@ process's separate two-active-Core quit scenario remains unchanged.
 Each process independently retains the original 110/150-second limits; the flag
 does not extend either. Every stage prints elapsed time. Actual complete-App
 execution is CI-only, and is still required to establish timings and outcomes
-for these new 47 assertions. No default backend, media export, download, user
+for these new 54 assertions. No default backend, media export, download, user
 file, installed App or permission configuration is changed by this harness.
 
 ## Focused asynchronous paused-wait probe
@@ -233,6 +233,21 @@ loop remains a same-media operation and must keep playing. The preparation
 suite passed 43 tests for driver SHA-256
 `2749e03ee67293973092a7d8f04f528d97ef9e5e5c8634c8288da6c790df0516`;
 the complete 92/47 App scenarios remain unexecuted for this revision.
+
+A subsequent third pristine Core adds seven cancellation checks (54 queue
+checks total). It opens 256 explicit repeated local fixture URLs, invokes the
+real audio-delay menu and observes a genuinely partial MPV append prefix. It
+closes the window, immediately requests the blue file, and requires the actual
+MPV list to contain only that replacement, paused at zero and muted in a visible
+window. It checks the same ownership after 200ms, then closes and shuts down the
+third Core. Termination must find all three distinct Cores fully retired. No
+test directly changes the installer state or calls its stop acknowledgement.
+This tests real media/clock/queue state, not post-handoff physical display pixels.
+The preparation suite passed 44 tests for driver SHA-256
+`4d7f5f4551d77138b4e63e5bd6cee1d7045f7ea50d897e5127906903de9cb947`.
+An initial typecheck failure was the test-only `PlayerState` declaration missing
+the production `.loading` case; adding that case preserved the driver predicate.
+The complete 92/54 scenarios still require CI; neither process deadline changed.
 
 The preview-close check captures a nonoptional real output layer before closing
 the window. Its bounded diagnostic records preview/session/output ownership,

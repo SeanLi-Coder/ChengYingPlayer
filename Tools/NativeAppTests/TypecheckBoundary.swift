@@ -14,7 +14,7 @@ enum MPVOption {
   enum Audio { static let volume = "volume", audioDelay = "audio-delay" }
   enum Video { static let videoZoom = "video-zoom", videoPanX = "video-pan-x", videoPanY = "video-pan-y" }
 }
-enum PlayerState { case idle, playing, paused, shutDown }
+enum PlayerState { case idle, loading, playing, paused, shutDown }
 enum LoopMode { case off, file, playlist }
 enum Preference {
   enum SeekOption { case exact }

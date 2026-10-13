@@ -1601,17 +1601,82 @@ final class NativeAppTestDriver {
           }
           self.record("queue_unsupported_old_layer_detached")
           self.closeQueueCore(second, label: "queue_second_core") {
-            self.awaitingQuit = true
-            self.quitRequestedAt = ProcessInfo.processInfo.systemUptime
-            self.writeReport(complete: false, passed: false)
-            Self.performTerminationFromRunLoop {
-              guard !self.terminal, self.awaitingQuit else { return }
-              NSApp.terminate(nil)
+            self.startCancelledQueueHandoff()
+          }
+        }
+      }
+    }
+  }
+
+  private func startCancelledQueueHandoff() {
+    let third = PlayerCore.newPlayerCore
+    guard !quitPlayers.contains(where: { $0 === third }) else { fail("queue_cancel_pristine_service"); return }
+    quitPlayers.append(third)
+    queueItemIdentities = []
+    let names = (0..<256).map { $0 % 2 == 0 ? "red/red.mp4" : "blue/blue.mp4" }
+    third.setLoopMode(.off)
+    wait("queue_cancel_pristine_service", until: {
+      third.mpv.getFlag(MPVProperty.idleActive) && third.mpv.getString(MPVProperty.path) == nil &&
+        third.mpv.mpvRenderContext == nil
+    }) {
+      guard third.openMediaURLs(names.map(self.fixture), shouldAutoLoad: false) == names.count else {
+        self.fail("queue_cancel_native_plan_ready"); return
+      }
+      self.waitQueueFrame(third, index: 0, color: .red, label: "queue_cancel_native_plan_ready", names: names) {
+        guard let window = third.mainWindow.window, let layer = third.nativePlaybackOutput?.displayLayer else {
+          self.fail("queue_cancel_during_partial_install"); return
+        }
+        let delay = NSMenuItem()
+        delay.representedObject = 0.25
+        guard NSApp.sendAction(#selector(MainMenuActionHandler.menuChangeAudioDelay(_:)),
+                               to: third.mainWindow.menuActionHandler, from: delay) else {
+          self.fail("queue_cancel_during_partial_install"); return
+        }
+        // Observe real incremental appends, without pausing the installer or
+        // synthesizing its owner/state. Activation must not have happened yet.
+        self.wait("queue_cancel_during_partial_install", until: {
+          guard let entries = third.mpv.getNode(MPVProperty.playlist) as? [[String: Any?]] else { return false }
+          return !entries.isEmpty && entries.count < names.count && third.info.state == .loading &&
+            third.mpv.getString(MPVProperty.path) == nil &&
+            entries.allSatisfy({ ($0["current"] as? Bool ?? false) == false &&
+                                  ($0["playing"] as? Bool ?? false) == false })
+        }) {
+          window.performClose(nil)
+          third.openURL(self.fixture("blue/blue.mp4"), shouldAutoLoad: false)
+          self.wait("queue_cancel_reopens_compatibility", until: {
+            self.cancelledQueueReopenMatches(third) && layer.superlayer == nil
+          }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+              guard self.cancelledQueueReopenMatches(third), layer.superlayer == nil else {
+                self.fail("queue_cancel_reopened_remains_owned"); return
+              }
+              self.record("queue_cancel_reopened_remains_owned")
+              self.closeQueueCore(third, label: "queue_cancel_core") {
+                self.awaitingQuit = true
+                self.quitRequestedAt = ProcessInfo.processInfo.systemUptime
+                self.writeReport(complete: false, passed: false)
+                Self.performTerminationFromRunLoop {
+                  guard !self.terminal, self.awaitingQuit else { return }
+                  NSApp.terminate(nil)
+                }
+              }
             }
           }
         }
       }
     }
+  }
+
+  private func cancelledQueueReopenMatches(_ player: PlayerCore) -> Bool {
+    !player.hasNativePlaybackQueue && !player.isUsingNativePlayback && player.info.state == .paused &&
+      player.info.currentURL == fixture("blue/blue.mp4") &&
+      player.mpv.getString(MPVProperty.path) == fixture("blue/blue.mp4").path &&
+      actualMPVQueueMatches(player, names: ["blue/blue.mp4"], selected: 0) &&
+      player.mpv.getFlag(MPVOption.PlaybackControl.pause) &&
+      player.mpv.getDouble(MPVOption.Audio.volume) == 0 && player.mainWindow.volumeSlider.doubleValue == 0 &&
+      abs(player.mpv.getDouble(MPVProperty.timePos)) < 0.05 &&
+      player.mainWindow.window?.isVisible == true && player.mpv.mpvRenderContext != nil &&
+      player.nativePlaybackSession == nil && player.nativePlaybackOutput == nil
   }
 
   private func closeQueueCore(_ player: PlayerCore, label: String, then continuation: @escaping () -> Void) {
@@ -1631,7 +1696,7 @@ final class NativeAppTestDriver {
 
   private func completeQueueTermination() {
     let registered = PlayerCore.playerCores
-    guard quitPlayers.count == 2, quitPlayers[0] !== quitPlayers[1], registered.count >= 2,
+    guard quitPlayers.count == 3, Set(quitPlayers.map(ObjectIdentifier.init)).count == 3, registered.count >= 3,
           quitPlayers.allSatisfy({ expected in registered.contains { $0 === expected } }),
           registered.allSatisfy({ $0.info.state == .shutDown }),
           quitPlayers.allSatisfy({ $0.nativePlaybackSession == nil && $0.nativePlaybackOutput == nil &&

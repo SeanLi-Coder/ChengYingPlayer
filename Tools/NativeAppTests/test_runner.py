@@ -19,7 +19,7 @@ SPEC.loader.exec_module(runner)
 class RunnerTests(unittest.TestCase):
     def test_queue_report_requires_its_own_exact_set_and_identity(self):
         labels = runner.QUEUE_REQUIRED_CHECKS
-        self.assertEqual(len(labels), 47)
+        self.assertEqual(len(labels), 54)
         self.assertFalse(labels & runner.REQUIRED_CHECKS)
         result = {"format": 1, "run_id": "queue-run", "complete": True, "passed": True,
                   "checks": [{"label": label, "passed": True} for label in sorted(labels)]}
@@ -194,7 +194,8 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn("getMirror", stages)
         self.assertIn("waitForNativePaused(player, position: 0", stages)
         for label in runner.QUEUE_REQUIRED_CHECKS - {"queue_first_core_close", "queue_first_core_shutdown",
-                "queue_second_core_close", "queue_second_core_shutdown"}:
+                "queue_second_core_close", "queue_second_core_shutdown", "queue_cancel_core_close",
+                "queue_cancel_core_shutdown"}:
             self.assertIn('"' + label + '"', stages)
         self.assertEqual(source.count("deadline: .now() + 110"), 1)
         self.assertEqual(runner.run_application.__kwdefaults__["timeout"], 150)
@@ -214,6 +215,23 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("player.info.state == .playing", advance)
         self.assertIn("self.verifyClock(player, advancing: true", advance)
         self.assertNotIn("playFileInPlaylist", advance)
+
+    def test_queue_cancellation_observes_real_partial_install_and_reopens(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private func startCancelledQueueHandoff(")
+        end = source.index("  private func closeQueueCore(", start)
+        stages = source[start:end]
+        for proof in ("third.openMediaURLs", "third.mpv.getNode(MPVProperty.playlist)",
+                      "entries.count < names.count", "third.info.state == .loading",
+                      "window.performClose(nil)", 'third.openURL(self.fixture("blue/blue.mp4")',
+                      'actualMPVQueueMatches(player, names: ["blue/blue.mp4"], selected: 0)',
+                      'player.mainWindow.window?.isVisible == true', "layer.superlayer == nil"):
+            self.assertIn(proof, stages)
+        self.assertNotIn(".stopCancelledNativeQueue", stages)
+        self.assertNotIn(".nativeQueueInstallation", stages)
+        self.assertNotIn(".advance()", stages)
+        self.assertIn("quitPlayers.count == 3", source)
+        self.assertIn("Set(quitPlayers.map(ObjectIdentifier.init)).count == 3", source)
 
     def test_actual_queue_node_comparator_rejects_wrong_duplicate_and_playing_entry(self):
         source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()

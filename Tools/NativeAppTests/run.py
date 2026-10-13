@@ -64,6 +64,9 @@ REQUIRED_CHECKS = {
     "handoff_extra_core_shutdown",
 }
 QUEUE_REQUIRED_CHECKS = {
+    "queue_cancel_pristine_service", "queue_cancel_native_plan_ready", "queue_cancel_during_partial_install",
+    "queue_cancel_reopens_compatibility", "queue_cancel_reopened_remains_owned",
+    "queue_cancel_core_close", "queue_cancel_core_shutdown",
     "queue_pristine_service", "queue_explicit_duplicate_urls_accepted", "queue_first_actual_red_frame",
     "queue_distinct_duplicate_identities", "queue_volume_before_next", "queue_next_blue_resets_volume",
     "queue_volume_before_previous", "queue_previous_red_resets_volume", "queue_volume_before_duplicate",
