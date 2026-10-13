@@ -159,8 +159,11 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
   @Atomic private var awaitingFirstRoutedStart = false
   @Atomic private var hasReceivedShutdown = false
   @Atomic private var nativeQueueEventOwner: UUID? = nil
+  @Atomic private var nativeQueueStopEventOwner: UUID? = nil
   // The sink is main-owned; the preceding START identity is event-reader-owned.
   private var nativeQueueEventSink: ((MPVQueueInstaller.Event) -> Void)?
+  private var retiredNativeQueueEventOwner: UUID?
+  private var retiredNativeQueueEntryIDs: [Int64]?
   private var nativeQueueReaderOwner: UUID?
   private var nativeQueueStartedEntry: Int64?
 
@@ -173,6 +176,9 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
           player.captureMPVEventRevision() == nil else { return false }
     nativeQueueEventSink = receive
     nativeQueueEventOwner = owner
+    retiredNativeQueueEventOwner = nil
+    retiredNativeQueueEntryIDs = nil
+    nativeQueueStopEventOwner = nil
     prepareForFirstMPVMediaLoad()
     return true
   }
@@ -182,11 +188,121 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
     guard nativeQueueEventOwner == owner else { return }
     nativeQueueEventOwner = nil
     nativeQueueEventSink = nil
+    retiredNativeQueueEventOwner = owner
+    retiredNativeQueueEntryIDs = queueSnapshot()?.entries.map(\.id)
+  }
+
+  /// Arm before Core enables its stop route or waits for background tasks.
+  /// A callback already queued under that new route cannot be recalled later.
+  func prepareCancelledNativeQueueStop(owner: UUID) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard retiredNativeQueueEventOwner == owner, nativeQueueEventOwner == nil else { return }
+    nativeQueueStopEventOwner = owner
+  }
+
+  /// An installation may be cancelled before START_FILE, when MPV was already
+  /// idle and owes us no new idle property notification. Keep the first-START
+  /// barrier intact; only this retired owner may finish its verified stop.
+  /// Preserve current as an unload barrier until MPV leaves its before-start /
+  /// after-end hooks and playback loop, then clear only the same owned list.
+  func stopCancelledNativeQueue(owner: UUID) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard retiredNativeQueueEventOwner == owner, nativeQueueEventOwner == nil,
+          player.info.state == .stopping,
+          let revision = player.captureMPVEventRevision() else { return }
+    nativeQueueStopEventOwner = owner
+    let status = queueCommand(["stop", "keep-playlist"])
+    guard status.map({ $0 >= 0 }) == true else {
+      log("Cancelled native queue stop command failed", level: .error)
+      return
+    }
+    let deadline = ProcessInfo.processInfo.systemUptime + 2
+    DispatchQueue.main.async { [weak self] in
+      self?.pollCancelledNativeQueueStop(owner: owner, revision: revision, deadline: deadline)
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+      self?.pollCancelledNativeQueueStop(owner: owner, revision: revision, deadline: deadline)
+    }
+  }
+
+  private func pollCancelledNativeQueueStop(owner: UUID, revision: UInt64, deadline: TimeInterval) {
+    guard retiredNativeQueueEventOwner == owner, nativeQueueEventOwner == nil, nativeQueueStopEventOwner == owner,
+          player.acceptsMPVEventRevision(revision), player.info.state == .stopping,
+          mpv != nil, !hasReceivedShutdown else { return }
+    guard ProcessInfo.processInfo.systemUptime < deadline else {
+      retiredNativeQueueEventOwner = nil
+      retiredNativeQueueEntryIDs = nil
+      log("Cancelled native queue stop could not verify idle state before the deadline", level: .error)
+      return
+    }
+    guard let entryIDs = retiredNativeQueueEntryIDs, let snapshot = queueSnapshot(),
+          snapshot.entries.map(\.id) == entryIDs else {
+      retiredNativeQueueEventOwner = nil
+      retiredNativeQueueEntryIDs = nil
+      log("Cancelled native queue stop lost its exact playlist ownership", level: .error)
+      return
+    }
+    // idle-active reflects PT_STOP before unloading finishes. A missing path
+    // alone also cannot exclude a selected entry waiting in a before-load hook.
+    if snapshot.idle, snapshot.activePath == nil,
+       snapshot.entries.allSatisfy({ !$0.current && !$0.playing }) {
+      let status = queueCommand(["playlist-clear"])
+      guard retiredNativeQueueEventOwner == owner, nativeQueueEventOwner == nil, nativeQueueStopEventOwner == owner,
+            player.acceptsMPVEventRevision(revision), player.info.state == .stopping else { return }
+      guard status.map({ $0 >= 0 }) == true, let empty = queueSnapshot(),
+            empty.entries.isEmpty, empty.idle, empty.activePath == nil else {
+        retiredNativeQueueEventOwner = nil
+        retiredNativeQueueEntryIDs = nil
+        log("Cancelled native queue stop could not verify an empty playlist", level: .error)
+        return
+      }
+      retiredNativeQueueEntryIDs = []
+      // Unloading may finish before this client's reader consumes END_FILE or
+      // idle-active. Drain those events under the stop owner before a pending
+      // open can publish a new route. Never wait for the reader on main.
+      readEvents()
+      queue.async { [weak self] in
+        DispatchQueue.main.async {
+          self?.finishCancelledNativeQueueStop(owner: owner, revision: revision, deadline: deadline)
+        }
+      }
+      return
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
+      self?.pollCancelledNativeQueueStop(owner: owner, revision: revision, deadline: deadline)
+    }
+  }
+
+  private func finishCancelledNativeQueueStop(owner: UUID, revision: UInt64, deadline: TimeInterval) {
+    guard retiredNativeQueueEventOwner == owner, nativeQueueEventOwner == nil, nativeQueueStopEventOwner == owner,
+          player.acceptsMPVEventRevision(revision), player.info.state == .stopping,
+          mpv != nil, !hasReceivedShutdown else { return }
+    guard ProcessInfo.processInfo.systemUptime < deadline else {
+      retiredNativeQueueEventOwner = nil
+      retiredNativeQueueEntryIDs = nil
+      log("Cancelled native queue stop could not drain events before the deadline", level: .error)
+      return
+    }
+    guard let empty = queueSnapshot(), empty.entries.isEmpty, empty.idle, empty.activePath == nil else {
+      retiredNativeQueueEventOwner = nil
+      retiredNativeQueueEntryIDs = nil
+      log("Cancelled native queue stop lost its empty playlist before event delivery", level: .error)
+      return
+    }
+    awaitingFirstRoutedStart = true
+    retiredNativeQueueEventOwner = nil
+    retiredNativeQueueEntryIDs = nil
+    nativeQueueStopEventOwner = nil
+    player.idleActiveChanged()
   }
 
   /// Copy entry identity before querying properties or dispatching callbacks.
   /// Return true only for media events consumed by the installation route.
   private func routeNativeQueueEvent(_ event: UnsafePointer<mpv_event>) -> Bool {
+    if nativeQueueStopEventOwner != nil {
+      return ![MPV_EVENT_SHUTDOWN, MPV_EVENT_LOG_MESSAGE, MPV_EVENT_HOOK,
+               MPV_EVENT_COMMAND_REPLY, MPV_EVENT_QUEUE_OVERFLOW].contains(event.pointee.event_id)
+    }
     guard let owner = nativeQueueEventOwner else {
       nativeQueueReaderOwner = nil
       nativeQueueStartedEntry = nil
@@ -298,6 +414,10 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
   }
 
   private func noteMediaCommand(_ command: MPVCommand, args: [String?]) {
+    if command.rawValue == "loadfile", args.count < 2 || args[1] == "replace", nativeQueueStopEventOwner != nil {
+      awaitingFirstRoutedStart = true
+      nativeQueueStopEventOwner = nil
+    }
     if command.rawValue == "loadfile" || command.rawValue == "loadlist" ||
         command.rawValue.hasPrefix("playlist-") || command.rawValue.hasPrefix("script-") ||
         ["keypress", "keydown", "keyup", "keybind"].contains(command.rawValue) {
@@ -1331,7 +1451,7 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
   private func handleEvent(_ event: UnsafePointer<mpv_event>) {
     if routeNativeQueueEvent(event) { return }
     let eventId = event.pointee.event_id
-    let routeRevision = player.captureMPVEventRevision()
+    let routeRevision = nativeQueueStopEventOwner == nil ? player.captureMPVEventRevision() : nil
     let isControlEvent = eventId == MPV_EVENT_SHUTDOWN || eventId == MPV_EVENT_LOG_MESSAGE ||
       eventId == MPV_EVENT_HOOK || eventId == MPV_EVENT_COMMAND_REPLY || eventId == MPV_EVENT_QUEUE_OVERFLOW
     if !isControlEvent {

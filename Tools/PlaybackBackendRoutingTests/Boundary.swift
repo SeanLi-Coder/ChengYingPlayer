@@ -22,13 +22,16 @@ enum OSDMessage {
   case subScale(Double), contrast(Int), hue(Int), brightness(Int), gamma(Int), saturation(Int)
 }
 enum UIUpdate { case time, volume, loop }
-enum TestNotification { case iinaPlaylistChanged }
+enum TestNotification { case iinaPlaylistChanged, iinaPlayerStopped }
 enum LoopMode { case file, playlist, none, off }
 enum IINAError: Error { case unsupportedMPVNodeFormat(UInt32) }
 struct TestTime { let stringRepresentation = "0" }
 func / (_ left: TestTime?, _ right: TestTime?) -> Double? { 0 }
 final class TestInfo {
-  enum State { case starting, paused }
+  enum State {
+    case idle, loading, starting, paused, playing, stopping
+    var loaded: Bool { self == .paused || self == .playing }
+  }
   var state = State.paused
   var currentURL: URL? = URL(fileURLWithPath: "/synthetic.mp4")
   var isNetworkResource = false
@@ -56,6 +59,8 @@ final class TestVideoView {
 final class TestWindow {
   var rotation = 0
   let videoView = TestVideoView()
+  var isVisible = false
+  func close() {}
 }
 final class EventController {
   struct Name: Hashable { let value: String; init(_ value: String) { self.value = value } }
@@ -69,6 +74,15 @@ class RoutingPlayerFixture {
   let events = EventController()
   let mainWindow = TestWindow()
   var actions: [String] = []
+  var receivedEndFileWhileLoading = false
+  var pendingUrl: URL?
+  var pendingNativeQueueStopOwner: UUID?
+  var pendingAutoLoad = false
+  var onOpen: ((URL) -> Void)?
+  var currentController: TestWindow { mainWindow }
+  var currentWindow: TestWindow? { mainWindow }
+  func log(_ message: String) {}
+  func open(_ url: URL, shouldAutoLoad: Bool) { onOpen?(url) }
   func record(_ value: String) { precondition(Thread.isMainThread); actions.append(value) }
   func mpvHasShutdown() { record("shutdown") }
   func onVideoReconfig() { record("reconfig") }
@@ -104,7 +118,6 @@ class RoutingPlayerFixture {
   func ontopChanged() { record("ontop") }
   func windowScaleChanged() { record("windowScale") }
   func mediaTitleChanged() { record("title") }
-  func idleActiveChanged() { record("idle") }
   func currentAoChanged() { record("ao") }
   func restoreSavedLoopMode() { record("restoreLoop") }
 }

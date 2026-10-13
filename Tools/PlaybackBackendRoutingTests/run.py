@@ -79,7 +79,8 @@ def extract_production(args):
     generated = "import Cocoa\nimport QuartzCore\n" + "final class MPVController: RoutingControllerFixture, MPVQueueInstallationBackend {\n"
     generated += route + properties + commands + setters + hook + events + "\n}\n"
     generated = generated.replace("private ", "")
-    player = "import Foundation\nfinal class PlayerCore: RoutingPlayerFixture {\n" + gate.replace("private ", "") + "\n}\n"
+    idle = section(core, "  func idleActiveChanged() {", "  func mediaTitleChanged()")
+    player = "import Foundation\nfinal class PlayerCore: RoutingPlayerFixture {\n" + gate.replace("private ", "") + idle + "\n}\n"
     if args.negative_control == "epoch":
         original = "$0.acceptsMPV && $0.revision == revision"
         if original not in player:
@@ -99,13 +100,66 @@ def extract_production(args):
         if generated.count(original) != 1:
             raise RuntimeError("Queue START negative-control boundary changed")
         generated = generated.replace(original, "nativeQueueReaderOwner = owner")
+    elif args.negative_control == "queue-stop-completion":
+        original = "self?.pollCancelledNativeQueueStop(owner: owner, revision: revision, deadline: deadline)"
+        if generated.count(original) != 3:
+            raise RuntimeError("Queue stop completion negative-control boundary changed")
+        generated = generated.replace(original, "_ = (self, owner, revision, deadline)", 1)
+    elif args.negative_control == "queue-stop-current":
+        original = "snapshot.entries.allSatisfy({ !$0.current && !$0.playing })"
+        if generated.count(original) != 1:
+            raise RuntimeError("Queue selected-entry stop boundary changed")
+        generated = generated.replace(original, "true")
+    elif args.negative_control == "queue-stop-route":
+        original = "player.acceptsMPVEventRevision(revision), player.info.state == .stopping"
+        if generated.count(original) != 3:
+            raise RuntimeError("Queue stop route boundary changed")
+        generated = generated.replace(original, "player.info.state == .stopping")
+    elif args.negative_control == "queue-stop-event-gate":
+        original = "if nativeQueueStopEventOwner != nil {"
+        if generated.count(original) != 1:
+            raise RuntimeError("Queue stop event gate boundary changed")
+        generated = generated.replace(original, "if false {")
+        original = "let routeRevision = nativeQueueStopEventOwner == nil ? player.captureMPVEventRevision() : nil"
+        if generated.count(original) != 1:
+            raise RuntimeError("Queue stop control event gate boundary changed")
+        generated = generated.replace(original, "let routeRevision = player.captureMPVEventRevision()")
+    elif args.negative_control == "queue-stop-keep-list":
+        original = 'queueCommand(["stop", "keep-playlist"])'
+        if generated.count(original) != 1:
+            raise RuntimeError("Queue retained-list stop boundary changed")
+        generated = generated.replace(original, 'queueCommand(["stop"])')
+    elif args.negative_control == "queue-stop-list-owner":
+        original = "snapshot.entries.map(\\.id) == entryIDs else {"
+        if generated.count(original) != 1:
+            raise RuntimeError("Queue stop list ownership boundary changed")
+        generated = generated.replace(original, "(snapshot.entries.map(\\.id) == entryIDs || true) else {")
+    elif args.negative_control == "queue-stop-reader-drain":
+        original = """readEvents()
+      queue.async { [weak self] in
+        DispatchQueue.main.async {
+          self?.finishCancelledNativeQueueStop(owner: owner, revision: revision, deadline: deadline)
+        }
+      }"""
+        if generated.count(original) != 1:
+            raise RuntimeError("Queue stop reader drain boundary changed")
+        generated = generated.replace(original,
+            "finishCancelledNativeQueueStop(owner: owner, revision: revision, deadline: deadline)")
+    elif args.negative_control == "queue-stop-preparation":
+        original = "nativeQueueStopEventOwner = owner"
+        if generated.count(original) != 2:
+            raise RuntimeError("Queue stop preparation boundary changed")
+        generated = generated.replace(original, "_ = owner", 1)
     return generated, player
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sanitize", choices=["address", "thread"])
-    parser.add_argument("--negative-control", choices=["epoch", "first-start", "queue-owner", "queue-start-context"])
+    parser.add_argument("--negative-control", choices=["epoch", "first-start", "queue-owner", "queue-start-context",
+                                                     "queue-stop-completion", "queue-stop-current", "queue-stop-route",
+                                                     "queue-stop-event-gate", "queue-stop-keep-list", "queue-stop-list-owner",
+                                                     "queue-stop-reader-drain", "queue-stop-preparation"])
     args = parser.parse_args()
     sources = [ROOT / name for name in COMPILED_SOURCES + ["iina/MPVController.swift", "iina/PlayerCore.swift",
         "Tools/PlaybackBackendRoutingTests/run.py", "deps/include/mpv/client.h"]]
@@ -149,7 +203,15 @@ def main():
             expected = {"epoch": "Old queued callbacks cannot alias a new MPV epoch",
                         "first-start": "First-load barrier rejects startup properties before START_FILE",
                         "queue-owner": "Queued old envelopes cannot borrow a new installation owner",
-                        "queue-start-context": "A new owner cannot inherit the previous START context"}[args.negative_control]
+                        "queue-start-context": "A new owner cannot inherit the previous START context",
+                        "queue-stop-completion": "Pre-START cancellation reaches actual idle and releases pending reopen",
+                        "queue-stop-current": "Selected before-START entry prevents premature stop acknowledgement",
+                        "queue-stop-route": "A queued stop acknowledgement cannot cross playback route revisions",
+                        "queue-stop-event-gate": "Special stop suppresses premature ordinary idle and media callbacks after START",
+                        "queue-stop-keep-list": "Repeated owned stop preserves the retained prefix while refreshing its route",
+                        "queue-stop-list-owner": "Cancelled stop cannot clear foreign entries or falsely acknowledge idle",
+                        "queue-stop-reader-drain": "Actual idle cannot reopen until the old reader backlog is drained",
+                        "queue-stop-preparation": "Special stop suppresses premature ordinary idle and media callbacks after START"}[args.negative_control]
             if result.returncode != 1 or "FAIL: " + expected not in result.stderr:
                 raise RuntimeError("Negative control did not fail at the intended invariant: " + result.stderr)
             print("PASS: Negative control rejected: " + expected)

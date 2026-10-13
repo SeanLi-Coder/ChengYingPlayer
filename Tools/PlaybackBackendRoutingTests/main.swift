@@ -63,7 +63,7 @@ let controller = MPVController(player)
 allProperties(controller)
 lifecycle(controller)
 pump()
-check(player.actions.contains("idle") && player.actions.contains("start") && player.actions.contains("pause"),
+check(player.actions.contains("notification") && player.actions.contains("start") && player.actions.contains("pause"),
       "Default legacy route preserves lifecycle and property delivery")
 check(player.actions.contains("screenshot") && player.events.calls > 80, "Default plugins and screenshot callback work")
 let legacyCalls = player.actions.count
@@ -345,4 +345,304 @@ queueController.mpv = nil
 check(queueController.queueCommand(["playlist-clear"]) == nil && queueController.queueSetPaused() == nil &&
       queueController.queueSnapshot() == nil, "A missing production MPV handle cannot report queue success")
 queueController.mpv = retainedHandle
+
+// Cancel an actual partially appended list before any activation command. Stop
+// begins from an already-idle MPV client, so no idle transition is guaranteed.
+let stoppedPlayer = PlayerCore()
+let stoppedController = MPVController(stoppedPlayer)
+stoppedController.realPropertyReadback = true
+check(mpv_observe_property(stoppedController.mpv, 0, "idle-active", MPV_FORMAT_FLAG) >= 0,
+      "Cancelled queue fixture observes actual idle notifications")
+route(stoppedPlayer, enabled: false)
+let stoppedOwner = UUID()
+var stoppedState = try NativeQueueState(plan: NativeQueuePlan(urls: Array(repeating: queueURL, count: 10)))
+let stoppedCheckpoint = stoppedState.handoffCheckpoint()!
+let stoppedInstallation = stoppedState.beginHandoff(stoppedCheckpoint)!
+var stoppedCurrent = true
+var stoppedOutcome: MPVQueueInstaller.Outcome?
+let stoppedInstaller = MPVQueueInstaller(backend: stoppedController, isCurrent: { stoppedCurrent && $0 == stoppedInstallation })
+check(stoppedController.beginNativeQueueInstallation(owner: stoppedOwner, receive: { stoppedInstaller.receive($0) }),
+      "Cancelled queue reserves its actual production event bridge")
+check(stoppedInstaller.begin(stoppedCheckpoint, installation: stoppedInstallation, completion: { stoppedOutcome = $0 }) == .accepted,
+      "Cancelled queue starts from a fresh real MPV client")
+stoppedInstaller.advance()
+print("QUEUE_STOP_PREFIX_DIAGNOSTIC: \(String(describing: stoppedController.queueSnapshot()))")
+check(stoppedController.queueSnapshot()?.entries.count == 8 && stoppedController.queueSnapshot()?.idle == true &&
+      stoppedController.awaitingFirstRoutedStart,
+      "Cancelled queue contains a real prefix without any START_FILE")
+stoppedController.readEvents(); pump()
+stoppedCurrent = false
+stoppedController.endNativeQueueInstallation(owner: stoppedOwner)
+stoppedInstaller.cancel(stoppedInstallation)
+route(stoppedPlayer, enabled: true)
+stoppedPlayer.info.state = .stopping
+stoppedController.stopCancelledNativeQueue(owner: stoppedOwner)
+check(stoppedController.nativeQueueStopEventOwner == stoppedOwner,
+      "Cancelled queue submits its stop under a dedicated event owner")
+route(stoppedPlayer, enabled: true)
+stoppedController.stopCancelledNativeQueue(owner: stoppedOwner)
+check(stoppedController.queueSnapshot()?.entries.count == 8,
+      "Repeated owned stop preserves the retained prefix while refreshing its route")
+stoppedPlayer.pendingUrl = queueURL
+var reopenedAfterIdle = false
+stoppedPlayer.onOpen = { url in
+  reopenedAfterIdle = stoppedPlayer.info.state == .idle
+  route(stoppedPlayer, enabled: true)
+  stoppedPlayer.info.state = .loading
+  stoppedController.command(.loadfile, args: [url.path])
+}
+let stoppedDeadline = Date().addingTimeInterval(2)
+while !reopenedAfterIdle && Date() < stoppedDeadline {
+  stoppedController.readEvents(); pump()
+}
+check(reopenedAfterIdle, "Pre-START cancellation reaches actual idle and releases pending reopen")
+let reopenedDeadline = Date().addingTimeInterval(3)
+while !stoppedPlayer.actions.contains("loaded") && Date() < reopenedDeadline {
+  stoppedController.readEvents(); pump()
+}
+check(stoppedPlayer.actions.contains("start") && stoppedPlayer.actions.contains("loaded") &&
+      stoppedController.queueSnapshot()?.activePath == queueURL.path,
+      "Reopening after pre-START cancellation receives real START and FILE_LOADED")
+check(stoppedOutcome == .superseded,
+      "Cancelled installer cannot deliver success while the replacement opens")
+
+// Hold MPV's real before-start hook after activation was submitted. Its path is
+// still nil and stop sets idle-active immediately, but its selected entry must
+// retire before an idle acknowledgement can authorize the pending replacement.
+let activatingPlayer = PlayerCore()
+let activatingController = MPVController(activatingPlayer)
+activatingController.realPropertyReadback = true
+route(activatingPlayer, enabled: false)
+let activatingOwner = UUID()
+check(activatingController.beginNativeQueueInstallation(owner: activatingOwner, receive: { _ in }),
+      "Before-START cancellation reserves the production bridge")
+check(mpv_hook_add(activatingController.mpv, 201, "on_before_start_file", 100) == 0,
+      "Before-START cancellation registers an actual asynchronous MPV hook")
+check(activatingController.queueSetPaused() == 0 &&
+      activatingController.queueCommand(["loadfile", queueURL.path, "append"]) == 0 &&
+      activatingController.queueCommand(["playlist-play-index", "0"]) == 0,
+      "Before-START cancellation submits a real activation command")
+var heldHookID: UInt64?
+let hookDeadline = Date().addingTimeInterval(2)
+while heldHookID == nil && Date() < hookDeadline {
+  activatingController.queue.sync {
+    guard let pending = mpv_wait_event(activatingController.mpv, 0.01), pending.pointee.event_id != MPV_EVENT_NONE else { return }
+    if pending.pointee.event_id == MPV_EVENT_HOOK {
+      heldHookID = pending.pointee.data.load(as: mpv_event_hook.self).id
+    } else {
+      activatingController.handleEvent(pending)
+    }
+  }
+  pump()
+}
+check(heldHookID != nil && activatingController.awaitingFirstRoutedStart &&
+      activatingController.queueSnapshot()?.activePath == nil,
+      "Actual before-start hook is held before START_FILE and before path publication")
+activatingController.endNativeQueueInstallation(owner: activatingOwner)
+route(activatingPlayer, enabled: true)
+activatingPlayer.info.state = .stopping
+activatingController.stopCancelledNativeQueue(owner: activatingOwner)
+let heldSnapshot = activatingController.queueSnapshot()
+print("QUEUE_STOP_HELD_DIAGNOSTIC: \(String(describing: heldSnapshot))")
+check(heldSnapshot?.idle == true && heldSnapshot?.activePath == nil &&
+      heldSnapshot?.entries.contains(where: { $0.current || $0.playing }) == true,
+      "Idle and absent path cannot prove a selected before-START entry has retired")
+pump()
+check(activatingPlayer.info.state == .stopping && !activatingPlayer.actions.contains("notification") &&
+      activatingController.retiredNativeQueueEventOwner == activatingOwner,
+      "Selected before-START entry prevents premature stop acknowledgement")
+var activatingReopened = false
+activatingPlayer.pendingUrl = queueURL
+activatingPlayer.onOpen = { url in
+  activatingReopened = activatingPlayer.info.state == .idle
+  route(activatingPlayer, enabled: true)
+  activatingPlayer.info.state = .loading
+  activatingController.command(.loadfile, args: [url.path])
+}
+check(mpv_hook_continue(activatingController.mpv, heldHookID!) == 0,
+      "Releasing the held before-start hook lets real MPV finish unloading")
+let activatingDeadline = Date().addingTimeInterval(3)
+while !activatingPlayer.actions.contains("loaded") && Date() < activatingDeadline {
+  activatingController.readEvents(); pump()
+}
+check(activatingReopened && activatingPlayer.actions.contains("start") && activatingPlayer.actions.contains("loaded") &&
+      activatingController.queueSnapshot()?.activePath == queueURL.path,
+      "Submitted activation cancelled before START reaches idle and actually reopens")
+
+let endingPlayer = PlayerCore()
+let endingController = MPVController(endingPlayer)
+endingController.realPropertyReadback = true
+check(mpv_observe_property(endingController.mpv, 0, "idle-active", MPV_FORMAT_FLAG) >= 0 &&
+      mpv_hook_add(endingController.mpv, 301, "on_after_end_file", 100) == 0,
+      "After-end cancellation observes actual idle and registers a real unload hook")
+route(endingPlayer, enabled: false)
+let endingOwner = UUID()
+var endingLoaded = false
+check(endingController.beginNativeQueueInstallation(owner: endingOwner, receive: {
+  if case .fileLoaded = $0 { endingLoaded = true }
+}), "After-end cancellation reserves its installation owner")
+check(endingController.queueSetPaused() == 0 &&
+      endingController.queueCommand(["loadfile", queueURL.path, "append"]) == 0 &&
+      endingController.queueCommand(["playlist-play-index", "0"]) == 0,
+      "After-end cancellation activates a real paused file")
+let endingLoadDeadline = Date().addingTimeInterval(3)
+while !endingLoaded && Date() < endingLoadDeadline { endingController.readEvents(); pump() }
+check(endingLoaded && !endingController.awaitingFirstRoutedStart,
+      "After-end scenario has consumed its actual START and FILE_LOADED")
+endingController.endNativeQueueInstallation(owner: endingOwner)
+endingController.prepareCancelledNativeQueueStop(owner: endingOwner)
+route(endingPlayer, enabled: true)
+endingPlayer.info.state = .stopping
+// A previously read idle property can be dispatched in the gap between Core
+// enabling its stop route and submitting the actual owned stop command.
+var queuedOldIdle: Int32 = 1
+withUnsafeMutablePointer(to: &queuedOldIdle) {
+  property(endingController, name: MPVProperty.idleActive, format: MPV_FORMAT_FLAG, data: $0)
+}
+endingController.stopCancelledNativeQueue(owner: endingOwner)
+var heldEndHookID: UInt64?
+let endHookDeadline = Date().addingTimeInterval(2)
+while heldEndHookID == nil && Date() < endHookDeadline {
+  endingController.queue.sync {
+    guard let pending = mpv_wait_event(endingController.mpv, 0.01), pending.pointee.event_id != MPV_EVENT_NONE else { return }
+    if pending.pointee.event_id == MPV_EVENT_HOOK {
+      heldEndHookID = pending.pointee.data.load(as: mpv_event_hook.self).id
+    } else { endingController.handleEvent(pending) }
+  }
+  pump()
+}
+let endingHeld = endingController.queueSnapshot()
+check(heldEndHookID != nil && endingHeld?.idle == true && endingHeld?.activePath == nil &&
+      endingHeld?.entries.contains(where: { $0.current }) == true,
+      "Actual after-end hook retains current after END_FILE and path retirement")
+check(endingPlayer.info.state == .stopping && endingPlayer.actions.isEmpty,
+      "Special stop suppresses premature ordinary idle and media callbacks after START")
+var endingReopened = false
+endingPlayer.pendingUrl = queueURL
+endingPlayer.onOpen = { url in
+  endingReopened = endingPlayer.info.state == .idle
+  route(endingPlayer, enabled: true)
+  endingPlayer.info.state = .loading
+  endingController.command(.loadfile, args: [url.path])
+}
+check(mpv_hook_continue(endingController.mpv, heldEndHookID!) == 0, "Release actual after-end hook")
+let endingDeadline = Date().addingTimeInterval(3)
+while !endingPlayer.actions.contains("loaded") && Date() < endingDeadline { endingController.readEvents(); pump() }
+check(endingReopened && endingPlayer.actions.contains("loaded") && endingController.queueSnapshot()?.entries.count == 1,
+      "After-end cancellation clears its old list before actual replacement loading")
+
+// The MPV worker can finish unloading while this client's event reader is
+// still delayed. Pending opens must wait for its old END/idle event backlog.
+let backlogPlayer = PlayerCore()
+let backlogController = MPVController(backlogPlayer)
+backlogController.realPropertyReadback = true
+check(mpv_observe_property(backlogController.mpv, 0, "idle-active", MPV_FORMAT_FLAG) >= 0,
+      "Reader-backlog scenario observes actual idle changes")
+route(backlogPlayer, enabled: false)
+let backlogOwner = UUID()
+var backlogLoaded = false
+check(backlogController.beginNativeQueueInstallation(owner: backlogOwner, receive: {
+  if case .fileLoaded = $0 { backlogLoaded = true }
+}) && backlogController.queueSetPaused() == 0 &&
+      backlogController.queueCommand(["loadfile", queueURL.path, "append"]) == 0 &&
+      backlogController.queueCommand(["playlist-play-index", "0"]) == 0,
+      "Reader-backlog scenario starts actual paused playback under its owner")
+let backlogLoadDeadline = Date().addingTimeInterval(3)
+while !backlogLoaded && Date() < backlogLoadDeadline { backlogController.readEvents(); pump() }
+check(backlogLoaded && !backlogController.awaitingFirstRoutedStart,
+      "Reader-backlog scenario consumed START and FILE_LOADED")
+let readerEntered = DispatchSemaphore(value: 0)
+let readerRelease = DispatchSemaphore(value: 0)
+backlogController.queue.async {
+  readerEntered.signal()
+  readerRelease.wait()
+}
+check(readerEntered.wait(timeout: .now() + 1) == .success,
+      "Only the test-owned reader is held while the MPV worker can unload")
+backlogController.endNativeQueueInstallation(owner: backlogOwner)
+route(backlogPlayer, enabled: true)
+backlogPlayer.info.state = .stopping
+backlogPlayer.pendingUrl = queueURL
+var backlogReopened = false
+backlogPlayer.onOpen = { url in
+  backlogReopened = backlogPlayer.info.state == .idle
+  route(backlogPlayer, enabled: true)
+  backlogPlayer.info.state = .loading
+  backlogController.command(.loadfile, args: [url.path])
+}
+backlogController.stopCancelledNativeQueue(owner: backlogOwner)
+let backlogClearDeadline = Date().addingTimeInterval(1)
+while backlogController.retiredNativeQueueEntryIDs?.isEmpty != true && !backlogReopened &&
+      Date() < backlogClearDeadline { pump() }
+check(backlogController.retiredNativeQueueEntryIDs?.isEmpty == true || backlogReopened,
+      "The real worker reached the clear-list stage independently of its reader")
+check(!backlogReopened && backlogPlayer.info.state == .stopping && backlogPlayer.actions.isEmpty &&
+      backlogController.nativeQueueStopEventOwner == backlogOwner,
+      "Actual idle cannot reopen until the old reader backlog is drained")
+readerRelease.signal()
+let backlogOpenDeadline = Date().addingTimeInterval(3)
+while !backlogPlayer.actions.contains("loaded") && Date() < backlogOpenDeadline {
+  backlogController.readEvents(); pump()
+}
+check(backlogReopened && backlogPlayer.actions.contains("start") && backlogPlayer.actions.contains("loaded") &&
+      backlogController.queueSnapshot()?.activePath == queueURL.path &&
+      backlogController.queueSnapshot()?.entries.count == 1,
+      "Draining retired events allows the replacement to actually load without old idle delivery")
+
+let foreignPlayer = PlayerCore()
+let foreignController = MPVController(foreignPlayer)
+foreignController.realPropertyReadback = true
+route(foreignPlayer, enabled: false)
+let foreignOwner = UUID()
+check(foreignController.beginNativeQueueInstallation(owner: foreignOwner, receive: { _ in }) &&
+      foreignController.queueCommand(["loadfile", queueURL.path, "append"]) == 0,
+      "Foreign-list scenario reserves and appends its owned prefix")
+foreignController.endNativeQueueInstallation(owner: foreignOwner)
+route(foreignPlayer, enabled: true)
+foreignPlayer.info.state = .stopping
+foreignController.stopCancelledNativeQueue(owner: foreignOwner)
+check(foreignController.queueCommand(["loadfile", queueURL.path, "append"]) == 0,
+      "A separate writer appends a distinct entry before stop completion")
+let foreignIDs = foreignController.queueSnapshot()?.entries.map(\.id)
+pump()
+check(foreignController.queueSnapshot()?.entries.map(\.id) == foreignIDs && foreignIDs?.count == 2 &&
+      foreignPlayer.info.state == .stopping && foreignPlayer.actions.isEmpty &&
+      foreignController.logs.contains { $0.contains("lost its exact playlist ownership") },
+      "Cancelled stop cannot clear foreign entries or falsely acknowledge idle")
+
+// A queued idle probe must not acknowledge a newer stop or queue owner, even
+// when the shared backend currently satisfies every idle readback condition.
+let retiredPlayer = PlayerCore()
+let retiredController = MPVController(retiredPlayer)
+retiredController.realPropertyReadback = true
+route(retiredPlayer, enabled: false)
+let retiredOwner = UUID()
+check(retiredController.beginNativeQueueInstallation(owner: retiredOwner, receive: { _ in }),
+      "Retired stop probe acquires its original owner")
+retiredController.endNativeQueueInstallation(owner: retiredOwner)
+route(retiredPlayer, enabled: true)
+retiredPlayer.info.state = .stopping
+retiredController.stopCancelledNativeQueue(owner: retiredOwner)
+route(retiredPlayer, enabled: true)
+pump()
+check(retiredPlayer.info.state == .stopping && retiredPlayer.actions.isEmpty,
+      "A queued stop acknowledgement cannot cross playback route revisions")
+retiredController.stopCancelledNativeQueue(owner: retiredOwner)
+route(retiredPlayer, enabled: false)
+let replacementOwner = UUID()
+check(retiredController.beginNativeQueueInstallation(owner: replacementOwner, receive: { _ in }),
+      "New queue installation replaces retired stop ownership")
+pump()
+check(retiredPlayer.info.state == .stopping && retiredController.nativeQueueEventOwner == replacementOwner,
+      "A retired stop acknowledgement cannot consume the replacement installation")
+retiredController.endNativeQueueInstallation(owner: replacementOwner)
+route(retiredPlayer, enabled: true)
+retiredPlayer.info.state = .stopping
+retiredController.stopCancelledNativeQueue(owner: replacementOwner)
+retiredController.pollCancelledNativeQueueStop(owner: replacementOwner,
+  revision: retiredPlayer.captureMPVEventRevision()!, deadline: ProcessInfo.processInfo.systemUptime - 1)
+pump()
+check(retiredPlayer.info.state == .stopping && retiredPlayer.actions.isEmpty &&
+      retiredController.logs.contains { $0.contains("before the deadline") },
+      "An expired stop proof logs failure without reporting idle")
 print("PASS: \(assertions) production MPV backend routing checks")
