@@ -17,3 +17,10 @@ anchors, context-menu identity capture, chapter independence, subtitle targets,
 mid-drag queue/filter changes, malformed drag data, and normal unfiltered
 reordering. The extraction fails when its production boundaries change, rather
 than silently testing an outdated hand-written implementation.
+
+The player boundary explicitly defaults to compatibility-owned playback. A
+mutable ownership flag also checks the actual controller guards for pasted files
+and context menus, including a backend change after menu selection. These are
+controller-to-service boundary checks, not an actual native session, backend
+handoff, or complete application test. Existing identity/filter checks and the
+Intel typecheck remain unchanged.

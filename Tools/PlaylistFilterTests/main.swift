@@ -28,6 +28,7 @@ subtitle.playlistTableView = table
 controller.subPopover.contentViewController = subtitle
 
 func prepare(filtered: Bool = true, selected: IndexSet = [0]) {
+  player.nativeQueueOwnsPlaylist = false
   player.info.state.active = true
   player.snapshotAvailable = true
   player.livePlaylist = all
@@ -316,5 +317,30 @@ let invalidArchive = try NSKeyedArchiver.archivedData(withRootObject: IndexSet(i
 pasteboard.setData(invalidArchive, forType: .iinaPlaylistItem)
 check(!acceptInternal(at: 2) && player.moves.isEmpty,
       "Out-of-range archived drag indexes cannot reach the playback mutation boundary")
+
+prepare()
+writeExternalFiles()
+player.nativeQueueOwnsPlaylist = true
+check(!controller.pasteFromPasteboard(row: 1, from: pasteboard) && player.additions.isEmpty &&
+      player.notifications == 0,
+      "A native-owned playlist rejects pasted files before any compatibility mutation")
+player.nativeQueueOwnsPlaylist = false
+check(controller.pasteFromPasteboard(row: 1, from: pasteboard) && player.additions.last?.index == 3,
+      "A compatibility-owned playlist preserves filtered paste insertion")
+
+prepare(selected: [0, 1])
+controller.menuNeedsUpdate(NSMenu())
+check(controller.contextMenuSelection()?.rows == [1, 3],
+      "A compatibility context menu captures valid filtered identities")
+player.nativeQueueOwnsPlaylist = true
+check(controller.contextMenuSelection() == nil,
+      "A backend ownership change invalidates a previously captured context selection")
+controller.contextMenuRemove(menu)
+controller.contextMenuPlayNext(menu)
+check(player.removedIDs.isEmpty && player.moves.isEmpty && player.notifications == 0,
+      "A native-owned context menu cannot remove or reorder compatibility entries")
+player.nativeQueueOwnsPlaylist = false
+check(controller.contextMenuSelection()?.rows == [1, 3],
+      "Restoring compatibility ownership retains the original menu identity checks")
 
 print("PASS: \(checks) production playlist filter interaction checks")

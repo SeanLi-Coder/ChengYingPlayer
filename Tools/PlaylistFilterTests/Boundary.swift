@@ -47,6 +47,8 @@ final class ProbeMPV {
 }
 enum MPVProperty { static let playlistPos = "playlist-pos" }
 final class PlayerCore {
+  // Explicit service boundary; these tests do not instantiate a native session.
+  var nativeQueueOwnsPlaylist = false
   let info = ProbePlaybackInfo()
   let mpv = ProbeMPV()
   let subsystem = "playlist-filter-tests"

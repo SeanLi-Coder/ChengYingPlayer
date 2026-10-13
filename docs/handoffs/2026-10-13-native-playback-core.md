@@ -1087,3 +1087,17 @@ runner `4ee0aaad` 可选 `NATIVE_PLAYBACK_DEPS`，不覆盖旧库，失败退出
 关闭后差值 −573,440／−40,615,960 字节。这是本次静音 CLI AppKit 测试，不是复杂
 电影、听觉／A-V drift、整 App、AV1、实体 HDR 或目标 M4 验收。完整说明见
 [压力验证 README](../../Tools/NativePlaybackSoakTests/README.md)。
+
+### EOF 变速修补后的同源 4K 回归
+
+主代理用 session `aab38cba`、CYN `e3bcc18e` 和同一隔离 `7FMHum` 依赖再次执行
+原 180 秒命令，`native-playback-soak.85CsqG` 为 292/0，182.22 秒；原错参考
+`tYX5s4` 为 16/1，准确只在首次 H.264 像素比较失败，随后正常关闭与释放。
+正负源／依赖清单一致，source/generated/dependency 前后身份通过；正向所有退出码
+为 0，负控 playback/runner 为 1，identity/tee 为 0。无任何生产或测试断言变更。
+
+三轮都显示全部四个正确源区间，尺寸、位深、颜色异常为零；无图观察为 4／2／5，
+未测持续时间与成因。样本预算峰值 124,623,360 字节，RSS／footprint 峰值分别
+261,242,880／180,208,624 字节，后两轮关闭后差值 +4,472,832／−42,270,744 字节。
+三次 retired session 均释放；这仍是静音合成短素材实际显示缓冲验证，不是零泄漏、
+无卡顿、实体 HDR／音频、AV1 硬解或完整 App 通过声明。

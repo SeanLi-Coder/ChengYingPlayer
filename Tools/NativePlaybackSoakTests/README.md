@@ -170,3 +170,25 @@ This validates the newer libraries for this actual H.264/HEVC decoder-to-display
 chain on the development M2 Pro. It does not exercise AV1, the complete
 ChengYing App/nib, physical HDR, audible sound, measured A/V drift, or target M4
 hardware. The original default backend, assertions and deadlines are unchanged.
+
+## EOF-rate-fix regression (2026-10-13)
+
+After `NativePlaybackSession.swift` changed to `aab38cba18651a86e7250e743a9af2e580ae50c67c3bc7ee150f937d6184d1af`,
+the same 180-second command and isolated `7FMHum` dependency tree were run again.
+The actual three-lifetime run completed **292 checks, zero failures** in 182.22
+seconds, evidence `build/native-playback-soak.85CsqG/`. Compilation, playback,
+log capture, source/generated/dependency identities and combined runner status
+were all zero. The unchanged wrong-reference control in
+`build/native-playback-soak.tYX5s4/` produced exactly **16 checks, one failure** at
+the first H.264 pixel comparison; playback and runner exited 1, identity and log
+capture exited zero, and asynchronous cleanup completed. Both runs have identical
+source and dependency manifests; generated before/after manifests also match.
+
+Each sustained round observed all four source intervals with no invalid dimensions,
+formats or unknown colors. Image-less observations were 4, 2 and 5; their duration
+and cause were not measured. Peak application sample budget was 124,623,360 bytes;
+RSS and physical-footprint peaks were 261,242,880 and 180,208,624 bytes. Post-close
+round-two-to-three changes were +4,472,832 and -42,270,744 bytes respectively.
+All three retired sessions were deallocated. This remains a short synthetic,
+silent H.264/HEVC displayed-buffer test, not a zero-leak/stutter-free guarantee,
+AV1 hardware test, physical HDR/audio verification or full application acceptance.

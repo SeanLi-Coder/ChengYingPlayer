@@ -22,6 +22,10 @@
 **正式默认仍使用 libmpv；PlayerCore／主窗口内部 opt-in 路由正在验证，整体换核没有完成；未新增发行。**
 最新验证冻结于 `0455ab7c7dc207e3bc46349eda1ea6c148c1b891`：开发 CI
 `38381002473` 于 2026-10-13 10:05:47 UTC 派发，正在执行；开发 App 上传关闭。
+该次 media-helper 已在 PlaylistFilterTests 旧边界缺 `nativeQueueOwnsPlaylist` 处
+编译失败，完整 App job 仍在执行。主代理本地复现相同编译错误后补明确可变 service
+边界，原 66 项及新增 6 项实际 controller 门禁检查、Intel 10.15 typecheck 通过。
+不改生产，不把边界检查当作真实 native 队列或该次 CI 通过。
 这次纳入音频设备交接、EOF 变速、夹具接口与明确退出门禁修补，以及真实非默认
 状态的异步等待验证；尚未取得该次完整 App 结果。下面保留各较早源码的真实结果。
 本轮整合已接显式多文件 Core 导航、真实整表兼容交接和取消时的卸载／事件隔离。
@@ -81,6 +85,9 @@ worker，保留原像素、数值与窗口／Session／媒体所有权要求及 
 根代理新 rotation runner 普通重跑 `Q1bAQC` 为 176/0，四负控失败数 4/10/2/48，
 runner/source/generated 检查为 0；该轮未重跑 sanitizer，不继承旧源码结论。
 这些记录不代表新候选完整 App 已验收或已发布。
+EOF 修补后的 session `aab38cba` 又在隔离 `7FMHum` 依赖上完成原 180 秒 4K 实播：
+`85CsqG` 为 292/0，错参考 `tYX5s4` 精确 16/1 并正常清理；source／依赖一致，
+所有前后身份校验通过。无图观察 4／2／5，不称零卡顿、零泄漏或完整 App 验收。
 不得把受控事件服务、忙状态 fixture 或旧 Core 测试当作所有换核场景验收。
 以下按时间保留旧候选结果；它们不替代本段的最新状态。
 内部路径只有从未加载过 MPV 的 core 才准入；原孤立本地 SDR 单视频边界保留，新增显式
