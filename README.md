@@ -388,6 +388,10 @@ Dolby Vision 基础层色彩回退另有固定源码回归 `bash Tools/HDRSource
 唯一的 `.noindex` 临时目录，成功、失败或正常取消退出时自动精确注销并清理，
 避免应用搜索积累同名测试副本。清理失败不会写总成功报告，也不会强制卸载或停止安全软件。
 不要再复制旧的 `build/verify-v*-public.py` 生成新的持久测试 App。
+若缺少上一版原始可信 plist，可用 `other/verify_release_base.py --help`，传入已下载的该版
+feed／完整 DMG 和更早一版的独立可信 plist：先验签再只读挂载，校验实际 App 后提取原始字节。
+仅使用 `base-verification.json` 中 `status=verified-base` 且卸载／清理均成功的结果。
+这只是准备可信基线，不包含公开交付、增量、安装或运行验收，不能替代上述完整验证入口。
 手动 Xcode 开发时也请把 DerivedData 设在独立 `.noindex` 目录，退出开发 App 后再清理；
 自动工具只拥有自己创建的临时目录，不会删除手动构建的 App 或正式安装。
 
