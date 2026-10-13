@@ -63,6 +63,8 @@ class VideoViewBoundary {
 final class PlaybackInfoBoundary {
   var currentURL: URL?
   var volume: Double = 0
+  var playSpeed: Double = 1
+  var isMuted = false
   var state = PlayerState.loaded
   var justOpenedFile = false
   var justStartedFile = false
@@ -83,6 +85,9 @@ final class PlaybackVideoViewBoundary {
 final class PlaybackWindowBoundary {
   var loaded = true
   let videoView = PlaybackVideoViewBoundary()
+  func updateSpeedLabel(speed: Double) {
+    preconditionFailure("Native restoration is outside MPV color-state tests")
+  }
 }
 
 enum PlaybackUI { case time, volume, playButton }
@@ -92,11 +97,19 @@ struct NativeRestoreBoundary {
   let url: URL
   let position: Double
   let volume: Double
+  let rate: Double
   let paused: Bool
+  let unmuteRequested: Bool
   let waitingForSeek: Bool
   let completion: () -> Void
 }
 final class PlaybackTransportBoundary {
+  func setRate(_ value: Double) {
+    preconditionFailure("Native restoration is outside MPV color-state tests")
+  }
+  func setVolumePercent(_ value: Double) {
+    preconditionFailure("Native restoration is outside MPV color-state tests")
+  }
   func setPaused(_ value: Bool) {
     preconditionFailure("Unexpected native restoration in MPV color-state tests")
   }
@@ -116,6 +129,9 @@ class PlaybackBoundary {
     preconditionFailure("Native queue restore is outside MPV color-state tests")
   }
   var playbackPosition: Double? { nil }
+  var mpv: MPVBoundary {
+    preconditionFailure("Native restoration is outside MPV color-state tests")
+  }
   let playbackTransport = PlaybackTransportBoundary()
   let info = PlaybackInfoBoundary()
   let mainWindow = PlaybackWindowBoundary()

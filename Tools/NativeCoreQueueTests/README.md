@@ -217,5 +217,35 @@ Latest frozen Core SHA-256:
 Ordinary `build/native-core-queue-tests.8TH6bc`, AddressSanitizer `RD4anl`, and
 ThreadSanitizer `HRuQt2` each passed 206/0, exit 0, with matching
 source/dependency/generated hashes and no sanitizer diagnostics. Expanded
-negative-control results are pending; the earlier 87/0 results do not verify this source.
+negative controls also completed on this exact source. Each child exited 1 for
+only its expected semantic failures; every exact-failure wrapper exited 0, with
+no sanitizer diagnostics and matching source/dependency/generated manifests.
+The preserved outer logs are in `build/native-core-queue-final-controls.BDgEMR`.
+
+| Control | Run suffix | Exact failures |
+| --- | --- | ---: |
+| stale-auto-advance-preference | tuSBGk | 2 |
+| forget-pending-volume | vNiNUv | 8 |
+| forget-pending-speed | YFb3YT | 9 |
+| forget-verified-audio-intent | tRZJpX | 1 |
+| missing-stop-prepare | KNASbH | 2 |
+| stale-seek-eof | ylQsrc | 2 |
+| consume-stop-owner | Ja7szZ | 3 |
+| preview-pending-intent | Cvg9NK | 1 |
+| preview-cancel-intent | kakyuV | 2 |
+| preview-pause-persistent | Ef5UPZ | 2 |
+| preview-resume-persistent | L4MOET | 4 |
+| auto-next-ignores-open-preference | WyGNZC | 3 |
+| rewind-reopens-session | bhoqbn | 8 |
+| forget-eof-marker-seek | jtdfJg | 1 |
+| forget-eof-seek | nEgGE1 | 4 |
+| old-draining-toggle | 7Xt0FK | 2 |
+| wrong-reopen-count | rbdz7O | 1 |
+| deduplicate-plan | xHS9lA | 20 |
+
+Run suffixes refer to `build/native-core-queue-tests.<suffix>`. All 18 frozen
+manifests also compare equal to ordinary `8TH6bc`; no expected failure set or
+production source changed during this final sequence. These controls do not
+resolve the separately retained historical paused-preroll or installer CI
+failures merely because this bounded run passed.
 Full App, new default routing, and release validation remain outside this result.
