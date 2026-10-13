@@ -940,6 +940,88 @@ print("Handoff numeric comparator checks: \(checks)")
                             "-o", str(executable)], check=True, timeout=90)
             subprocess.run([str(executable)], check=True, timeout=10)
 
+    def test_actual_handoff_window_comparator_rejects_wrong_state(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private static func matchesHandoffWindowOptions(")
+        end = source.index("\n  }", start) + len("\n  }")
+        comparator = source[start:end].replace("private ", "")
+        extensions = (runner.ROOT / "iina/Extensions.swift").read_text()
+        level = next(line for line in extensions.splitlines() if "static let iinaFloating =" in line)
+        harness = r'''
+import AppKit
+extension NSWindow.Level {
+LEVEL
+}
+struct Check {
+COMPARATOR
+}
+var checks = 0
+func expect(_ value: Bool) { checks += 1; precondition(value, "Window comparator check failed") }
+func matches(level: NSWindow.Level = .iinaFloating, onTop: Bool = true,
+             controllerFS: Bool = false, styleFS: Bool = false, mpvFS: Bool = false,
+             mpvTop: Bool, expected: Bool) -> Bool {
+  Check.matchesHandoffWindowOptions(level: level, isOntop: onTop, controllerFullscreen: controllerFS,
+    styleFullscreen: styleFS, mpvFullscreen: mpvFS, mpvOntop: mpvTop, expectedMPVOntop: expected)
+}
+expect(matches(mpvTop: false, expected: false))
+expect(matches(mpvTop: true, expected: true))
+expect(!matches(mpvTop: true, expected: false))
+expect(!matches(mpvTop: false, expected: true))
+expect(!matches(level: .normal, mpvTop: true, expected: true))
+expect(!matches(level: .floating, mpvTop: true, expected: true))
+expect(!matches(onTop: false, mpvTop: true, expected: true))
+expect(!matches(controllerFS: true, mpvTop: true, expected: true))
+expect(!matches(styleFS: true, mpvTop: true, expected: true))
+expect(!matches(mpvFS: true, mpvTop: true, expected: true))
+print("Window comparator checks: \(checks)")
+'''
+        with tempfile.TemporaryDirectory(prefix="native-window-comparator-") as directory:
+            root = Path(directory)
+            main = root / "main.swift"
+            main.write_text(harness.replace("COMPARATOR", comparator).replace("LEVEL", level))
+            executable = root / "comparator"
+            subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-warnings-as-errors", str(main),
+                            "-o", str(executable)], check=True, timeout=90)
+            subprocess.run([str(executable)], check=True, timeout=10)
+
+    def test_handoff_window_check_dispatches_real_menu_and_rechecks_after_settling(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+
+        def method(name):
+            start = source.index("  private func " + name + "(")
+            return source[start:source.index("\n  }", start) + len("\n  }")]
+
+        prepare = method("prepareHandoffWindowOptions")
+        for proof in ("AppDelegate.shared.menuController.alwaysOnTop", "let action = item.action",
+                      "#selector(MainWindowController.menuAlwaysOnTop(_:))",
+                      "NSApp.sendAction(action, to: player.mainWindow, from: item)",
+                      "player.nativePlaybackSession === session", "NSApp.keyWindow === window",
+                      "!player.mainWindow.isOntop", "window.level == .normal",
+                      "!player.mpv.getFlag(MPVOption.Window.ontop)",
+                      "player.mpv.getString(MPVProperty.path) == nil", "player.mpv.mpvRenderContext == nil",
+                      "handoffWindowOptionsMatch(player, window: window, mpvOntop: false)"):
+            self.assertIn(proof, prepare)
+        configure = method("configureHandoffState")
+        self.assertLess(configure.index("prepareHandoffWindowOptions("), configure.index("menuChangeAudioDelay"))
+        after = method("verifyHandoffRestoration")
+        self.assertEqual(after.count("handoffWindowOptionsMatch(player, window: window, mpvOntop: true)"), 2)
+        self.assertLess(after.index('"handoff_mpv_window_options_restored"'), after.index("deadline: .now() + 0.2"))
+        self.assertLess(after.index("deadline: .now() + 0.2"), after.index('"handoff_mpv_window_options_stable"'))
+        self.assertLess(after.index('"handoff_mpv_window_options_stable"'), after.index("closeHandoffCore("))
+        actual = method("handoffWindowOptionsMatch")
+        for proof in ("player.mainWindow.window === window", "window.isVisible", "level: window.level",
+                      "isOntop: player.mainWindow.isOntop", "player.mainWindow.fsState.isFullscreen",
+                      "window.styleMask.contains(.fullScreen)", "player.mpv.getFlag(MPVOption.Window.fullscreen)",
+                      "player.mpv.getFlag(MPVOption.Window.ontop)"):
+            self.assertIn(proof, actual)
+        for text in (prepare, after, actual):
+            for forbidden in (".setFlag(", ".setWindowFloatingOnTop(", ".fsState ="):
+                self.assertNotIn(forbidden, text)
+        self.assertIn('"alwaysFloatOnTop": false, "fullScreenWhenOpen": false', source)
+        self.assertIn("UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)", source)
+        self.assertIn("deadline: .now() + 110", method("start"))
+        self.assertEqual(runner.run_application.__kwdefaults__["timeout"], 150)
+
     def test_every_baseline_ab_delayed_viewport_preview_and_handoff_check_is_required(self):
         baseline = {
             "pristine_real_mpv_service", "native_autoplay_ready", "native_autoplay_shared_clock_advances",
@@ -1000,8 +1082,10 @@ print("Handoff numeric comparator checks: \(checks)")
         }
         self.assertEqual(len(baseline | ab | delayed | viewport | preview), 75)
         self.assertEqual(len(handoff), 17)
-        self.assertEqual(len(runner.REQUIRED_CHECKS), 92)
-        self.assertEqual(runner.REQUIRED_CHECKS, baseline | ab | delayed | viewport | preview | handoff)
+        window = {"handoff_native_ontop_menu_state", "handoff_mpv_window_options_restored", "handoff_mpv_window_options_stable"}
+        self.assertEqual(len(baseline | ab | delayed | viewport | preview | handoff), 92)
+        self.assertEqual(len(runner.REQUIRED_CHECKS), 95)
+        self.assertEqual(runner.REQUIRED_CHECKS, baseline | ab | delayed | viewport | preview | handoff | window)
         source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
         for label in runner.REQUIRED_CHECKS:
             self.assertIn('"' + label + '"', source)

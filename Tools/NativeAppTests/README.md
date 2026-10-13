@@ -1,5 +1,45 @@
 # Complete native playback application checks
 
+## Current 95-check candidate: awaiting complete-App CI
+
+The candidate retains all 92 baseline labels and their assertions, then adds three
+window-state checks to the existing loaded generic handoff. The independent queue
+scenario remains 54 checks. The previous frozen 92/92 result below does not prove
+this new 95-check candidate has passed.
+
+After the native nondefault playback state is actually ready, the driver dispatches
+the real `alwaysOnTop` menu item's action to the same production main-window
+controller. It first requires a visible windowed native player with a normal
+window level, an off on-top indicator and untouched false MPV flags. The menu must
+then raise the actual `NSWindow.level` to `.iinaFloating` and set its indicator,
+while the idle MPV on-top flag remains false and MPV still has no path or renderer.
+This prevents an accidental early MPV write from masking the handoff regression.
+
+The existing real audio-delay menu action then initiates compatibility as before.
+After its deferred effect and all original transport/viewport checks pass, a new
+required check reads the same visible NSWindow, its actual level, the controller
+indicator, and real MPV fullscreen/on-top properties. The same values must survive
+the existing 0.2-second stable-state interval, recorded as a third required check.
+No test code writes MPV window flags, assigns fullscreen state, or raises the
+window directly. The automatically-float and open-fullscreen preferences are
+explicitly false only in the existing isolated volatile test domain.
+
+These three checks exercise the real application menu and MPVController event
+route in CI. They do not enter or simulate macOS Spaces, prove stacking against
+other applications, or establish true fullscreen-animation acceptance. The
+110-second driver and 150-second process deadlines are unchanged. Local predicate
+checks and declaration-only typechecking remain preparation evidence, not a
+substitute for running all 95 checks in the disposable CI application.
+
+Local preparation on 2026-10-13 passed all 47 tests in
+`build/native-app-window-preparation.A01RXM`, including macOS 12 declaration-only
+typechecking, ten real predicate positive/wrong-state inputs, preservation of the
+original 92 labels, and rejection of each missing required label in the 95 set.
+Driver SHA-256 is
+`f19d431cd18e08c9ba9c75ff33d2175d8214d74552352734c3d473993ad09e52`.
+Recorded preparation exit status is 0 and before/after input hashes match. This
+run did not build or execute the complete application; 95-check App CI is pending.
+
 ## Latest frozen full-application result
 
 CI run `38381002473` at `0455ab7c7dc207e3bc46349eda1ea6c148c1b891`
@@ -47,7 +87,7 @@ python3 -B Tools/NativeAppTests/run.py \
 ```
 
 Add `--include-queue` to also execute the separate 54-check queue scenario using
-the same test build. The default still executes only the original 92-check
+the same test build. The default executes only the current 95-check baseline
 scenario. Both processes must succeed when the flag is present. The queue run
 gets its own UUID, fixture marker and `queue/{app.log,result.json,summary.json}`;
 it cannot overwrite or satisfy the baseline report. The disposable bundle is
@@ -73,8 +113,8 @@ local macOS 12 typechecking, never linked into the complete application.
 
 ## Loaded native-to-MPV handoff addition
 
-The candidate requires 92 distinct successful checks: all previous 75 labels
-remain required, plus 17 loaded-handoff checks. CI run `38329363769` at `7f7e4bcc`
+The original loaded-handoff candidate required 92 distinct successful checks:
+all previous 75 labels remained required, plus 17 loaded-handoff checks. CI run `38329363769` at `7f7e4bcc`
 executed the candidate: 66 checks passed and the close/detach check failed.
 The later compatibility and quit stages were not executed. Test App cleanup
 completed. This is not evidence that the complete 92-check App has passed.

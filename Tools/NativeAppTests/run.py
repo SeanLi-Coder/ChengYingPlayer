@@ -62,6 +62,7 @@ REQUIRED_CHECKS = {
     "handoff_native_resources_detached", "handoff_mpv_transport_restored", "handoff_mpv_viewport_and_ab_restored",
     "handoff_deferred_menu_action_applied", "handoff_paused_mpv_stays_still", "handoff_real_close_stops_mpv",
     "handoff_extra_core_shutdown",
+    "handoff_native_ontop_menu_state", "handoff_mpv_window_options_restored", "handoff_mpv_window_options_stable",
 }
 QUEUE_REQUIRED_CHECKS = {
     "queue_cancel_pristine_service", "queue_cancel_native_plan_ready", "queue_cancel_during_partial_install",

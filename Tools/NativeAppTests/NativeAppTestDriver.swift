@@ -96,6 +96,7 @@ final class NativeAppTestDriver {
       "subAutoLoadIINA": 0, "subAutoLoadSearchPath": "./*",
       "softVolume": 0, "enableHdrSupport": false,
       "enableControlBarAutoHide": true, "oscPosition": 2,
+      "alwaysFloatOnTop": false, "fullScreenWhenOpen": false,
     ]
     arguments.merge(overrides) { _, value in value }
     if scenario == .queue {
@@ -1152,6 +1153,10 @@ final class NativeAppTestDriver {
         self.markersMatch(player, start: 0, end: 5.5) &&
           self.viewportMatches(player, scale: 1.5, panX: 0.05 / 1.5, panY: -0.05 / 1.5)
       }) {
+      guard self.prepareHandoffWindowOptions(player, session: session, window: window) else {
+        self.fail("handoff_native_ontop_menu_state"); return
+      }
+      self.record("handoff_native_ontop_menu_state")
       // A real existing menu command forces compatibility without writing any
       // media. Its observable audio-delay change proves deferred replay occurred.
       let delay = NSMenuItem()
@@ -1189,21 +1194,62 @@ final class NativeAppTestDriver {
           self.wait("handoff_deferred_menu_action_applied", until: {
             abs(player.mpv.getDouble(MPVOption.Audio.audioDelay) - 0.25) < 0.000001
           }) {
-            let position = player.mpv.getDouble(MPVProperty.timePos)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-              guard self.handoffMPVTransportMatches(player), self.handoffMPVViewportAndRangeMatch(player),
-                    player.mainWindow.window === window,
-                    abs(player.mpv.getDouble(MPVProperty.timePos) - position) < 0.03,
-                    abs(player.mpv.getDouble(MPVOption.Audio.audioDelay) - 0.25) < 0.000001 else {
-                self.fail("handoff_paused_mpv_stays_still"); return
+            self.wait("handoff_mpv_window_options_restored", until: {
+              self.handoffWindowOptionsMatch(player, window: window, mpvOntop: true)
+            }) {
+              let position = player.mpv.getDouble(MPVProperty.timePos)
+              DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                guard self.handoffMPVTransportMatches(player), self.handoffMPVViewportAndRangeMatch(player),
+                      player.mainWindow.window === window,
+                      abs(player.mpv.getDouble(MPVProperty.timePos) - position) < 0.03,
+                      abs(player.mpv.getDouble(MPVOption.Audio.audioDelay) - 0.25) < 0.000001 else {
+                  self.fail("handoff_paused_mpv_stays_still"); return
+                }
+                self.record("handoff_paused_mpv_stays_still")
+                guard self.handoffWindowOptionsMatch(player, window: window, mpvOntop: true) else {
+                  self.fail("handoff_mpv_window_options_stable"); return
+                }
+                self.record("handoff_mpv_window_options_stable")
+                self.closeHandoffCore(player, window: window)
               }
-              self.record("handoff_paused_mpv_stays_still")
-              self.closeHandoffCore(player, window: window)
             }
           }
         }
       }
     }
+  }
+
+  private func prepareHandoffWindowOptions(_ player: PlayerCore, session: NativePlaybackSession,
+                                           window: NSWindow) -> Bool {
+    guard player.nativePlaybackSession === session, player.isUsingNativePlayback,
+          player.mainWindow.window === window, NSApp.keyWindow === window,
+          !player.mainWindow.fsState.isFullscreen, !window.styleMask.contains(.fullScreen),
+          !player.mainWindow.isOntop, window.level == .normal,
+          !player.mpv.getFlag(MPVOption.Window.ontop), !player.mpv.getFlag(MPVOption.Window.fullscreen),
+          let item = AppDelegate.shared.menuController.alwaysOnTop,
+          let action = item.action, action == #selector(MainWindowController.menuAlwaysOnTop(_:)),
+          NSApp.sendAction(action, to: player.mainWindow, from: item) else { return false }
+    // The native menu must affect the actual window without initializing or
+    // changing the inactive compatibility backend merely to satisfy this check.
+    return player.nativePlaybackSession === session && player.isUsingNativePlayback &&
+      player.mpv.getString(MPVProperty.path) == nil && player.mpv.mpvRenderContext == nil &&
+      handoffWindowOptionsMatch(player, window: window, mpvOntop: false)
+  }
+
+  private func handoffWindowOptionsMatch(_ player: PlayerCore, window: NSWindow, mpvOntop: Bool) -> Bool {
+    player.mainWindow.window === window && window.isVisible &&
+      Self.matchesHandoffWindowOptions(level: window.level, isOntop: player.mainWindow.isOntop,
+        controllerFullscreen: player.mainWindow.fsState.isFullscreen,
+        styleFullscreen: window.styleMask.contains(.fullScreen),
+        mpvFullscreen: player.mpv.getFlag(MPVOption.Window.fullscreen),
+        mpvOntop: player.mpv.getFlag(MPVOption.Window.ontop), expectedMPVOntop: mpvOntop)
+  }
+
+  private static func matchesHandoffWindowOptions(level: NSWindow.Level, isOntop: Bool,
+      controllerFullscreen: Bool, styleFullscreen: Bool, mpvFullscreen: Bool,
+      mpvOntop: Bool, expectedMPVOntop: Bool) -> Bool {
+    level == .iinaFloating && isOntop && !controllerFullscreen && !styleFullscreen &&
+      !mpvFullscreen && mpvOntop == expectedMPVOntop
   }
 
   private func handoffMPVTransportMatches(_ player: PlayerCore) -> Bool {

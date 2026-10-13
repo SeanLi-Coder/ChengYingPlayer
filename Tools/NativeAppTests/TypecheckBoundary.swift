@@ -10,6 +10,7 @@ extension Notification.Name {
 
 enum MPVProperty { static let idleActive = "idle-active", path = "path", timePos = "time-pos", playlist = "playlist" }
 enum MPVOption {
+  enum Window { static let ontop = "ontop", fullscreen = "fullscreen" }
   enum PlaybackControl { static let pause = "pause", speed = "speed", abLoopA = "ab-loop-a", abLoopB = "ab-loop-b", abLoopCount = "ab-loop-count" }
   enum Audio { static let volume = "volume", audioDelay = "audio-delay" }
   enum Video { static let videoZoom = "video-zoom", videoPanX = "video-pan-x", videoPanY = "video-pan-y" }
@@ -78,6 +79,9 @@ final class PlaySlider: NSSlider {
   var abLoopB = PlaySliderLoopKnob()
 }
 final class MainWindowController: NSWindowController {
+  struct FullscreenState { var isFullscreen = false }
+  var fsState = FullscreenState()
+  var isOntop = false
   enum SideBarViewType { case hidden, settings }
   var loaded = false
   var videoView = VideoView()
@@ -92,7 +96,11 @@ final class MainWindowController: NSWindowController {
   func endControlInteraction() {}
   func hideUIAndCursor() {}
   func hideSideBar(animate: Bool = true, after: @escaping () -> Void = {}) {}
+  @objc func menuAlwaysOnTop(_ sender: AnyObject) {}
 }
+final class MenuController { var alwaysOnTop: NSMenuItem! }
+final class AppDelegate { static let shared = AppDelegate(); let menuController = MenuController() }
+extension NSWindow.Level { static let iinaFloating = NSWindow.Level(NSWindow.Level.floating.rawValue - 1) }
 final class MainMenuActionHandler: NSObject {
   @objc func menuTogglePause(_ sender: NSMenuItem) {}
   @objc func menuFileLoop(_ sender: NSMenuItem) {}
