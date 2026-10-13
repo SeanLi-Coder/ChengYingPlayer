@@ -49,7 +49,10 @@ boundary = boundary.replace('  func seek(absoluteSecond: Double) { fatalError("E
 boundary = boundary.replace("  private let playlistMutationLock", "  let playlistMutationLock")
 boundary = boundary.replace("  private var backgroundTaskInUse = false\n", "")
 boundary = boundary.replace("enum AudioStatus { case notAudio }", "enum AudioStatus { case notAudio, unknown }")
-boundary += "\n  @Atomic var backgroundQueueTicket = 0\n  var backgroundTaskTickets = Set<Int>()\n  var triedUsingExactSeekForCurrentFile = false\n  var useExactSeekForCurrentFile = true\n  var receivedEndFileWhileLoading = false\n  var currentWindow: NSWindow? { mainWindow.window }\n"
+ticket_fields = [line for line in core.splitlines() if line.startswith("  @Atomic var backgroundQueueTicket =")]
+if len(ticket_fields) != 1:
+    raise SystemExit("Production matcher ticket declaration changed")
+boundary += "\n" + ticket_fields[0] + "\n  var backgroundTaskTickets = Set<Int>()\n  var triedUsingExactSeekForCurrentFile = false\n  var useExactSeekForCurrentFile = true\n  var receivedEndFileWhileLoading = false\n  var currentWindow: NSWindow? { mainWindow.window }\n"
 boundary = boundary.replace("  func videoToolsEnforceLoopBounds() {}", "  func videoToolsEnforceLoopBounds(playbackRestarted: Bool = false) {}")
 boundary = boundary.replace("  func postNotification(_ name: Notification.Name) { notifications.append(name) }",
                             "  func postNotification(_ name: Notification.Name) { notifications.append(name); notificationHook?(name) }")

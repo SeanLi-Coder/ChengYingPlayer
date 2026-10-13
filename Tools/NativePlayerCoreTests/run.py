@@ -56,6 +56,10 @@ def main():
     bridge = (ROOT / "iina/VideoTools/VideoToolsPlayerBridge.swift").read_text()
     model = bridge[bridge.index("struct VideoToolsViewport:"):bridge.index("struct VideoToolsPlayerSnapshot")]
     generated = "import Cocoa\n" + model + "\nfinal class PlayerCore: CoreBoundary {\n"
+    ticket_fields = [line for line in core.splitlines() if line.startswith("  @Atomic var backgroundQueueTicket =")]
+    if len(ticket_fields) != 1:
+        raise RuntimeError("Production matcher ticket declaration changed")
+    generated += ticket_fields[0] + "\n"
     generated += core[gate_start:gate_end] + "\n" + core[fields_start:preview_start] + core[preview_end:fields_end]
     rotation_start = core.index("  private var permanentRotationIntent")
     rotation_end = core.index("\n  /// Both window shortcuts", rotation_start)

@@ -136,6 +136,7 @@ class AutoFileMatcher {
     log("Adding files to playlist")
     // add videos
     for video in media {
+      try checkTicket()
       // add to playlist
       if video.url.path == player.info.currentURL?.path {
         addedCurrentVideo = true
@@ -147,6 +148,9 @@ class AutoFileMatcher {
         let current = player.mpv.getInt(MPVProperty.playlistPos)
         try checkTicket()
         player.appendToPlaylist(video.path, silent: true)
+        // Opening another file can cancel this batch while append is in flight.
+        // Leave the lock before a stale follow-up move delays that newer open.
+        try checkTicket()
         player.mpv.command(.playlistMove, args: ["\(count)", "\(current)"], checkError: false,
                            level: .verbose) { err in
           if err == MPV_ERROR_COMMAND.rawValue { needQuit = true }

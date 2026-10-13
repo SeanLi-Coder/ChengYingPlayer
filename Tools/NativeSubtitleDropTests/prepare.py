@@ -58,7 +58,9 @@ if negative:
         end = core.index("\n  }", start) + 4
         body = core[start:end]
         body = replace_once(body, "    invalidateGenericHandoff()\n", "")
-        body = replace_once(body, "    playlistMutationLock.lock()", "    invalidateGenericHandoff()\n    playlistMutationLock.lock()")
+        # Invalidate before playable-input preflight, not merely before the
+        # lock: admission now intentionally completes before lock acquisition.
+        body = replace_once(body, "    let isSpecialInput =", "    invalidateGenericHandoff()\n    let isSpecialInput =")
         core = core[:start] + body + core[end:]
     elif negative in ["allow-busy-subtitle", "allow-busy-lut"]:
         gate = "        guard canAttachExternalPlaybackData else { return false }\n"

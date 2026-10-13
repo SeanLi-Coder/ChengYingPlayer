@@ -1913,30 +1913,36 @@ class PlayerCore: NSObject {
       Utility.showAlert("local_media_only", style: .informational)
       return nil
     }
-    playlistMutationLock.lock()
-    defer { playlistMutationLock.unlock() }
-
     // Handle folder URL (to support mpv shuffle, etc), BD folders and m3u / m3u8 files first.
     // For these cases, mpv will load/build the playlist and notify IINA when it can be retrieved.
-    if urls.count == 1 {
-      let url = urls[0]
-
-      if isBDFolder(url)
-          || Utility.playlistFileExt.contains(url.absoluteString.lowercasedPathExtension) {
-        info.shouldAutoLoadFiles = false
-        open(url)
-        return nil
-      }
-    }
-
-    let playableFiles = getPlayableFiles(in: urls)
+    let isSpecialInput = urls.count == 1 && (isBDFolder(urls[0]) ||
+      Utility.playlistFileExt.contains(urls[0].absoluteString.lowercasedPathExtension))
+    let playableFiles = isSpecialInput ? urls : getPlayableFiles(in: urls)
     let count = playableFiles.count
-    let explicitNativePlan = nativeExplicitQueuePlan(urls, playableFiles: playableFiles)
+    guard count > 0 else { return 0 }
 
-    // check playable files count
-    if count == 0 {
-      return 0
+    // Preflight does not mutate playback or cancel a subtitle-only/empty input.
+    // Once a new media request is admitted, revoke the old matcher BEFORE
+    // waiting for its batch lock; otherwise it cannot observe cancellation
+    // until the entire previous folder has already been appended.
+    guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown,
+          !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return nil }
+    let openTicket = $backgroundQueueTicket.withLock { ticket in
+      ticket += 1
+      return ticket
     }
+    playlistMutationLock.lock()
+    defer { playlistMutationLock.unlock() }
+    guard backgroundQueueTicket == openTicket,
+          !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown,
+          !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return nil }
+
+    if isSpecialInput {
+      info.shouldAutoLoadFiles = false
+      open(playableFiles[0])
+      return nil
+    }
+    let explicitNativePlan = nativeExplicitQueuePlan(urls, playableFiles: playableFiles)
 
     // Subtitle attachments and other non-playable inputs are not a new media
     // request and must not revoke an in-flight compatibility restoration.

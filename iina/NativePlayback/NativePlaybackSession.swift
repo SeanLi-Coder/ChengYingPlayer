@@ -636,6 +636,15 @@ final class NativePlaybackSession {
     // backwards seek must never free the new queue budget or trigger B/EOF.
     let clock = output.currentTime.seconds
     guard output.actualRate == 0, clock.isFinite, abs(clock - lowerBound) <= 0.001 else { return false }
+    // A cooperative yield may follow the first video frame while its matching
+    // PCM is still held. Give the first ready, in-range audio sample a bounded
+    // drain opportunity before pausing. Do not wait for blocked/future audio,
+    // or for the rest of the FIFO after audio has already been submitted.
+    if !wantsPlayback && !hasAudio, heldPrerollAudioHead < heldPrerollAudio.count,
+       let first = heldPrerollAudio[heldPrerollAudioHead],
+       first.start <= clock + maximumLead, output.isReady(video: false) {
+      return false
+    }
     preroll = false
     phase = wantsPlayback ? .playing : .paused
     output.setRate(wantsPlayback ? rate : 0)
@@ -672,6 +681,9 @@ final class NativePlaybackSession {
       if finishPrerollIfReady() && !wantsPlayback { return }
       if finishPlaybackIfNeeded() { return }
       var budget = 8
+      let quantumDeadline = ProcessInfo.processInfo.systemUptime + 0.004
+      var quantumExpired = false
+      var madeProgress = false
       if !preroll || hasVideo, try !drainHeldPrerollAudio(clock: clock, budget: &budget) {
         publish()
         if preroll || wantsPlayback { schedulePump() }
@@ -679,6 +691,13 @@ final class NativePlaybackSession {
       }
       if preroll && hasVideo && hasAudio { budget = 0 }
       while !eof && budget > 0 && identity.accepts(revision) {
+        // Yield between samples even when software decoding is expensive.
+        // A single decoder call is not preemptible; the sample-count bound
+        // remains in force independently of this cooperative time budget.
+        if preroll && budget < 8 && ProcessInfo.processInfo.systemUptime >= quantumDeadline {
+          quantumExpired = true
+          break
+        }
         if finishPlaybackIfNeeded() { return }
         // Preroll can finish inside this loop during autoplay. Do not let a
         // newly decoded audio sample overtake the FIFO before the next pump.
@@ -698,10 +717,12 @@ final class NativePlaybackSession {
         switch gated {
         case .beforeRange:
           pending = nil
+          madeProgress = true
           continue
         case .afterRange:
           if isVideo { videoBoundary = true } else { audioBoundary = true }
           pending = nil
+          madeProgress = true
           if (videoBoundary || !media.hasVideo) && (audioBoundary || !media.hasAudio) { eof = true }
           continue
         case .sample(let sample):
@@ -734,6 +755,7 @@ final class NativePlaybackSession {
             break
           }
           pending = nil
+          madeProgress = true
           queuedBytes += bytes
           outstanding.append((end, bytes))
           finalEnd = max(finalEnd, end)
@@ -757,7 +779,15 @@ final class NativePlaybackSession {
       if finishPrerollIfReady() && !wantsPlayback { return }
       if finishPlaybackIfNeeded() { return }
       publish()
-      if preroll || wantsPlayback { schedulePump() }
+      if preroll || wantsPlayback {
+        // Keyframe-to-target catch-up still has useful decoding to do. Do not
+        // charge a fixed polling delay for each quantum of discarded samples.
+        // Retaining a pending sample means output/lead backpressure; clock and
+        // flush waits return earlier. Those waits keep the delayed retry.
+        let activePreroll = preroll && madeProgress && !eof && pending == nil &&
+          (budget == 0 || quantumExpired)
+        schedulePump(after: activePreroll ? .milliseconds(0) : .milliseconds(10))
+      }
     } catch { fail(error, revision: revision) }
   }
 

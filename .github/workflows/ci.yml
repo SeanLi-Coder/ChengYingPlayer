@@ -125,6 +125,28 @@ jobs:
           bash Tools/PlaybackUIPerformanceTests/run.sh
           python3 -B Tools/SeekTimingTests/run.py
 
+      - name: Test media-open cancellation before playlist admission
+        run: |
+          python3 -B Tools/MediaOpenAdmissionTests/run.py
+          python3 -B Tools/MediaOpenAdmissionTests/run.py --sanitize address
+          python3 -B Tools/MediaOpenAdmissionTests/run.py --sanitize thread
+          python3 -B Tools/MediaOpenAdmissionTests/run.py --negative-late-cancel
+          python3 -B Tools/MediaOpenAdmissionTests/run.py --negative-post-append
+
+      - name: Preserve media-open admission evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: media-open-admission-evidence-${{ github.sha }}
+          path: |
+            build/media-open-admission.*/*.json
+            build/media-open-admission.*/*.sha256
+            build/media-open-admission.*/*.log
+            build/media-open-admission.*/exit-status.txt
+            build/media-open-admission.*/test-exit-status.txt
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Test simplified player features
         run: |
           ./Tools/SimplificationTests/run.sh
@@ -389,6 +411,50 @@ jobs:
           bash Tools/NativePlaybackSessionTests/run.sh
           bash Tools/NativePlaybackRenderedTests/run.sh
           NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativePlaybackSessionTests/run.sh
+
+      - name: Test native exact seek cooperative scheduling
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 8
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          python3 -B Tools/NativeSeekLatencyTests/test_evidence.py
+          python3 -B Tools/NativeSeekLatencyTests/test_gate.py
+          for sanitizer in "" address thread; do
+            positive_log="$(mktemp "$RUNNER_TEMP/native-seek-positive.XXXXXX")"
+            set +e
+            NATIVE_PLAYBACK_SANITIZER="$sanitizer" bash Tools/NativeSeekLatencyTests/run.sh > "$positive_log" 2>&1
+            positive_status=$?
+            set -e
+            cat "$positive_log"
+            test "$positive_status" -eq 0
+            positive_dir="$(sed -n 's/^Artifacts: //p' "$positive_log" | tail -1)"
+            python3 -B Tools/NativeSeekLatencyTests/verify.py evidence "$positive_dir"
+          done
+          for negative in polling busy-wait quantum fifo; do
+            negative_log="$(mktemp "$RUNNER_TEMP/native-seek-negative.XXXXXX")"
+            set +e
+            NATIVE_SEEK_NEGATIVE="$negative" bash Tools/NativeSeekLatencyTests/run.sh > "$negative_log" 2>&1
+            negative_status=$?
+            set -e
+            cat "$negative_log"
+            test "$negative_status" -eq 1
+            negative_dir="$(sed -n 's/^Artifacts: //p' "$negative_log" | tail -1)"
+            python3 -B Tools/NativeSeekLatencyTests/verify.py negative "$negative_dir" "$negative"
+          done
+
+      - name: Preserve native exact seek evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-seek-evidence-${{ github.sha }}
+          path: |
+            build/native-seek-latency.*/*.txt
+            build/native-seek-latency.*/*.sha256
+            build/native-seek-latency.*/*.log
+            build/native-seek-latency.*/*.json
+            build/native-seek-latency.*/NativePlaybackSession.swift
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Test native rate changes after real EOF
         if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
