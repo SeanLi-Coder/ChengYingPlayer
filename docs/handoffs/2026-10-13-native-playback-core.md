@@ -62,6 +62,29 @@ ASan `8tUPGl`、TSan `2odrPO` 各 90/0，主代理独立普通 `JnTU9P` 亦 90/0
 完整 MPVController／整窗验收。CI 已增加同源三模式、三负控及失败证据留存；
 运行中的 `38361506765` 不包含该后续修补，须另行验证。
 
+### 真实 EOF 后变速与首次重播
+
+音频时序审查以实际 FFV1/PCM、H.264/AAC 播放复现：原 Session `5542c267` 到
+EOF 后 `setRate(0.8)` 会 seek 到 `duration - 1 microsecond`，抹掉 ended 状态；
+首次 resume 随即再次结束。原速对照均正常；`native-rate-eof.XTH30V` 为 34/2。
+Session `aab38cba` 只在已结束且 decoder／媒体 revision 有效时发布新 rate，
+不刷新尾帧队列，保留原有 resume 从头开始逻辑；非 EOF 路径不变。
+
+最终专项普通 `GY9B0L`、ASan `M7VAcc`、TSan `h71aZc` 各 64/0，包含连续变速、
+不支持速率拒绝、静音和显式 seek 到非零位置后变速。单变量撤回该分支的 `L528c1`
+恰为 52/8，主代理独立验证失败集合与身份校验。负控验证器后补依赖校验的 hash
+差异明确记录在 README，不把不同工具清单称为完全相同。主代理在隔离 AV1 新库
+`7FMHum` 上独立重跑最终专项 `HW6EfR` 64/0、原 Session 普通 `MkRSPe`／TSan
+`eQbtj1` 各 209/0及真实图像读回 `TJCI4T` 66/0；源码／生成物／依赖检查通过。
+原 A/B 普通／ASan／TSan 各 151/0（统一证据 `native-ab-rate-review.ImjZC5`），
+其旧 runner 使用既有 deps，不冒充新 AV1 依赖运行。
+
+CI 增加该专项三模式、精确负控及证据保存；完整 App 检查前移到生产构建后，
+保留所有既有断言、超时和隔离清理。仅 workflow_dispatch 在失败后继续采集独立
+检查结果，稳定发布仍被失败拦截。正在运行的旧 CI 不受本地顺序改变影响，也不包含
+此 EOF 修补。它的 surfaces／route step 已失败，具体 CI 原因待完成日志；本机
+另确认 run-video-view 旧 fixture 缺 generic 退场接口而编译失败，正在补测试边界。
+
 显式有界列表已接实际 Core、native Session 与 MPV 命令；周围 App 服务边界见
 `Tools/NativeCoreQueueTests/README.md`。生产 controller 的停止协议单独测试：
 当前条目真正卸载后才能清理精确 owner 的列表，reader 事件排空后才能确认 idle。

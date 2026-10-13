@@ -347,7 +347,37 @@ jobs:
           CODE_SIGNING_ALLOWED=YES
           CODE_SIGNING_REQUIRED=YES
 
+      # Exercise complete-app wiring before the longer isolated suites so a
+      # development candidate exposes integration failures as soon as it builds.
+      - name: Test native playback in the complete application window
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 20
+        run: |
+          python3 -B Tools/NativeAppTests/test_runner.py
+          bash Tools/NativeAppTests/run_paused_probe.sh
+          python3 -B Tools/NativeAppTests/run.py \
+            --include-queue \
+            --source-packages "$RUNNER_TEMP/SourcePackages" \
+            --production-app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app" \
+            --report-directory "$PWD/build/native-app-ci-report"
+
+      - name: Preserve complete native application test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-app-test-evidence-${{ github.sha }}
+          path: |
+            build/native-app-ci-report/
+            build/native-app-paused-wait.*/*.txt
+            build/native-app-paused-wait.*/*.log
+            build/native-app-paused-wait.*/*.json
+            build/native-app-paused-wait.*/*/*.log
+            build/native-app-paused-wait.*/*/exit-code.txt
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Test independent native playback backend
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
         timeout-minutes: 6
         run: |
           export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
@@ -358,6 +388,37 @@ jobs:
           bash Tools/NativePlaybackSessionTests/run.sh
           bash Tools/NativePlaybackRenderedTests/run.sh
           NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativePlaybackSessionTests/run.sh
+
+      - name: Test native rate changes after real EOF
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 5
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          bash Tools/NativeRateEOFTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=address bash Tools/NativeRateEOFTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeRateEOFTests/run.sh
+          negative_log="$(mktemp "$RUNNER_TEMP/native-rate-eof-negative.XXXXXX")"
+          set +e
+          NATIVE_RATE_EOF_NEGATIVE=1 bash Tools/NativeRateEOFTests/run.sh > "$negative_log" 2>&1
+          negative_status=$?
+          set -e
+          cat "$negative_log"
+          test "$negative_status" -eq 1
+          negative_dir="$(sed -n 's/^Artifacts: //p' "$negative_log" | tail -1)"
+          python3 -B Tools/NativeRateEOFTests/verify_negative.py "$negative_dir"
+
+      - name: Preserve native rate-at-EOF evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-rate-eof-evidence-${{ github.sha }}
+          path: |
+            build/native-rate-eof.*/*.txt
+            build/native-rate-eof.*/*.sha256
+            build/native-rate-eof.*/*.log
+            build/native-rate-eof.*/dependency-runtime.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Preserve native core test evidence
         if: always()
@@ -709,33 +770,6 @@ jobs:
             build/native-core-queue-tests.*/*exit-status.txt
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Test native playback in the complete application window
-        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
-        timeout-minutes: 20
-        run: |
-          python3 -B Tools/NativeAppTests/test_runner.py
-          bash Tools/NativeAppTests/run_paused_probe.sh
-          python3 -B Tools/NativeAppTests/run.py \
-            --include-queue \
-            --source-packages "$RUNNER_TEMP/SourcePackages" \
-            --production-app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app" \
-            --report-directory "$PWD/build/native-app-ci-report"
-
-      - name: Preserve complete native application test evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: native-app-test-evidence-${{ github.sha }}
-          path: |
-            build/native-app-ci-report/
-            build/native-app-paused-wait.*/*.txt
-            build/native-app-paused-wait.*/*.log
-            build/native-app-paused-wait.*/*.json
-            build/native-app-paused-wait.*/*/*.log
-            build/native-app-paused-wait.*/*/exit-code.txt
-          if-no-files-found: ignore
-          retention-days: 3
 
       - name: Assemble and verify application
         run: |

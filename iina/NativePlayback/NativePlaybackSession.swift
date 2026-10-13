@@ -322,6 +322,12 @@ final class NativePlaybackSession {
       // A renderer may automatically flush when its pitch/rate changes. Seek
       // and refill both streams as one transaction, not just the audio stream.
       if self.decoder != nil && self.identity.accepts(self.revision) {
+        // EOF has no active output to retime. Preserve its restart semantics;
+        // seeking to duration here would turn ended into a paused tail frame.
+        if self.phase == .ended {
+          self.publish(force: true)
+          return
+        }
         self.seekOnWorker(to: self.positionOnWorker(), revision: self.revision)
       }
     }

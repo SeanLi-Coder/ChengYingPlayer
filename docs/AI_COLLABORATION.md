@@ -52,6 +52,12 @@ ClipPreviewLiveTests 缺 `nativePreviewBaseline` 的旧边界编译处失败。�
 Core `14d8d140` 专项三模式各 90/0、三精确负控准确，主代理普通独立复跑 90/0。
 只是实际 Session／libmpv 与明确 App 服务边界，不是物理声卡或完整窗口验收；
 当前 CI 冻结源码不含该修补，详见迁移交接和 NativeAudioDeviceTests README。
+真实 EOF 后变速又已复现并修补首次重播立即结束的问题；Session `aab38cba`
+专项三模式各 64/0、精确撤回分支产生 8 项预期失败，新 AV1 库上主代理原 Session
+普通／TSan 各 209/0、真实画面 66/0；原 A/B 既有 deps 三模式各 151/0。
+下一 CI 将优先执行整窗检查，原检查与失败门禁不减少。当前 CI 的 surfaces／route
+step 已失败，具体日志待 job 完成；本机另确认 VideoView fixture 缺 generic 退场
+接口的编译失败，尚在补测试边界。这些记录不代表新候选完整 App 已验收或已发布。
 不得把受控事件服务、忙状态 fixture 或旧 Core 测试当作所有换核场景验收。
 以下按时间保留旧候选结果；它们不替代本段的最新状态。
 内部路径只有从未加载过 MPV 的 core 才准入；原孤立本地 SDR 单视频边界保留，新增显式
