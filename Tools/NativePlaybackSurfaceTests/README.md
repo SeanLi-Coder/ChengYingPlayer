@@ -74,6 +74,13 @@ resize/redraw. An old output cannot detach a newer output, including after a
 reopen. A never-loaded window must not create a view during retirement. The
 worker ownership and last retirement continuation stay unchanged.
 
+The retirement slice supplies only a nil generic-owner admission boundary.
+Owner/phase types have private initializers, and non-nil ownership or phase access
+fails fast; this does not simulate the generic handoff state machine. The route
+boundary returns its incremented `UInt64` revision rather than discarding it.
+The complete production retirement body, including its owned-handoff branch,
+remains extracted unchanged.
+
 ```bash
 bash Tools/NativePlaybackSurfaceTests/run-video-view.sh
 NATIVE_PLAYBACK_SANITIZER=address bash Tools/NativePlaybackSurfaceTests/run-video-view.sh
@@ -89,6 +96,30 @@ The expanded positive suite contains 51 assertions. The runner preserves source
 and generated-code SHA-256 manifests, validates them after execution, and checks
 both test and log-writer exit statuses. Sanitizers instrument the Swift code;
 system frameworks are not re-instrumented.
+
+The no-generic boundary adaptation retained a fresh pre-adaptation compile
+failure in `build/native-video-view-tests.On1xKn`; its complete log and exit 1
+are in `build/video-view-generic-boundary.gtTwyX/before-adaptation.log` and
+`before-adaptation.exit`. After adapting only `VideoViewBoundary.swift`, ordinary
+(`2YzEeF`), ASan (`pBOGdm`) and TSan (`VlY8j3`) runs each passed all 51 assertions
+with exit 0. These suffixes identify `build/native-video-view-tests.*` evidence
+directories. All five executed variants validated their source and generated
+manifests. The normal-mode negative controls retained these exact failures:
+
+- `skip-retirement-detach` (`tcL9hp`): 48 passed / 3 failed, exit 1:
+  `Core retirement detaches its output before asynchronous shutdown completes`,
+  `Idle after retirement has no retained output layer`, and
+  `Repeated detachment of a retired output is a harmless no-op`.
+- `ignore-output-owner` (`Hnfhiq`): 47 passed / 4 failed, exit 1:
+  `A stale output cannot detach the current session`,
+  `Rejected old-owner detachment preserves the current layer and geometry`,
+  `Repeated detachment of a retired output is a harmless no-op`, and
+  `A late old-output detach cannot remove the newly attached session`.
+
+These are local boundary results, not proof of the unique cause or resolution of
+CI run `38361506765` step 34; its concrete failed-command log was not available
+when this evidence was recorded. Neither production code, test assertions,
+extraction branches nor the original 20-second watchdog was changed here.
 
 This remains a presentation/control boundary, not complete nib/window-close
 acceptance. `Tools/NativePlayerRouteTests` additionally uses the real native

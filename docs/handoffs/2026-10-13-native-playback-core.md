@@ -83,7 +83,13 @@ CI 增加该专项三模式、精确负控及证据保存；完整 App 检查前
 保留所有既有断言、超时和隔离清理。仅 workflow_dispatch 在失败后继续采集独立
 检查结果，稳定发布仍被失败拦截。正在运行的旧 CI 不受本地顺序改变影响，也不包含
 此 EOF 修补。它的 surfaces／route step 已失败，具体 CI 原因待完成日志；本机
-另确认 run-video-view 旧 fixture 缺 generic 退场接口而编译失败，正在补测试边界。
+另确认 run-video-view 旧 fixture 缺 generic 退场接口而编译失败。
+已补 nil-only、误入 generic owner 即失败的边界，保留完整生产退场方法；route
+返回实际递增 UInt64。普通／ASan／TSan 各 51/0；原两个负控精确为 48/3、47/4，
+无崩溃或编译错误。五轮源清单完全相同、source/generated 重验通过，证据与原样
+修前编译失败保留于 `build/video-view-generic-boundary.gtTwyX`。这不证明 CI
+仅有同一问题；完整日志仍须核对。独立 Surface 几何与真实源像素本机 106/0 于
+`native-surface-tests.U2Frqy`，不等同物理屏幕合成或 HDR 验收。
 
 显式有界列表已接实际 Core、native Session 与 MPV 命令；周围 App 服务边界见
 `Tools/NativeCoreQueueTests/README.md`。生产 controller 的停止协议单独测试：

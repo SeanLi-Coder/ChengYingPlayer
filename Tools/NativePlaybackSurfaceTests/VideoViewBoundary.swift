@@ -18,7 +18,27 @@ final class PlayerCore {
   var nativeRetirementCompletion: (() -> Void)?
   var nativeRetiring = false
   var nativeReady = true
-  var retirementRouteRevision = 0
+  var retirementRouteRevision: UInt64 = 0
+  // This presentation fixture retires native output without a generic handoff
+  // owner. Keep the real retirement body and reject any owned-handoff branch.
+  struct GenericHandoffPhaseBoundary {
+    private init() {}
+    static func retiring(_ revision: UInt64) -> Self {
+      preconditionFailure("Generic retirement ownership requires the handoff tests")
+    }
+  }
+  struct GenericHandoffOwnerBoundary {
+    private init() {}
+    var phase: GenericHandoffPhaseBoundary {
+      get { preconditionFailure("No generic owner in presentation retirement tests") }
+      set { preconditionFailure("No generic owner in presentation retirement tests") }
+    }
+  }
+  var genericHandoffOwner: GenericHandoffOwnerBoundary? = nil
+  func ownsGenericHandoff(_ id: UUID?) -> Bool {
+    precondition(id == nil, "No owned generic handoff in presentation retirement tests")
+    return true
+  }
   var previewCancellations = 0
   var loopCancellations = 0
   func cancelNativePreview(restoreLoop: Bool) {
@@ -26,9 +46,11 @@ final class PlayerCore {
     previewCancellations += 1
   }
   func cancelNativeLoopRequests() { loopCancellations += 1 }
-  func advancePlaybackRoute(acceptsMPV: Bool) {
+  @discardableResult
+  func advancePlaybackRoute(acceptsMPV: Bool) -> UInt64 {
     precondition(!acceptsMPV)
-    retirementRouteRevision += 1
+    retirementRouteRevision &+= 1
+    return retirementRouteRevision
   }
   func acceptFromPasteboard(_ sender: NSDraggingInfo, isPlaylist: Bool = false) -> NSDragOperation { [] }
   func openFromPasteboard(_ sender: NSDraggingInfo) -> Bool { false }
