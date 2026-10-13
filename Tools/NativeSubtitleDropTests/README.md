@@ -143,3 +143,85 @@ Artifact paths use `build/native-subtitle-drop.<suffix>`. Source-before/after
 is identical and all generated-file validations pass. Sanitized positives
 contain no sanitizer diagnostic. Counts denote actual executed assertions;
 accepted negative runs intentionally retain every expected `FAIL` line.
+
+## Non-deferred media actions during handoff
+
+The additional `NATIVE_SUBTITLE_CASE=actions` suite has **406 checks**, separate
+from the unchanged default 408 attachment checks. It extracts the complete
+production `toggleMute` and `frameStep` methods and the screenshot admission /
+owned-handoff prefix. Screenshot export/clipboard presentation is a counted
+boundary: this suite does not create screenshots or prove their pixel contents.
+
+Inventory, all four owners at capture/retire/loaded/seek, and an actual queue
+append prefix must reject these actions without changing the real MPV mute
+flag, issuing real forward/backward frame commands, admitting screenshot export,
+or cancelling the existing owner. After release, the original operation must
+still complete. Six separate settled native/MPV cases require the same methods
+to remain usable, with actual mute readback/frame commands, one screenshot
+boundary delivery and the original real media path after restoration.
+
+Before the production guards, `95G3mE` ran 353 checks with 52 failures (before the
+53 settled-action checks were added). Core was `fbbc0af8`; source/generated
+identities remained unchanged and child exited 1. Actual frame-step commands
+during inventory initialized MPV rendering early and prevented native admission.
+Busy rotation could also be cancelled by the old `frameStep` implementation.
+This is retained failure evidence, not a successful negative-control run.
+
+Each new guard is the first line of its production method, before any owner
+mutation or compatibility request. The pre-existing admission getter still
+allows settled native and MPV operation and rejects partial ownership/termination.
+Negative controls `busy-mute`, `busy-frame-step` and `busy-screenshot` remove only
+that method's guard from a generated copy and run all 406 action checks. Required
+failure counts are exactly 11, 18 and 29, with full case/count/multiset/child-exit
+validation and actual MPV command/mute or screenshot-boundary diagnostics.
+
+Final Core is
+`c0c69a4a99b0fd92a4bedda2aa86f453ca77a4f73b9073c477697004323a94e1`.
+The following artifacts share source manifest SHA-256
+`545985af672827dce3981e3f4b8a0fb1c7d100a02320384ff77f168d715df93b`:
+
+| Scope | Artifact suffix | Checks / failures | Runner exit |
+| --- | --- | --- | --- |
+| Actions normal | `rDqkAf` | 406 / 0 | 0 |
+| Actions ASan | `9Cl4n6` | 406 / 0 | 0 |
+| Actions TSan | `ZSCUDj` | 406 / 0 | 0 |
+| Original complete attachment regression | `wle1B8` | 408 / 0 | 0 |
+| Missing mute guard | `vLpvjn` | 406 / 11, exact | 0 |
+| Missing frame-step guard | `yVyice` | 406 / 18, exact | 0 |
+| Missing screenshot guard | `n9amKy` | 406 / 29, exact | 0 |
+
+All source-after/generated checks pass; positive children exit 0, negative
+children exit 1 and tee exits 0. No sanitizer diagnostic was observed. Initial
+exploratory controls `qBJAeV`, `aB5opc`, `5kPR4E` were correctly rejected while
+their exact failure sets were unregistered; `aB5opc` also records verifier source
+drift during development. They are not substituted for the final runs above.
+The original 408-check sanitizer and five-control results remain tied to their
+earlier `fbbc0af8` source; this table does not relabel them as current-source runs.
+
+```sh
+NATIVE_SUBTITLE_CASE=actions python3 -B Tools/NativeSubtitleDropTests/run.py
+NATIVE_SUBTITLE_CASE=actions NATIVE_PLAYBACK_SANITIZER=thread python3 -B Tools/NativeSubtitleDropTests/run.py
+NATIVE_SUBTITLE_NEGATIVE_CONTROL=busy-mute python3 -B Tools/NativeSubtitleDropTests/run.py
+NATIVE_SUBTITLE_NEGATIVE_CONTROL=busy-frame-step python3 -B Tools/NativeSubtitleDropTests/run.py
+NATIVE_SUBTITLE_NEGATIVE_CONTROL=busy-screenshot python3 -B Tools/NativeSubtitleDropTests/run.py
+```
+
+### Shared extractor follow-up
+
+The standalone Generic regression subsequently failed compilation in `nIIZs8`:
+the newly extracted gate referenced `hasPendingURLPlaylistEnqueue`, which that
+focused no-enqueue boundary did not expose. The shared generator now extracts
+the real production accessor against the existing nil-only, fail-fast enqueue
+service. Audio avoids extracting it twice; Subtitle removes the separate accessor
+before inserting the actual enqueue implementation. No production or assertion
+was changed to fix this fixture integration failure.
+
+Final same-source reruns use manifest
+`8c3e07f8b61bfc84f680141ac182f7b4bee37af95e31980ff5809b82fd346b3d`:
+normal actions `JhkugU`, ASan `5ByvNO`, TSan `BiJGKC` each 406/0; default
+attachments `m5ZzPw` 408/0; exact controls `FjdqZa` 406/11, `vCkxoH` 406/18,
+`KmclQL` 406/29. All final runners exited 0, source/generated checks passed and
+the positive sanitizer logs are clean. The original Generic suite `w1GNPh`
+also passed 218/0, Audio `IRkJEA` 90/0, Window `M6DV70` 208/0 and CoreQueue
+`bkZiPh` 206/0. These latter suites have their own input manifests. The earlier
+table remains valid for its own frozen extractor, not silently relabelled.

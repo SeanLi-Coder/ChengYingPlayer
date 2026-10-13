@@ -64,7 +64,7 @@ case "${NATIVE_PLAYBACK_SANITIZER:-}" in
   address|thread) swift_flags+=("-sanitize=$NATIVE_PLAYBACK_SANITIZER" -g) ;;
   *) printf 'Unknown sanitizer\n'; exit 2 ;;
 esac
-controls=(positive deadline activation-status readback-cancel owner old-end-event prefix cleanup-unload)
+controls=(positive deadline activation-status readback-cancel owner old-end-event prefix cleanup-unload initial-idle)
 runtime_arguments=()
 if [[ -n "${MPV_QUEUE_PARTIAL_CANCELLATIONS:-}" ]]; then
   case "$MPV_QUEUE_PARTIAL_CANCELLATIONS" in ''|*[!0-9]*) exit 2 ;; esac
@@ -92,8 +92,10 @@ for control in "${controls[@]}"; do
   test "$compile_status" -eq 0
   shasum -a 256 "$work/tests" >> "$work/generated-before.sha256"
   control_arguments=()
+  if [ "$control" != positive ]; then control_arguments=(legacy); fi
   if [ "${#runtime_arguments[@]}" -gt 0 ]; then control_arguments=("${runtime_arguments[@]}"); fi
   if [ "$control" = cleanup-unload ]; then control_arguments=(cleanup-hooks); fi
+  if [ "$control" = initial-idle ]; then control_arguments=(startup-load); fi
   set +e
   /usr/bin/perl -e 'alarm 75; exec @ARGV' "$work/tests" "$test_dir" ${control_arguments[@]+"${control_arguments[@]}"} > "$work/results.log" 2>&1
   status=$?
@@ -108,6 +110,6 @@ for control in "${controls[@]}"; do
   else
     test "$status" -eq 1
     /usr/bin/grep -E '^FAIL:' "$work/results.log" > "$work/failures.log"
-    xcrun swift Tools/MPVQueueInstallerTests/verify_negative.swift "$control" "$work/failures.log"
+    xcrun swift Tools/MPVQueueInstallerTests/verify_negative.swift "$control" "$work/failures.log" "$work/results.log"
   fi
 done

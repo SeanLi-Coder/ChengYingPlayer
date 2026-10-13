@@ -38,7 +38,8 @@ driver = driver_dir / "run.sh"
 driver.write_text(script)
 print(f"Driver: {driver}", flush=True)
 environment = os.environ.copy()
-targeted_cases = {"early-invalidation": "retiring", "remove-inventory-gate": "inventory"}
+targeted_cases = {"early-invalidation": "retiring", "remove-inventory-gate": "inventory",
+                  "busy-mute": "actions", "busy-frame-step": "actions", "busy-screenshot": "actions"}
 if environment.get("NATIVE_SUBTITLE_NEGATIVE_CONTROL") in targeted_cases:
     environment.setdefault("NATIVE_SUBTITLE_CASE", targeted_cases[environment["NATIVE_SUBTITLE_NEGATIVE_CONTROL"]])
 raise SystemExit(subprocess.run(["/bin/bash", str(driver)], cwd=root, env=environment).returncode)

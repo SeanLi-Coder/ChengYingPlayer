@@ -4,6 +4,8 @@ let source = try String(contentsOfFile: CommandLine.arguments[1], encoding: .utf
 let destination = CommandLine.arguments[2]
 let mode = CommandLine.arguments[3]
 let changes: [String: (String, String)] = [
+  "initial-idle": ("guard backend.queueHasReachedInitialIdle else { return }",
+                   "// Negative control: skip the initial real IDLE fence."),
   "deadline": ("private func beforeDeadline(_ value: Operation) -> Bool { clock() < value.deadline }",
                "private func beforeDeadline(_ value: Operation) -> Bool { true }"),
   "activation-status": ("var activationAcknowledged = false", "var activationAcknowledged = true"),

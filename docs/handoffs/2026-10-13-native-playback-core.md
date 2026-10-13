@@ -22,6 +22,38 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 
 ### 当前整合检查点
 
+2026-10-13 继续开发，新增首次 idle 队列门禁、忙操作保护和音频偏好路由修补。
+以下是尚待新冻结 CI 的局部结果，不修改随后保留的旧 CI 失败状态。
+
+- 安装器等待真实 `MPV_EVENT_IDLE`，原 deadline／owner／current-playing 卸载屏障不变。
+  本地普通／ASan／TSan 各 253/0、八组精确负控；200 次八项列表取消 TSan 为 600/0。
+  真实事件延迟确认测试不是把 MPV worker 固定在 prepare_playlist 之前，不能声称已经
+  确定性重现旧 CI 的调度。锁定 MPV 0.38 的源码顺序支持该保守门禁；升级库必须重新核实。
+- 静音、逐帧、截图入口此前在非 generic 交接、异步 inventory 和半建队列中可写 MPV
+  或撤销旋转 owner。旧 Core `fbbc0af8` 的 `95G3mE` 为 353/52，保留真实命令／状态证据。
+  Core `c0c69a4a` 加三处首行 gate；actions 三模式均 406/0，三个精确负控 11／18／29
+  项失败，原附件 408/0。正常 native 与已恢复 MPV 都有可用性正对照；截图只验证生产
+  准入前缀和计数服务边界，不声称截图文件／像素验证。
+- 偏好设置设备选择此前仅改全局 UserDefaults，KVO 直接写闲置 MPV。现改主线程
+  Core 路由、最新值合并、退出取消和真实 reader shutdown 门禁；一次 native 交接失败
+  后不自动无限重试。此专项为真实 KVO／AppKit 控件与明确 Core 投递记录边界，实际
+  Session／libmpv 设备交接由原 90 项专项另行验证，不证明物理声卡输出。
+  最终 Controller `4af2e24d` 的真实 KVO 三模式各 31/0，五个精确负控为
+  18／3／2／1／2 项失败，编译／完整标签／子进程／身份／sanitizer 门禁通过；根代理
+  独立复核八份 source-before/after、生成 Swift 与二进制 SHA 及最终退出状态。
+  同值 UserDefaults 写入实际不发 KVO，不承诺重新选同一个已保存设备立即重试；
+  改选不同值或下次开片按保存偏好处理，实际限制和中途错误假设均保留在专项 README。
+- 本轮普通 Generic 夹具 `nIIZs8` 在新增 gate 的 `hasPendingURLPlaylistEnqueue` 依赖处
+  编译失败，未运行断言。已抽取真实单行 getter，派生 Audio 防重复，Subtitle 在替换
+  真实 enqueue 块前撤掉重复 accessor；生产逻辑不因夹具改动改变。最终普通 Generic
+  `w1GNPh` 218/0、Audio `IRkJEA` 90/0、Window `M6DV70` 208/0、附件 `m5ZzPw` 408/0；
+  新共享清单下 actions 普通／ASan／TSan `JhkugU`／`5ByvNO`／`BiJGKC` 各 406/0，
+  三精确负控 `FjdqZa`／`vCkxoH`／`KmclQL` 为 11／18／29 项准确失败、验证器 0。
+
+续播尚未实现，设计与具体静态缺口另见
+[续播保存与兼容恢复设计](2026-10-13-native-resume-design.md)。正式默认仍 MPV，
+没有版本／发布／签名／更新源变更，不能因这批专项通过而宣布整体替换完成。
+
 最新开发 CI `38381002473` 于 2026-10-13 10:05:47 UTC 派发，冻结
 `0455ab7c7dc207e3bc46349eda1ea6c148c1b891`，已结束且整体失败。
 `upload_development_build=false`；没有新发行或可交付 App 验收结论。

@@ -79,6 +79,7 @@ final class MPVController: MPVQueueInstallationBackend {
   }
   func queueSetPaused() -> Int32? { client.queueSetPaused() }
   func queueSnapshot() -> MPVQueueInstallationSnapshot? { client.queueSnapshot() }
+  var queueHasReachedInitialIdle: Bool { client.queueHasReachedInitialIdle }
   func beginNativeQueueInstallation(owner: UUID, receive: @escaping (MPVQueueInstaller.Event) -> Void) -> Bool {
     guard self.owner == nil, player?.captureMPVEventRevision() == nil else { return false }
     self.owner = owner; receiver = receive; contextEntryID = nil
@@ -109,6 +110,7 @@ final class MPVController: MPVQueueInstallationBackend {
   }
   func pump() {
     guard let event = mpv_wait_event(client.handle, 0) else { return }
+    client.noteQueueEvent(event.pointee.event_id)
     let receiver = receiver
     switch event.pointee.event_id {
     case MPV_EVENT_START_FILE:

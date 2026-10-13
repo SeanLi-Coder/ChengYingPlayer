@@ -49,6 +49,13 @@ class PrefCodecViewController: PreferenceViewController, PreferenceWindowEmbedda
   }
 
   @IBAction func audioDeviceAction(_ sender: Any) {
+    guard PlayerCore.playerCores.allSatisfy({
+      $0.info.state == .shuttingDown || $0.info.state == .shutDown || $0.canSelectAudioDevice
+    }) else {
+      updateAudioDevicePopUp()
+      Utility.showAlert("audio_device.busy", style: .informational, sheetWindow: view.window)
+      return
+    }
     let device = audioDevicePopUp.selectedItem!.representedObject as! MPVAudioDevice
     Preference.set(device.name, for: .audioDevice)
     Preference.set(device.desc, for: .audioDeviceDesc)

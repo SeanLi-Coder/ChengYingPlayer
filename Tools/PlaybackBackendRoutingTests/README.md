@@ -141,3 +141,56 @@ runner `536ab5ed47fab0d4e6b46ab5858c885fcf200082896920b51a2e5c5824eaf879`：
   `Pending restore volume is resolved at delivery for info UI and OSD` 退出 1；验证器退出 0。
 - 四次运行源码／生成物前后 SHA 一致，三正向运行无 sanitizer 诊断。既有停止协议
   及测试断言未改变；此前十二个停止／路由负控的精确证据保留于上一节，本次未重跑。
+
+## 首次真实 idle 事件门禁
+
+安装器新增首次 idle fence：Controller 在事件读取线程、native／取消停止路由过滤之前，
+用 Atomic 记录实际 `MPV_EVENT_IDLE`；该事实属于同一个 MPV handle，不借用安装 owner，
+shutdown 后不再报告就绪。安装器在原有 10 秒 deadline 内等待，不用 `idle-active` 属性、
+空 playlist 或成功的 pause 命令代替这一事件。原有卸载 current/playing 检查未改变。
+该顺序依赖锁定的 MPV 0.38 实现，升级必须重新核对，不能视为 deprecated IDLE API 的通用保证。
+
+专项从真实 `mpv_wait_event` 取出首次 IDLE 并暂缓交给生产 `handleEvent`，验证此时真实 playlist
+仍为空且没有媒体命令；随后交付同一事件，确认记录先于 native gate，且没有普通 UI/plugin 回调，
+再沿原真实 queue 场景验证 selected START、FILE_LOADED、entry ID 和节点 readback。
+这是延迟事件读取确认的行为测试，**不是**将 worker 固定在 startup `prepare_playlist` 之前，
+也不声称确定性复现历史 CI 调度。CI 原失败及锁定源码解释另见安装器专项 README。
+
+新单变量负控 `--negative-control initial-idle-recording` 仅删除生产事件记录，运行完整的
+独立 7 检查范围，必须只在
+`Production reader records actual IDLE before the native presentation gate` 失败，child 退出 1。
+验证器同时要求唯一 CASE、7/1 summary、总计 7 条 PASS/FAIL 和精确唯一 FAIL；缺项、额外失败、
+crash、timeout 或 sanitizer 诊断均拒绝。`--initial-idle-only` 跑同一范围的 7/0 正对照。
+默认全正向继续调用同一个 helper，再完成真实 selected load；没有删掉旧范围断言。
+已有部分列表取消场景先等待真实 IDLE，再断言实际八项前缀，不能以空取消代替原测试。
+
+上一冻结 controller `7afa7834186b0d60703034d7d1d062fd27b8dba5761c61a06a9ad783a26fc63c`、
+Core `c0c69a4a99b0fd92a4bedda2aa86f453ca77a4f73b9073c477697004323a94e1` 下：
+
+- 独立正对照 `efrnihgu` 为 7/0；负控 `5z5oo93w` 为精确 7/1、child 1、验证器 0。
+- 默认完整正向：普通 `g3qaqli_` 为 220/0，ASan `4cx5tcnv` 为 235/0，TSan `2aobwane` 为 251/0。
+  完整 suite 的计数包含实际异步等待中的主队列 drain 检查，因此随调度略变；没有删断言或延长时限。
+- 五次输入 manifest SHA-256 均为 `2fe26eb2f723d83cdd0fa78642769a6d6807fe220a483a8b079bdb6d9d83d521`，
+  source/generated 前后校验通过，无 sanitizer 诊断，runner 均退出 0。
+
+上述目录使用 `build/native-mpv-event-bridge.` 前缀。本轮新增门禁的负控范围只有明确的 7 项，
+没有宣称本轮重跑此前全部 13 个 bridge 控制。Controller 后段音频设备 KVO 虽纳入整文件输入 hash，
+并不在本 suite 的事件桥抽取范围内；它的行为由独立专项验证。
+
+Controller 后段新增每个音频偏好请求最多一次 native 交接尝试后，最终整文件
+`bf4deeba61947dd675e65792404e0c3138ed9a9f5d3c0e2a994b8356f9a23996`
+（Core 仍为上述 `c0c69a4a…`）重新完成同组验证：普通 `67zve9ln` 217/0、
+ASan `zo9i6yt2` 235/0、TSan `p8w6gdm7` 240/0，独立正对照 `9lhl6zhb` 7/0，
+精确负控 `s5dspzep` 7/1（child 1，验证器 0）。五次输入 manifest SHA-256 均为
+`759d69a3427a6fc306f5d5965fecf4871d1d40d4f203a2f338c5ef4728d73675`；
+编译均为 0，source/generated 前后校验通过，无 sanitizer 诊断，runner 均为 0。
+保留上一冻结的全部证据，不将本 bridge 复验误记为后段 KVO 行为验证。Installer
+输入未改变，未因这一后段修改重复运行安装器专项。
+
+最终 Controller `4af2e24de31130e033782dd371ba3027d052ae956001aa000bfac6e31b21d26d`
+仅将后段 warning 文案改为准确的“下次打开媒体应用保留偏好”。根代理重新调用实际
+extract_production，确认其两份生成 Swift 与 `67zve9ln` 逐字节相同：Production SHA
+`838d59584fc76bdeb8e722bb00cff792b9779e128c2a9ba9b6f5ff1cd48d963e`，Player SHA
+`5452b5418df9eaa42da5a5b212613ffb3980007533d78c2ed2aefe5cc3af9dce`。
+没有为了日志文案再重复三模式；上表完整文件输入身份仍明确属于 bf4deeba，不能说
+4af2e24d 已完成新的同源 CI。其后段行为以最终音频偏好专项为准。

@@ -158,6 +158,7 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
 
   @Atomic private var awaitingFirstRoutedStart = false
   @Atomic private var hasReceivedShutdown = false
+  @Atomic private var hasReachedInitialQueueIdle = false
   @Atomic private var nativeQueueEventOwner: UUID? = nil
   @Atomic private var nativeQueueStopEventOwner: UUID? = nil
   // The sink is main-owned; the preceding START identity is event-reader-owned.
@@ -361,6 +362,8 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
     guard mpv != nil, !hasReceivedShutdown else { return nil }
     return setString(MPVOption.PlaybackControl.pause, "yes")
   }
+
+  var queueHasReachedInitialIdle: Bool { hasReachedInitialQueueIdle && !hasReceivedShutdown }
 
   func queueSnapshot() -> MPVQueueInstallationSnapshot? {
     dispatchPrecondition(condition: .onQueue(.main))
@@ -582,6 +585,7 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
   }
 
   deinit {
+    audioDevicePreferenceWorkItem?.cancel()
     removeOptionObservers()
   }
 
@@ -1064,6 +1068,7 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
   ///     has shutdown is not permitted by mpv and can trigger a crash. During shutdown mpv will emit property change events,
   ///     thus it is critical that observers be removed, otherwise they may access the core and trigger a crash.
   func removeObservers() {
+    cancelPendingAudioDevicePreference()
     // Remove observers for IINA preferences. Must not attempt to change a mpv setting in response
     // to an IINA preference change while mpv is shutting down.
     removeOptionObservers()
@@ -1083,6 +1088,7 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
 
   /// Shutdown this mpv controller.
   func mpvQuit() {
+    cancelPendingAudioDevicePreference()
     // Remove observers for IINA preference. Must not attempt to change a mpv setting
     // in response to an IINA preference change while mpv is shutting down.
     removeOptionObservers()
@@ -1449,6 +1455,9 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
 
   // Handle the event
   private func handleEvent(_ event: UnsafePointer<mpv_event>) {
+    // In our pinned MPV, the first IDLE follows startup prepare_playlist.
+    // Record it even when native ownership suppresses presentation events.
+    if event.pointee.event_id == MPV_EVENT_IDLE { hasReachedInitialQueueIdle = true }
     if routeNativeQueueEvent(event) { return }
     let eventId = event.pointee.event_id
     let routeRevision = nativeQueueStopEventOwner == nil ? player.captureMPVEventRevision() : nil
@@ -2072,6 +2081,10 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
   }
 
   private var optionObservers: [String: [OptionObserverInfo]] = [:]
+  // These request fields are main-thread owned. KVO may arrive on any thread.
+  private var audioDevicePreferenceRequestID: UUID?
+  private var audioDevicePreferenceWorkItem: DispatchWorkItem?
+  private var audioDevicePreferenceAttemptedNative = false
 
   private func setOptionFlag(_ name: String, _ flag: Bool, level: Logger.Level = .debug,
                              verboseIfDefault: Bool = false) -> Int32 {
@@ -2215,6 +2228,11 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
     }
     guard !(change?[NSKeyValueChangeKey.oldKey] is NSNull) else { return }
 
+    if keyPath == PK.audioDevice.rawValue {
+      DispatchQueue.main.async { [weak self] in self?.audioDevicePreferenceDidChange() }
+      return
+    }
+
     guard let keyPath = keyPath else { return }
     guard let infos = optionObservers[keyPath] else { return }
 
@@ -2252,6 +2270,64 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
         }
       }
     }
+  }
+
+  private func audioDevicePreferenceDidChange() {
+    dispatchPrecondition(condition: .onQueue(.main))
+    cancelPendingAudioDevicePreference()
+    let requestID = UUID()
+    audioDevicePreferenceRequestID = requestID
+    applyPendingAudioDevicePreference(requestID)
+  }
+
+  private func applyPendingAudioDevicePreference(_ requestID: UUID) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard audioDevicePreferenceRequestID == requestID else { return }
+    guard mpv != nil, !hasReceivedShutdown,
+          player.info.state != .shuttingDown, player.info.state != .shutDown else {
+      cancelPendingAudioDevicePreference()
+      return
+    }
+    guard player.canSelectAudioDevice else {
+      scheduleAudioDevicePreference(requestID)
+      return
+    }
+    // Apply the latest global preference, not a captured action for an old file.
+    // Native output changes must pass through Core's owned compatibility handoff.
+    let requiresHandoff = player.isUsingNativePlayback || player.hasNativePlaybackQueue
+    if requiresHandoff && audioDevicePreferenceAttemptedNative {
+      // A capture failure or cancelled action leaves native output alive. Do
+      // not start another capture/OSD loop for this same preference request.
+      cancelPendingAudioDevicePreference()
+      log("Audio device preference was not applied; saved preference retained for the next media open", level: .warning)
+      return
+    }
+    if requiresHandoff { audioDevicePreferenceAttemptedNative = true }
+    if !requiresHandoff { cancelPendingAudioDevicePreference() }
+    player.setAudioDevice(Preference.effectiveAudioDeviceName)
+    if requiresHandoff { scheduleAudioDevicePreference(requestID) }
+  }
+
+  private func scheduleAudioDevicePreference(_ requestID: UUID) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard audioDevicePreferenceRequestID == requestID else { return }
+    audioDevicePreferenceWorkItem?.cancel()
+    let workItem = DispatchWorkItem { [weak self] in
+      self?.applyPendingAudioDevicePreference(requestID)
+    }
+    audioDevicePreferenceWorkItem = workItem
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: workItem)
+  }
+
+  private func cancelPendingAudioDevicePreference() {
+    if !Thread.isMainThread {
+      DispatchQueue.main.async { [weak self] in self?.cancelPendingAudioDevicePreference() }
+      return
+    }
+    audioDevicePreferenceRequestID = nil
+    audioDevicePreferenceAttemptedNative = false
+    audioDevicePreferenceWorkItem?.cancel()
+    audioDevicePreferenceWorkItem = nil
   }
 
   // MARK: - Utils

@@ -4,6 +4,7 @@ let mode = CommandLine.arguments[1]
 let failures = try String(contentsOfFile: CommandLine.arguments[2], encoding: .utf8)
   .split(separator: "\n").map(String.init)
 let expected: [String: [String]] = [
+  "initial-idle": ["startup-selected-last: no append or activation precedes the real initial IDLE acknowledgement"],
   "deadline": [
     "Installation reaches a bounded terminal outcome",
     "Withheld loaded event times out and cleans its own queue",
@@ -44,5 +45,12 @@ let expected: [String: [String]] = [
 guard let names = expected[mode], failures.count == names.count,
       failures.sorted() == names.map({ "FAIL: " + $0 }).sorted() else {
   fatalError("Unexpected installer negative-control failures for \(mode): \(failures)")
+}
+let output = try String(contentsOfFile: CommandLine.arguments[3], encoding: .utf8)
+  .split(separator: "\n").map(String.init)
+let count = mode == "initial-idle" ? 6 : mode == "cleanup-unload" ? 16 : 207
+guard output.filter({ $0.hasPrefix("Queue installer:") }) == ["Queue installer: \(count) checks, \(names.count) failures"],
+      output.filter({ $0.hasPrefix("PASS:") || $0.hasPrefix("FAIL:") }).count == count else {
+  fatalError("Incomplete installer negative-control run for \(mode)")
 }
 print("PASS: \(mode) negative control reproduces exactly \(names.count) named failures")

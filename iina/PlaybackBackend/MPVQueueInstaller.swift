@@ -18,6 +18,9 @@ struct MPVQueueInstallationSnapshot: Equatable {
 /// Production integration must retain MPVController's media-command accounting
 /// and event gate. A missing handle/result is a failure, never implicit success.
 protocol MPVQueueInstallationBackend: AnyObject {
+  /// A real IDLE event must have reached this handle's event reader. Initial
+  /// idle-active properties can precede MPV's startup playlist preparation.
+  var queueHasReachedInitialIdle: Bool { get }
   func queueCommand(_ arguments: [String]) -> Int32?
   func queueSetPaused() -> Int32?
   func queueSnapshot() -> MPVQueueInstallationSnapshot?
@@ -119,6 +122,7 @@ final class MPVQueueInstaller {
     if value.phase == .cleaning { advanceCleanup(value); return }
     guard beforeDeadline(value) else { fail(value, .timedOut); return }
     guard value.phase == .appending else { return }
+    guard backend.queueHasReachedInitialIdle else { return }
     for _ in 0..<Self.commandsPerAdvance {
       guard owns(value), value.phase == .appending else { return }
       guard beforeDeadline(value) else { fail(value, .timedOut); return }

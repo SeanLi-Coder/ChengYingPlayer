@@ -32,6 +32,10 @@ final class LiveQueueClient: MPVQueueInstallationBackend {
   var dropLoadedEvents = false
   var heldHookName: String?
   private(set) var heldHookID: UInt64?
+  private(set) var queueHasReachedInitialIdle = false
+  private var holdInitialIdle: Bool
+  private(set) var heldIdleEvents = 0
+  private(set) var idleEvents = 0
   private(set) var diagnostics: [String] = []
 
   private func record(_ value: String) {
@@ -39,7 +43,8 @@ final class LiveQueueClient: MPVQueueInstallationBackend {
     if diagnostics.count > 40 { diagnostics.removeFirst(diagnostics.count - 40) }
   }
 
-  init(directory: URL) {
+  init(directory: URL, holdInitialIdle: Bool = false) {
+    self.holdInitialIdle = holdInitialIdle
     guard let mpv = mpv_create() else { fatalError("Cannot create real libmpv") }
     handle = mpv
     for (key, value) in ["config": "no", "config-dir": directory.path, "terminal": "no", "vo": "null",
@@ -60,6 +65,20 @@ final class LiveQueueClient: MPVQueueInstallationBackend {
     heldHookID = nil
     heldHookName = nil
     return mpv_hook_continue(handle, id)
+  }
+
+  func noteQueueEvent(_ eventID: mpv_event_id) {
+    guard eventID == MPV_EVENT_IDLE else { return }
+    idleEvents += 1
+    if holdInitialIdle { heldIdleEvents += 1 }
+    else { queueHasReachedInitialIdle = true }
+    record("idle event=\(idleEvents) held=\(holdInitialIdle)")
+  }
+
+  func releaseInitialIdle() {
+    precondition(holdInitialIdle && heldIdleEvents > 0, "No actual initial idle event is held")
+    holdInitialIdle = false
+    queueHasReachedInitialIdle = true
   }
 
   func rawCommand(_ arguments: [String]) -> Int32 {
@@ -124,6 +143,7 @@ final class LiveQueueClient: MPVQueueInstallationBackend {
   }
   func pump(_ installer: MPVQueueInstaller) {
     guard let event = mpv_wait_event(handle, 0.002) else { return }
+    noteQueueEvent(event.pointee.event_id)
     switch event.pointee.event_id {
     case MPV_EVENT_START_FILE:
       let id = event.pointee.data.assumingMemoryBound(to: mpv_event_start_file.self).pointee.playlist_entry_id

@@ -17,6 +17,10 @@ core = (out / "Core.swift").read_text()
 core += "\nextension PlayerCore {\n" + ended + "\n}\n"
 start = source.index("  func frameStep(")
 core += "\nextension PlayerCore {\n" + source[start:source.index("\n  }", start) + 4] + "\n}\n"
+start = source.index("  var canAttachExternalPlaybackData:")
+core += "\nextension PlayerCore {\n" + source[start:source.index("\n  }", start) + 4] + "\n}\n"
+enqueue_accessor = next(line for line in source.splitlines() if "var hasPendingURLPlaylistEnqueue:" in line)
+core += "\nextension PlayerCore {\n" + enqueue_accessor + "\n}\n"
 window_source = (root / "iina/PlayerWindowController.swift").read_text()
 start = window_source.index("  private func handleGuardedPlaybackCommand(")
 handler = window_source[start:window_source.index("\n  }", start) + 4].replace("private ", "")
@@ -64,7 +68,9 @@ boundary = boundary.replace(before, before + "\n  var beforeLoaded: (() -> Void)
 begin = boundary.index("  func pump() {")
 end = boundary.index("  func lockAndSetOpenGLContext()", begin)
 pump = '''  func pump() {
-    guard let event = mpv_wait_event(client.handle, 0), let player else { return }
+    guard let event = mpv_wait_event(client.handle, 0) else { return }
+    client.noteQueueEvent(event.pointee.event_id)
+    guard let player else { return }
     let revision = player.captureMPVEventRevision()
     switch event.pointee.event_id {
     case MPV_EVENT_START_FILE:

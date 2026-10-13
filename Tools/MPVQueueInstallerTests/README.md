@@ -70,6 +70,7 @@ merely a nonzero exit:
 | Old END entry-ID gate | 2 |
 | Full-prefix validation | 1 |
 | Cleanup unload barrier | 4 |
+| Initial real IDLE fence | 1 (focused 6-check run) |
 
 The frozen installer `17a555f5db5e5654019ff8e2ad0ddabd423ce15d824b2e8d62cbb4c1a9ef10be`
 passed 191 positive checks in ordinary, AddressSanitizer, and ThreadSanitizer
@@ -176,3 +177,69 @@ Core must still restore the selected file's position, pause intent, volume, rate
 A/B range, and viewport, avoid AutoFileMatcher mutating the installed list, and
 confirm restoration before delivering a pending action. Model-only `verified`
 flags or controlled test boundaries cannot replace that real receipt.
+
+## Initial idle-loop fence and CI evidence
+
+Frozen development CI `38381002473` (`0455ab7c`) failed its ordinary positive
+run at `Actual activation command error is not reported as loaded` (207/1,
+`jMKL1y`). Its separate TSan 200-partial-cancellation run failed iterations
+50/80/156/164 (600/4, `tw1TEx`), without a sanitizer report. Both original runs
+are retained in `build/native-ci-38381002473-queue.pDioB2/`. Their bounded traces
+show an exact owned list, idle and paused, no path or playing entry, but a
+persistent first `current` entry. Complete-App 92+54 passing assertions do not
+override these independent failures. Later local unchanged-source runs
+`jbyp4M`, `1oN7ct` (207/0 and seven controls) and `APCnnD` (600/0) did not
+reproduce or close the failures.
+
+In the pinned MPV 0.38 source, `mpv_initialize` returns before the worker enters
+`mp_play_files`. Its `prepare_playlist` can select the first newly appended entry
+while the initial `PT_STOP` remains set. `stop keep-playlist` does not remove that
+selection, and idle-loop execution need not pass through normal file-retirement
+cleanup. Startup preparation can also overwrite an early non-first activation.
+This sequence explains the observed state and supports a conservative startup
+fence; the CI logs alone do not prove that exact interleaving occurred. The older
+191/1 failure remains separately recorded above, not retrospectively resolved.
+
+The backend now requires real initial `MPV_EVENT_IDLE` evidence before the first
+append. Controller records this handle-lifetime fact atomically on its event
+reader, before native/stop presentation gates. Installer waits within its
+original ten-second budget; owner, shutdown, overflow, cancellation and the
+separate two-second cleanup protocol remain intact. In pinned 0.38 this event
+occurs after startup playlist preparation. This is a version-specific ordering
+dependency, not a generic promise of MPV's deprecated IDLE API. An MPV upgrade
+must recheck it. No current/playing unload predicate was removed.
+
+The dedicated six scenarios retain an actual initial IDLE before acknowledging
+it to the backend. They prove no append/activation before acknowledgement,
+actual selected START/path after release, and bounded timeout/cancel/supersede/
+overflow/shutdown semantics with no late mutation of a subsequent owner's real
+replacement. Overflow/shutdown in these waiting scenarios are typed installer
+event injections; their existing real lifecycle cases remain separate. This
+does **not** hold the MPV worker before `prepare_playlist` and is not a
+deterministic replay of the CI interleaving. A prior Lua gate attempt (`KG2W0h`)
+compiled but exited 133 at setup because this distribution disables scripting
+(`scripts` returned -5); it produced no startup behavior evidence. Its original
+files and logs remain in that owned build directory. Draft compile failure
+`rZ2CYC` is also retained.
+
+The original 207 assertions start after actual IDLE readiness. Their six
+original controls still run all 207 checks; `cleanup-unload` still runs 16/4.
+The new `initial-idle` control removes only the production append fence and runs
+the focused selected-last scenario, requiring exactly 6 checks/1 named failure.
+The verifier now also requires the complete declared check count and summary.
+The 200-cancellation mode explicitly requires eight actual appended entries
+before each cancellation, so startup waiting cannot silently turn this into an
+empty-list cancellation test. No existing deadline or assertion was relaxed.
+
+Final installer SHA-256
+`546115800bb54a895f3411bd2963e8ec099feca6913d8b8748db0da1d3c18511`
+passed ordinary `Diy3Q1`, ASan `frYcbo`, and TSan `119MmG`: 253/0 positives,
+all eight exact controls, and runner exit 0. TSan `fCkrU3` separately passed
+200 actual eight-entry partial cancellations (600/0, runner 0). All four share
+source-manifest SHA-256
+`ad1a7e5a7dc66d4c42de8e91a9242a65da016c021e65c825c768b8c28f10eb14`
+and verified dependency-manifest SHA-256
+`9e6e108fbbf90d6da7a47728047f15da747b2042385cfe8463dbb9a73c97f25c`.
+Source/generated/dependency postchecks passed, with no sanitizer diagnostic.
+These are local conservative-fence regression results, not proof of the exact
+historical CI scheduling interleaving or a substitute for the next same-source CI.

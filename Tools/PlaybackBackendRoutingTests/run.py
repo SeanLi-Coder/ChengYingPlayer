@@ -155,17 +155,26 @@ def extract_production(args):
         if generated.count(original) != 1:
             raise RuntimeError("Pending restore volume boundary changed")
         generated = generated.replace(original, "let volume = data")
+    elif args.negative_control == "initial-idle-recording":
+        original = "if event.pointee.event_id == MPV_EVENT_IDLE { hasReachedInitialQueueIdle = true }"
+        if generated.count(original) != 1:
+            raise RuntimeError("Initial idle recording boundary changed")
+        generated = generated.replace(original, "// Negative control: discard actual startup IDLE evidence.")
     return generated, player
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sanitize", choices=["address", "thread"])
+    parser.add_argument("--initial-idle-only", action="store_true")
     parser.add_argument("--negative-control", choices=["epoch", "first-start", "queue-owner", "queue-start-context",
                                                      "queue-stop-completion", "queue-stop-current", "queue-stop-route",
                                                      "queue-stop-event-gate", "queue-stop-keep-list", "queue-stop-list-owner",
-                                                     "queue-stop-reader-drain", "queue-stop-preparation", "pending-volume"])
+                                                     "queue-stop-reader-drain", "queue-stop-preparation", "pending-volume",
+                                                     "initial-idle-recording"])
     args = parser.parse_args()
+    if args.initial_idle_only and args.negative_control not in {None, "initial-idle-recording"}:
+        parser.error("The initial idle scope cannot run another negative control")
     sources = [ROOT / name for name in COMPILED_SOURCES + ["iina/MPVController.swift", "iina/PlayerCore.swift",
         "Tools/PlaybackBackendRoutingTests/run.py", "deps/include/mpv/client.h"]]
     sources += sorted((ROOT / "deps/lib").glob("*.dylib"))
@@ -196,7 +205,11 @@ def main():
         if compilation.returncode:
             print(compilation.stderr, end="")
         compilation.check_returncode()
-        result = subprocess.run([str(executable), str(media), str(video)], capture_output=True, text=True, timeout=35)
+        initial_idle_only = args.initial_idle_only or args.negative_control == "initial-idle-recording"
+        runtime = [str(executable), str(media), str(video)]
+        if initial_idle_only:
+            runtime.append("initial-idle-only")
+        result = subprocess.run(runtime, capture_output=True, text=True, timeout=35)
         (work / "stdout.log").write_text(result.stdout)
         (work / "stderr.log").write_text(result.stderr)
         (work / "exit-status.txt").write_text(str(result.returncode) + "\n")
@@ -204,6 +217,20 @@ def main():
         print(result.stderr, end="")
         if "WARNING: ThreadSanitizer" in result.stderr or "ERROR: AddressSanitizer" in result.stderr:
             raise RuntimeError("Event bridge emitted a sanitizer diagnostic")
+        if initial_idle_only:
+            expected = "FAIL: Production reader records actual IDLE before the native presentation gate"
+            expected_failures = 1 if args.negative_control else 0
+            failures = [line for line in (result.stdout + result.stderr).splitlines() if line.startswith("FAIL:")]
+            summaries = [line for line in result.stdout.splitlines() if line.startswith("Initial idle bridge:")]
+            cases = [line for line in result.stdout.splitlines() if line.startswith("CASE:")]
+            passes = [line for line in result.stdout.splitlines() if line.startswith("PASS:")]
+            if (result.returncode != expected_failures or cases != ["CASE: initial-idle"]
+                    or summaries != [f"Initial idle bridge: 7 checks, {expected_failures} failures"]
+                    or failures != ([expected] if expected_failures else [])
+                    or len(passes) + len(failures) != 7):
+                raise RuntimeError("Initial idle scope did not produce its complete exact result")
+            print("PASS: Exact initial idle scope accepted")
+            return
         if args.negative_control:
             expected = {"epoch": "Old queued callbacks cannot alias a new MPV epoch",
                         "first-start": "First-load barrier rejects startup properties before START_FILE",
@@ -217,7 +244,8 @@ def main():
                         "queue-stop-list-owner": "Cancelled stop cannot clear foreign entries or falsely acknowledge idle",
                         "queue-stop-reader-drain": "Actual idle cannot reopen until the old reader backlog is drained",
                         "queue-stop-preparation": "Special stop suppresses premature ordinary idle and media callbacks after START",
-                        "pending-volume": "Pending restore volume is resolved at delivery for info UI and OSD"}[args.negative_control]
+                        "pending-volume": "Pending restore volume is resolved at delivery for info UI and OSD",
+                        "initial-idle-recording": "Production reader records actual IDLE before the native presentation gate"}[args.negative_control]
             if result.returncode != 1 or "FAIL: " + expected not in result.stderr:
                 raise RuntimeError("Negative control did not fail at the intended invariant: " + result.stderr)
             print("PASS: Negative control rejected: " + expected)

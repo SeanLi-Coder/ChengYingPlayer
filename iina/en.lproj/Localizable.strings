@@ -317,6 +317,7 @@
 "menu.resume" = "Resume";
 "menu.speed" = "Speed: %@x";
 "menu.audio_device.image_disabled" = "Switch to a video window to select its audio device";
+"alert.audio_device.busy" = "Audio output cannot be changed while a video is opening or switching playback engines. Wait for the transition to finish, then select the device again. Your saved preference has not changed.";
 "menu.chapters" = "Show Chapters Panel";
 "menu.hide_chapters" = "Hide Chapters Panel";
 "menu.playlist" = "Show Playlist Panel";

@@ -23,6 +23,8 @@ def replace_once(text, before, after):
 
 core = (out / "Core.swift").read_text()
 # Exercise actual enqueue ownership rather than the inherited no-enqueue service.
+enqueue_accessor = next(line for line in core_source.splitlines() if "var hasPendingURLPlaylistEnqueue:" in line)
+core = replace_once(core, enqueue_accessor + "\n", "")
 no_enqueue = (root / "Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt").read_text().replace("private ", "")
 start = core_source.index("  private struct URLPlaylistRequest")
 end = core_source.index("  func appendToPlaylist(", start)
@@ -39,9 +41,16 @@ core += "\nextension PlayerCore {\n" + next(line for line in core_source.splitli
 core = replace_once(core, "final class PlayerCore {", """final class PlayerCore {
   @Atomic var expectedFolderMatchURL: URL?
   @Atomic var folderMatchRequests: [URL] = []
+  var acceptedScreenshotRequests = 0
 """)
-if "  var canAttachExternalPlaybackData:" in core_source:
+if "  var canAttachExternalPlaybackData:" not in core:
     core += "\nextension PlayerCore {\n" + method(core_source, "  var canAttachExternalPlaybackData:") + "\n}\n"
+core += "\nextension PlayerCore {\n" + method(core_source, "  func toggleMute(") + "\n}\n"
+# The screenshot admission prefix is production code. File creation/clipboard
+# presentation is a counted boundary, not a fabricated screenshot success.
+screenshot = method(core_source, "  func screenshot(")
+screenshot = screenshot[:screenshot.index("    let saveToFile =")]
+core += "\nstruct KeyMapping {}\nextension PlayerCore {\n" + screenshot + "    acceptedScreenshotRequests += 1\n    return true\n  }\n}\n"
 negative = os.environ.get("NATIVE_SUBTITLE_NEGATIVE_CONTROL", "")
 if negative:
     if negative == "early-invalidation":
@@ -63,6 +72,12 @@ if negative:
                             "    if hasPendingGenericPlaybackHandoff { return 0 }\n    // Subtitle attachments and other non-playable inputs are not a new media")
     elif negative == "remove-inventory-gate":
         core = replace_once(core, "      (nativeTransport != nil || playbackEventRoute.acceptsMPV) &&\n", "")
+    elif negative in ["busy-mute", "busy-frame-step", "busy-screenshot"]:
+        signature = {"busy-mute": "  func toggleMute(", "busy-frame-step": "  func frameStep(",
+                     "busy-screenshot": "  func screenshot("}[negative]
+        original = method(core, signature)
+        guard = "    guard canAttachExternalPlaybackData else { return" + (" false" if negative == "busy-screenshot" else "") + " }\n"
+        core = replace_once(core, original, replace_once(original, guard, ""))
     else:
         raise SystemExit("Unknown subtitle negative control")
 (out / "Core.swift").write_text(core)

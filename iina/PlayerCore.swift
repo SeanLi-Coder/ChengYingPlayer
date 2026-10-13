@@ -1760,8 +1760,8 @@ class PlayerCore: NSObject {
     openMainWindow(path: url.path, url: url, isNetwork: false)
   }
 
-  /// Attachments must not replace an owner or write into a partially restored
-  /// compatibility backend. A new media request has separate cancellation rules.
+  /// Attachments and non-deferred media actions must not replace an owner or write
+  /// into a partially restored backend. New media has separate cancellation rules.
   var canAttachExternalPlaybackData: Bool {
     !nativeTerminationRequested && info.state != .shuttingDown && info.state != .shutDown &&
       (nativeTransport != nil || playbackEventRoute.acceptsMPV) &&
@@ -2416,6 +2416,7 @@ class PlayerCore: NSObject {
   }
 
   func toggleMute(_ set: Bool? = nil) {
+    guard canAttachExternalPlaybackData else { return }
     if isUsingNativePlayback || hasPendingGenericPlaybackHandoff {
       requireMPVCompatibility(reason: "mute_track_state") { [weak self] in self?.toggleMute(set) }
       return
@@ -2545,6 +2546,7 @@ class PlayerCore: NSObject {
   }
 
   func frameStep(backwards: Bool) {
+    guard canAttachExternalPlaybackData else { return }
     cancelPendingPermanentRotation()
     if isUsingNativePlayback || hasPendingGenericPlaybackHandoff {
       requireMPVCompatibility(reason: "frame_step") { [weak self] in self?.frameStep(backwards: backwards) }
@@ -2591,6 +2593,7 @@ class PlayerCore: NSObject {
   /// `Preference.Key.screenshotIncludeSubtitle` to decide between `subtitles` or `video`.
   @discardableResult
   func screenshot(fromKeyBinding keyBinding: KeyMapping? = nil) -> Bool {
+    guard canAttachExternalPlaybackData else { return false }
     if isUsingNativePlayback || hasPendingGenericPlaybackHandoff {
       requireMPVCompatibility(reason: "screenshot") { [weak self] in _ = self?.screenshot(fromKeyBinding: keyBinding) }
       return true
@@ -3744,6 +3747,7 @@ class PlayerCore: NSObject {
   /// Do not accept another output change while a native owner is restoring MPV.
   var canSelectAudioDevice: Bool {
     !nativeTerminationRequested && info.state != .shuttingDown && info.state != .shutDown &&
+      (nativeTransport != nil || playbackEventRoute.acceptsMPV) &&
       !nativeRetiring && nativeCompatibilityCaptureID == nil && nativeCompatibilityRestore == nil &&
       !hasPendingGenericPlaybackHandoff && !hasPendingPermanentRotation && !hasPendingURLPlaylistEnqueue &&
       !nativeQueueLoadPending && nativeQueueInstallation == nil && nativeQueue?.phase != .handoffFailed

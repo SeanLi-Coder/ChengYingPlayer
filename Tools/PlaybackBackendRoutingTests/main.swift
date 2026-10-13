@@ -2,9 +2,15 @@ import Cocoa
 import QuartzCore
 
 var assertions = 0
+var failedAssertions = 0
+let initialIdleOnly = CommandLine.arguments.last == "initial-idle-only"
 func check(_ condition: @autoclosure () -> Bool, _ message: String) {
   assertions += 1
-  if !condition() { fputs("FAIL: \(message)\n", stderr); exit(1) }
+  if !condition() {
+    fputs("FAIL: \(message)\n", stderr)
+    if !initialIdleOnly { exit(1) }
+    failedAssertions += 1
+  } else if initialIdleOnly { print("PASS: \(message)") }
 }
 func pump() {
   var finished = false
@@ -56,6 +62,56 @@ func lifecycle(_ controller: MPVController) {
   var reason = MPV_END_FILE_REASON_STOP
   withUnsafeMutablePointer(to: &reason) { event(controller, MPV_EVENT_END_FILE, data: $0) }
   event(controller, MPV_EVENT_COMMAND_REPLY, reply: MPVController.UserData.screenshot)
+}
+
+func checkInitialIdleFence(_ controller: MPVController, player: PlayerCore, installer: MPVQueueInstaller) {
+  // Retain a real event before the production reader handles it. MPV has already
+  // emitted IDLE; this is a delayed-reader test, not a held startup worker.
+  var retainedInitialIdle: mpv_event?
+  let initialIdleDeadline = Date().addingTimeInterval(2)
+  while retainedInitialIdle == nil && Date() < initialIdleDeadline {
+    controller.queue.sync {
+      guard let pending = mpv_wait_event(controller.mpv, 0.01) else { return }
+      if pending.pointee.event_id == MPV_EVENT_IDLE { retainedInitialIdle = pending.pointee }
+      else if pending.pointee.event_id != MPV_EVENT_NONE { controller.handleEvent(pending) }
+    }
+  }
+  check(retainedInitialIdle != nil && !controller.queueHasReachedInitialIdle,
+        "Real initial IDLE is retained before the production reader acknowledges it")
+  installer.advance()
+  check(controller.queueSnapshot()?.entries.isEmpty == true && !player.hasIssuedMPVMediaCommand,
+        "Production installer issues no append or activation before the initial idle fence")
+  if var retainedInitialIdle {
+    withUnsafePointer(to: &retainedInitialIdle) { pending in
+      controller.queue.sync { controller.handleEvent(pending) }
+    }
+  }
+  check(controller.queueHasReachedInitialIdle,
+        "Production reader records actual IDLE before the native presentation gate")
+  pump()
+  check(player.actions.isEmpty && player.events.calls == 0,
+        "Initial idle bookkeeping never leaks ordinary presentation or plugin events")
+}
+
+if initialIdleOnly {
+  print("CASE: initial-idle")
+  let player = PlayerCore()
+  let controller = MPVController(player)
+  controller.realPropertyReadback = true
+  route(player, enabled: false)
+  let url = URL(fileURLWithPath: CommandLine.arguments[2])
+  var state = try NativeQueueState(plan: NativeQueuePlan(urls: [url, url]), selectedIndex: 1)
+  let checkpoint = state.handoffCheckpoint()!
+  let token = state.beginHandoff(checkpoint)!
+  let installer = MPVQueueInstaller(backend: controller, isCurrent: { $0 == token })
+  check(controller.beginNativeQueueInstallation(owner: token.id, receive: { installer.receive($0) }),
+        "Initial idle fixture reserves the production native queue route")
+  check(installer.begin(checkpoint, installation: token, completion: { _ in
+    check(false, "Initial idle observation alone cannot complete an installation")
+  }) == .accepted, "Initial idle fixture admits an actual empty idle client")
+  checkInitialIdleFence(controller, player: player, installer: installer)
+  print("Initial idle bridge: \(assertions) checks, \(failedAssertions) failures")
+  exit(failedAssertions == 0 ? 0 : 1)
 }
 
 let player = PlayerCore()
@@ -323,6 +379,7 @@ check(mpv_hook_add(queueController.mpv, 99, "on_load", 100) == 0,
       "Queue load registers a real hook barrier")
 check(queueInstaller.begin(checkpoint, installation: installation, completion: { queueOutcome = $0 }) == .accepted,
       "Real production adapter accepts an empty idle client")
+checkInitialIdleFence(queueController, player: queuePlayer, installer: queueInstaller)
 let queueDeadline = Date().addingTimeInterval(5)
 while queueOutcome == nil && Date() < queueDeadline {
   queueInstaller.advance()
@@ -407,6 +464,12 @@ check(stoppedController.beginNativeQueueInstallation(owner: stoppedOwner, receiv
       "Cancelled queue reserves its actual production event bridge")
 check(stoppedInstaller.begin(stoppedCheckpoint, installation: stoppedInstallation, completion: { stoppedOutcome = $0 }) == .accepted,
       "Cancelled queue starts from a fresh real MPV client")
+let stoppedInitialIdleDeadline = Date().addingTimeInterval(2)
+while !stoppedController.queueHasReachedInitialIdle && Date() < stoppedInitialIdleDeadline {
+  stoppedController.readEvents(); pump()
+}
+check(stoppedController.queueHasReachedInitialIdle,
+      "Partial cancellation begins only after actual production initial idle acknowledgement")
 stoppedInstaller.advance()
 print("QUEUE_STOP_PREFIX_DIAGNOSTIC: \(String(describing: stoppedController.queueSnapshot()))")
 check(stoppedController.queueSnapshot()?.entries.count == 8 && stoppedController.queueSnapshot()?.idle == true &&

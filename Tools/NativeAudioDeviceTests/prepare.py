@@ -16,7 +16,9 @@ def member(source, signature):
 
 core = (out / "Core.swift").read_text()
 members = [member(source, "  func setAudioDevice(")]
-members.append(next(line for line in source.splitlines() if "var hasPendingURLPlaylistEnqueue:" in line))
+enqueue_accessor = next(line for line in source.splitlines() if "var hasPendingURLPlaylistEnqueue:" in line)
+if enqueue_accessor not in core:
+    members.append(enqueue_accessor)
 for signature in ["  var canSelectAudioDevice:", "  var currentAudioDeviceName:"]:
     if signature in source:
         members.append(member(source, signature))

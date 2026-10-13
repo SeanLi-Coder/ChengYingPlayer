@@ -522,7 +522,7 @@ jobs:
         timeout-minutes: 5
         run: |
           export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
-          for control in queue-stop-completion queue-stop-current queue-stop-route queue-stop-event-gate queue-stop-keep-list queue-stop-list-owner queue-stop-reader-drain queue-stop-preparation pending-volume; do
+          for control in queue-stop-completion queue-stop-current queue-stop-route queue-stop-event-gate queue-stop-keep-list queue-stop-list-owner queue-stop-reader-drain queue-stop-preparation pending-volume initial-idle-recording; do
             python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control "$control"
           done
 
@@ -741,6 +741,17 @@ jobs:
             NATIVE_AUDIO_DEVICE_NEGATIVE_CONTROL="$control" bash Tools/NativeAudioDeviceTests/run.sh
           done
 
+      - name: Test native audio-device preference observer routing
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 5
+        run: |
+          python3 -B Tools/NativeAudioPreferenceTests/run.py
+          python3 -B Tools/NativeAudioPreferenceTests/run.py --sanitizer address
+          python3 -B Tools/NativeAudioPreferenceTests/run.py --sanitizer thread
+          for control in direct-observer drop-ui-guard drop-inventory-guard drop-shutdown-guard retry-native; do
+            python3 -B Tools/NativeAudioPreferenceTests/run.py --negative "$control"
+          done
+
       - name: Preserve native audio-device evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -750,6 +761,9 @@ jobs:
             build/native-audio-device.*/*.sha256
             build/native-audio-device.*/*.log
             build/native-audio-device.*/*exit-status.txt
+            build/native-audio-preference.*/*.sha256
+            build/native-audio-preference.*/*.log
+            build/native-audio-preference.*/*.txt
           if-no-files-found: warn
           retention-days: 14
 
@@ -795,6 +809,17 @@ jobs:
           python3 -B Tools/NativeSubtitleDropTests/run.py
           NATIVE_PLAYBACK_SANITIZER=thread python3 -B Tools/NativeSubtitleDropTests/run.py
           for control in early-invalidation allow-busy-subtitle allow-busy-lut reject-new-media remove-inventory-gate; do
+            NATIVE_SUBTITLE_NEGATIVE_CONTROL="$control" python3 -B Tools/NativeSubtitleDropTests/run.py
+          done
+
+      - name: Test native busy media actions and settled compatibility admission
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 8
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          NATIVE_SUBTITLE_CASE=actions python3 -B Tools/NativeSubtitleDropTests/run.py
+          NATIVE_SUBTITLE_CASE=actions NATIVE_PLAYBACK_SANITIZER=thread python3 -B Tools/NativeSubtitleDropTests/run.py
+          for control in busy-mute busy-frame-step busy-screenshot; do
             NATIVE_SUBTITLE_NEGATIVE_CONTROL="$control" python3 -B Tools/NativeSubtitleDropTests/run.py
           done
 

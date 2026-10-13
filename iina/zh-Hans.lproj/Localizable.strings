@@ -317,6 +317,7 @@
 "menu.resume" = "继续";
 "menu.speed" = "播放速度";
 "menu.audio_device.image_disabled" = "切换到视频窗口后设置音频设备";
+"alert.audio_device.busy" = "视频正在打开或切换播放内核，暂时不能更改音频设备。请等切换完成后重新选择；原有偏好设置未改变。";
 "menu.chapters" = "显示章节面板";
 "menu.hide_chapters" = "隐藏章节面板";
 "menu.playlist" = "显示播放列表面板";

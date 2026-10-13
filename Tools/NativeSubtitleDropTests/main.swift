@@ -55,7 +55,7 @@ let emptyFolder = fixtureDirectory.appendingPathComponent("empty", isDirectory: 
 try! FileManager.default.createDirectory(at: emptyFolder, withIntermediateDirectories: false)
 Preference.pauseWhenOpen = true
 let selectedCase = ProcessInfo.processInfo.environment["NATIVE_SUBTITLE_CASE"] ?? "all"
-precondition(["all", "retiring", "attachments", "inventory"].contains(selectedCase))
+precondition(["all", "retiring", "attachments", "inventory", "actions"].contains(selectedCase))
 print("CASE: \(selectedCase)")
 
 func makeCore(queued: Bool = false) -> PlayerCore {
@@ -100,7 +100,30 @@ func hasActualLUT(_ core: PlayerCore) -> Bool {
   return filters.contains { $0["label"] as? String == "iina_quickl3d" && $0["name"] as? String == "lavfi" }
 }
 
-if selectedCase == "all" || selectedCase == "inventory" {
+func rejectBusyActions(_ core: PlayerCore, label: String) {
+  let capture = core.nativeCompatibilityCaptureID
+  let restore = core.nativeCompatibilityRestore?.id
+  let generic = core.genericHandoffOwner?.id
+  let route = core.playbackEventRoute.revision
+  let rotation = core.hasPendingPermanentRotation
+  let commands = core.mpv.client.commandNames
+  let mute = core.mpv.getFlag(MPVOption.Audio.mute)
+  let screenshots = core.acceptedScreenshotRequests
+  core.toggleMute(!mute)
+  check(core.mpv.getFlag(MPVOption.Audio.mute) == mute, "\(label) busy mute preserves actual MPV state")
+  core.frameStep(backwards: false)
+  core.frameStep(backwards: true)
+  check(core.mpv.client.commandNames == commands, "\(label) busy stepping issues no MPV command")
+  check(!core.screenshot(), "\(label) busy screenshot is explicitly rejected")
+  check(core.acceptedScreenshotRequests == screenshots, "\(label) busy screenshot never reaches export boundary")
+  check(core.nativeCompatibilityCaptureID == capture && core.nativeCompatibilityRestore?.id == restore &&
+        core.genericHandoffOwner?.id == generic && core.playbackEventRoute.revision == route &&
+        core.hasPendingPermanentRotation == rotation,
+        "\(label) busy actions preserve the existing owner and route")
+  print("DIAGNOSTIC: \(label) actionCommands=\(Array(core.mpv.client.commandNames.dropFirst(commands.count))) muteChanged=\(core.mpv.getFlag(MPVOption.Audio.mute) != mute) screenshotBoundary=\(core.acceptedScreenshotRequests - screenshots)")
+}
+
+if selectedCase == "all" || selectedCase == "inventory" || selectedCase == "actions" {
   let inventory = PlayerCore(); cores.append(inventory); PlayerCore.lastActive = inventory
   check(inventory.openMediaURLs([red], shouldAutoLoad: false) == 1,
         "Inventory test admits an actual native candidate")
@@ -116,6 +139,7 @@ if selectedCase == "all" || selectedCase == "inventory" {
   print("DIAGNOSTIC: inventory lutCommands=\(Array(inventory.mpv.client.commandNames.dropFirst(lutCommands.count)))")
   check(inventory.mpv.client.commandNames == lutCommands, "Inventory LUT issues no idle MPV command")
   check(inventory.playbackEventRoute.revision == route, "Inventory attachments preserve the pending media route")
+  if selectedCase == "actions" { rejectBusyActions(inventory, label: "inventory") }
   check(wait { inventory.isUsingNativePlayback && inventory.info.state == .paused },
         "Inventory completes the original actual native admission")
   close(inventory)
@@ -166,7 +190,7 @@ if let session = retiring.nativePlaybackSession,
 close(retiring)
 }
 
-if selectedCase == "all" || selectedCase == "attachments" {
+if selectedCase == "all" || selectedCase == "attachments" || selectedCase == "actions" {
   for action in ["generic", "rotation", "enqueue", "queue"] {
     for phase in ["capture", "retire", "loaded", "seek"] {
       let core = makeCore(queued: action == "queue")
@@ -209,6 +233,7 @@ if selectedCase == "all" || selectedCase == "attachments" {
       check(core.nativeCompatibilityCaptureID == captureID && core.nativeCompatibilityRestore?.id == restoreID &&
             core.genericHandoffOwner?.id == genericID && core.playbackEventRoute.revision == route,
             "\(label) attachments preserve the existing owner and route")
+      if selectedCase == "actions" { rejectBusyActions(core, label: label) }
       if phase == "capture" || phase == "retire" { barrier.finish(label) }
       if phase == "loaded" {
         core.mpv.holdLoaded = false; let deliver = core.mpv.heldLoaded; core.mpv.heldLoaded = nil; deliver?()
@@ -235,11 +260,45 @@ if selectedCase == "all" || selectedCase == "attachments" {
     print("DIAGNOSTIC: queue-prefix attachmentCommands=\(Array(installing.mpv.client.commandNames.dropFirst(commands.count)))")
     check(subtitleRejected && lutRejected, "Queue prefix rejects both busy attachment types")
     check(installing.mpv.client.commandNames == commands, "Queue prefix attachments issue no MPV command")
+    if selectedCase == "actions" { rejectBusyActions(installing, label: "queue-prefix") }
   }
   installing.requireMPVCompatibility(reason: "queue prefix attachments") { installed += 1 }
   check(wait(10) { installed == 1 }, "Queue prefix continues to a verified installation")
   check(observedPrefix, "Queue prefix test observes a real append before activation")
   close(installing)
+}
+
+if selectedCase == "actions" {
+  // Admission is not allowed to regress into rejecting every operation. Exercise
+  // each action from both a settled native session and already restored MPV.
+  for native in [true, false] {
+    for action in ["mute", "frame-step", "screenshot"] {
+      let core = makeCore()
+      let label = "\(native ? "Native" : "Legacy") settled \(action)"
+      if !native {
+        var ready = false
+        core.requireMPVCompatibility(reason: "settled action fixture") { ready = true }
+        check(wait(10) { ready }, "\(label) reaches fully restored MPV")
+      }
+      check(core.canAttachExternalPlaybackData, "\(label) has an open admission gate")
+      let commands = core.mpv.client.commandNames.count
+      switch action {
+      case "mute": core.toggleMute(true)
+      case "frame-step": core.frameStep(backwards: false)
+      default: check(core.screenshot(), "\(label) screenshot request is admitted")
+      }
+      check(wait(10) {
+        guard !core.isUsingNativePlayback && !core.hasPendingGenericPlaybackHandoff else { return false }
+        switch action {
+        case "mute": return core.mpv.getFlag(MPVOption.Audio.mute)
+        case "frame-step": return core.mpv.client.commandNames.dropFirst(commands).contains("frame-step")
+        default: return core.acceptedScreenshotRequests == 1
+        }
+      }, "\(label) reaches its actual MPV action or counted screenshot boundary")
+      check(core.mpv.getString("path") == red.path, "\(label) retains the selected media")
+      close(core)
+    }
+  }
 }
 
 if selectedCase == "all" {

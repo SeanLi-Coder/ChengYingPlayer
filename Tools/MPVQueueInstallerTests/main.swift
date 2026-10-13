@@ -19,7 +19,18 @@ final class InstallationRig {
   lazy var installer = MPVQueueInstaller(backend: client, isCurrent: { [weak self] in self?.current == $0 },
     clock: { [weak self] in ProcessInfo.processInfo.systemUptime + (self?.nowOffset ?? 0) })
   var outcomes: [MPVQueueInstaller.Outcome] = []
-  init() { client = LiveQueueClient(directory: directory) }
+  init(holdInitialIdle: Bool = false) {
+    client = LiveQueueClient(directory: directory, holdInitialIdle: holdInitialIdle)
+    // Legacy scenarios start after actual startup; the dedicated fence cases
+    // below retain a real IDLE and deliberately defer its backend acknowledgement.
+    if !holdInitialIdle {
+      let deadline = ProcessInfo.processInfo.systemUptime + 2
+      while !client.queueHasReachedInitialIdle && ProcessInfo.processInfo.systemUptime < deadline {
+        client.pump(installer)
+      }
+      precondition(client.queueHasReachedInitialIdle, "Real MPV did not emit initial IDLE within the fixture budget")
+    }
+  }
   @discardableResult
   func begin(_ urls: [URL], selected: Int = 0) -> NativeQueueState.InstallationToken {
     let plan = try! NativeQueuePlan(urls: urls)
@@ -41,6 +52,63 @@ final class InstallationRig {
   var isEmpty: Bool {
     guard let snapshot = client.queueSnapshot() else { return false }
     return snapshot.entries.isEmpty && snapshot.idle && snapshot.activePath == nil
+  }
+}
+
+func checkStartupAdmission(scenarios: [String] = ["selected-last", "cancel", "timeout", "superseded", "overflow", "shutdown"]) {
+  for scenario in scenarios {
+    let rig = InstallationRig(holdInitialIdle: true)
+    let enteredDeadline = ProcessInfo.processInfo.systemUptime + 2
+    while rig.client.heldIdleEvents == 0 &&
+          ProcessInfo.processInfo.systemUptime < enteredDeadline {
+      rig.client.pump(rig.installer)
+    }
+    check(rig.client.heldIdleEvents == 1 && !rig.client.queueHasReachedInitialIdle,
+          "startup-\(scenario): a real initial IDLE is retained before backend acknowledgement")
+    check(rig.isEmpty, "startup-\(scenario): property readback alone looks empty and idle")
+    let token = rig.begin([red, blue], selected: 1)
+    rig.installer.advance()
+    check(rig.client.appendCalls == 0 && !rig.client.commandNames.contains("playlist-play-index"),
+          "startup-\(scenario): no append or activation precedes the real initial IDLE acknowledgement")
+    if scenario == "selected-last" {
+      rig.client.releaseInitialIdle()
+      rig.run()
+      if case .installed(let receipt) = rig.outcomes.first {
+        check(receipt.selectedIndex == 1 && rig.client.actualStarts == [receipt.selectedEntryID] &&
+              rig.client.string("path") == blue.path,
+              "startup-selected-last: actual selected START and path follow the released idle fence")
+      } else {
+        check(false, "startup-selected-last: actual selected START and path follow the released idle fence")
+      }
+      continue
+    }
+    switch scenario {
+    case "cancel": rig.installer.cancel(token)
+    case "timeout": rig.nowOffset = MPVQueueInstaller.loadTimeout + 1; rig.installer.advance()
+    case "superseded": rig.current = nil; rig.installer.advance()
+    case "overflow": rig.installer.receive(.queueOverflow)
+    case "shutdown": rig.installer.receive(.shutdown)
+    default: fatalError("Unknown startup scenario")
+    }
+    rig.run()
+    let expected: MPVQueueInstaller.Outcome
+    switch scenario {
+    case "cancel": expected = .cancelled(.verifiedEmpty)
+    case "timeout": expected = .failed(.timedOut, .verifiedEmpty)
+    case "superseded": expected = .superseded
+    case "overflow": expected = .failed(.eventQueueOverflow, .verifiedEmpty)
+    default: expected = .failed(.shutdown, .unverified)
+    }
+    check(rig.outcomes == [expected] && rig.isEmpty,
+          "startup-\(scenario): waiting retains the original bounded terminal semantics")
+    check(rig.client.rawCommand(["loadfile", blue.path, "replace"]) == 0,
+          "startup-\(scenario): a subsequent owner submits actual replacement media")
+    let commands = rig.client.commandNames.count
+    rig.client.releaseInitialIdle()
+    rig.installer.advance()
+    check(rig.client.commandNames.count == commands && rig.outcomes == [expected] &&
+          rig.client.queueSnapshot()?.entries.map(\.path) == [blue.path],
+          "startup-\(scenario): late idle acknowledgement cannot mutate the subsequent owner")
   }
 }
 
@@ -88,7 +156,13 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[2] == "cleanup-hooks"
   exit(failed == 0 ? 0 : 1)
 }
 
-if CommandLine.arguments.count == 3 {
+if CommandLine.arguments.count == 3, CommandLine.arguments[2] == "startup-load" {
+  checkStartupAdmission(scenarios: ["selected-last"])
+  print("Queue installer: \(passed + failed) checks, \(failed) failures")
+  exit(failed == 0 ? 0 : 1)
+}
+
+if CommandLine.arguments.count == 3, CommandLine.arguments[2] != "legacy" {
   guard let repetitions = Int(CommandLine.arguments[2]), (1...500).contains(repetitions) else {
     fatalError("Invalid partial-cancellation repetition count")
   }
@@ -96,6 +170,8 @@ if CommandLine.arguments.count == 3 {
     let rig = InstallationRig()
     let token = rig.begin(Array(repeating: red, count: 20))
     rig.installer.advance()
+    precondition(rig.client.appendCalls == 8 && rig.client.queueSnapshot()?.entries.count == 8,
+                 "Partial-cancellation stress requires eight actual appends after the startup fence")
     rig.installer.cancel(token)
     rig.run()
     let empty = rig.isEmpty
@@ -108,6 +184,8 @@ if CommandLine.arguments.count == 3 {
   print("Queue installer stress: \(passed + failed) checks, \(failed) failures")
   exit(failed == 0 ? 0 : 1)
 }
+
+if CommandLine.arguments.count == 2 { checkStartupAdmission() }
 
 for (name, urls, selected) in [
   ("single", [red], 0), ("first", [red, blue], 0), ("last", [red, blue], 1),
