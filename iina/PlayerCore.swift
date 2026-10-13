@@ -178,6 +178,7 @@ class PlayerCore: NSObject {
       }
       return false
     }
+    guard nativeQueueInstallation == nil, !hasPendingNativeQueueRestore else { return false }
     guard info.state.loaded else { return false }
     if !isUsingNativePlayback {
       return deliverPermanentRotation(clockwiseQuarterTurns: clockwiseQuarterTurns, inputURL: url)
@@ -243,7 +244,7 @@ class PlayerCore: NSObject {
     guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown,
           let restore = nativeCompatibilityRestore, restore.url == info.currentURL,
           (restore.rotationMediaEpoch != nil && restore.rotationMediaEpoch == permanentRotationIntent.mediaEpoch ||
-           hasPendingURLPlaylistRestore) else { return nil }
+           hasPendingURLPlaylistRestore || hasPendingNativeQueueRestore) else { return nil }
     return restore
   }
 
@@ -256,13 +257,31 @@ class PlayerCore: NSObject {
       let ceiling = restore.duration.flatMap { $0.isFinite && $0 > 0 ? $0.nextDown : nil } ?? Double.greatestFiniteMagnitude
       restore.position = range?.clamped(position) ?? min(max(0, position), ceiling)
     }
-    if let paused { restore.paused = paused }
+    if let paused {
+      restore.paused = paused
+      _ = nativeQueue?.setIntent(paused ? .paused : .playing)
+    }
     nativeCompatibilityRestore = restore
     // While draining/loading, only retain intent. Once the real mpv load is
     // ready, retarget its exact seek but keep it paused until the matching restart.
     if position != nil, restore.waitingForSeek, !isUsingNativePlayback, info.state.loaded {
       playbackTransport.seek(.init(value: restore.position, reference: .absoluteSeconds, exact: true))
     }
+    return true
+  }
+
+  private func updatePendingPlaybackVolume(_ volume: Double, unmute: Bool) -> Bool {
+    guard var restore = pendingRotationPlaybackRestore else { return false }
+    restore.volume = volume
+    restore.unmuteRequested = restore.unmuteRequested || (unmute && volume > 0)
+    nativeCompatibilityRestore = restore
+    return true
+  }
+
+  private func updatePendingPlaybackSpeed(_ speed: Double) -> Bool {
+    guard var restore = pendingRotationPlaybackRestore else { return false }
+    restore.rate = speed
+    nativeCompatibilityRestore = restore
     return true
   }
 
@@ -595,9 +614,10 @@ class PlayerCore: NSObject {
     let id = UUID()
     let url: URL
     var position: Double
-    let volume: Double
-    let rate: Double
+    var volume: Double
+    var rate: Double
     var paused: Bool
+    var unmuteRequested = false
     var duration: Double? = nil
     var loopA: Double? = nil
     var loopB: Double? = nil
@@ -606,6 +626,7 @@ class PlayerCore: NSObject {
     var rotationMediaEpoch: UUID? = nil
     var enqueueRequestID: UUID? = nil
     var enqueueMediaEpoch: UUID? = nil
+    var queueMedia: NativeQueueState.MediaToken? = nil
     var completion: () -> Void
     var waitingForSeek = false
   }
@@ -635,14 +656,16 @@ class PlayerCore: NSObject {
     }
   }
 
-  var playbackVolume: Double { playbackTransport.volumePercent }
-  var currentPlaybackSpeed: Double { playbackTransport.rate }
+  var pendingPlaybackVolume: Double? { pendingRotationPlaybackRestore?.volume }
+  var playbackVolume: Double { pendingPlaybackVolume ?? playbackTransport.volumePercent }
+  var currentPlaybackSpeed: Double { pendingRotationPlaybackRestore?.rate ?? playbackTransport.rate }
   var nativeInitialPlaybackPending: Bool {
     nativeTransport != nil && !nativeRetiring && !nativeTerminationRequested &&
       info.state.active && (!nativeReady || info.state == .loaded)
   }
   var playbackIsPaused: Bool {
     if let restore = pendingRotationPlaybackRestore { return restore.paused }
+    if nativeQueueLoadPending, let queue = nativeQueue { return queue.intent == .paused }
     return nativeInitialPlaybackPending ? (nativeInitialPauseIntent ?? Preference.bool(for: .pauseWhenOpen)) : playbackTransport.isPaused
   }
   var playbackPosition: Double? { playbackTransport.position }
@@ -763,7 +786,7 @@ class PlayerCore: NSObject {
             let interval = try? NativePlaybackInterval(start: range.start, end: range.end) else { return .invalid }
       nativeLoopB = range.end
       transport.setLoop(interval)
-      transport.seek(.init(value: range.start, reference: .absoluteSeconds, exact: true))
+      recordNativeQueueSeek(transport.seek(.init(value: range.start, reference: .absoluteSeconds, exact: true)))
     case .clear:
       nativeLoopA = nil; nativeLoopB = nil
       transport.setLoop(nil)
@@ -945,6 +968,233 @@ class PlayerCore: NSObject {
 
   // MARK: - Control
 
+  // A fixed explicit selection is separate from MPV's mutable playlist. The
+  // model never substitutes for the installer's actual command/event receipt.
+  private var nativeQueue: NativeQueueState?
+  // Background folder matchers must not consult the main-owned queue model.
+  @Atomic private(set) var nativeQueueOwnsPlaylist = false
+  private var nativeQueueItems: [MPVPlaylistItem] = []
+  private final class NativeQueueInstallation {
+    let checkpoint: NativeQueueState.HandoffCheckpoint
+    let token: NativeQueueState.InstallationToken
+    let installer: MPVQueueInstaller
+    var timer: Timer?
+    init(_ checkpoint: NativeQueueState.HandoffCheckpoint, _ token: NativeQueueState.InstallationToken,
+         _ installer: MPVQueueInstaller) {
+      self.checkpoint = checkpoint; self.token = token; self.installer = installer
+    }
+  }
+  private var nativeQueueInstallation: NativeQueueInstallation?
+  private var pendingNativeQueueStopOwner: UUID?
+  var hasNativePlaybackQueue: Bool {
+    guard let queue = nativeQueue else { return false }
+    return queue.phase != .stopped && (queue.phase != .compatibility || hasPendingNativeQueueRestore)
+  }
+  private var nativeQueueLoadPending: Bool {
+    nativeQueue?.phase == .loading && (nativeTransport == nil || nativeRetiring) && nativeQueueInstallation == nil
+  }
+  private var hasPendingNativeQueueRestore: Bool {
+    guard let media = nativeCompatibilityRestore?.queueMedia else { return false }
+    return media == nativeQueue?.mediaToken && nativeCompatibilityRestore?.url == info.currentURL
+  }
+
+  private func resetNativeQueue() {
+    // An open queued behind stopping has not installed a new route yet. Retain
+    // its pending stop until the background task permits the actual command.
+    if info.state != .stopping { pendingNativeQueueStopOwner = nil }
+    let installation = nativeQueueInstallation
+    nativeQueueInstallation = nil
+    installation?.timer?.invalidate()
+    nativeQueue?.stop()
+    nativeQueue = nil
+    nativeQueueItems = []
+    nativeQueueOwnsPlaylist = false
+    if nativeCompatibilityRestore?.queueMedia != nil { nativeCompatibilityRestore = nil }
+    if let installation {
+      // The new open/stop owner alone may change MPV. Invalidate before cancel so
+      // a late installer cannot clear the replacement owner's list.
+      mpv.endNativeQueueInstallation(owner: installation.token.id)
+      installation.installer.cancel(installation.token)
+    }
+  }
+
+  private func publishNativeQueue() {
+    guard let queue = nativeQueue else { return }
+    if nativeQueueItems.count != queue.plan.items.count {
+      nativeQueueItems = queue.plan.items.map {
+        MPVPlaylistItem(filename: $0.url.path, isCurrent: false, isPlaying: false, title: nil)
+      }
+    }
+    for (index, item) in nativeQueueItems.enumerated() {
+      item.isCurrent = index == queue.selectedIndex
+      item.isPlaying = index == queue.selectedIndex
+    }
+    info.playlist = nativeQueueItems
+  }
+
+  private func recordNativeQueueSeek(_ result: PlaybackTransportResult) {
+    guard case .accepted = result, isUsingNativePlayback, let token = nativeQueue?.mediaToken else { return }
+    if nativeQueue?.acceptedSeek(token) == true {
+      _ = nativeQueue?.setIntent(playbackTransport.isPaused ? .paused : .playing)
+    }
+  }
+
+  private func nativeExplicitQueuePlan(_ urls: [URL], playableFiles: [URL]) -> NativeQueuePlan? {
+    guard ProcessInfo.processInfo.environment["CHENGYING_NATIVE_PLAYBACK"] == "1",
+          !hasIssuedMPVMediaCommand, (2...NativeQueuePlan.maximumItems).contains(urls.count),
+          Set(urls) == Set(playableFiles),
+          urls.allSatisfy({ url in
+            url.isFileURL && !url.hasDirectoryPath &&
+            Utility.supportedFileExt[.video]!.contains(url.pathExtension.lowercased()) &&
+            (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+          }) else { return nil }
+    return try? NativeQueuePlan(urls: urls)
+  }
+
+  private func attemptNativeQueue(_ plan: NativeQueuePlan) -> Bool {
+    guard
+          let queue = try? NativeQueueState(plan: plan,
+            intent: Preference.bool(for: .pauseWhenOpen) ? .paused : .playing,
+            repeatMode: Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) ?? .off,
+            autoAdvance: Preference.bool(for: .playlistAutoPlayNext)) else { return false }
+    nativeQueue = queue
+    nativeQueueOwnsPlaylist = true
+    nativeQueueItems = []
+    if attemptNativeOpen(queue.selectedItem.url) { return true }
+    resetNativeQueue()
+    return false
+  }
+
+  private func applyNativeQueueDecision(_ decision: NativeQueueState.Decision, manual: Bool) {
+    switch decision {
+    case .load(let request):
+      _ = nativeQueue?.setIntent(Preference.bool(for: .pauseWhenOpen) ? .paused : .playing)
+      resetURLPlaylistEnqueue()
+      resetPermanentRotationMedia(to: request.url)
+      nativeCompatibilityRestore = nil
+      retireNativePlayback { [weak self] in
+        guard let self, self.nativeQueue?.mediaToken == request.token,
+              !self.nativeTerminationRequested else { return }
+        if !self.attemptNativeOpen(request.url) { self.handoffUnopenedNativeQueue() }
+      }
+    case .rewind(let request):
+      guard let transport = nativeTransport, !nativeRetiring,
+            nativeQueue?.mediaToken == request.token else {
+        _ = nativeQueue?.completeRewind(request, accepted: false)
+        return
+      }
+      cancelPendingPermanentRotation()
+      cancelNativePreview(restoreLoop: true)
+      cancelNativeLoopRequests()
+      let result = transport.seek(.init(value: 0, reference: .absoluteSeconds, exact: true))
+      let accepted: Bool
+      if case .accepted = result { accepted = true } else { accepted = false }
+      guard nativeQueue?.completeRewind(request, accepted: accepted) == true, accepted,
+            let queue = nativeQueue else { return }
+      transport.setPaused(queue.intent == .paused)
+    case .intentUpdated, .unchanged, .ended:
+      if let queue = nativeQueue, queue.phase != .installing {
+        nativeTransport?.setPaused(queue.intent == .paused)
+      }
+    case .rejected: break
+    }
+  }
+
+  private func handoffUnopenedNativeQueue() {
+    guard let queue = nativeQueue else { return }
+    let restore = NativeCompatibilityRestore(url: queue.selectedItem.url, position: 0, volume: 0,
+      rate: nativePreferredRate, paused: queue.intent == .paused, completion: {})
+    beginNativeQueueHandoff(restore)
+  }
+
+  private func beginNativeQueueHandoff(_ capturedRestore: NativeCompatibilityRestore) {
+    guard nativeQueueInstallation == nil, var queue = nativeQueue else { return }
+    _ = queue.setIntent(capturedRestore.paused ? .paused : .playing)
+    guard
+          let checkpoint = queue.handoffCheckpoint(),
+          let token = queue.beginHandoff(checkpoint) else { return }
+    nativeQueue = queue
+    var restore = capturedRestore
+    restore.queueMedia = token.media
+    nativeCompatibilityRestore = restore
+    let installer = MPVQueueInstaller(backend: mpv) { [weak self] token in
+      guard let self else { return false }
+      return !self.nativeTerminationRequested && self.nativeQueueInstallation?.token == token &&
+        self.nativeQueue?.mediaToken == token.media && self.nativeQueue?.phase == .installing
+    }
+    let installation = NativeQueueInstallation(checkpoint, token, installer)
+    nativeQueueInstallation = installation
+    retireNativePlayback { [weak self, weak installation] in
+      guard let self, let installation, self.nativeQueueInstallation === installation,
+            self.nativeQueue?.mediaToken == token.media,
+            self.nativeCompatibilityRestore?.queueMedia == token.media else { return }
+      let url = checkpoint.plan.items[checkpoint.selectedIndex].url
+      self.openMainWindow(path: url.path, url: url, isNetwork: false, allowNative: false,
+                          queueInstallationID: token.id)
+      guard self.nativeQueueInstallation === installation,
+            self.nativeCompatibilityRestore?.queueMedia == token.media,
+            self.info.state == .loading,
+            self.mpv.beginNativeQueueInstallation(owner: token.id, receive: { [weak self, weak installation] event in
+              guard let self, let installation, self.nativeQueueInstallation === installation else { return }
+              installation.installer.receive(event)
+            }) else {
+        self.finishNativeQueueInstallation(installation, outcome: .failed(.backendUnavailable, .unverified))
+        return
+      }
+      let admission = installer.begin(checkpoint, installation: token) { [weak self, weak installation] outcome in
+        guard let self, let installation else { return }
+        self.finishNativeQueueInstallation(installation, outcome: outcome)
+      }
+      guard case .accepted = admission else {
+        self.finishNativeQueueInstallation(installation, outcome: .failed(.notFreshIdle, .unverified))
+        return
+      }
+      guard self.nativeQueueInstallation === installation else { return }
+      let timer = Timer(timeInterval: 0.01, repeats: true) { [weak self, weak installation] _ in
+        guard let self, let installation, self.nativeQueueInstallation === installation else { return }
+        installation.installer.advance()
+      }
+      installation.timer = timer
+      RunLoop.main.add(timer, forMode: .common)
+    }
+  }
+
+  private func finishNativeQueueInstallation(_ installation: NativeQueueInstallation,
+                                             outcome: MPVQueueInstaller.Outcome) {
+    guard nativeQueueInstallation === installation else { return }
+    installation.timer?.invalidate()
+    mpv.endNativeQueueInstallation(owner: installation.token.id)
+    nativeQueueInstallation = nil
+    switch outcome {
+    case .installed(let receipt):
+      guard receipt.installation == installation.token,
+            receipt.itemIDs == installation.checkpoint.plan.items.map(\.id),
+            receipt.selectedIndex == installation.checkpoint.selectedIndex,
+            let accepted = nativeQueue?.completeHandoff(installation.token, verified: true), accepted.verified,
+            nativeCompatibilityRestore?.queueMedia == installation.token.media else { return }
+      // No normal file callbacks ran during installation. Publish the owned
+      // restore before committing metadata so resize cannot auto-resume early.
+      info.shouldAutoLoadFiles = false
+      advancePlaybackRoute(acceptsMPV: true)
+      info.state = .starting
+      fileStarted(path: accepted.selectedItem.url.path)
+      guard hasPendingNativeQueueRestore else { return }
+      applyLoopMode(accepted.repeatMode)
+      fileLoaded()
+      guard hasPendingNativeQueueRestore else { return }
+      onVideoReconfig()
+    case .failed, .cancelled, .superseded:
+      _ = nativeQueue?.completeHandoff(installation.token, verified: false)
+      nativeCompatibilityRestore = nil
+      // Preserve the failed plan for explicit retry/open, but never pretend an
+      // unverified partial list is installed or deliver the pending action.
+      advancePlaybackRoute(acceptsMPV: false)
+      info.state = .idle
+      log("Native queue compatibility installation failed", level: .error)
+      sendOSD(.custom(NSLocalizedString("playback.compatibility_restore_failed", comment: "Queue handoff failed")))
+    }
+  }
+
   /// This opt-in route deliberately has a one-way compatibility boundary. A
   /// core which has ever loaded mpv media cannot re-enter native until a proven
   /// stop/event-drain handoff exists. The production default remains mpv.
@@ -953,7 +1203,7 @@ class PlayerCore: NSObject {
     guard ProcessInfo.processInfo.environment["CHENGYING_NATIVE_PLAYBACK"] == "1" else { return false }
     let reason: String?
     if hasIssuedMPVMediaCommand { reason = "mpv_session_already_used" }
-    else if !nativeSingleInput { reason = "multiple_or_playlist_input" }
+    else if !nativeSingleInput && nativeQueue == nil { reason = "multiple_or_playlist_input" }
     else if !url.isFileURL || !Utility.supportedFileExt[.video]!.contains(url.pathExtension.lowercased()) {
       reason = "non_video_input"
     } else if Preference.bool(for: .enableAdvancedSettings) || Preference.bool(for: .useUserDefinedConfDir) ||
@@ -966,7 +1216,7 @@ class PlayerCore: NSObject {
       reason = "unmigrated_output_configuration"
     } else if Preference.string(for: .subAutoLoadSearchPath) != "./*" {
       reason = "custom_subtitle_search"
-    } else if Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) == .playlist {
+    } else if nativeQueue == nil && Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) == .playlist {
       reason = "playlist_repeat"
     } else if !Preference.bool(for: .keepOpenOnFileEnd) && Preference.bool(for: .playlistAutoPlayNext) {
       reason = "close_window_on_eof"
@@ -978,7 +1228,8 @@ class PlayerCore: NSObject {
       return false
     }
     let request = advancePlaybackRoute(acceptsMPV: false)
-    let loadSiblings = info.shouldAutoLoadFiles && Preference.bool(for: .playlistAutoAdd)
+    let queueMedia = nativeQueue?.mediaToken
+    let loadSiblings = nativeQueue == nil && info.shouldAutoLoadFiles && Preference.bool(for: .playlistAutoAdd)
     let loadSubs = Preference.integer(for: .subAutoLoadIINA) != 0
     let watchLater = Utility.watchLaterURL.appendingPathComponent(Utility.mpvWatchLaterMd5(url.path))
     let honorWatchLater = Preference.bool(for: .resumeLastPosition)
@@ -1007,6 +1258,7 @@ class PlayerCore: NSObject {
       }
       DispatchQueue.main.async { [weak self] in
         guard let self, self.playbackEventRoute.revision == request,
+              self.nativeQueue?.mediaToken == queueMedia,
               !self.nativeTerminationRequested,
               self.info.state != .shuttingDown, self.info.state != .shutDown else { return }
         guard !self.hasIssuedMPVMediaCommand else {
@@ -1016,6 +1268,7 @@ class PlayerCore: NSObject {
         }
         if let reason {
           self.log("Native compatibility: \(reason)")
+          if self.nativeQueue != nil { self.handoffUnopenedNativeQueue(); return }
           self.mpv.prepareForFirstMPVMediaLoad()
           self.advancePlaybackRoute(acceptsMPV: true)
           self.openMainWindow(path: url.path, url: url, isNetwork: false, allowNative: false)
@@ -1035,8 +1288,8 @@ class PlayerCore: NSObject {
     let transport = NativePlaybackTransport(session: session)
     nativeTransport = transport
     nativeReady = false
-    nativeInitialPauseIntent = nil
-    nativeLoopMode = Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) ?? .off
+    nativeInitialPauseIntent = nativeQueue.map { $0.intent == .paused }
+    nativeLoopMode = nativeQueue?.repeatMode ?? Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) ?? .off
     invalidateThumbnails()
     videoToolsMediaGeneration &+= 1
     info.currentURL = url
@@ -1046,14 +1299,19 @@ class PlayerCore: NSObject {
     info.videoWidth = nil; info.videoHeight = nil; info.displayWidth = nil; info.displayHeight = nil
     info.videoDuration = nil; info.videoPosition = nil; info.videoRemaining = nil
     info.playlist = []
+    publishNativeQueue()
     info.volume = 0; info.isMuted = false
     info.justOpenedFile = true; info.justStartedFile = true
     info.disableOSDForFileLoading = true
     info.state = .loading
     currentMediaIsAudio = .notAudio
+    let queueMedia = nativeQueue?.mediaToken
     postNotification(.chengyingMediaSourceChanged)
+    guard nativeTransport === transport, playbackEventRoute.revision == request,
+          nativeQueue?.mediaToken == queueMedia, !nativeRetiring, !nativeTerminationRequested else { return }
     transport.onSnapshot = { [weak self, weak transport] snapshot in
       guard let self, let transport, self.nativeTransport === transport,
+            self.nativeQueue?.mediaToken == queueMedia,
             self.playbackEventRoute.revision == request, !self.nativeRetiring else { return }
       self.receiveNativeSnapshot(snapshot)
     }
@@ -1066,11 +1324,18 @@ class PlayerCore: NSObject {
     }
     transport.setLoop(nil, repeatFile: nativeLoopMode == .file)
     _ = transport.setRate(nativePreferredRate)
+    guard nativeTransport === transport, playbackEventRoute.revision == request,
+          nativeQueue?.mediaToken == queueMedia, !nativeRetiring, !nativeTerminationRequested else { return }
     session.open(url, autoplay: false)
   }
 
   private func receiveNativeSnapshot(_ snapshot: NativePlaybackSnapshot) {
     guard ![.stopping, .shuttingDown, .shutDown].contains(info.state) else { return }
+    let transport = nativeTransport
+    let route = playbackEventRoute.revision
+    let token = nativeQueue?.mediaToken
+    let stillCurrent = { self.nativeTransport === transport && self.playbackEventRoute.revision == route &&
+      self.nativeQueue?.mediaToken == token && !self.nativeRetiring && !self.nativeTerminationRequested }
     let previousState = info.state
     if snapshot.phase == .failed {
       if !nativeReady, case .decoder(let domain, let code)? = snapshot.failure,
@@ -1107,7 +1372,12 @@ class PlayerCore: NSObject {
       info.rotation = media.rotationDegrees
       mainWindow.rotation = media.rotationDegrees
       info.hdrAvailable = false
-      info.playlist = [MPVPlaylistItem(filename: info.currentURL!.path, isCurrent: true, isPlaying: true, title: nil)]
+      if let token = nativeQueue?.mediaToken {
+        guard nativeQueue?.acceptLoaded(token) == true else { return }
+        publishNativeQueue()
+      } else {
+        info.playlist = [MPVPlaylistItem(filename: info.currentURL!.path, isCurrent: true, isPlaying: true, title: nil)]
+      }
       info.state = .loaded
       resetAutoSeekForNewMedia()
       info.disableOSDForFileLoading = false
@@ -1121,13 +1391,17 @@ class PlayerCore: NSObject {
     info.isSeeking = snapshot.phase == .seeking
     if info.state == .loaded {
       currentController.setupUI()
+      guard stillCurrent() else { return }
       notifyWindowVideoSizeChanged()
+      guard stillCurrent() else { return }
       // Replacing media in an already-main window produces no new activation
       // event. Publish its complete title/timeline explicitly on first ready.
       if self === PlayerCore.lastActive { NowPlayingInfoManager.shared.updateInfo(withTitle: true) }
       if let url = info.currentURL { HistoryController.shared.add(url, duration: snapshot.duration) }
       postNotification(.iinaFileLoaded)
+      guard stillCurrent() else { return }
       events.emit(.fileLoaded, data: info.currentURL?.absoluteString ?? "")
+      guard stillCurrent() else { return }
       syncUI(.playlist)
       generateThumbnails()
       info.justOpenedFile = false; info.justStartedFile = false
@@ -1140,6 +1414,13 @@ class PlayerCore: NSObject {
     mainWindow.updateSpeedLabel(speed: currentPlaybackSpeed)
     syncUI([.time, .playButton, .volume])
     refreshSyncUITimer()
+    guard stillCurrent() else { return }
+    if snapshot.phase == .ended, let token = nativeQueue?.mediaToken {
+      nativeQueue?.setAutoAdvance(Preference.bool(for: .playlistAutoPlayNext))
+      if let decision = nativeQueue?.ended(token) {
+        applyNativeQueueDecision(decision, manual: false)
+      }
+    }
   }
 
   /// Compatibility actions execute only after the same media has reached its
@@ -1149,6 +1430,12 @@ class PlayerCore: NSObject {
     dispatchPrecondition(condition: .onQueue(.main))
     guard ownsPermanentRotationRequest(rotationRequestID) else { return }
     guard ownsURLPlaylistEnqueue(enqueueRequestID) else { return }
+    guard !nativeQueueLoadPending, nativeQueueInstallation == nil, nativeQueue?.phase != .handoffFailed,
+          !(nativeQueue?.phase == .compatibility && hasPendingNativeQueueRestore) else {
+      if let rotationRequestID { cancelPendingPermanentRotation(requestID: rotationRequestID) }
+      if let enqueueRequestID { cancelURLPlaylistEnqueue(requestID: enqueueRequestID) }
+      return
+    }
     // A URL enqueue owns one transition. Unrelated actions must not replace its
     // restore continuation while the decoder is being captured or retired.
     guard !isURLPlaylistEnqueueBusy(except: enqueueRequestID) else {
@@ -1257,6 +1544,10 @@ class PlayerCore: NSObject {
         restore?.enqueueRequestID = enqueueRequestID
         restore?.enqueueMediaEpoch = enqueueRequestID == nil ? nil : self.urlPlaylistMediaEpoch
         if self.nativeCompatibilityCaptureID == captureID { self.nativeCompatibilityCaptureID = nil }
+        if self.nativeQueue != nil, let restore {
+          self.beginNativeQueueHandoff(restore)
+          return
+        }
         // Publish an owned restore before asynchronous retirement, so navigation
         // can discard it without a captured local value reinstalling it later.
         if rotationRequestID != nil || enqueueRequestID != nil { self.nativeCompatibilityRestore = restore }
@@ -1315,6 +1606,7 @@ class PlayerCore: NSObject {
       log("Ignoring a remote media URL in the local player", level: .warning)
       return
     }
+    resetNativeQueue()
     resetURLPlaylistEnqueue()
     resetPermanentRotationMedia(to: url)
     guard info.state != .stopping || nativeRetiring else {
@@ -1383,12 +1675,14 @@ class PlayerCore: NSObject {
 
     let playableFiles = getPlayableFiles(in: urls)
     let count = playableFiles.count
+    let explicitNativePlan = nativeExplicitQueuePlan(urls, playableFiles: playableFiles)
 
     // check playable files count
     if count == 0 {
       return 0
     }
 
+    resetNativeQueue()
     resetURLPlaylistEnqueue()
     resetPermanentRotationMedia(to: playableFiles.first)
 
@@ -1400,12 +1694,14 @@ class PlayerCore: NSObject {
       retireNativePlayback { [weak self] in
         _ = self?.openMediaURLs(urls, shouldAutoLoad: autoLoad)
       }
-      return count
+      return explicitNativePlan?.items.count ?? count
     }
 
     info.shouldAutoLoadFiles = PlaylistPlaybackPolicy.shouldAutoLoadSiblings(
       inputURLs: urls, playableFileCount: count, requested: autoLoad)
     nativeSingleInput = count == 1 && urls.count == 1 && !urls[0].hasDirectoryPath
+
+    if let explicitNativePlan, attemptNativeQueue(explicitNativePlan) { return explicitNativePlan.items.count }
 
     // open the first file
     open(playableFiles[0])
@@ -1473,9 +1769,11 @@ class PlayerCore: NSObject {
   ///   - path: Path to the media to open.
   ///   - url: URL of the media to open.
   ///   - isNetwork: Whether the media must be streamed over the network.
-  private func openMainWindow(path: String, url: URL, isNetwork: Bool, allowNative: Bool = true) {
+  private func openMainWindow(path: String, url: URL, isNetwork: Bool, allowNative: Bool = true,
+                              queueInstallationID: UUID? = nil) {
     guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
     if allowNative {
+      resetNativeQueue()
       resetURLPlaylistEnqueue()
       resetPermanentRotationMedia(to: url)
       nativeCompatibilityRestore = nil
@@ -1488,12 +1786,20 @@ class PlayerCore: NSObject {
       }
       if attemptNativeOpen(url) { return }
     }
-    advancePlaybackRoute(acceptsMPV: true)
+    if let queueInstallationID {
+      guard nativeQueueInstallation?.token.id == queueInstallationID else { return }
+    }
+    advancePlaybackRoute(acceptsMPV: queueInstallationID == nil)
     log("Opening \(Utility.mediaLogSummary(url)) in main window")
     invalidateThumbnails()
     info.currentURL = url
     info.isNetworkResource = isNetwork
     postNotification(.chengyingMediaSourceChanged)
+    if let queueInstallationID {
+      guard nativeQueueInstallation?.token.id == queueInstallationID,
+            nativeCompatibilityRestore?.queueMedia == nativeQueue?.mediaToken,
+            !nativeTerminationRequested else { return }
+    }
     info.audioTracks = []
     info.chapters = []
     info.playlist = []
@@ -1506,6 +1812,10 @@ class PlayerCore: NSObject {
     info.videoTracks = []
     info.videoWidth = nil
     let _ = mainWindow.window
+    if let queueInstallationID {
+      guard nativeQueueInstallation?.token.id == queueInstallationID,
+            !nativeTerminationRequested else { return }
+    }
     guard mainWindow.videoView.configurePlaybackSurface() else {
       cancelURLPlaylistEnqueue()
       if let requestID = nativeCompatibilityRestore?.rotationRequestID {
@@ -1537,6 +1847,7 @@ class PlayerCore: NSObject {
     restoreSavedLoopMode()
     info.justOpenedFile = true
     info.state = .loading
+    if queueInstallationID != nil { return }
     playlistMutationLock.lock()
     mpv.command(.loadfile, args: [path], level: .verbose)
     playlistMutationLock.unlock()
@@ -1650,6 +1961,8 @@ class PlayerCore: NSObject {
   ///     down was in progress and will call this method again to continue the process of shutting down..
   func shutdown() {
     guard !nativeTerminationRequested else { return }
+    pendingNativeQueueStopOwner = nil
+    resetNativeQueue()
     resetURLPlaylistEnqueue()
     resetPermanentRotationMedia(to: nil)
     if nativeTransport != nil {
@@ -1699,6 +2012,8 @@ class PlayerCore: NSObject {
   ///     windows of vulnerability that can not be fully closed. IINA has no choice but to support a mpv initiated shutdown as best it
   ///     can.
   func mpvHasShutdown() {
+    pendingNativeQueueStopOwner = nil
+    resetNativeQueue()
     resetURLPlaylistEnqueue()
     resetPermanentRotationMedia(to: nil)
     invalidateThumbnails()
@@ -1775,7 +2090,7 @@ class PlayerCore: NSObject {
   // MARK: - MPV commands
 
   func togglePause(_ set: Bool? = nil) {
-    if isUsingNativePlayback || pendingRotationPlaybackRestore != nil { playbackIsPaused ? resume() : pause() }
+    if isUsingNativePlayback || nativeQueueLoadPending || pendingRotationPlaybackRestore != nil { playbackIsPaused ? resume() : pause() }
     else { info.state == .paused ? resume() : pause() }
   }
 
@@ -1789,6 +2104,10 @@ class PlayerCore: NSObject {
   ///     asleep. Thus `setFlag` **must not** be called if the `mpv` core is idle or stopping. See issue
   ///     [#4520](https://github.com/iina/iina/issues/4520)
   func pause() {
+    // A captured preview baseline owns the persistent queue intent; only the
+    // temporary transport is paused. A pending capture has no baseline yet.
+    if nativePreviewBaseline == nil { _ = nativeQueue?.setIntent(.paused) }
+    if nativeQueueLoadPending { return }
     cancelPendingPermanentRotation()
     if updatePendingRotationRestore(paused: true) { return }
     guard info.state.active else { return }
@@ -1805,6 +2124,12 @@ class PlayerCore: NSObject {
   ///     the `pauseChanged` method, this method calls `displayActive` to provide more time for the display link to start up.
   func resume() {
     guard !UpdateWorkAdmission.shared.isBlocked else { return }
+    if nativePreviewBaseline == nil,
+       let decision = nativeQueue?.setIntent(.playing), case .rewind = decision {
+      applyNativeQueueDecision(decision, manual: false)
+      return
+    }
+    if nativeQueueLoadPending { return }
     cancelPendingPermanentRotation()
     if updatePendingRotationRestore(paused: false) { return }
     if isUsingNativePlayback {
@@ -1848,10 +2173,19 @@ class PlayerCore: NSObject {
     // Closing a window while the native output is draining must not replace
     // the terminal completion which will quit the idle compatibility core.
     guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
+    let cancelledQueueOwner = nativeQueueInstallation?.token.id ?? pendingNativeQueueStopOwner
+    resetNativeQueue()
+    pendingNativeQueueStopOwner = cancelledQueueOwner
+    if let owner = cancelledQueueOwner {
+      // Suppress retired installation events before accepting any new MPV
+      // presentation revision, including while background work delays stop.
+      mpv.prepareCancelledNativeQueueStop(owner: owner)
+    }
     resetURLPlaylistEnqueue()
     resetPermanentRotationMedia(to: nil)
     nativeCompatibilityRestore = nil
     if nativeTransport != nil {
+      pendingNativeQueueStopOwner = nil
       invalidateThumbnails()
       info.state = .stopping
       retireNativePlayback { [weak self] in
@@ -1902,7 +2236,14 @@ class PlayerCore: NSObject {
 
     // Do not send a stop command to mpv if it is already stopped.
     guard info.state != .idle else { return }
-    mpv.command(.stop, level: .verbose)
+    if let owner = pendingNativeQueueStopOwner {
+      // Keep the owner until the verified idle transition. Repeated stop calls
+      // must not replace the controller's keep-playlist stop with a destructive
+      // default stop while its worker is still leaving the installed item.
+      mpv.stopCancelledNativeQueue(owner: owner)
+    } else {
+      mpv.command(.stop, level: .verbose)
+    }
   }
 
   func toggleMute(_ set: Bool? = nil) {
@@ -1937,8 +2278,8 @@ class PlayerCore: NSObject {
       percent = percent.clamped(to: 0..<100)
     }
     let useExact = forceExact ? true : Preference.bool(for: .useExactSeek)
-    playbackTransport.seek(.init(value: percent, reference: .absolutePercent, exact: useExact),
-      context: .init(checkError: false, verbosity: .verbose))
+    recordNativeQueueSeek(playbackTransport.seek(.init(value: percent, reference: .absolutePercent, exact: useExact),
+      context: .init(checkError: false, verbosity: .verbose)))
   }
 
   func seek(relativeSecond: Double, option: Preference.SeekOption) {
@@ -1956,20 +2297,20 @@ class PlayerCore: NSObject {
     switch option {
 
     case .relative:
-      playbackTransport.seek(.init(value: relativeSecond, reference: .relativeSeconds, exact: false),
-        context: .init(checkError: false, verbosity: .verbose))
+      recordNativeQueueSeek(playbackTransport.seek(.init(value: relativeSecond, reference: .relativeSeconds, exact: false),
+        context: .init(checkError: false, verbosity: .verbose)))
 
     case .exact:
-      playbackTransport.seek(.init(value: relativeSecond, reference: .relativeSeconds, exact: true),
-        context: .init(checkError: false))
+      recordNativeQueueSeek(playbackTransport.seek(.init(value: relativeSecond, reference: .relativeSeconds, exact: true),
+        context: .init(checkError: false)))
 
     case .auto:
       // The first probe must actually be exact, even after a slow previous file.
       let firstProbe = !triedUsingExactSeekForCurrentFile
       triedUsingExactSeekForCurrentFile = true
-      playbackTransport.seek(.init(value: relativeSecond, reference: .relativeSeconds,
+      recordNativeQueueSeek(playbackTransport.seek(.init(value: relativeSecond, reference: .relativeSeconds,
         exact: firstProbe || useExactSeekForCurrentFile),
-        context: .init(checkError: false, seekTimingGeneration: firstProbe ? videoToolsMediaGeneration : nil))
+        context: .init(checkError: false, seekTimingGeneration: firstProbe ? videoToolsMediaGeneration : nil)))
 
     }
   }
@@ -1989,7 +2330,7 @@ class PlayerCore: NSObject {
     if isUsingNativePlayback {
       cancelNativePreview(restoreLoop: true)
       cancelNativeLoopRequests()
-      playbackTransport.seek(.init(value: max(0, absoluteSecond), reference: .absoluteSeconds, exact: true))
+      recordNativeQueueSeek(playbackTransport.seek(.init(value: max(0, absoluteSecond), reference: .absoluteSeconds, exact: true)))
       return
     }
     let target = videoToolsLoopRange?.clamped(absoluteSecond) ?? absoluteSecond
@@ -2269,6 +2610,7 @@ class PlayerCore: NSObject {
   }
 
   func getLoopMode() -> LoopMode {
+    if let queue = nativeQueue, queue.phase != .compatibility { return queue.repeatMode }
     if isUsingNativePlayback { return nativeLoopMode }
     let loopFileStatus = mpv.getString(MPVOption.PlaybackControl.loopFile)
     guard loopFileStatus != "inf" else { return .file }
@@ -2300,6 +2642,12 @@ class PlayerCore: NSObject {
 
   /// Apply whole-file/list repetition without changing A-B markers or saving incidental mpv state.
   private func applyLoopMode(_ newMode: LoopMode) {
+    if nativeQueue != nil, nativeQueue?.phase != .compatibility {
+      _ = nativeQueue?.setRepeatMode(newMode)
+      nativeLoopMode = newMode
+      if let transport = nativeTransport { transport.setLoop(transport.loopInterval, repeatFile: newMode == .file) }
+      return
+    }
     if let transport = nativeTransport {
       if newMode == .playlist {
         requireMPVCompatibility(reason: "playlist_repeat") { [weak self] in self?.applyLoopMode(newMode) }
@@ -2333,6 +2681,7 @@ class PlayerCore: NSObject {
 
   func toggleShuffle() {
     playlistMutationLock.lock()
+    guard !nativeQueueOwnsPlaylist else { playlistMutationLock.unlock(); return }
     mpv.command(.playlistShuffle)
     playlistMutationLock.unlock()
     postNotification(.iinaPlaylistChanged)
@@ -2343,6 +2692,12 @@ class PlayerCore: NSObject {
     let maxVolume = Preference.integer(for: .maxVolume)
     let constrainedVolume = volume.clamped(to: 0...Double(maxVolume))
     let appliedVolume = constrain ? constrainedVolume : volume
+    if updatePendingPlaybackVolume(appliedVolume, unmute: unmute) {
+      info.volume = appliedVolume
+      Preference.set(constrainedVolume, for: .softVolume)
+      syncUI(.volume)
+      return
+    }
     if isUsingNativePlayback, !(0...100).contains(appliedVolume) {
       requireMPVCompatibility(reason: "audio_amplification") { [weak self] in
         self?.setVolume(volume, constrain: constrain, unmute: unmute)
@@ -2364,7 +2719,7 @@ class PlayerCore: NSObject {
   /// Reconcile the volume UI with mpv without changing the saved volume preference.
   @discardableResult
   func syncVolumeFromMPV() -> Double {
-    if isUsingNativePlayback {
+    if isUsingNativePlayback || pendingPlaybackVolume != nil {
       info.volume = playbackVolume
       syncUI(.volume)
       return info.volume
@@ -2399,6 +2754,11 @@ class PlayerCore: NSObject {
   func setSpeed(_ speed: Double) {
     guard speed.isFinite else { return }
     let speed = speed < AppData.mpvMinPlaybackSpeed ? AppData.mpvMinPlaybackSpeed : speed
+    if updatePendingPlaybackSpeed(speed) {
+      info.playSpeed = speed
+      mainWindow.updateSpeedLabel(speed: speed)
+      return
+    }
     if isUsingNativePlayback, !(0.5...2).contains(speed) {
       requireMPVCompatibility(reason: "unsupported_playback_rate") { [weak self] in self?.setSpeed(speed) }
       return
@@ -2762,6 +3122,7 @@ class PlayerCore: NSObject {
   func appendToPlaylist(_ path: String, silent: Bool = false) {
     guard Utility.isLocalPlaybackPath(path) else { return }
     playlistMutationLock.lock()
+    guard !nativeQueueOwnsPlaylist else { playlistMutationLock.unlock(); return }
     guard !UpdateWorkAdmission.shared.isOpeningMediaBlocked else {
       playlistMutationLock.unlock()
       return
@@ -2775,6 +3136,7 @@ class PlayerCore: NSObject {
 
   func playlistMove(_ from: Int, to: Int) {
     playlistMutationLock.lock()
+    guard !nativeQueueOwnsPlaylist else { playlistMutationLock.unlock(); return }
     mpv.playlistMove(from, to: to)
     playlistMutationLock.unlock()
     postNotification(.iinaPlaylistChanged)
@@ -2783,6 +3145,7 @@ class PlayerCore: NSObject {
   @discardableResult
   func playlistReorder(newPlaylist: [MPVPlaylistItem]) -> Bool {
     playlistMutationLock.lock()
+    guard !nativeQueueOwnsPlaylist else { playlistMutationLock.unlock(); return false }
     defer {
       getPlaylist()
       playlistMutationLock.unlock()
@@ -2804,6 +3167,7 @@ class PlayerCore: NSObject {
     guard !paths.isEmpty else { return }
     playlistMutationLock.lock()
     defer { playlistMutationLock.unlock() }
+    guard !nativeQueueOwnsPlaylist else { return }
     guard isFileRelocation || !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return }
     getPlaylist()
     guard let previousCount = playlistSnapshot()?.count else { return }
@@ -2820,6 +3184,7 @@ class PlayerCore: NSObject {
 
   func playlistRemove(_ index: Int) {
     playlistMutationLock.lock()
+    guard !nativeQueueOwnsPlaylist else { playlistMutationLock.unlock(); return }
     mpv.playlistRemove(index)
     playlistMutationLock.unlock()
     postNotification(.iinaPlaylistChanged)
@@ -2829,6 +3194,7 @@ class PlayerCore: NSObject {
     guard !indexSet.isEmpty else { return }
     playlistMutationLock.lock()
     defer { playlistMutationLock.unlock() }
+    guard !nativeQueueOwnsPlaylist else { return }
     var count = 0
     for i in indexSet {
       mpv.playlistRemove(i - count)
@@ -2839,6 +3205,7 @@ class PlayerCore: NSObject {
 
   func clearPlaylist() {
     playlistMutationLock.lock()
+    guard !nativeQueueOwnsPlaylist else { playlistMutationLock.unlock(); return }
     mpv.command(.playlistClear)
     playlistMutationLock.unlock()
     postNotification(.iinaPlaylistChanged)
@@ -2865,6 +3232,12 @@ class PlayerCore: NSObject {
   /// - Parameter pos: Position of the entry in the playlist to be played.
   func playFileInPlaylist(_ pos: Int) {
     guard !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return }
+    guard nativeQueueInstallation == nil, !hasPendingNativeQueueRestore else { return }
+    if let queue = nativeQueue, queue.phase != .compatibility {
+      guard queue.plan.items.indices.contains(pos), let decision = nativeQueue?.select(queue.plan.items[pos].id) else { return }
+      applyNativeQueueDecision(decision, manual: true)
+      return
+    }
     resetURLPlaylistEnqueue()
     resetPermanentRotationMedia(to: nil)
     if isUsingNativePlayback {
@@ -2896,6 +3269,12 @@ class PlayerCore: NSObject {
   /// - Parameter nextMedia: When `true` play the next entry in the playlist; otherwise play the previous entry.
   func navigateInPlaylist(nextMedia: Bool) {
     guard !UpdateWorkAdmission.shared.isOpeningMediaBlocked else { return }
+    guard nativeQueueInstallation == nil, !hasPendingNativeQueueRestore else { return }
+    if nativeQueue != nil, nativeQueue?.phase != .compatibility {
+      let decision = nextMedia ? nativeQueue?.next() : nativeQueue?.previous()
+      if let decision { applyNativeQueueDecision(decision, manual: true) }
+      return
+    }
     resetURLPlaylistEnqueue()
     resetPermanentRotationMedia(to: nil)
     if isUsingNativePlayback {
@@ -3313,6 +3692,7 @@ class PlayerCore: NSObject {
   ///         the player is no longer active.
   func fileStarted(path: String) {
     guard info.state.active else { return }
+    let queueRestore = nativeCompatibilityRestore?.queueMedia
     log("File started")
     invalidateThumbnails()
     videoToolsMediaGeneration &+= 1
@@ -3332,6 +3712,10 @@ class PlayerCore: NSObject {
     if !ownedRotationReload { resetPermanentRotationMedia(to: info.currentURL) }
     info.isNetworkResource = !info.currentURL!.isFileURL
     postNotification(.chengyingMediaSourceChanged)
+    if let queueRestore {
+      guard nativeCompatibilityRestore?.queueMedia == queueRestore,
+            nativeQueue?.mediaToken == queueRestore else { return }
+    }
 
     // set "date last opened" attribute
     if let url = info.currentURL, url.isFileURL {
@@ -3411,6 +3795,7 @@ class PlayerCore: NSObject {
   ///         the player is no longer active.
   func fileLoaded() {
     guard info.state.active else { return }
+    let queueRestore = nativeCompatibilityRestore?.queueMedia
     log("File loaded")
 
     info.state = .loaded
@@ -3451,6 +3836,10 @@ class PlayerCore: NSObject {
     }
     // Load the tracks without changing the playback window.
     trackListChanged()
+    if let queueRestore {
+      guard nativeCompatibilityRestore?.queueMedia == queueRestore,
+            nativeQueue?.mediaToken == queueRestore else { return }
+    }
     getPlaylist()
     getChapters()
     syncAbLoop()
@@ -3474,6 +3863,10 @@ class PlayerCore: NSObject {
       }
     }
     postNotification(.iinaFileLoaded)
+    if let queueRestore {
+      guard nativeCompatibilityRestore?.queueMedia == queueRestore,
+            nativeQueue?.mediaToken == queueRestore else { return }
+    }
     events.emit(.fileLoaded, data: info.currentURL?.absoluteString ?? "")
     syncUI(.playlist)
     if var restore = nativeCompatibilityRestore, restore.url == info.currentURL {
@@ -3482,6 +3875,8 @@ class PlayerCore: NSObject {
       playbackTransport.setPaused(true)
       playbackTransport.setRate(restore.rate)
       playbackTransport.setVolumePercent(restore.volume)
+      info.volume = restore.volume
+      info.playSpeed = restore.rate
       restoreNativeLoopToMPV(start: restore.loopA, end: restore.loopB)
       videoToolsRestoreViewportToMPV(restore.viewport)
       seek(absoluteSecond: restore.position, preservingRotationHandoff: restore.id)
@@ -3492,6 +3887,7 @@ class PlayerCore: NSObject {
           self.cancelPendingPermanentRotation(requestID: requestID)
         }
         self.cancelURLPlaylistEnqueue()
+        if self.nativeCompatibilityRestore?.queueMedia != nil { self.resetNativeQueue() }
         self.nativeCompatibilityRestore = nil
         self.log("Native compatibility restoration timed out; pending action was not executed", level: .error)
         self.sendOSD(.custom(NSLocalizedString("playback.compatibility_restore_failed",
@@ -3502,6 +3898,7 @@ class PlayerCore: NSObject {
   }
 
   func fileEnded(_ dueToStopCommand: Bool) {
+    if nativeCompatibilityRestore?.queueMedia != nil { resetNativeQueue() }
     if nativeCompatibilityRestore?.enqueueMediaEpoch != nil { resetURLPlaylistEnqueue() }
     else { cancelURLPlaylistEnqueue() }
     if nativeCompatibilityRestore?.rotationMediaEpoch != nil { resetPermanentRotationMedia(to: nil) }
@@ -3596,6 +3993,7 @@ class PlayerCore: NSObject {
     }
     if info.state != .loading {
       log("Playback has stopped")
+      pendingNativeQueueStopOwner = nil
       info.state = .idle
       postNotification(.iinaPlayerStopped)
       if let pendingUrl {
@@ -3682,9 +4080,20 @@ class PlayerCore: NSObject {
     if let restore = nativeCompatibilityRestore, restore.waitingForSeek,
        restore.url == info.currentURL, let position = playbackPosition,
        abs(position - restore.position) <= 0.05 {
+      // User actions during loading or the exact seek supersede the original
+      // capture. Apply them only after this same-media restoration is verified.
+      playbackTransport.setRate(restore.rate)
+      playbackTransport.setVolumePercent(restore.volume)
+      if restore.unmuteRequested, restore.volume > 0 {
+        info.isMuted = false
+        mpv.setFlag(MPVOption.Audio.mute, false)
+      }
       nativeCompatibilityRestore = nil
+      if restore.queueMedia != nil { resetNativeQueue() }
       info.volume = restore.volume
+      info.playSpeed = restore.rate
       playbackTransport.setPaused(restore.paused)
+      mainWindow.updateSpeedLabel(speed: restore.rate)
       syncUI([.volume, .playButton, .time])
       restore.completion()
     }
@@ -3731,8 +4140,10 @@ class PlayerCore: NSObject {
 
   func speedChanged(_ speed: Double) {
     guard info.state.active else { return }
+    let pendingRate = pendingRotationPlaybackRestore?.rate
+    let speed = pendingRate ?? speed
     info.playSpeed = speed
-    videoToolsEnforceLoopBounds()
+    if pendingRate == nil { videoToolsEnforceLoopBounds() }
     sendOSD(.speed(speed))
     mainWindow.updateSpeedLabel(speed: speed)
     needReloadQuickSettingsView()

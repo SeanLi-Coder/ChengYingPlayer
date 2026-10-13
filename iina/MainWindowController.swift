@@ -3622,7 +3622,7 @@ class MainWindowController: PlayerWindowController {
   }
 
   func showPlaylistSidebar(tab: PlaylistViewController.TabViewType? = nil, force: Bool = false, hideIfAlreadyShown: Bool = true) {
-    if player.isUsingNativePlayback {
+    if player.isUsingNativePlayback || player.hasNativePlaybackQueue {
       player.requireMPVCompatibility(reason: "Playlist sidebar requires the compatibility renderer") { [weak self] in
         self?.showPlaylistSidebar(tab: tab, force: force, hideIfAlreadyShown: hideIfAlreadyShown)
       }

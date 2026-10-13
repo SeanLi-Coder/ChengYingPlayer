@@ -264,7 +264,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       }
     } else {
       if handleVolumeKeyBinding(keyBinding.action) { return true }
-      if player.isUsingNativePlayback {
+      if player.isUsingNativePlayback || player.hasNativePlaybackQueue {
         // Typed transport commands must never reach the idle compatibility
         // core. Preserve arbitrary custom mpv bindings by switching explicitly
         // before replaying the original binding on that backend.
@@ -280,6 +280,15 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
           player.resume()
           return true
         }
+        if keyBinding.action == ["playlist-next"] {
+          player.navigateInPlaylist(nextMedia: true)
+          return true
+        }
+        if keyBinding.action == ["playlist-prev"] {
+          player.navigateInPlaylist(nextMedia: false)
+          return true
+        }
+        if player.handleLoopModeKeyBinding(keyBinding.action) { return true }
         if handleGuardedPlaybackCommand(keyBinding.action) { return true }
         player.requireMPVCompatibility(reason: "The requested key binding needs the compatibility backend") { [weak self] in
           _ = self?.handleKeyBinding(keyBinding)

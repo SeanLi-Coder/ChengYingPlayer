@@ -749,6 +749,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
 
   @discardableResult
   func pasteFromPasteboard(row: Int, from pboard: NSPasteboard) -> Bool {
+    guard !player.nativeQueueOwnsPlaylist else { return false }
     let pathsToAdd: [String]
     if let paths = pboard.propertyList(forType: .nsFilenames) as? [String] {
       let playableFiles = Utility.resolveURLs(player.getPlayableFiles(in: paths.compactMap {
@@ -1137,7 +1138,7 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
   private var contextMenuTargets: [(entryID: Int64, filename: String)] = []
 
   private func contextMenuSelection() -> (items: [MPVPlaylistItem], rows: IndexSet)? {
-    guard let player, player.info.state.active, !contextMenuTargets.isEmpty,
+    guard let player, !player.nativeQueueOwnsPlaylist, player.info.state.active, !contextMenuTargets.isEmpty,
           let playlist = player.playlistSnapshot() else { return nil }
     var rows = IndexSet()
     var items: [MPVPlaylistItem] = []

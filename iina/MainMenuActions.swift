@@ -26,7 +26,7 @@ class MainMenuActionHandler: NSResponder, NSMenuItemValidation {
   /// its compatibility handoff. Snapshot the item so a rebuilt menu cannot
   /// change its tag or represented value while that asynchronous work runs.
   private func routeToCompatibility(_ sender: NSMenuItem, action: Selector) -> Bool {
-    guard player.isUsingNativePlayback else { return false }
+    guard player.isUsingNativePlayback || player.hasNativePlaybackQueue else { return false }
     let preservedSender = (sender.copy() as? NSMenuItem) ?? sender
     player.requireMPVCompatibility(reason: "The requested menu action needs the compatibility backend") { [weak self] in
       guard let self else { return }
