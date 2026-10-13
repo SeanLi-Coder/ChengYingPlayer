@@ -80,6 +80,12 @@ CI 新增两项 owner／START 负控和失败证据留存，旧 gate 负控保�
 
 ### 最新整窗阻挡（2026-10-13）
 
+后续本机对安装器补有界取消诊断和候选依赖身份校验，没有改变生产安装器或放宽
+期限。新 AV1 播放库下普通／ASan／TSan 完整检查均为191/0且六负控准确；最终
+runner TSan复验于 `mpv-queue-installer-tests.8IDtyH`。另200次半建列表取消为600/0
+（`FtLwVq`），只是尚未复现，不代表下述CI的partial cancellation故障已修复。
+CI将保留实际返回码／列表ID和新的重复取消证据；详见安装器README。
+
 最新 `38337569102` 的原92项整窗驱动完成70项通过、1项失败。下述关闭layer检查
 已过，嵌入字幕回退也通过；后续新core开片的 `handoff_native_paused_red_ready` 在
 约2ms立即失败。真实inventory异步创建session，而helper入口先guard session非nil，

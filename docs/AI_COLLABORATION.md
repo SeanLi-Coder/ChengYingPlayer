@@ -122,6 +122,9 @@ owner 校验，普通 UI 事件隔离但 hook／shutdown 保留；实际命令�
 及六负控通过，但 TSan191/1 在 partial cancellation 的真实清理检查失败，正在采证，
 未归因为生产或工具问题。证据 `build/native-ci-38337569102.GQRT14`；App 清理完成。
 没有生成新的稳定更新，不以局部测试宣称换核完成。
+安装器后续只补有界失败诊断及候选依赖身份校验；新播放库本机普通／ASan／TSan
+各191/0及六负控通过，最终TSan为 `mpv-queue-installer-tests.8IDtyH`；200次半建
+列表取消600/0未复现CI故障，不能写成已修复，下一CI保留重复取消检查和原始诊断。
 新 AV1 backport 播放库的 H.264／HEVC 4K 持续回归已补：冻结 CYN `e3bcc18e`、
 session `5542c267`，独立 `7FMHum` 依赖上运行三轮共 182.55 秒，292/0；原错参考
 负控准确产生 16 项中 1 项失败并正常关闭。证据 `native-playback-soak.iX9p53`／
