@@ -607,6 +607,8 @@
 /* Global playback mode */
 "playback_mode.label" = "播放模式";
 "playback.compatibility_restore_failed" = "未能恢复播放位置，本次操作未执行。请重试。";
+"playback.url_enqueue_failed" = "播放状态正在切换，未能添加所请求的文件。请重试。";
+"playback.url_enqueue_options_unsupported" = "原生播放暂不支持同时通过链接添加文件和修改窗口或播放选项。请仅保留 url 和 enqueue 参数后重试。";
 "playback.loop_capture_unavailable" = "播放仍在准备中，请稍后重试设置循环点。";
 "playlist.resize_height" = "上下拖动调整文件列表高度，松开后自动记忆。";
 "playback_mode.accessibility" = "播放模式";

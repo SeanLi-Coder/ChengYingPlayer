@@ -1,0 +1,33 @@
+  // This focused suite never submits URL-enqueue work. Keep ownership queries
+  // explicit and trap any request instead of pretending an append succeeded.
+  struct UnsupportedURLPlaylistBatch { let url: URL }
+  var urlPlaylistBatch: UnsupportedURLPlaylistBatch? { nil }
+  var urlPlaylistMediaEpoch: UUID {
+    preconditionFailure("URL enqueue ownership is outside this focused test boundary")
+  }
+  var hasPendingURLPlaylistRestore: Bool {
+    precondition(nativeCompatibilityRestore?.enqueueMediaEpoch == nil,
+                 "URL enqueue restore requires the focused enqueue harness")
+    return false
+  }
+  func ownsURLPlaylistEnqueue(_ id: UUID?) -> Bool {
+    precondition(id == nil, "URL enqueue requires the focused enqueue harness")
+    return true
+  }
+  func isURLPlaylistEnqueueBusy(except id: UUID?) -> Bool {
+    precondition(id == nil && !hasPendingURLPlaylistRestore)
+    return false
+  }
+  func bindURLPlaylistCapture(_ captureID: UUID, requestID: UUID?) {
+    precondition(requestID == nil && !hasPendingURLPlaylistRestore)
+  }
+  func cancelURLPlaylistEnqueue(requestID: UUID? = nil) {
+    precondition(requestID == nil && !hasPendingURLPlaylistRestore)
+  }
+  func resetURLPlaylistEnqueue() {
+    precondition(!hasPendingURLPlaylistRestore)
+    nativeCompatibilityCaptureID = nil
+  }
+  func reportURLPlaylistEnqueueFailure(unsupportedOptions: Bool = false) {
+    preconditionFailure("Unexpected URL enqueue failure in a no-enqueue fixture")
+  }

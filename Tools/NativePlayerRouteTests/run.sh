@@ -26,6 +26,7 @@ source_files=(
   iina/NativePlayback/NativePlaybackSession.swift iina/NativePlayback/NativePlaybackSurface.swift
   iina/VideoView.swift iina/NativePlayback/CYNMediaDecoder.h iina/NativePlayback/CYNMediaDecoder.m
   Tools/NativePlayerRouteTests/Boundary.swift Tools/NativePlayerRouteTests/PlayerBoundary.txt
+  Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt
   Tools/NativePlayerRouteTests/extract.swift Tools/NativePlayerRouteTests/main.swift Tools/NativePlayerRouteTests/run.sh
   deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib
   deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib

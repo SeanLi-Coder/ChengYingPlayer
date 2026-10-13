@@ -298,9 +298,16 @@ flush 保护负对照 **110/16**（`LHIaR7`），去除 FIFO 单条件负对照 
 
 随后一次完整原前序的隔离诊断 `build/native-preroll-ring-diagnosis.7te25h/` 保持原始素材与
 三秒像素截止时间，TSan **117/0**；有界 ring 为 804 项、丢弃为零，只在末尾输出。
-seek 到 2 的首个实际读回是 `raw nil`，约 14.3 ms 后是正确 NV12；两时钟均为 2、rate 0，
+seek 到 2 的首个实际读回是 `raw nil`，约 12.5 ms 后是正确 NV12（距首次入队约 14.3 ms）；
+两时钟均为 2、rate 0，
 flush 完成、renderer 无错误且 `isReadyForDisplay=true`。这只能证明该次短暂空值存在，
 没有复现原三秒失败；不能据此把 ready 标志或追加帧当作生产修补，也未继续重复碰运气。
+
+后续只读复核 `7te25h` 和 `5n25Go` 的暂停入队记录，尚无证据表明当时 parent／renderer
+时钟不同步；原失败又发生在新建 output 的 paused open→seek，不能先假定是旧高位时钟。
+本机 SDK 的 `copyDisplayedPixelBuffer` 合约允许图像不可用时返回空，非零速率必为空；
+`readyForDisplay` 只描述首帧就绪，并不保证同一时刻能复制像素。三秒读回失败仍保留，
+但不单凭此判定实体屏幕黑屏，不添加尚无证据的生产锚点修补。
 
 上述开发 CI `38305625981` 最终失败：媒体 job、完整生产 App 编译、decoder 全部检查、
 output 96、display 36、普通 session **209/0**、实际像素 **66/0** 通过；随后 session
@@ -550,6 +557,48 @@ coordinator **77/0**、task manager **132/0**；旧 viewport 中英各 **1098/0*
 伪造 native 成功。日志和五个生产文件前后稳定 hash 位于
 `build/rotation-legacy-final.vg4hNP/`；本轮 Live 只是编译，不冒充新增的实播结果。
 
+## URL 加入列表的交接所有权（仍非完整 App URL 验收）
+
+只改 `chengying://open?url=...&enqueue=1` 的加入列表入口。此前 native `info.playlist`
+有一项，但实际追加发往尚未加载媒体的 MPV；切换期间列表暂空时，连续请求又可能误入
+新开片分支。现在 native 请求先取得同文件兼容交接，恢复准确位置后顺序追加。普通
+`appendToPlaylist`／`addToPlaylist` 及后台同目录匹配的同步锁和入口不变。
+
+一个 batch 至多保存 64 个请求、256 条路径与 1 MiB UTF-8 路径；超限拒绝新请求，不挤掉
+已接受项。capture、retire、load、restore 期间只建一个交接，保留 volume／rate／A-B／
+viewport，并接收最后的 pause／seek 意图。15 秒 watchdog 只取消所属动作；同文件仍可
+恢复播放，用户开新文件、同路径重开、停止、退出或加载失败则取消整个所属状态。
+不同 capture 的迟到回调不会清除新 batch；其他兼容动作不能抢走已有 enqueue continuation。
+
+实际 MPV 命令返回值决定成功数量，不因调用过 helper 就提示成功。所有追加先于任意
+completion；逐个回调和最终 main-queue OSD 都检查媒体 receipt，通知同步重开文件、后续
+MPV file-start（含同路径）不会把旧成功提示发到新画面。restore-only 状态也保持加入列表
+入口，避免动作超时后空列表又误开片。native enqueue 的混合 `new_window`／全屏／PiP／
+`mpv_*` 参数在分配新 core 或开图片前明确拒绝；没有假装这些额外选项已迁移。
+
+冻结生产 Core SHA-256 `d42407567af7382b895d8280d4e3cc2e2a063e0aa10cb0deda37b4d2204dd16f`，
+AppDelegate `0bb812b752409373e388a72264c31f612ae0bdf11ba7d640fb363b9f85038930`。
+`Tools/URLPlaylistEnqueueTests` 机械抽取真实 Core 方法、AppDelegate enqueue 分支及
+`sendOSD` 最后的异步 closure；capture／shutdown／MPV 服务和早期 UI 门禁是显式受控边界。
+不读取用户媒体，不发送系统 AppleEvent，不创建 App 或窗口；不能说完整 App URL 交付通过。
+
+普通／ASan／TSan 各 **118/0**，八个单变量负控分别产生 **27／9／7／2／3／4／2／2**
+项预期失败并退出 1；超时、编译失败或 sanitizer 告警不能冒充有效负控。证据为
+`build/url-enqueue-tests.ZetQ3f/`、`1fdLoF/`、`X1m0YH/`，输入稳定性检查均通过。
+runner 随后增加明确拒绝 sanitizer 诊断，不改生产和断言；主代理以最终 runner 独立复跑
+普通 `oLU53f`、ASan `eHhRop` 和 TSan `kA0o72`，同样全部通过、source-check 为零。
+新 CI 分开运行普通与 TSan 并保留正负日志／源码 hash，不改默认准入或发布条件。
+
+旧 fixture 只增加明确的无 enqueue 边界或复用真实 enqueue 代码／受控服务，未删除旧断言
+或延长 deadline。同 Core／AppDelegate 的 Core 41、Lifecycle 76、Seek 37、rotation 三模式
+176 及四负控、旧工具英文 942、task manager 132、旧 viewport 中英各 1098 通过；真实旧
+MPV 剪辑预览 324 项通过，实际收到 308 个 rendered frame，清理成功。
+证据汇总 `build/url-enqueue-legacy-verification.6CsPhO/`。
+Route 首轮 287 项虽通过，但 CYN 同时开发使 source-check 失败（`SNvZHM`），不能算同源
+成功。CYN 暂冻于 `413c4afa` 后另跑 Route `wookuc` 287、Clip `vPbsSc` 235、A/B `wkFaRV`
+151 全部通过且输入 hash 稳定；这是该时点 decoder 的旧功能回归，不能替代尚在实现中的
+最终 AV1 decoder 验收。上述所有检查也不替代整窗 URL 事件交接。
+
 ## 实现文件
 
 - `iina/NativePlayback/CYNMediaDecoder.{h,m}`：只读本地文件、FFmpeg 收帧／drain、
@@ -638,6 +687,10 @@ coordinator **77/0**、task manager **132/0**；旧 viewport 中英各 **1098/0*
   仅在锁定 FFmpeg 路径明确要求硬件时为真。FFmpeg 7 的 HEVC 允许软件 fallback，
   因而 HEVC 的 false 是“实际硬件未确认”，不能标作软件解码或硬解失败。
 - 本机不是 M4；AV1 M4 硬解、实体 HDR 屏、ICC 色彩、真实音频设备切换和可听音质未验收。
+  进一步核对还确认：当前锁定的播放 FFmpeg 7.1.5 不含 AV1 VideoToolbox backport，
+  `CYNMediaDecoder` 按 codec ID 选择到的是 libdav1d；不能把现状描述成仅差 M4 测试。
+  `codex/movist-core-reference` 的 AV1 实验补丁尚未进入本分支，且只补库还不够，
+  新 decoder 还需要明确选择支持 VT 的 AV1 decoder，并在实际创建失败时可靠回退软件。
 - 旋转、SAR 和画面缩放／平移已接入新 surface；完整 App 组合验收仍未完成。
   完整字幕／轨道选择、截图、帧进、HDR 用户开关及播放列表策略仍走兼容路径。
   剪辑预览恢复已接入原生路径，但新完整 App 预览回归仍待运行。

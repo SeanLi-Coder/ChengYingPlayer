@@ -958,6 +958,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return
       }
 
+      let enqueueRecipient = queryDict["enqueue"] == "1" ? PlayerCore.lastActive : nil
+      // Native enqueue only appends files. Reject mixed presentation/mpv options
+      // before opening viewers or allocating a different player core.
+      if let enqueueRecipient,
+         !enqueueRecipient.validateURLPlaylistEnqueueOptions(Set(queryDict.keys)) { return }
+
       let localURL = urlValue.hasPrefix("/") ? URL(fileURLWithPath: urlValue) : URL(string: urlValue)
       let imagePlan: ImageOpenPlan?
       if let localURL, localURL.isFileURL {
@@ -982,16 +988,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       }
 
       // enqueue
-      let playlistEmpty = PlayerCore.lastActive.info.$playlist.withLock { $0.isEmpty }
-      if let enqueueValue = queryDict["enqueue"], enqueueValue == "1", !playlistEmpty {
+      let playlistEmpty = (enqueueRecipient ?? PlayerCore.lastActive).info.$playlist.withLock { $0.isEmpty }
+      if let enqueueValue = queryDict["enqueue"], enqueueValue == "1",
+         !playlistEmpty || enqueueRecipient?.hasPendingURLPlaylistEnqueue == true {
+        let recipient = enqueueRecipient ?? PlayerCore.lastActive
+        let paths: [String]
         if let imagePlan, imagePlan.imageCount > 0 {
-          let files = PlayerCore.lastActive.getPlayableFiles(in: imagePlan.mediaURLs)
-          PlayerCore.lastActive.addToPlaylist(paths: files.map(\.path))
+          paths = recipient.getPlayableFiles(in: imagePlan.mediaURLs).map(\.path)
         } else {
-          PlayerCore.lastActive.appendToPlaylist(urlValue)
+          paths = [urlValue]
         }
-        PlayerCore.lastActive.postNotification(.iinaPlaylistChanged)
-        PlayerCore.lastActive.sendOSD(.addToPlaylist(1))
+        let receipt = recipient.urlPlaylistEnqueueReceipt
+        recipient.enqueueURLPlaybackPaths(paths) { [weak recipient] count in
+          guard let recipient, count > 0 else { return }
+          recipient.postNotification(.iinaPlaylistChanged)
+          recipient.sendOSD(.addToPlaylist(count), stillApplies: { [weak recipient] in
+            recipient?.urlPlaylistEnqueueReceipt == receipt
+          })
+        }
       } else if let imagePlan {
         player.openMediaURLs(imagePlan.mediaURLs)
       } else {

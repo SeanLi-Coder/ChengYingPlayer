@@ -13,6 +13,7 @@ sources=(iina/Atomic.swift iina/Lock.swift iina/PlayerState.swift iina/MPVComman
 shasum -a 256 "${sources[@]}" iina/PlayerCore.swift iina/PlayerWindowController.swift \
   iina/QuickSettingViewController.swift iina/VideoTools/VideoToolsViewController.swift \
   iina/VideoTools/VideoToolsPlayerBridge.swift Tools/NativeRotationHandoffTests/*.swift \
+  Tools/URLPlaylistEnqueueTests/EnqueueServices.swift \
   Tools/NativeRotationHandoffTests/run.sh > "$test_dir/inputs.sha256"
 finish_evidence() {
   original_status=$?
@@ -43,6 +44,7 @@ for mutation in positive loaded-only resurrect-restore unowned-restore drop-play
   ROTATION_HANDOFF_NEGATIVE="$mode" xcrun swift Tools/NativeRotationHandoffTests/extract.swift \
     "$repo_root" "$test_dir/$mutation.swift"
   "${compiler[@]}" "${sources[@]}" Tools/NativeRotationHandoffTests/Boundary.swift \
+    Tools/URLPlaylistEnqueueTests/EnqueueServices.swift \
     "$test_dir/$mutation.swift" Tools/NativeRotationHandoffTests/main.swift -o "$test_dir/$mutation"
   set +e
   /usr/bin/perl -e 'alarm 25; exec @ARGV' "$test_dir/$mutation" 2>&1 | tee "$test_dir/$mutation.log"

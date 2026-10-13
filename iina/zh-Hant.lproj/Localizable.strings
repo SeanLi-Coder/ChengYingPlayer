@@ -599,6 +599,8 @@
 /* Global playback mode */
 "playback_mode.label" = "播放模式";
 "playback.compatibility_restore_failed" = "未能恢復播放位置，本次操作未執行。請重試。";
+"playback.url_enqueue_failed" = "播放狀態正在切換，未能加入所請求的檔案。請重試。";
+"playback.url_enqueue_options_unsupported" = "原生播放暫不支援同時透過連結加入檔案和修改視窗或播放選項。請僅保留 url 和 enqueue 參數後重試。";
 "playback.loop_capture_unavailable" = "播放仍在準備中，請稍後重試設定循環點。";
 "playlist.resize_height" = "上下拖曳調整檔案列表高度，放開後自動記住。";
 "playback_mode.accessibility" = "播放模式";

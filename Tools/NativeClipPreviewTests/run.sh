@@ -12,6 +12,7 @@ source_files=(
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift
   iina/NativePlayback/NativePlaybackSession.swift iina/NativePlayback/CYNMediaDecoder.h iina/NativePlayback/CYNMediaDecoder.m
   Tools/NativeClipPreviewTests/extract.swift Tools/NativeClipPreviewTests/main.swift Tools/NativeClipPreviewTests/run.sh
+  Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt
 )
 shasum -a 256 "${source_files[@]}" > "$test_dir/source-before.sha256"
 ffmpeg_bin="${FFMPEG_BIN:-/opt/homebrew/bin/ffmpeg}"

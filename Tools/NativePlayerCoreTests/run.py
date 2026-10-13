@@ -46,6 +46,7 @@ def main():
     rotation_start = core.index("  private var permanentRotationIntent")
     rotation_end = core.index("\n  /// Both window shortcuts", rotation_start)
     generated += core[rotation_start:rotation_end] + "\n"
+    generated += (ROOT / "Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt").read_text() + "\n"
     pending_start = core.index("  var nativeInitialPlaybackPending: Bool {")
     pending_end = core.index("\n  }", pending_start) + len("\n  }")
     generated += "\n" + core[pending_start:pending_end] + "\n"

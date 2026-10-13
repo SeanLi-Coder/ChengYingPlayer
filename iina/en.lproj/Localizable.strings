@@ -608,6 +608,8 @@
 /* Global playback mode */
 "playback_mode.label" = "Mode";
 "playback.compatibility_restore_failed" = "Could not restore the playback position. Please retry the requested action.";
+"playback.url_enqueue_failed" = "Could not add the requested files while playback is changing. Please retry.";
+"playback.url_enqueue_options_unsupported" = "Native playback only supports URL enqueue without extra window or playback options. Retry with only url and enqueue.";
 "playback.loop_capture_unavailable" = "Playback is still preparing. Try setting the loop point again shortly.";
 "playlist.resize_height" = "Drag up or down to resize the file list. The height is remembered.";
 "playback_mode.accessibility" = "Playback mode";

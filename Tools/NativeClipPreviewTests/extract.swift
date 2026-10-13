@@ -37,6 +37,7 @@ let rotationMethods = ["  @discardableResult\n  func cancelPendingPermanentRotat
   "  private func ownsPermanentRotationRequest("].map(coreMethod).joined(separator: "\n")
 let compatibilityMembersEnd = source.range(of: "  private var playbackTransport:", range: end..<source.endIndex)!.lowerBound
 let compatibilityMembers = String(source[end..<compatibilityMembersEnd])
+let noEnqueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt"), encoding: .utf8)
 var compatibilityMethods = ["  func requireMPVCompatibility(", "  private func retireNativePlayback("].map(coreMethod).joined(separator: "\n")
 if ProcessInfo.processInfo.environment["NATIVE_PREVIEW_NEGATIVE_CONTROL"] == "stale-compatibility" {
   let original = ",\n              (!initiallyReady && self.nativeInitialPlaybackPending || self.nativePreviewIntentRevision == previewIntent),\n              !self.nativePreviewInProgress"
@@ -51,6 +52,7 @@ import AVFoundation
 final class PlayerCore {
 \(rotationFields)
 \(rotationMethods)
+\(noEnqueue)
   struct Info { var videoDuration: VideoTime?; var state = PlayerState.idle; var currentURL: URL? }
   var info = Info()
   var nativeTransport: NativePlaybackTransport?

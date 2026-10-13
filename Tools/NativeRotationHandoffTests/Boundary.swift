@@ -11,8 +11,8 @@ enum Logger { enum Level { case debug, verbose, error, warning } }
 enum Utility {
   static func mediaLogSummary(_ url: URL) -> String { "synthetic" }
 }
-enum NotificationName { case iinaPlayerStopped }
-enum OSDMessage { case custom(String), abLoop(Int) }
+enum NotificationName { case iinaPlayerStopped, iinaPlaylistChanged }
+enum OSDMessage { case custom(String), abLoop(Int), addToPlaylist(Int) }
 struct VideoTime { let second: Double }
 struct NativePlaybackSnapshot {
   enum Phase { case paused, playing }

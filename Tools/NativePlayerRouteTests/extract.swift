@@ -64,6 +64,7 @@ if negative == "ignore-opening-getter" {
   declarations = declarations.replacingOccurrences(of: original, with: "playbackTransport.isPaused")
 }
 let boundary = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerRouteTests/PlayerBoundary.txt"), encoding: .utf8)
+let noEnqueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt"), encoding: .utf8)
 let bridge = try String(contentsOf: root.appendingPathComponent("iina/VideoTools/VideoToolsPlayerBridge.swift"), encoding: .utf8)
 guard let modelStart = bridge.range(of: "struct VideoToolsViewport:")?.lowerBound,
       let modelEnd = bridge.range(of: "struct VideoToolsPlayerSnapshot")?.lowerBound else {
@@ -89,6 +90,7 @@ import AVFoundation
 final class PlayerCore {
 \(boundary)
 \(declarations)
+\(noEnqueue)
 \(methods)
 }
 final class PlaybackInfoDouble: PlaybackInfoFields {

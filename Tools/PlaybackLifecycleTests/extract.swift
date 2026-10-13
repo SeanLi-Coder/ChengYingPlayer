@@ -25,6 +25,7 @@ let thumbnailGenerationFallback = declarations.contains("var thumbnailGeneration
   ? "" : "@Atomic var thumbnailGeneration: UInt = 0"
 let rotationFields = section(player, "  private var permanentRotationIntent", "\n  /// Both window shortcuts")
 let rotationMethods = section(player, "  @discardableResult\n  func cancelPendingPermanentRotation(", "  /// An abandoned rotation action")
+let noEnqueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt"), encoding: .utf8)
 let playerSource = """
 import Foundation
 
@@ -33,6 +34,7 @@ final class PlayerUnderTest: PlayerFixture {
 \(thumbnailGenerationFallback)
 \(rotationFields)
 \(rotationMethods)
+\(noEnqueue)
 \(start)
 \(stop)
 \(shutdown)

@@ -38,6 +38,7 @@ let methods = ["  func abLoop()", "  func syncAbLoop()", "  func seek(absoluteSe
   .map { method(core, $0) }.joined(separator: "\n")
 let markerProperties = section(core, "  /// The A loop point established", "\n  var isABLoopActive:")
 let boundary = try String(contentsOf: root.appendingPathComponent("Tools/NativeABLoopTests/PlayerBoundary.txt"), encoding: .utf8)
+let noEnqueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt"), encoding: .utf8)
 let generated = """
 import AppKit
 import AVFoundation
@@ -45,6 +46,7 @@ final class PlayerCore {
 \(boundary)
 \(rotationFields)
 \(compatibilityFields)
+\(noEnqueue)
 \(members)
 \(controls)
 \(markerProperties)

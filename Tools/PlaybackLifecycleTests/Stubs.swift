@@ -102,9 +102,11 @@ class PlayerFixture {
     let url: URL
     var rotationRequestID: UUID?
     let rotationMediaEpoch: UUID?
+    let enqueueMediaEpoch: UUID? = nil
     var completion: () -> Void
   }
   var nativeCompatibilityRestore: RotationRestoreBoundary?
+  var nativeCompatibilityCaptureID: UUID?
   var pendingUrl: URL?
   var pendingAutoLoad = false
   @discardableResult func advancePlaybackRoute(acceptsMPV: Bool) -> UInt64 { 0 }

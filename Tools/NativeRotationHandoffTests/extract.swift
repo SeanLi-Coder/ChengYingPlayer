@@ -23,6 +23,9 @@ let core = try read("iina/PlayerCore.swift")
 let bridge = try read("iina/VideoTools/VideoToolsPlayerBridge.swift")
 var members = span(core, "  private var permanentRotationIntent", "  var touchBarSupport:")
 members += span(core, "  private struct NativeCompatibilityRestore", "  private var playbackTransport:")
+// Keep enqueue ownership real even though this suite submits only rotations.
+// The focused URL suite supplies the controlled append service boundary.
+members += span(core, "  private struct URLPlaylistRequest", "  func appendToPlaylist(")
 let signatures = ["  func requireMPVCompatibility(", "  private func retireNativePlayback(",
                   "  private func open(_ url:", "  func stop()", "  func shutdown()",
                   "  func seek(absoluteSecond:", "  func seek(relativeSecond:", "  func seek(percent:",
@@ -51,7 +54,7 @@ case "": break
 case "loaded-only":
   replaceOnce(&window, "player.info.state.loaded || player.hasPendingPermanentRotation", "player.info.state.loaded")
 case "resurrect-restore":
-  replaceOnce(&members, "if rotationRequestID == nil { self.nativeCompatibilityRestore = restore }",
+  replaceOnce(&members, "if rotationRequestID == nil && enqueueRequestID == nil { self.nativeCompatibilityRestore = restore }",
               "self.nativeCompatibilityRestore = restore")
 case "unowned-restore":
   replaceOnce(&members, "let ownsRestore = restoreID != nil && nativeCompatibilityRestore?.id == restoreID",
