@@ -121,6 +121,27 @@ URL 与 rotation 同型门禁均改为明确退出，实际 gate 在系统 Bash 
 generic handoff 三模式各 218/0 及十一精确负控通过。这些真实局部结果不能替代
 完整 App 失败，也不能解释或抹除此前 partial-cancellation 的偶发失败。
 
+### 非默认播放状态的有界整窗准备
+
+随后真实 CLI `native-app-paused-wait.PnJ8Ui` 自然复现立即变速 query 为 unavailable、
+稍后实际 worker 与绿色输出准确就绪的一处测试缺陷。原 CI 没有记录该查询结果，
+不能据此断言其唯一根因。新 single／queue caller 复用原 paused helper 的单一
+12 秒 deadline，最多一个查询在途；37% 音量仍用原 1e-6 容差，其余调用保持精确零，
+位置、1.25x、实际绿色像素、A/B 标记、viewport 及同一个窗口／Session／媒体／native
+输出身份仍必须同时符合。没有修改生产代码或原 92/54 labels、110/150 秒总限制。
+
+driver `4926aeb4`／probe `872f9502`／runner `018bb559` 最终 CLI `rUhGfd`
+包含六模式：普通延迟准入通过、原过早 nil guard 精确失败、旧一次性 handoff 精确失败、
+新等待通过、只撤等待精确失败、只撤 owner 检查时错误接纳替换媒体被精确检出。
+所有编译退出 0，子进程状态依次 0/1/1/0/1/1，wrapper 0，清理和 source/generated/deps
+检查通过。确定性检查通过有界屏障排序真实 worker 的 rate 与 capture，阻止调度运气
+掩盖旧缺陷；没有注入 ready／像素。45 项准备测试通过，根代理独立重跑及第三方审查
+均通过。仍须下一完整 App CI 验证菜单、几何及实际两核交接。
+
+新退出门禁的 rotation runner 由根代理普通重跑于 `Q1bAQC`：正向 176/0，四负控
+4/10/2/48，runner/source/generated 均为 0；该轮未跑 sanitizer，不使用旧 CI 的
+sanitizer 结果冒充当前源码。未发布、未更换默认内核或用户安装。
+
 显式有界列表已接实际 Core、native Session 与 MPV 命令；周围 App 服务边界见
 `Tools/NativeCoreQueueTests/README.md`。生产 controller 的停止协议单独测试：
 当前条目真正卸载后才能清理精确 owner 的列表，reader 事件排空后才能确认 idle。

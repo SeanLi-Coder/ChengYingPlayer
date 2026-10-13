@@ -372,7 +372,7 @@ jobs:
             build/native-app-paused-wait.*/*.log
             build/native-app-paused-wait.*/*.json
             build/native-app-paused-wait.*/*/*.log
-            build/native-app-paused-wait.*/*/exit-code.txt
+            build/native-app-paused-wait.*/*/*.txt
           if-no-files-found: ignore
           retention-days: 3
 

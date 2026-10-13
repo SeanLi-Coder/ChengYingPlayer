@@ -295,10 +295,38 @@ print("Queue node comparator checks: \(checks)")
         self.assertEqual(method.count("let deadline = ProcessInfo.processInfo.systemUptime + 12"), 1)
         self.assertLess(method.index("let deadline ="), method.index("func poll()"))
         self.assertIn("if observedSession == nil, let available = player.nativePlaybackSession", method)
-        self.assertEqual(method.count("player.nativePlaybackSession === session"), 2)
-        self.assertEqual(method.count("player.videoToolsMediaGeneration == observedGeneration"), 2)
+        self.assertEqual(method.count("guard stillOwned(), player.nativePlaybackSession === session"), 2)
+        self.assertEqual(method.count("player.videoToolsMediaGeneration == observedGeneration else"), 2)
         self.assertIn("snapshot.phase == .paused", method)
         self.assertIn("self.pixel(player, is: color)", method)
+        self.assertEqual(method.count("guard stillOwned(),"), 2)
+        self.assertIn("expectedVolume: Double = 0", method)
+        self.assertIn("expectedVolume == 0 ? snapshot.volume == 0", method)
+        self.assertIn("abs(Double(snapshot.volume) - expectedVolume) < 0.000001", method)
+
+    def test_handoff_wait_preserves_owner_and_strict_real_worker_contract(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private func waitForHandoffState(")
+        end = source.index("\n  }", start) + len("\n  }")
+        method = source[start:end]
+        for proof in ("waitForNativePaused", "position: 4.2", "color: .green", "expectedVolume: 0.37",
+                      "player.nativePlaybackSession === session", "player.videoToolsMediaGeneration == generation",
+                      "player.info.currentURL == url", "player.captureMPVEventRevision() == nil",
+                      "player.mainWindow.window === window", "player.nativePlaybackOutput?.displayLayer === layer",
+                      "!snapshot.wantsPlayback", "abs(Double(snapshot.rate) - 1.25) < 0.000001"):
+            self.assertIn(proof, method)
+        self.assertNotIn("asyncAfter", method)
+        self.assertNotIn("deadline", method)
+        for name in ("configureHandoffState", "configureQueueHandoff"):
+            start = source.index("  private func " + name + "(")
+            end = source.index("\n  }", start) + len("\n  }")
+            caller = source[start:end]
+            self.assertLess(caller.index("let session = player.nativePlaybackSession"), caller.index("menuChangeSpeed"))
+            self.assertLess(caller.index("menuChangeSpeed"), caller.index("waitForHandoffState"))
+            self.assertLess(caller.index("waitForHandoffState"), caller.index("menuChangeAudioDelay"))
+            self.assertIn("self.markersMatch(player, start: 0, end: 5.5)", caller)
+            self.assertIn("self.viewportMatches(player, scale: 1.5, panX: 0.05 / 1.5, panY: -0.05 / 1.5)", caller)
+            self.assertNotIn("session.captureCurrentState", caller)
 
     def test_real_appkit_termination_context_and_old_gcd_negative_control(self):
         driver = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
@@ -659,7 +687,10 @@ print("Queue node comparator checks: \(checks)")
             self.assertIn(proof, markers)
         paused = method("waitForNativePaused")
         self.assertLess(paused.index("guard extra() else"), paused.index("session.captureCurrentState"))
-        self.assertEqual(paused.count("extra()"), 2)
+        self.assertEqual(paused.count("extra()"), 3)
+        self.assertIn("guard extra() else", paused)
+        self.assertIn("player.mpv.mpvRenderContext == nil, extra(), self.pixel", paused)
+        self.assertIn('extra=\\(extra()) pixel=', paused)
         for proof in ("session.captureCurrentState", "snapshot.phase == .paused", "snapshot.volume == 0",
                       "snapshot.position - position", "player.nativePlaybackSession === session",
                       "player.mpv.mpvRenderContext == nil", "!player.mainWindow.videoView.hasInitializedOpenGL",
@@ -824,12 +855,16 @@ print("Queue node comparator checks: \(checks)")
             self.assertIn(proof, begin)
         setup = method("configureHandoffState")
         for proof in ("sendViewportKey", "slider.doubleValue = 37", "speed.representedObject = 1.25",
-                      "menuChangeSpeed", "session.captureCurrentState", "snapshot.phase == .paused",
-                      "!snapshot.wantsPlayback", "Double(snapshot.volume) - 0.37", "Double(snapshot.rate) - 1.25",
-                      "self.pixel(player, is: .green)", "delay.representedObject = 0.25",
+                      "menuChangeSpeed", "waitForHandoffState", "delay.representedObject = 0.25",
                       "NSApp.sendAction(#selector(MainMenuActionHandler.menuChangeAudioDelay(_:))"):
             self.assertIn(proof, setup)
-        self.assertLess(setup.index("session.captureCurrentState"), setup.index("menuChangeAudioDelay"))
+        self.assertLess(setup.index("waitForHandoffState"), setup.index("menuChangeAudioDelay"))
+        strict_wait = method("waitForNativePaused") + method("waitForHandoffState")
+        for proof in ("session.captureCurrentState", "snapshot.phase == .paused", "!snapshot.wantsPlayback",
+                      "position: 4.2", "abs(snapshot.position - position) < 0.0000001", "expectedVolume: 0.37",
+                      "abs(Double(snapshot.volume) - expectedVolume) < 0.000001", "Double(snapshot.rate) - 1.25",
+                      "self.pixel(player, is: color)"):
+            self.assertIn(proof, strict_wait)
         restore = method("verifyHandoffRestoration")
         for proof in ("player.mainWindow.window === window", "window.isVisible",
                       'self.fixture("red/red.mp4").path', "player.mainWindow.videoView.hasInitializedOpenGL",

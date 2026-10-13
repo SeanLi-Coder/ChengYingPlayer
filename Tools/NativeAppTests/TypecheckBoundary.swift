@@ -21,7 +21,7 @@ enum Preference {
   static func savedLoopMode(in defaults: UserDefaults, domain: String?) -> LoopMode? { nil }
 }
 struct VideoTime { var second: Double }
-enum NativePlaybackPhase { case paused, playing, ended }
+enum NativePlaybackPhase: String { case paused, playing, ended }
 struct NativePlaybackSnapshot {
   var phase: NativePlaybackPhase
   var volume: Float
@@ -31,7 +31,7 @@ struct NativePlaybackSnapshot {
   var position: Double
   var wantsPlayback: Bool
 }
-enum NativePlaybackQueryResult { case ready(NativePlaybackSnapshot), unavailable }
+enum NativePlaybackQueryResult { case ready(NativePlaybackSnapshot), unavailable, superseded }
 final class NativePlaybackSession {
   func captureCurrentState(completion: @escaping (NativePlaybackQueryResult) -> Void) {}
 }
@@ -117,6 +117,7 @@ final class PlayerCore {
   var hasNativePlaybackQueue = false
   var playbackAtEOF = false
   var videoToolsMediaGeneration: UInt64 = 0
+  func captureMPVEventRevision() -> UInt64? { nil }
   var playbackIsPaused = false
   var playbackVolume = 0.0
   var playbackPosition: Double?

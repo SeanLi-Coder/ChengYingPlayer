@@ -260,3 +260,87 @@ instead of silently strengthening it to a nonoptional value. A diagnostic must
 unwrap this property before storing a local alias. The preparation suite also
 compiles the exact unguarded alias as a negative control; the macOS 12 typecheck
 must reject it. This protects test-driver compilation, not window behavior.
+
+## Nondefault handoff wait correction
+
+CI `38361506765` retained 76 successful checks followed by
+`handoff_native_nondefault_state` failure at approximately 16.11 seconds. The
+previous green target had passed. Its aggregate failure label did not record
+the query result, so the CI artifact alone cannot uniquely identify the cause.
+The complete baseline and queue scenarios did not pass in that run.
+
+The real CLI reproduction in `build/native-app-paused-wait.PnJ8Ui` established
+one concrete driver defect: after paused position 4.2, A=0/B=5.5, volume 0.37 and
+`setRate(1.25)`, an immediate worker query returned `unavailable`. A later real
+query, within the bounded wait, reported exactly the intended paused position,
+volume and rate, and the actual displayed NV12 buffer matched all 27 green YUV
+reference values. `setRate` legitimately performs asynchronous seek/preroll;
+the driver had treated that transitional response as an immediate failure. The
+same one-shot pattern existed in the queue handoff preparation.
+
+Both callers now use `waitForHandoffState`, backed by the existing single
+twelve-second paused-wait deadline and one outstanding worker query at a time.
+The real slider/menu actions, positions, markers, viewport geometry, rate and
+pixel checks remain required. Only the handoff explicitly requests volume 0.37
+with the original 1e-6 tolerance; all existing zero-volume waits retain exact
+zero equality. Each caller captures its Session, media generation, URL, window
+and display layer before sending the speed action. Those identities and the
+public native/MPV event gate must still match before querying and on callback.
+Core creates a new Session for every native route; a same-URL replacement cannot
+be adopted. No private route state is read. A failed wait emits one bounded
+state/ownership diagnostic without paths or media metadata. Baseline 92 and
+queue 54 required labels, the 110-second driver deadline and the 150-second
+outer deadline are unchanged.
+
+The expanded focused runner remains a CLI test, not a full App or real menu
+test. `HandoffWaitProbe.swift` mechanically uses the actual driver helpers and
+pixel comparator, production Session/Output/decoder, nine-second synthetic
+H.264/AAC RGB media and independently decoded FFmpeg reference pixels. Its small
+PlayerCore service boundary does not verify real menu dispatch, markers or
+viewport UI; those remain full-App/source-contract checks. The probe covers
+correct 37%/1.25x values but does not claim end-to-end wrong-volume/wrong-rate
+fault injection.
+
+For deterministic command ordering, the probe reads only Session's immutable
+worker `DispatchQueue` via `Mirror`, a test boundary already used by the native
+fixtures. A semaphore barrier has bounded entry (one second), release (three
+seconds) and exit (one second). While held, main submits the real volume/rate
+commands followed by the real query or extracted wait, then releases it on all
+paths. Both positive and negative controls use the same ordering; no snapshots,
+sample buffers or readiness responses are fabricated. This is necessary because
+uncontrolled main-thread preemption could allow preroll to finish before an
+immediate query. The earlier natural `PnJ8Ui` result remains historical evidence,
+not a flaky mandatory CI condition.
+
+Final focused evidence: `build/native-app-paused-wait.rUhGfd`, run with
+`NATIVE_PLAYBACK_DEPS="$PWD/build/native-av1-playback.7FMHum" bash Tools/NativeAppTests/run_paused_probe.sh`.
+All six compilations exited 0. Child results were:
+
+- `normal`: 0, original late-Session wait and both original owner checks pass.
+- `old-first-session`: 1, exact former immediate nil-Session rejection.
+- `old-handoff-capture`: 1, actual `unavailable` followed by correct real state.
+- `handoff`: 0, bounded retime wait succeeds; replacement Session, changed
+  generation and changed route are each rejected without a success callback.
+- `old-one-shot`: 1, removing only retry causes exactly one failure on the real
+  `unavailable` response, with no successful completion.
+- `ignore-owner`: 1, removing the two ownership guards falsely accepts the
+  replacement, producing exactly two successes instead of the required rejection.
+
+The wrapper exited 0 only after exact expected markers/exits, explicit successful
+worker ordering and complete Session/window cleanup for every mode. Source,
+generated sources/media/object/executables and dependency identities all matched
+after execution. Barrier failure or an unrelated process failure cannot satisfy
+the negative-control contract. The same directory contains the final 45-test
+preparation log and matching pre/post input hashes, including macOS 12
+typechecking, all existing comparator assertions and termination controls.
+Earlier `CcSP6Z` preserved a test-only missing-`try` compile failure; `ep5JsP` and
+`JNjJis` were successful candidates before the deterministic barrier was added.
+
+Final driver SHA-256:
+`4926aeb4740b6c60dcb90bab7ffae17a0b53003173c3b02b9571df4487a57395`.
+Final probe SHA-256:
+`872f9502a5e0cb3a0ae205eae0380a191fb4e575b3d31d8238091a472e0f91cc`.
+Final focused runner SHA-256:
+`018bb55904b3d830f64a30730dc37d588fd1fd403aeb72841d3655da9e67bcbc`.
+No production source was changed. This local evidence does not establish a
+complete App 92/54 pass; that still requires the subsequent isolated CI run.

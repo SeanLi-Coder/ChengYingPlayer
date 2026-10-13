@@ -661,6 +661,8 @@ final class NativeAppTestDriver {
   }
 
   private func waitForNativePaused(_ player: PlayerCore, position: Double, color: Color, label: String,
+                                   expectedVolume: Double = 0,
+                                   stillOwned: @escaping () -> Bool = { true },
                                    extra: @escaping () -> Bool = { true },
                                    snapshotCheck: @escaping (NativePlaybackSnapshot) -> Bool = { _ in true },
                                    then continuation: @escaping () -> Void) {
@@ -678,25 +680,38 @@ final class NativeAppTestDriver {
         observedGeneration = player.videoToolsMediaGeneration
       }
       guard let session = observedSession else {
-        if ProcessInfo.processInfo.systemUptime >= deadline { self.fail(label) }
+        if ProcessInfo.processInfo.systemUptime >= deadline {
+          print("NATIVE_APP_PAUSED_WAIT: result=no-session")
+          self.fail(label)
+        }
         else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: poll) }
         return
       }
-      guard player.nativePlaybackSession === session,
-            player.videoToolsMediaGeneration == observedGeneration else { self.fail(label); return }
+      guard stillOwned(), player.nativePlaybackSession === session,
+            player.videoToolsMediaGeneration == observedGeneration else {
+        print("NATIVE_APP_PAUSED_WAIT: result=owner-changed owned=\(stillOwned()) sameSession=\(player.nativePlaybackSession === session) sameGeneration=\(player.videoToolsMediaGeneration == observedGeneration)")
+        self.fail(label); return
+      }
       // Marker captures first return to main, where they enqueue a loop refill.
       // Do not queue this query until the expected marker state is visible;
       // otherwise an older paused snapshot can arrive after that new UI state.
       guard extra() else {
-        if ProcessInfo.processInfo.systemUptime >= deadline { self.fail(label) }
+        if ProcessInfo.processInfo.systemUptime >= deadline {
+          print("NATIVE_APP_PAUSED_WAIT: result=extra-pending owned=\(stillOwned()) extra=false pixel=\(self.pixel(player, is: color))")
+          self.fail(label)
+        }
         else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: poll) }
         return
       }
       session.captureCurrentState { result in
         guard !self.terminal, request == self.pollRevision else { return }
-        guard player.nativePlaybackSession === session,
-              player.videoToolsMediaGeneration == observedGeneration else { self.fail(label); return }
-        if case .ready(let snapshot) = result, snapshot.phase == .paused, snapshot.volume == 0,
+        guard stillOwned(), player.nativePlaybackSession === session,
+              player.videoToolsMediaGeneration == observedGeneration else {
+          print("NATIVE_APP_PAUSED_WAIT: result=callback-owner-changed owned=\(stillOwned()) sameSession=\(player.nativePlaybackSession === session) sameGeneration=\(player.videoToolsMediaGeneration == observedGeneration)")
+          self.fail(label); return
+        }
+        if case .ready(let snapshot) = result, snapshot.phase == .paused,
+           (expectedVolume == 0 ? snapshot.volume == 0 : abs(Double(snapshot.volume) - expectedVolume) < 0.000001),
            snapshot.position.isFinite, abs(snapshot.position - position) < 0.0000001,
            snapshotCheck(snapshot), player.isUsingNativePlayback, player.playbackIsPaused,
            player.info.state == .paused, !player.mainWindow.videoView.hasInitializedOpenGL,
@@ -704,6 +719,12 @@ final class NativeAppTestDriver {
           self.record(label)
           continuation()
         } else if ProcessInfo.processInfo.systemUptime >= deadline {
+          switch result {
+          case .ready(let snapshot):
+            print("NATIVE_APP_PAUSED_WAIT: result=ready phase=\(snapshot.phase.rawValue) wantsPlayback=\(snapshot.wantsPlayback) position=\(snapshot.position) volume=\(snapshot.volume) rate=\(snapshot.rate) extra=\(extra()) pixel=\(self.pixel(player, is: color))")
+          case .unavailable: print("NATIVE_APP_PAUSED_WAIT: result=unavailable")
+          case .superseded: print("NATIVE_APP_PAUSED_WAIT: result=superseded")
+          }
           self.fail(label)
         } else {
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: poll)
@@ -711,6 +732,24 @@ final class NativeAppTestDriver {
       }
     }
     poll()
+  }
+
+  private func waitForHandoffState(_ player: PlayerCore, session: NativePlaybackSession,
+                                   generation: UInt64, url: URL, window: NSWindow,
+                                   layer: AVSampleBufferDisplayLayer, label: String,
+                                   extra: @escaping () -> Bool,
+                                   then continuation: @escaping () -> Void) {
+    // setRate refills the real audio/video renderers asynchronously. An
+    // unavailable query is not a failed state, but no replacement route may
+    // satisfy this wait. Core creates a new session for each native route.
+    waitForNativePaused(player, position: 4.2, color: .green, label: label, expectedVolume: 0.37,
+      stillOwned: {
+        player.nativePlaybackSession === session && player.videoToolsMediaGeneration == generation &&
+          player.info.currentURL == url && player.captureMPVEventRevision() == nil &&
+          player.mainWindow.window === window && player.nativePlaybackOutput?.displayLayer === layer
+      }, extra: extra, snapshotCheck: { snapshot in
+        !snapshot.wantsPlayback && abs(Double(snapshot.rate) - 1.25) < 0.000001
+      }, then: continuation)
   }
 
   private func replaceRapidly(_ player: PlayerCore) {
@@ -1095,7 +1134,11 @@ final class NativeAppTestDriver {
     }
     guard sendViewportKey(player, action: .panRight), sendViewportKey(player, action: .panUp),
           let slider = player.mainWindow.volumeSlider, let sliderAction = slider.action,
-          let session = player.nativePlaybackSession else { fail("handoff_native_nondefault_state"); return }
+          let session = player.nativePlaybackSession, let url = player.info.currentURL,
+          let window = player.mainWindow.window, let layer = player.nativePlaybackOutput?.displayLayer else {
+      fail("handoff_native_nondefault_state"); return
+    }
+    let generation = player.videoToolsMediaGeneration
     slider.doubleValue = 37
     let speed = NSMenuItem()
     speed.representedObject = 1.25
@@ -1104,19 +1147,11 @@ final class NativeAppTestDriver {
                            to: player.mainWindow.menuActionHandler, from: speed) else {
       fail("handoff_native_nondefault_state"); return
     }
-    session.captureCurrentState { result in
-      guard case .ready(let snapshot) = result, player.nativePlaybackSession === session,
-            snapshot.phase == .paused, !snapshot.wantsPlayback,
-            abs(snapshot.position - 4.2) < 0.0000001,
-            abs(Double(snapshot.volume) - 0.37) < 0.000001,
-            abs(Double(snapshot.rate) - 1.25) < 0.000001,
-            self.markersMatch(player, start: 0, end: 5.5),
-            self.viewportMatches(player, scale: 1.5, panX: 0.05 / 1.5, panY: -0.05 / 1.5),
-            self.pixel(player, is: .green), let window = player.mainWindow.window,
-            let layer = player.nativePlaybackOutput?.displayLayer else {
-        self.fail("handoff_native_nondefault_state"); return
-      }
-      self.record("handoff_native_nondefault_state")
+    waitForHandoffState(player, session: session, generation: generation, url: url, window: window,
+      layer: layer, label: "handoff_native_nondefault_state", extra: {
+        self.markersMatch(player, start: 0, end: 5.5) &&
+          self.viewportMatches(player, scale: 1.5, panX: 0.05 / 1.5, panY: -0.05 / 1.5)
+      }) {
       // A real existing menu command forces compatibility without writing any
       // media. Its observable audio-delay change proves deferred replay occurred.
       let delay = NSMenuItem()
@@ -1489,22 +1524,22 @@ final class NativeAppTestDriver {
               }
               let speed = NSMenuItem()
               speed.representedObject = 1.25
+              guard let session = player.nativePlaybackSession, let url = player.info.currentURL,
+                    let layer = player.nativePlaybackOutput?.displayLayer else {
+                self.fail("queue_handoff_state_ready"); return
+              }
+              let generation = player.videoToolsMediaGeneration
               guard self.sendViewportKey(player, action: .panRight), self.sendViewportKey(player, action: .panUp),
                     self.setQueueVolume(player),
                     NSApp.sendAction(#selector(MainMenuActionHandler.menuChangeSpeed(_:)),
-                                     to: player.mainWindow.menuActionHandler, from: speed),
-                    let session = player.nativePlaybackSession, let layer = player.nativePlaybackOutput?.displayLayer else {
+                                     to: player.mainWindow.menuActionHandler, from: speed) else {
                 self.fail("queue_handoff_state_ready"); return
               }
-              session.captureCurrentState { result in
-                guard case .ready(let snapshot) = result, snapshot.phase == .paused, !snapshot.wantsPlayback,
-                      abs(snapshot.position - 4.2) < 0.0000001,
-                      abs(Double(snapshot.volume) - 0.37) < 0.000001, abs(Double(snapshot.rate) - 1.25) < 0.000001,
-                      self.queueProjectionMatches(player, index: 2), self.pixel(player, is: .green),
-                      self.viewportMatches(player, scale: 1.5, panX: 0.05 / 1.5, panY: -0.05 / 1.5) else {
-                  self.fail("queue_handoff_state_ready"); return
-                }
-                self.record("queue_handoff_state_ready")
+              self.waitForHandoffState(player, session: session, generation: generation, url: url, window: window,
+                layer: layer, label: "queue_handoff_state_ready", extra: {
+                  self.queueProjectionMatches(player, index: 2) && self.markersMatch(player, start: 0, end: 5.5) &&
+                    self.viewportMatches(player, scale: 1.5, panX: 0.05 / 1.5, panY: -0.05 / 1.5)
+                }) {
                 let delay = NSMenuItem()
                 delay.representedObject = 0.25
                 guard NSApp.sendAction(#selector(MainMenuActionHandler.menuChangeAudioDelay(_:)),
