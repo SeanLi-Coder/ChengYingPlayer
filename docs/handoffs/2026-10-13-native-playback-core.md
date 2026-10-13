@@ -73,9 +73,19 @@ CI 新增两项 owner／START 负控和失败证据留存，旧 gate 负控保�
 开发 CI `38329363769` 冻结于 `7f7e4bcc`，已失败，既不包含上述 AV1 代码，也不包含
 独立队列模型。当前没有新增版本、发行包、签名变化或更新源变化。
 后续开发 CI `38337569102` 冻结于 `e4369f41`，纳入新 AV1、独立模型／安装器和
-关闭 layer 修补，仍在运行；不包含后续 controller 桥接或 Core 队列接线。
+关闭 layer 修补，已失败；不包含后续 controller 桥接或 Core 队列接线。
+生产／测试 App 编译、media-helper 与 AV1 检查通过。独立安装器普通191/0及六负控
+通过，TSan191/1仅 partial cancellation 清理检查失败，尚在定位；不能用本机通过
+覆盖这次失败。队列证据为 `build/native-ci-38337569102.GQRT14/queue`。
 
 ### 最新整窗阻挡（2026-10-13）
+
+最新 `38337569102` 的原92项整窗驱动完成70项通过、1项失败。下述关闭layer检查
+已过，嵌入字幕回退也通过；后续新core开片的 `handoff_native_paused_red_ready` 在
+约2ms立即失败。真实inventory异步创建session，而helper入口先guard session非nil，
+没有进入原12秒poll；正在补异步session获取和实际Session正反对照，不能改写失败。
+加载后交接和终止检查尚未执行，完整App仍未过关。隔离App清理完成，原始证据在
+`build/native-ci-38337569102.GQRT14/app`。以下保留关闭问题的原复现与修补证据。
 
 后续开发 CI `38329363769` 的完整生产／测试 App 编译及 media-helper job 通过。
 92 项驱动实际完成 **66 项通过、1 项失败**：菜单入口、实际自动预览、连续输入、隐藏后

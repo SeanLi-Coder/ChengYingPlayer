@@ -114,8 +114,14 @@ owner 校验，普通 UI 事件隔离但 hook／shutdown 保留；实际命令�
 前后校验一致；计数差来自主队列等待轮次，不是测试覆盖差。证据和首轮脚本编译失败
 保留于 `Tools/PlaybackBackendRoutingTests/README.md`。Core 多文件接线仍未验收。
 开发 CI `38337569102` 冻结于 `e4369f41`，包含关闭 layer 修补、新 AV1 及独立队列
-模型／安装器，当前仍在运行；不含上述 controller 桥接和正在实施的 Core 队列接线。
-没有生成新的稳定更新，不以运行中的流水线或局部测试宣称换核完成。
+模型／安装器，已失败；不含上述 controller 桥接和正在实施的 Core 队列接线。
+生产／测试 App 编译、media-helper 和 AV1 检查通过，整窗 70 项通过、1 项失败。
+关窗 layer 与嵌入字幕回退已过，后续新 core 的 `handoff_native_paused_red_ready`
+在开片后约 2ms 因测试 helper 立即要求 session 存在而失败，尚未进入其有界等待。
+该 helper 正在修；不能把尚未运行的加载后交接／退出写成通过。独立安装器普通191/0
+及六负控通过，但 TSan191/1 在 partial cancellation 的真实清理检查失败，正在采证，
+未归因为生产或工具问题。证据 `build/native-ci-38337569102.GQRT14`；App 清理完成。
+没有生成新的稳定更新，不以局部测试宣称换核完成。
 新 AV1 backport 播放库的 H.264／HEVC 4K 持续回归已补：冻结 CYN `e3bcc18e`、
 session `5542c267`，独立 `7FMHum` 依赖上运行三轮共 182.55 秒，292/0；原错参考
 负控准确产生 16 项中 1 项失败并正常关闭。证据 `native-playback-soak.iX9p53`／
