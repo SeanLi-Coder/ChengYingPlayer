@@ -4,9 +4,18 @@ repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo_root"
 test_dir="$(mktemp -d "$repo_root/build/native-playback-rendered-tests.XXXXXX")"
 trap 'rm -f "$test_dir/rendered-tests" "$test_dir/decoder.o"' EXIT
+# shellcheck source=Tools/RenderTestSupport/native_dependencies.sh
+source "$repo_root/Tools/RenderTestSupport/native_dependencies.sh"
+prepare_native_test_dependencies
+verify_native_test_runtime
 ffmpeg_bin="${FFMPEG_BIN:-/opt/homebrew/bin/ffmpeg}"
 session_source="${NATIVE_PLAYBACK_SESSION_SOURCE:-iina/NativePlayback/NativePlaybackSession.swift}"
-xcrun clang -target arm64-apple-macos12 -fobjc-arc -fmodules -std=gnu11 -I deps/include -c \
+shasum -a 256 iina/NativePlayback/CYNMediaDecoder.h iina/NativePlayback/CYNMediaDecoder.m \
+  iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift \
+  "$session_source" Tools/NativePlaybackRenderedTests/main.swift Tools/NativePlaybackRenderedTests/run.sh \
+  Tools/RenderTestSupport/native_dependencies.sh Tools/RenderTestSupport/verify_native_dependencies.py \
+  other/verify_playback_distribution.py > "$test_dir/source-sha256.txt"
+xcrun clang -target arm64-apple-macos12 -fobjc-arc -fmodules -std=gnu11 -I "$native_test_deps/include" -c \
   iina/NativePlayback/CYNMediaDecoder.m -o "$test_dir/decoder.o"
 xcrun swiftc -swift-version 5 -target arm64-apple-macos14.4 \
   -import-objc-header iina/NativePlayback/CYNMediaDecoder.h \
@@ -14,9 +23,8 @@ xcrun swiftc -swift-version 5 -target arm64-apple-macos14.4 \
   iina/NativePlayback/NativePlaybackSampleGate.swift \
   "$session_source" \
   Tools/NativePlaybackRenderedTests/main.swift "$test_dir/decoder.o" \
-  deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib \
-  deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib \
-  -Xlinker -rpath -Xlinker "$repo_root/deps/lib" \
+  "${native_test_libraries[@]}" \
+  -Xlinker -rpath -Xlinker "$native_test_deps/lib" \
   -framework AppKit -framework AVFoundation -framework CoreMedia \
   -framework CoreVideo -framework AudioToolbox -o "$test_dir/rendered-tests"
 "$ffmpeg_bin" -hide_banner -loglevel error \
@@ -55,4 +63,14 @@ if [[ "$alternate_bytes" != '78 78 78 78 214 230' ]]; then
 fi
 printf 'Artifacts: %s\n' "$test_dir"
 printf 'Session source: %s\n' "$session_source"
+shasum -a 256 "$test_dir/timeline.mkv" "$test_dir/timeline.mp4" "$test_dir/alternate.mkv" > "$test_dir/fixture-sha256.txt"
+set +e
 /usr/bin/perl -e 'alarm 65; exec @ARGV' "$test_dir/rendered-tests" "$test_dir" 2>&1 | tee "$test_dir/results.log"
+pipeline_status=("${PIPESTATUS[@]}")
+result=${pipeline_status[0]}
+if [[ "$result" == 0 && "${pipeline_status[1]}" != 0 ]]; then result=${pipeline_status[1]}; fi
+set -e
+shasum -a 256 -c "$test_dir/source-sha256.txt" > "$test_dir/source-validation.log"
+shasum -a 256 -c "$test_dir/fixture-sha256.txt" > "$test_dir/fixture-validation.log"
+validate_native_test_dependencies
+exit "$result"

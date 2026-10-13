@@ -19,6 +19,43 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 参考前一轮 REA 研究的高层职责划分；未复制 Movist Pro 的代码、反编译输出、二进制或资源。
 不声称已经得到 Movist 的同一内核或性能。
 
+### AV1 与队列后续切片（2026-10-13，未切默认）
+
+播放 FFmpeg 7.1.5 已加入 SHA 锁定的开源 AV1 VideoToolbox backport；原补丁与
+ChengYing 的资源错误修补分开记录，并进入源码分发清单。新 CYN 明确选择支持 VT 的
+`av1` decoder，初始化不可用时才回退 `libdav1d`；首帧前最多保留 64 个／8 MiB
+压缩视频包，不重放音频、不倒退 demux 游标。已有实际视频输出后的错误不会被伪装成
+无缝软件回退。动态 HDR、默认准入和旧 MPV 兼容边界不因此放开。
+
+已通过真实函数负控定位并修补 AV1 `ff_get_format` 吞掉资源初始化错误、OBU append
+失败仍提交截断数据，以及 CYN context 分配失败误标 Unsupported 三个问题。最后一项
+会使 App 错误地尝试格式兼容重试；现在明确为 ResourceLimit。最终源码 CYN SHA 为
+`e3bcc18ecde84e48cf5556308eac7fc9802d6e5818ceecabe5b85e738b8958b9`。
+新库独立构建到 `build/native-av1-playback.7FMHum`，没有覆盖原 `deps`；详细正常／
+sanitizer／故障注入、保留的历史失败、补丁来源与 M4 命令见
+[AV1 专项说明](../../Tools/NativeAV1Tests/README.md)。本机 M2 正常软退不能充当 M4 硬解。
+
+同一新库和新 CYN 的真实 session 普通／TSan／ASan 各 209 项通过，证据分别为
+`native-playback-session-tests.FNF2F6`／`TAmCkL`／`ESDZO1`；真实显示读回 66 项通过于
+`native-playback-rendered-tests.5IGfEG`，源码、库／SDK 与生成素材前后身份校验均通过。
+这些是独立 session 和渲染窗口，不是完整 App、目标 M4、可听输出或实体 HDR 色彩验收。
+较早同库／旧 CYN `acb0f798` 的结果保留，但不再代替新 CYN 的回归证据。
+两个 runner 新增可选 `NATIVE_PLAYBACK_DEPS`，默认仍用仓库 `deps`；完整校验候选
+9 库的安装名、rpath、依赖闭包、签名、架构与 SDK，记录实际库／头文件前后 hash。
+候选缺失时失败，不静默改用旧库；测试环境有 DYLD 覆盖时拒绝运行。helper 六项正反
+检查通过，默认旧库及独立新库均实际通过身份验证。生产构建路径不变。
+
+新增 `NativeQueuePlan`／`NativeQueueState` 和
+[独立队列验证](../../Tools/NativePlaybackQueueTests/README.md)，只证明状态决策，
+尚未进入 Core／Session／Xcode 工程。正常／ASan／TSan 各 150 项通过；三个单变量
+负控分别产生准确的 4／7／1 项失败，主代理独立复跑于 `native-queue-model-tests.QuuVBv`。
+真实 libmpv 导航探针纠正了“末尾 next 总是 no-op”的错误假设：off/file 保持末项但
+生产入口会暂停；playlist 实际回到首项。探针没有执行后续 AppKit 自动恢复。
+完整队列的真实 MPV 安装和 Core 接入仍待实现，不能把模型 `verified` 字段当外部安装证据。
+
+开发 CI `38329363769` 冻结于 `7f7e4bcc`，正在运行，既不包含上述 AV1 代码，也不包含
+独立队列模型。当前没有新增版本、发行包、签名变化或更新源变化。
+
 ### 最新整窗阻挡（2026-10-13）
 
 开发 CI `38319384831` 冻结于 `82b40531`，完整生产 App 与测试 App 编译成功，
@@ -722,10 +759,10 @@ macOS 12 typecheck 必须拒绝旧 optional 访问；原 92 项 runtime 标签�
   仅在锁定 FFmpeg 路径明确要求硬件时为真。FFmpeg 7 的 HEVC 允许软件 fallback，
   因而 HEVC 的 false 是“实际硬件未确认”，不能标作软件解码或硬解失败。
 - 本机不是 M4；AV1 M4 硬解、实体 HDR 屏、ICC 色彩、真实音频设备切换和可听音质未验收。
-  进一步核对还确认：当前锁定的播放 FFmpeg 7.1.5 不含 AV1 VideoToolbox backport，
-  `CYNMediaDecoder` 按 codec ID 选择到的是 libdav1d；不能把现状描述成仅差 M4 测试。
-  `codex/movist-core-reference` 的 AV1 实验补丁尚未进入本分支，且只补库还不够，
-  新 decoder 还需要明确选择支持 VT 的 AV1 decoder，并在实际创建失败时可靠回退软件。
+  本阶段早期审计确认，当时的播放 FFmpeg 7.1.5 不含 AV1 VideoToolbox backport，
+  `CYNMediaDecoder` 按 codec ID 选择到的是 libdav1d，不能把当时的缺口仅描述成缺 M4 测试。
+  后续已补库、明确 decoder 选择与初始化软件回退，见本文前部的 AV1 后续切片；
+  仍没有目标 M4 的实际硬件输出证据，不把新增源码或 M2 软退写成硬解验收。
 - 旋转、SAR 和画面缩放／平移已接入新 surface；完整 App 组合验收仍未完成。
   完整字幕／轨道选择、截图、帧进、HDR 用户开关及播放列表策略仍走兼容路径。
   剪辑预览恢复已接入原生路径，但新完整 App 预览回归仍待运行。

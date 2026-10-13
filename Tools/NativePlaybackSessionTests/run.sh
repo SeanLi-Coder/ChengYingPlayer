@@ -3,6 +3,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo_root"
 test_dir="$(mktemp -d "$repo_root/build/native-playback-session-tests.XXXXXX")"
+# shellcheck source=Tools/RenderTestSupport/native_dependencies.sh
+source "$repo_root/Tools/RenderTestSupport/native_dependencies.sh"
+prepare_native_test_dependencies
+verify_native_test_runtime
 ffmpeg_bin="${FFMPEG_BIN:-/opt/homebrew/bin/ffmpeg}"
 sanitizer_mode="${NATIVE_PLAYBACK_SANITIZER:-}"
 diagnostic_negative="${NATIVE_PLAYBACK_DIAGNOSTIC_NEGATIVE:-0}"
@@ -26,7 +30,9 @@ fi
 shasum -a 256 iina/NativePlayback/CYNMediaDecoder.h iina/NativePlayback/CYNMediaDecoder.m \
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift \
   iina/NativePlayback/NativePlaybackSession.swift Tools/NativePlaybackSessionTests/main.swift \
-  Tools/NativePlaybackSessionTests/run.sh "$main_source" > "$test_dir/source-sha256.txt"
+  Tools/NativePlaybackSessionTests/run.sh Tools/RenderTestSupport/native_dependencies.sh \
+  Tools/RenderTestSupport/verify_native_dependencies.py other/verify_playback_distribution.py \
+  "$main_source" > "$test_dir/source-sha256.txt"
 printf 'sanitizer=%s\ndiagnostic_negative_control=%s\n' "$sanitizer_mode" "$diagnostic_negative" > "$test_dir/mode.txt"
 clang_sanitizer=""
 swift_sanitizer=""
@@ -44,7 +50,7 @@ case "$sanitizer_mode" in
     ;;
 esac
 xcrun clang ${clang_sanitizer:+"$clang_sanitizer"} ${sanitizer_debug:+"$sanitizer_debug"} \
-  -target arm64-apple-macos12 -fobjc-arc -fmodules -std=gnu11 -I deps/include -c \
+  -target arm64-apple-macos12 -fobjc-arc -fmodules -std=gnu11 -I "$native_test_deps/include" -c \
   iina/NativePlayback/CYNMediaDecoder.m -o "$test_dir/decoder.o"
 xcrun swiftc ${swift_sanitizer:+"$swift_sanitizer"} ${sanitizer_debug:+"$sanitizer_debug"} \
   -swift-version 5 -target arm64-apple-macos12 \
@@ -53,9 +59,8 @@ xcrun swiftc ${swift_sanitizer:+"$swift_sanitizer"} ${sanitizer_debug:+"$sanitiz
   iina/NativePlayback/NativePlaybackSampleGate.swift \
   iina/NativePlayback/NativePlaybackSession.swift \
   "$main_source" "$test_dir/decoder.o" \
-  deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib \
-  deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib \
-  -Xlinker -rpath -Xlinker "$repo_root/deps/lib" \
+  "${native_test_libraries[@]}" \
+  -Xlinker -rpath -Xlinker "$native_test_deps/lib" \
   -framework AppKit -framework AVFoundation -framework CoreMedia \
   -framework CoreVideo -framework AudioToolbox -o "$test_dir/session-tests"
 "$ffmpeg_bin" -hide_banner -loglevel error \
@@ -106,4 +111,5 @@ if [[ "$result" == 0 && "${pipeline_status[1]}" != 0 ]]; then result=${pipeline_
 set -e
 shasum -a 256 -c "$test_dir/source-sha256.txt" > "$test_dir/source-validation.log"
 shasum -a 256 -c "$test_dir/fixture-sha256.txt" > "$test_dir/fixture-validation.log"
+validate_native_test_dependencies
 exit "$result"

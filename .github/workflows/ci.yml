@@ -226,7 +226,9 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          brew install cmake pkg-config meson ninja autoconf automake libtool
+          # Homebrew FFmpeg is a test-only independent AV1 reference. Shipped
+          # playback/helper binaries are still built from their pinned sources.
+          brew install cmake pkg-config meson ninja autoconf automake libtool ffmpeg
           python -m venv "$RUNNER_TEMP/build-python"
           "$RUNNER_TEMP/build-python/bin/python" -m pip install --require-hashes --only-binary=:all: --requirement Tools/DownloaderHelper/requirements-build.txt
           python -m venv "$RUNNER_TEMP/media-test-python"
@@ -348,6 +350,7 @@ jobs:
         timeout-minutes: 6
         run: |
           export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          python3 -B Tools/RenderTestSupport/test_native_dependencies.py
           bash Tools/NativeDecoderTests/run.sh
           bash Tools/NativeSampleBufferOutputTests/run.sh
           bash Tools/NativeSampleBufferDisplayTests/run.sh
@@ -367,9 +370,42 @@ jobs:
             build/native-playback-session-tests.*/source-validation.log
             build/native-playback-session-tests.*/fixture-sha256.txt
             build/native-playback-session-tests.*/fixture-validation.log
+            build/native-playback-session-tests.*/dependency-*.txt
+            build/native-playback-session-tests.*/dependency-*.log
+            build/native-playback-session-tests.*/dependency-*.json
             build/native-playback-rendered-tests.*/results.log
+            build/native-playback-rendered-tests.*/*-sha256.txt
+            build/native-playback-rendered-tests.*/*-validation.log
+            build/native-playback-rendered-tests.*/dependency-*.txt
+            build/native-playback-rendered-tests.*/dependency-*.json
           if-no-files-found: ignore
           retention-days: 3
+
+      - name: Test native AV1 bootstrap and failure boundaries
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 6
+        run: |
+          export FFMPEG_BIN="$(brew --prefix ffmpeg)/bin/ffmpeg"
+          python3 -B -m unittest discover -s Tools/NativeAV1Tests -p 'test_*.py' -v
+          python3 -B Tools/NativeAV1Tests/run_matrix.py
+          python3 -B Tools/NativeAV1Tests/run.py --sanitizer thread
+
+      - name: Preserve native AV1 bootstrap evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-av1-test-evidence-${{ github.sha }}
+          path: |
+            build/native-av1-matrix.*/*.json
+            build/native-av1-matrix.*/*.log
+            build/native-av1-tests.*/results.log
+            build/native-av1-tests.*/provenance.json
+            build/native-av1-tests.*/hash-validation.json
+            build/native-av1-tests.*/*.sha256
+            build/native-av1-resource-boundary.*/*.log
+            build/native-av1-resource-boundary.*/*.sha256
+          if-no-files-found: ignore
+          retention-days: 14
 
       # Manual development runs gather independent evidence after a test fails.
       # Failures still fail this job; packaging/publication keep success() gating.

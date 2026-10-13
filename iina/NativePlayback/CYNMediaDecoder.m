@@ -17,6 +17,24 @@
 
 NSErrorDomain const CYNMediaDecoderErrorDomain = @"CYNMediaDecoder";
 static const int64_t CYNMaxPixels = 8192LL * 8192;
+// Only compressed video packets preceding the first successfully decoded AV1
+// image are retained. Audio and the demux cursor are never replayed on fallback.
+enum { CYNAV1ReplayPacketLimit = 64 };
+static const size_t CYNAV1ReplayByteLimit = 8 * 1024 * 1024;
+typedef struct {
+  BOOL active, selectedVideoToolbox, initializationRejected;
+} CYNAV1Bootstrap;
+
+static BOOL CYNCodecSupportsVideoToolbox(const AVCodec *codec) {
+  if (!codec) return NO;
+  for (int i = 0; ; ++i) {
+    const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
+    if (!config) return NO;
+    if (config->device_type == AV_HWDEVICE_TYPE_VIDEOTOOLBOX &&
+        config->pix_fmt == AV_PIX_FMT_VIDEOTOOLBOX &&
+        (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)) return YES;
+  }
+}
 
 @interface CYNMediaInfo ()
 @property(nonatomic) double duration;
@@ -84,6 +102,22 @@ static int CYNRejectNestedIO(AVFormatContext *context, AVIOContext **io, const c
   return AVERROR(EPERM);
 }
 static enum AVPixelFormat CYNVideoFormat(AVCodecContext *context, const enum AVPixelFormat *formats) {
+  CYNAV1Bootstrap *av1 = context->codec_id == AV_CODEC_ID_AV1 ? context->opaque : NULL;
+  if (av1 && av1->active) {
+    if (context->hw_device_ctx) {
+      for (const enum AVPixelFormat *p = formats; *p != AV_PIX_FMT_NONE; ++p) {
+        if (*p == AV_PIX_FMT_VIDEOTOOLBOX) {
+          av1->selectedVideoToolbox = YES;
+          return *p;
+        }
+      }
+    }
+    // FFmpeg calls get_format again with the rejected hardware choice removed
+    // after hwaccel initialization fails. A parser/decode error alone is not
+    // evidence of this failure and must not trigger a software retry.
+    if (av1->selectedVideoToolbox) av1->initializationRejected = YES;
+    return AV_PIX_FMT_NONE;
+  }
   if (context->hw_device_ctx) {
     for (const enum AVPixelFormat *p = formats; *p != AV_PIX_FMT_NONE; ++p)
       if (*p == AV_PIX_FMT_VIDEOTOOLBOX) return *p;
@@ -168,6 +202,11 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   CMTime _nextVideoTime;
   CMTime _originVideoStart;
   BOOL _readingFromOrigin, _observedOriginVideoStart;
+  CYNAV1Bootstrap _av1Bootstrap;
+  AVPacket *_av1Replay[CYNAV1ReplayPacketLimit];
+  size_t _av1ReplayBytes;
+  NSUInteger _av1ReplayCount, _av1ReplayIndex;
+  BOOL _av1SoftwareSelected, _av1ProducedVideo, _av1Replaying, _av1CurrentPacketRetained;
 }
 @end
 
@@ -194,6 +233,9 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   return YES;
 }
 - (void)close {
+  [self clearAV1Replay];
+  _av1Bootstrap = (CYNAV1Bootstrap){0};
+  _av1SoftwareSelected = _av1ProducedVideo = _av1CurrentPacketRetained = NO;
   av_packet_free(&_packet);
   av_frame_free(&_frame);
   avcodec_free_context(&_video);
@@ -219,9 +261,36 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
 }
 - (AVCodecContext *)openStream:(int)index video:(BOOL)video error:(NSError **)error {
   const AVCodec *codec = avcodec_find_decoder(_format->streams[index]->codecpar->codec_id);
-  AVCodecContext *context = codec ? avcodec_alloc_context3(codec) : NULL;
-  if (!context) {
+  if (video && _format->streams[index]->codecpar->codec_id == AV_CODEC_ID_AV1) {
+    const AVCodec *native = avcodec_find_decoder_by_name("av1");
+    if (!_av1SoftwareSelected && CYNCodecSupportsVideoToolbox(native)) {
+      codec = native;
+      _av1Bootstrap = (CYNAV1Bootstrap){ .active = YES };
+    } else {
+      codec = avcodec_find_decoder_by_name("libdav1d");
+      _av1SoftwareSelected = YES;
+      _av1Bootstrap = (CYNAV1Bootstrap){0};
+    }
+  }
+  AVCodecContext *context = [self openCodec:codec stream:index video:video error:error];
+  // Device creation is independent of media parsing. Only an unavailable
+  // device may fall back here; allocation/cancellation errors remain errors.
+  if (video && context && _av1Bootstrap.active && !context->hw_device_ctx) {
+    avcodec_free_context(&context);
+    _av1SoftwareSelected = YES;
+    _av1Bootstrap = (CYNAV1Bootstrap){0};
+    context = [self openCodec:avcodec_find_decoder_by_name("libdav1d") stream:index video:YES error:error];
+  }
+  return context;
+}
+- (AVCodecContext *)openCodec:(const AVCodec *)codec stream:(int)index video:(BOOL)video error:(NSError **)error {
+  if (!codec) {
     [self fail:CYNMediaDecoderErrorUnsupported message:@"No native decoder is available for this codec." error:error];
+    return NULL;
+  }
+  AVCodecContext *context = avcodec_alloc_context3(codec);
+  if (!context) {
+    [self fail:CYNMediaDecoderErrorResourceLimit message:@"The native codec context could not be allocated." error:error];
     return NULL;
   }
   context->max_pixels = CYNMaxPixels;
@@ -238,18 +307,108 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
       if (!config) break;
       if (config->device_type == AV_HWDEVICE_TYPE_VIDEOTOOLBOX &&
           (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)) {
-        if (av_hwdevice_ctx_create(&_hardware, AV_HWDEVICE_TYPE_VIDEOTOOLBOX, NULL, NULL, 0) >= 0)
+        int result = av_hwdevice_ctx_create(&_hardware, AV_HWDEVICE_TYPE_VIDEOTOOLBOX, NULL, NULL, 0);
+        if (result == AVERROR(ENOMEM) || result == AVERROR_EXIT || [self checkCancelled:error]) {
+          avcodec_free_context(&context);
+          if (!_failure) [self fail:result == AVERROR(ENOMEM) ? CYNMediaDecoderErrorResourceLimit : CYNMediaDecoderErrorDecode
+                           message:@"The hardware decoder device initialization was interrupted or could not allocate resources." error:error];
+          return NULL;
+        }
+        if (result >= 0)
           context->hw_device_ctx = av_buffer_ref(_hardware);
+        if (result >= 0 && !context->hw_device_ctx) {
+          avcodec_free_context(&context);
+          [self fail:CYNMediaDecoderErrorResourceLimit message:@"The hardware decoder device could not be retained." error:error];
+          return NULL;
+        }
         break;
       }
     }
     context->get_format = CYNVideoFormat;
+    if (codec && codec->id == AV_CODEC_ID_AV1 && _av1Bootstrap.active)
+      context->opaque = &_av1Bootstrap;
   }
-  if (avcodec_open2(context, codec, NULL) < 0) {
+  int openResult = avcodec_open2(context, codec, NULL);
+  if (openResult < 0) {
+    BOOL retry = video && codec->id == AV_CODEC_ID_AV1 && [self canRetryAV1Initialization:openResult];
     avcodec_free_context(&context);
-    [self fail:CYNMediaDecoderErrorDecode message:@"The native codec could not be opened." error:error];
+    if ([self checkCancelled:error]) return NULL;
+    if (retry) {
+      // Some decoders initialize their hardware during open rather than the
+      // first packet. The same observed format rejection is required here.
+      av_buffer_unref(&_hardware);
+      _av1Bootstrap = (CYNAV1Bootstrap){0};
+      _av1SoftwareSelected = YES;
+      return [self openCodec:avcodec_find_decoder_by_name("libdav1d") stream:index video:YES error:error];
+    }
+    [self fail:openResult == AVERROR(ENOMEM) ? CYNMediaDecoderErrorResourceLimit : CYNMediaDecoderErrorDecode
+       message:@"The native codec could not be opened." error:error];
   }
   return context;
+}
+
+- (void)clearAV1Replay {
+  for (NSUInteger i = 0; i < _av1ReplayCount; ++i) av_packet_free(&_av1Replay[i]);
+  _av1ReplayCount = _av1ReplayIndex = _av1ReplayBytes = 0;
+  _av1Replaying = _av1CurrentPacketRetained = NO;
+}
+- (BOOL)switchAV1ToSoftware:(NSError **)error {
+  if ([self checkCancelled:error]) return NO;
+  if (!_av1Bootstrap.active || _av1ProducedVideo || _av1SoftwareSelected)
+    return [self fail:CYNMediaDecoderErrorDecode message:@"AV1 fallback is unavailable after video output." error:error];
+  avcodec_free_context(&_video);
+  av_buffer_unref(&_hardware);
+  av_frame_unref(_frame);
+  if (_hasPacket && _av1CurrentPacketRetained) {
+    // The replay prefix already owns this not-yet-sent current video packet.
+    av_packet_unref(_packet);
+    _hasPacket = NO;
+  }
+  _av1CurrentPacketRetained = NO;
+  _av1Bootstrap = (CYNAV1Bootstrap){0};
+  _av1SoftwareSelected = YES;
+  _video = [self openCodec:avcodec_find_decoder_by_name("libdav1d") stream:_videoIndex video:YES error:error];
+  _av1Replaying = _av1ReplayCount != 0;
+  _av1ReplayIndex = 0;
+  _videoFlushed = _videoEOF = NO;
+  return _video != NULL;
+}
+- (BOOL)canRetryAV1Initialization:(int)result {
+  return result < 0 && result != AVERROR(ENOMEM) && result != AVERROR_EXIT &&
+    !CYNInterrupt(&_input) && !_failure && _av1Bootstrap.active &&
+    _av1Bootstrap.initializationRejected && !_av1ProducedVideo && !_av1SoftwareSelected;
+}
+- (BOOL)retainAV1BootstrapPacket:(AVPacket *)packet error:(NSError **)error {
+  if (!_av1Bootstrap.active || _av1ProducedVideo) return YES;
+  if (packet->size < 0 || (packet->size > 0 && !packet->data) || packet->side_data_elems < 0 ||
+      (packet->side_data_elems > 0 && !packet->side_data))
+    return [self fail:CYNMediaDecoderErrorDecode message:@"The AV1 bootstrap packet is invalid." error:error];
+  size_t bytes = packet->size >= 0 ? (size_t)packet->size : SIZE_MAX;
+  // Packet refs can keep a backing buffer larger than the visible packet alive.
+  // Count that allocation, padding and side data, not merely compressed bytes.
+  if (packet->buf) bytes = MAX(bytes, packet->buf->size);
+  if (bytes <= CYNAV1ReplayByteLimit - sizeof(AVPacket) - AV_INPUT_BUFFER_PADDING_SIZE)
+    bytes += sizeof(AVPacket) + AV_INPUT_BUFFER_PADDING_SIZE;
+  else bytes = SIZE_MAX;
+  if (packet->side_data_elems < 0 || (size_t)packet->side_data_elems > CYNAV1ReplayByteLimit / sizeof(AVPacketSideData))
+    bytes = SIZE_MAX;
+  else if (bytes <= CYNAV1ReplayByteLimit - (size_t)packet->side_data_elems * sizeof(AVPacketSideData))
+    bytes += (size_t)packet->side_data_elems * sizeof(AVPacketSideData);
+  else bytes = SIZE_MAX;
+  for (int i = 0; i < packet->side_data_elems && bytes <= CYNAV1ReplayByteLimit; ++i) {
+    if (packet->side_data[i].size > CYNAV1ReplayByteLimit - bytes) bytes = SIZE_MAX;
+    else bytes += packet->side_data[i].size;
+  }
+  // Do not retain an oversized current packet. Replay the older bounded prefix
+  // first, then send this still-owned demux packet to dav1d exactly once.
+  if (_av1ReplayCount == CYNAV1ReplayPacketLimit || bytes > CYNAV1ReplayByteLimit - _av1ReplayBytes)
+    return [self switchAV1ToSoftware:error];
+  AVPacket *copy = av_packet_clone(packet);
+  if (!copy) return [self fail:CYNMediaDecoderErrorResourceLimit message:@"The bounded AV1 bootstrap packet could not be retained." error:error];
+  _av1Replay[_av1ReplayCount++] = copy;
+  _av1ReplayBytes += bytes;
+  _av1CurrentPacketRetained = YES;
+  return YES;
 }
 - (CYNMediaInfo *)openURL:(NSURL *)url error:(NSError **)error {
   NSError *openError = nil;
@@ -713,7 +872,13 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   // FFmpeg 7's HEVC decoder specification only enables hardware; other VT
   // codecs require it. No private FFmpeg internals are accessed to guess a
   // HEVC session's actual implementation.
-  BOOL verifiedHardware = hardware && _video->codec_id != AV_CODEC_ID_HEVC;
+  // The separately SHA-locked AV1 backport uses RequireHardwareAccelerated-
+  // VideoDecoder (not Enable). A real frame from that selected native AV1 VT
+  // decoder therefore proves hardware output; a CVPixelBuffer alone does not.
+  BOOL verifiedHardware = hardware && _video->codec_id != AV_CODEC_ID_HEVC &&
+    (_video->codec_id != AV_CODEC_ID_AV1 ||
+     (_av1Bootstrap.active && _av1Bootstrap.selectedVideoToolbox &&
+      !_av1Bootstrap.initializationRejected && !strcmp(_video->codec->name, "av1")));
   CYNMediaSample *sample = [[CYNMediaSample alloc] initWithBuffer:buffer video:YES hardware:verifiedHardware videoToolbox:hardware];
   CFRelease(buffer);
   return sample;
@@ -849,6 +1014,12 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
       if (result == AVERROR_EOF) { *eof = YES; continue; }
       if (result == AVERROR(EAGAIN)) continue;
       if (result < 0) {
+        if ([self checkCancelled:error]) return nil;
+        if (kind == 0 && [self canRetryAV1Initialization:result]) {
+          if (![self switchAV1ToSoftware:error]) return nil;
+          receivedFrame = YES;
+          break;
+        }
         [self fail:CYNMediaDecoderErrorDecode message:@"The codec rejected a media frame." error:error];
         return nil;
       }
@@ -857,7 +1028,13 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
       av_frame_unref(_frame);
       if (_failure) return nil;
       if ([self checkCancelled:error]) return nil;
-      if (sample) return sample;
+      if (sample) {
+        if (kind == 0) {
+          _av1ProducedVideo = YES;
+          if (_av1Bootstrap.active) [self clearAV1Replay];
+        }
+        return sample;
+      }
       // A resampler may buffer a frame without producing output yet.
     }
     if (receivedFrame) continue;
@@ -866,6 +1043,17 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
       if (_failure || sample) return sample;
     }
     if (_videoEOF && _audioEOF && _resamplerEOF) return nil;
+    if (_av1Replaying) {
+      int result = avcodec_send_packet(_video, _av1Replay[_av1ReplayIndex]);
+      if (result < 0) {
+        if ([self checkCancelled:error]) return nil;
+        [self fail:CYNMediaDecoderErrorDecode message:@"The software decoder rejected an AV1 bootstrap packet." error:error];
+        return nil;
+      }
+      ++_av1ReplayIndex;
+      if (_av1ReplayIndex == _av1ReplayCount) [self clearAV1Replay];
+      continue;
+    }
     if (_hasPacket) {
       AVCodecContext *context = _packet->stream_index == _videoIndex ? _video : _audio;
       int result = avcodec_send_packet(context, _packet);
@@ -875,8 +1063,14 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
         [self fail:CYNMediaDecoderErrorDecode message:@"The decoder made no forward progress." error:error];
         return nil;
       }
-      av_packet_unref(_packet); _hasPacket = NO;
+      BOOL retryAV1 = context == _video && [self canRetryAV1Initialization:result];
+      av_packet_unref(_packet); _hasPacket = _av1CurrentPacketRetained = NO;
       if (result < 0) {
+        if ([self checkCancelled:error]) return nil;
+        if (retryAV1) {
+          if (![self switchAV1ToSoftware:error]) return nil;
+          continue;
+        }
         [self fail:CYNMediaDecoderErrorDecode message:@"The codec rejected a media packet." error:error];
         return nil;
       }
@@ -887,6 +1081,11 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
       if (_video && !_videoFlushed) {
         int result = avcodec_send_packet(_video, NULL);
         if (result < 0 && result != AVERROR_EOF) {
+          if ([self checkCancelled:error]) return nil;
+          if ([self canRetryAV1Initialization:result]) {
+            if (![self switchAV1ToSoftware:error]) return nil;
+            continue;
+          }
           [self fail:CYNMediaDecoderErrorDecode message:@"The video decoder could not be drained." error:error]; return nil;
         }
         _videoFlushed = YES; flushed = YES;
@@ -919,6 +1118,8 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
       return nil;
     }
     _hasPacket = YES;
+    _av1CurrentPacketRetained = NO;
+    if (_packet->stream_index == _videoIndex && ![self retainAV1BootstrapPacket:_packet error:error]) return nil;
   }
   return nil;
 }
@@ -931,10 +1132,12 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   int64_t previousOrigin = _originUS;
   CMTime previousVideoStart = _originVideoStart;
   BOOL previouslyObserved = _observedOriginVideoStart;
+  BOOL previouslySoftware = _av1SoftwareSelected;
   int descriptor = [self duplicateInputDescriptor];
   // dup shares an open-file offset. The old AVIO and codecs must be completely
   // retired on this same worker before rewinding or reading the new context.
   [self close];
+  _av1SoftwareSelected = previouslySoftware;
   if (descriptor < 0) {
     if ([self checkCancelled:error]) return NO;
     return [self fail:CYNMediaDecoderErrorDecode message:@"The open media input could not be retained for an early seek." error:error];
@@ -996,6 +1199,8 @@ static AudioChannelLabel CYNChannelLabel(enum AVChannel channel) {
   }
   if (_video) avcodec_flush_buffers(_video);
   if (_audio) avcodec_flush_buffers(_audio);
+  [self clearAV1Replay];
+  _av1CurrentPacketRetained = NO;
   av_packet_unref(_packet); av_frame_unref(_frame);
   _hasPacket = _demuxEOF = _videoFlushed = _audioFlushed = NO;
   _videoEOF = !_video; _audioEOF = !_audio; _resamplerEOF = !_audio;

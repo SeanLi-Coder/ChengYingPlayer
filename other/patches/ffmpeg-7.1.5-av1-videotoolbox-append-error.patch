@@ -1,0 +1,46 @@
+Subject: Preserve AV1 VideoToolbox resource and interruption failures
+Origin: ChengYingPlayer local robustness fix, 2026-10-13
+Applies-after: ffmpeg-7.1.5-av1-videotoolbox.patch
+License: LGPL-2.1-or-later, matching the modified FFmpeg source
+
+The upstream backport did not inspect ff_videotoolbox_buffer_append's return
+value. Do not submit a truncated bitstream to VideoToolbox after an allocation
+failure. Preserve the original upstream patch and record this change separately.
+Also stop AV1 get_format retries after ENOMEM or EXIT: the public callback must
+not mistake a removed VT choice for ordinary hardware unavailability. Other
+codecs retain their existing format retry behavior.
+
+diff --git a/libavcodec/decode.c b/libavcodec/decode.c
+--- a/libavcodec/decode.c
++++ b/libavcodec/decode.c
+@@ -1389,5 +1389,10 @@ int ff_get_format(AVCodecContext *avctx, const enum AVPixelFormat *fmt)
+                    "initialisation.\n", desc->name, hw_config->hwaccel->p.name);
+             err = hwaccel_init(avctx, hw_config->hwaccel);
++            if (avctx->codec_id == AV_CODEC_ID_AV1 &&
++                (err == AVERROR(ENOMEM) || err == AVERROR_EXIT)) {
++                ret = AV_PIX_FMT_NONE;
++                break;
++            }
+             if (err < 0)
+                 goto try_again;
+         }
+
+diff --git a/libavcodec/videotoolbox_av1.c b/libavcodec/videotoolbox_av1.c
+--- a/libavcodec/videotoolbox_av1.c
++++ b/libavcodec/videotoolbox_av1.c
+@@ -83,9 +83,12 @@ static int videotoolbox_av1_end_frame(AVCodecContext *avctx)
+     AVFrame *frame = s->cur_frame.f;
+ 
+     vtctx->bitstream_size = 0;
+-    for (int i = s->start_unit; i < s->nb_unit; i++)
+-        ff_videotoolbox_buffer_append(vtctx, s->current_obu.units[i].data,
+-                                      s->current_obu.units[i].data_size);
++    for (int i = s->start_unit; i < s->nb_unit; i++) {
++        int ret = ff_videotoolbox_buffer_append(vtctx, s->current_obu.units[i].data,
++                                               s->current_obu.units[i].data_size);
++        if (ret < 0)
++            return ret;
++    }
+     return ff_videotoolbox_common_end_frame(avctx, frame);
+ }
+ 

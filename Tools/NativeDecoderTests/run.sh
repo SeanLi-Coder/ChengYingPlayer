@@ -5,6 +5,38 @@ cd "$repo_root"
 test_dir="$(mktemp -d "$repo_root/build/native-decoder-tests.XXXXXX")"
 exec > >(tee "$test_dir/results.log") 2>&1
 ffmpeg_bin="${FFMPEG_BIN:-/opt/homebrew/bin/ffmpeg}"
+decoder_deps="${NATIVE_DECODER_DEPS:-$repo_root/deps}"
+if [[ ! -d "$decoder_deps/include" || ! -d "$decoder_deps/lib" ]]; then
+  printf 'NATIVE_DECODER_DEPS must contain readable include and lib directories.\n' >&2
+  exit 2
+fi
+decoder_deps="$(cd "$decoder_deps" && pwd -P)"
+decoder_libraries=(
+  "$decoder_deps/lib/libavcodec.61.dylib" "$decoder_deps/lib/libavformat.61.dylib"
+  "$decoder_deps/lib/libavutil.59.dylib" "$decoder_deps/lib/libswresample.5.dylib"
+  "$decoder_deps/lib/libswscale.8.dylib"
+)
+for decoder_library in "${decoder_libraries[@]}"; do
+  [[ -f "$decoder_library" && -r "$decoder_library" ]] || { printf 'Missing readable decoder library: %s\n' "$decoder_library" >&2; exit 2; }
+done
+[[ -r "$decoder_deps/include/libavcodec/avcodec.h" ]] || { printf 'Missing readable decoder SDK header.\n' >&2; exit 2; }
+shasum -a 256 "${decoder_libraries[@]}" > "$test_dir/dependency-sha256.txt"
+find -L "$decoder_deps/include" -type f -print0 > "$test_dir/header-paths.nul"
+[[ -s "$test_dir/header-paths.nul" ]] || { printf 'Decoder SDK inventory is empty.\n' >&2; exit 2; }
+while IFS= read -r -d '' decoder_header; do
+  shasum -a 256 "$decoder_header" >> "$test_dir/dependency-sha256.txt"
+done < "$test_dir/header-paths.nul"
+printf 'Decoder dependency root: %s\n' "$decoder_deps"
+verify_dependencies_on_exit() {
+  local decoder_status=$?
+  trap - EXIT
+  if ! shasum -a 256 -c "$test_dir/dependency-sha256.txt" > "$test_dir/dependency-validation.log" 2>&1; then
+    printf 'Decoder headers or linked libraries changed during testing.\n' >&2
+    decoder_status=1
+  fi
+  exit "$decoder_status"
+}
+trap verify_dependencies_on_exit EXIT
 decoder_source="$repo_root/iina/NativePlayback/CYNMediaDecoder.m"
 clang_flags=(-g)
 swift_flags=(-g)
@@ -24,10 +56,9 @@ shasum -a 256 "$decoder_source" iina/NativePlayback/CYNMediaDecoder.h \
   > "$test_dir/source-sha256.txt"
 printf 'Artifacts: %s\n' "$test_dir"
 xcrun clang -fobjc-arc -fmodules -std=gnu11 -Wall -Wextra -Wno-unused-parameter \
-  "${clang_flags[@]}" -I deps/include Tools/NativeDecoderTests/main.m "$decoder_source" \
-  deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib \
-  deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib \
-  -Wl,-rpath,"$repo_root/deps/lib" -framework Foundation -framework CoreMedia \
+  "${clang_flags[@]}" -I "$decoder_deps/include" Tools/NativeDecoderTests/main.m "$decoder_source" \
+  "${decoder_libraries[@]}" \
+  -Wl,-rpath,"$decoder_deps/lib" -framework Foundation -framework CoreMedia \
   -framework CoreVideo -framework AudioToolbox -o "$test_dir/decoder-tests"
 "$ffmpeg_bin" -hide_banner -loglevel error -f lavfi -i testsrc2=s=320x180:r=30:d=4 \
   -f lavfi -i sine=frequency=440:sample_rate=48000:duration=4 \
@@ -92,19 +123,17 @@ xcrun clang -fobjc-arc -fmodules -std=gnu11 -Wall -Wextra -Wno-unused-parameter 
   -output_ts_offset 5 "$test_dir/delayed-seek-offset.mp4"
 "$test_dir/decoder-tests" "$test_dir"
 xcrun clang -fobjc-arc -fmodules -std=gnu11 -Wall -Wextra -Wno-unused-parameter \
-  "${clang_flags[@]}" -I deps/include Tools/NativeDecoderTests/OriginSeek.m "$decoder_source" \
-  deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib \
-  deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib \
-  -Wl,-rpath,"$repo_root/deps/lib" -framework Foundation -framework CoreMedia \
+  "${clang_flags[@]}" -I "$decoder_deps/include" Tools/NativeDecoderTests/OriginSeek.m "$decoder_source" \
+  "${decoder_libraries[@]}" \
+  -Wl,-rpath,"$decoder_deps/lib" -framework Foundation -framework CoreMedia \
   -framework CoreVideo -framework AudioToolbox -o "$test_dir/origin-seek-tests"
 "$test_dir/origin-seek-tests" "$test_dir"
-xcrun clang -fobjc-arc -fmodules -std=gnu11 -I deps/include -c \
+xcrun clang -fobjc-arc -fmodules -std=gnu11 -I "$decoder_deps/include" -c \
   "${clang_flags[@]}" "$decoder_source" -o "$test_dir/decoder.o"
 xcrun swiftc -parse-as-library -import-objc-header iina/NativePlayback/CYNMediaDecoder.h \
   "${swift_flags[@]}" Tools/NativeDecoderTests/SwiftEOF.swift "$test_dir/decoder.o" \
-  deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib \
-  deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib \
-  -Xlinker -rpath -Xlinker "$repo_root/deps/lib" -framework Foundation -framework CoreMedia \
+  "${decoder_libraries[@]}" \
+  -Xlinker -rpath -Xlinker "$decoder_deps/lib" -framework Foundation -framework CoreMedia \
   -framework CoreVideo -framework AudioToolbox -o "$test_dir/swift-eof-tests"
 "$test_dir/swift-eof-tests" "$test_dir/av.mp4"
 shasum -a 256 -c "$test_dir/source-sha256.txt"

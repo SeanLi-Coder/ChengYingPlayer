@@ -248,5 +248,15 @@ write_third_party_source_manifest() {
       printf '%s  other/patches/%s  %s  %s  %s\n' \
         "$expected_sha256" "$filename" "$record_name" "$version" "$url"
     done < "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/media-patches.tsv"
+    while IFS=$'\t' read -r record_name version filename url expected_sha256; do
+      printf '%s  other/patches/%s  %s  %s  %s\n' \
+        "$expected_sha256" "$filename" "$record_name" "$version" "$url"
+    done < "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/playback-ffmpeg-patches.tsv"
+    for filename in playback-ffmpeg-patches.tsv playback-ffmpeg-before-sha256.txt \
+      playback-ffmpeg-after-sha256.txt playback-ffmpeg-added-files.txt; do
+      expected_sha256="$(shasum -a 256 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/$filename" | awk '{print $1}')"
+      printf '%s  other/patches/%s  playback-ffmpeg-patch-lock 7.1.5 %s\n' \
+        "$expected_sha256" "$filename" 'https://github.com/SeanLi-Coder/ChengYingPlayer'
+    done
   } > "$destination"
 }

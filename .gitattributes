@@ -1,2 +1,3 @@
-# Unified diff context lines contain required single-space blank lines.
-other/patches/*.patch whitespace=-blank-at-eol
+# Unified diff context lines can end in a required single-space blank line.
+# Preserve checksum-locked patch bytes, including a final blank context line.
+other/patches/*.patch whitespace=-blank-at-eol,-blank-at-eof
