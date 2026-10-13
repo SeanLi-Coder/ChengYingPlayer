@@ -450,6 +450,15 @@ jobs:
           python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control queue-owner
           python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control queue-start-context
 
+      - name: Verify native compatibility stop and event intent barriers
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 5
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          for control in queue-stop-completion queue-stop-current queue-stop-route queue-stop-event-gate queue-stop-keep-list queue-stop-list-owner queue-stop-reader-drain queue-stop-preparation pending-volume; do
+            python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control "$control"
+          done
+
       - name: Preserve native MPV event bridge evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -613,6 +622,22 @@ jobs:
           bash Tools/MPVQueueInstallerTests/run.sh
           NATIVE_PLAYBACK_SANITIZER=thread bash Tools/MPVQueueInstallerTests/run.sh
 
+      - name: Diagnose repeated real MPV partial cancellation
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 3
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          MPV_QUEUE_PARTIAL_CANCELLATIONS=200 NATIVE_PLAYBACK_SANITIZER=thread bash Tools/MPVQueueInstallerTests/run.sh
+
+      - name: Test native Core queue and whole-list compatibility handoff
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 8
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          bash Tools/NativeCoreQueueTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=address bash Tools/NativeCoreQueueTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeCoreQueueTests/run.sh
+
       - name: Preserve native queue evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -625,8 +650,14 @@ jobs:
             build/native-queue-model-tests.*/*/exit-status.txt
             build/mpv-queue-installer-tests.*/*.sha256
             build/mpv-queue-installer-tests.*/*.log
+            build/mpv-queue-installer-tests.*/*.json
+            build/mpv-queue-installer-tests.*/*.txt
             build/mpv-queue-installer-tests.*/*/*.log
-            build/mpv-queue-installer-tests.*/*/exit-status.txt
+            build/mpv-queue-installer-tests.*/*/*.sha256
+            build/mpv-queue-installer-tests.*/*/*exit-status.txt
+            build/native-core-queue-tests.*/*.sha256
+            build/native-core-queue-tests.*/*.log
+            build/native-core-queue-tests.*/*exit-status.txt
           if-no-files-found: warn
           retention-days: 14
 
@@ -635,7 +666,9 @@ jobs:
         timeout-minutes: 20
         run: |
           python3 -B Tools/NativeAppTests/test_runner.py
+          bash Tools/NativeAppTests/run_paused_probe.sh
           python3 -B Tools/NativeAppTests/run.py \
+            --include-queue \
             --source-packages "$RUNNER_TEMP/SourcePackages" \
             --production-app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app" \
             --report-directory "$PWD/build/native-app-ci-report"
@@ -645,7 +678,13 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-app-test-evidence-${{ github.sha }}
-          path: build/native-app-ci-report/
+          path: |
+            build/native-app-ci-report/
+            build/native-app-paused-wait.*/*.txt
+            build/native-app-paused-wait.*/*.log
+            build/native-app-paused-wait.*/*.json
+            build/native-app-paused-wait.*/*/*.log
+            build/native-app-paused-wait.*/*/exit-code.txt
           if-no-files-found: ignore
           retention-days: 3
 

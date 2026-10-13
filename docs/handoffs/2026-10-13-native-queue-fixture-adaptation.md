@@ -124,3 +124,13 @@ passed lifecycle 76 (x86_64 macOS 10.15 typecheck and ASan execution), controlle
 Core TSan 41, and both original Core negative controls. The ordinary GUI runs
 above remain tied to their earlier SHA, not relabeled as final-source acceptance.
 No test App was created and no user preference or installed application changed.
+
+## 音量／速度意图的最后适配
+
+冻结 Core `a30bcd0004517da6e55bd6cef80140d6f875dc7ad8269c3e53c7fa30b10297dc`
+新增 pending 音量入口后，SilentVideoOpen 的纯 MPV 夹具明确声明无 pending restore；
+共享 Rotation/URL 边界补齐 isMuted、playSpeed 与速度标签服务，不删生产 guard。
+完整 SilentVideoOpen ASan runner 363 项通过，包含真实 libmpv 和隐藏 AppKit
+responder，前后源码身份一致。Rotation/URL 在 `build/handoff-final-compile.uufUyJ`
+仅类型检查通过，不记为 GUI 运行。主代理另复跑受控 Core TSan 41 与两负控、
+lifecycle 76，通过。新队列行为验收独立记录于 `Tools/NativeCoreQueueTests/README.md`。

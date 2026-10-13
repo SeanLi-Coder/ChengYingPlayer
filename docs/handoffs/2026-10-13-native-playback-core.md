@@ -19,6 +19,36 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 参考前一轮 REA 研究的高层职责划分；未复制 Movist Pro 的代码、反编译输出、二进制或资源。
 不声称已经得到 Movist 的同一内核或性能。
 
+### 当前整合检查点
+
+最新整窗候选保留原 92 项，新增独立进程的 54 项队列检查，不能互相替代。
+两种开片暂停偏好、实际切换途中关窗并立即开片、替换后的 MPV 列表、静音、
+渲染视图所有权及三个 Core 关闭均必须通过。44 项准备测试已过，包括 macOS 12
+类型检查及实际像素／列表比较器；完整 App 执行仍待验证。最近已执行 CI 仍为
+下文保留的失败 `38337569102`，不能用准备结果覆盖它。
+
+显式有界列表已接实际 Core、native Session 与 MPV 命令；周围 App 服务边界见
+`Tools/NativeCoreQueueTests/README.md`。生产 controller 的停止协议单独测试：
+当前条目真正卸载后才能清理精确 owner 的列表，reader 事件排空后才能确认 idle。
+事件隔离必须先于 stop route 启用，包括后台任务推迟发 stop 命令的窗口。
+
+controller `c06561e7` 通过普通 206、ASan 217、TSan 225 项及十二个精确负控；
+计数差来自主队列等待检查。后续音量事件补丁 `8f2d804a` 通过普通 210、ASan 237、
+TSan 232 项及新的 pending-volume 负控；旧十二控本轮未重跑，CI 将包含它们。
+安装器 `ed5d25f9` 三模式各 207 项及七负控通过。主代理独立
+`mpv-queue-installer-tests.tkDHUj` 在隔离 AV1 播放依赖上亦通过，源码／生成物／
+依赖身份校验保持完整。这不解释或抹除旧 CI partial-cancellation 191/1。
+
+审查新复现运行中自动下一项偏好、队列交接中音量／速度意图丢失，已修补。
+冻结 Core `a30bcd00` 的实际 Core/Session/MPV 集成普通 `8TH6bc`、ASan `RD4anl`、
+TSan `HRuQt2` 各 206/0，source/dependency/generated 前后身份校验通过；扩展负控
+仍在执行，不能预报通过。旧静音开片 ASan 363、受控 Core TSan 41 与两负控、
+lifecycle 76 也在该 Core 上通过；Rotation/URL 本轮仅类型检查，不冒充 GUI 实测。
+**普通单文件 generic compatibility 切换没有上述 queue／rotation／
+enqueue owner，load／seek 短窗仍可能丢失新音量／速度；尚须单独所有权设计，不能
+仅靠 URL 相等放开门禁。** 当前仍不切默认或发布，能力门禁与发行身份均不变。
+以下历史候选与失败保留各自源码身份，不当作后续 Core 变更的验收。
+
 ### AV1 与队列后续切片（2026-10-13，未切默认）
 
 播放 FFmpeg 7.1.5 已加入 SHA 锁定的开源 AV1 VideoToolbox backport；原补丁与
