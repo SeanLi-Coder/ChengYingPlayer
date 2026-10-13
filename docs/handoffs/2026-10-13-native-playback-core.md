@@ -47,7 +47,7 @@ sanitizer／故障注入、保留的历史失败、补丁来源与 M4 命令见
 
 新增 `NativeQueuePlan`／`NativeQueueState` 和
 [独立队列验证](../../Tools/NativePlaybackQueueTests/README.md)，只证明状态决策，
-尚未进入 Core／Session／Xcode 工程。正常／ASan／TSan 各 150 项通过；三个单变量
+当时尚未进入 Core／Session／Xcode 工程，后续集成见本节。正常／ASan／TSan 各150项通过；三个单变量
 负控分别产生准确的 4／7／1 项失败，主代理独立复跑于 `native-queue-model-tests.QuuVBv`。
 真实 libmpv 导航探针纠正了“末尾 next 总是 no-op”的错误假设：off/file 保持末项但
 生产入口会暂停；playlist 实际回到首项。探针没有执行后续 AppKit 自动恢复。
@@ -89,9 +89,19 @@ CI将保留实际返回码／列表ID和新的重复取消证据；详见安装�
 最新 `38337569102` 的原92项整窗驱动完成70项通过、1项失败。下述关闭layer检查
 已过，嵌入字幕回退也通过；后续新core开片的 `handoff_native_paused_red_ready` 在
 约2ms立即失败。真实inventory异步创建session，而helper入口先guard session非nil，
-没有进入原12秒poll；正在补异步session获取和实际Session正反对照，不能改写失败。
+没有进入原12秒poll。后续已补异步session获取，仍是单12秒期限，前后核对相同session
+和媒体代次。真实Session局部正反对照通过，最终证据为 `native-app-paused-wait.XFSltk`；
+旧guard控制在创建Session前明确失败，未放宽像素断言。准备测试42项通过
+（`native-app-queue-final.trDWRE`），不能改写原CI失败。
 加载后交接和终止检查尚未执行，完整App仍未过关。隔离App清理完成，原始证据在
 `build/native-ci-38337569102.GQRT14/app`。以下保留关闭问题的原复现与修补证据。
+
+新 driver 保留原92项，又新增同一测试build的独立46项队列进程；重复URL、真实帧／
+时钟、音量归零、off/file/list EOF、精确整表回退、菜单动作和两core关闭均须实际验收。
+每个进程的110/150秒限制不变，新增source／App／fixture前后身份检查及失败证据留存。
+这些新整窗检查尚未运行。旧单媒体夹具只补显式无队列边界，原断言保留；最终同源CI
+与本机rotation焦点前置失败仍待核实，详见
+[夹具适配记录](2026-10-13-native-queue-fixture-adaptation.md)。
 
 后续开发 CI `38329363769` 的完整生产／测试 App 编译及 media-helper job 通过。
 92 项驱动实际完成 **66 项通过、1 项失败**：菜单入口、实际自动预览、连续输入、隐藏后
