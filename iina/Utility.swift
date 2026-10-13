@@ -483,6 +483,9 @@ class Utility {
   }()
 
   static let watchLaterURL: URL = {
+    #if CHENGYING_NATIVE_APP_TESTS
+    if let url = NativeAppTestDriver.isolatedResumeWatchLaterURL { return url }
+    #endif
     let url = Utility.appSupportDirUrl.appendingPathComponent(AppData.watchLaterFolder, isDirectory: true)
     createDirIfNotExist(url: url)
     return url
@@ -558,7 +561,7 @@ class Utility {
   }
 
   static func playbackProgressFromWatchLater(_ mpvMd5: String) -> VideoTime? {
-    let fileURL = Utility.watchLaterURL.appendingPathComponent(mpvMd5)
+    let fileURL = existingWatchLaterURL(mpvMd5) ?? Utility.watchLaterURL.appendingPathComponent(mpvMd5.uppercased())
     if let reader = StreamReader(path: fileURL.path),
       let firstLine = reader.nextLine(),
       firstLine.hasPrefix("start="),
@@ -568,6 +571,16 @@ class Utility {
     } else {
       return nil
     }
+  }
+
+  /// MPV writes uppercase hex. Keep the legacy lowercase spelling readable on
+  /// case-sensitive volumes without changing history database keys.
+  static func existingWatchLaterURL(_ digest: String) -> URL? {
+    for name in [digest.uppercased(), digest.lowercased()] {
+      let candidate = watchLaterURL.appendingPathComponent(name)
+      if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+    }
+    return nil
   }
 
   static func getLatestScreenshot(from path: String) -> URL? {

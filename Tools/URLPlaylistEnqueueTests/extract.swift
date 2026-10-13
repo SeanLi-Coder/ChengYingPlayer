@@ -17,6 +17,7 @@ func method(_ signature: String) -> String {
   return String(core[a..<b])
 }
 var members = span("  private var permanentRotationIntent", "  var touchBarSupport:")
+members += try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoResumeMethods.txt"), encoding: .utf8)
 members += span("  private struct NativeCompatibilityRestore", "  private var playbackTransport:")
 members += span("  private struct URLPlaylistRequest", "  func appendToPlaylist(")
 members += try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt"), encoding: .utf8)

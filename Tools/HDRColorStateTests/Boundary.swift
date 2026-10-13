@@ -93,6 +93,7 @@ final class PlaybackWindowBoundary {
 enum PlaybackUI { case time, volume, playButton }
 
 struct NativeRestoreBoundary {
+  let restoresMPVWatchLater = false
   let queueMedia: Never? = nil
   let url: URL
   let position: Double

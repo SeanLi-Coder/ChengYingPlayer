@@ -121,6 +121,30 @@ CI run `38361506765` step 34; its concrete failed-command log was not available
 when this evidence was recorded. Neither production code, test assertions,
 extraction branches nor the original 20-second watchdog was changed here.
 
+### Resume-off compilation boundary (2026-10-13)
+
+The new exit-save helpers exposed another real compile failure, retained at
+`build/resume-legacy-compile.6I1BLu/surface-before.log` (`epNVF6`). The retirement
+extractor now ends at that method's own closing brace instead of the next `open`
+method, so later unrelated helpers cannot silently enlarge this presentation
+slice. Every branch of the actual retirement method remains intact.
+
+This fixture explicitly disables resume and accepts only a nil receipt, using
+the shared `NativePlayerCoreTests/NoResumeTypes.swift` and `NoResumeMethods.txt`.
+Its controlled shutdown returns `.unavailable` at the original `finish()` point
+before completion; no final decoder snapshot or writer success is manufactured.
+Non-nil receipts, compatibility restores, and writer drains fail fast. This is
+not native resume persistence coverage. Both shared inputs are in the manifest.
+
+`NATIVE_VIEW_BUILD_ONLY=1` compiles and validates source/generated identities
+without running any behavioral assertions; `yUXHt0` passed this check. On Core
+`d037183d5ac3ba8c4d398c4f43b5c468ef387bd56e4d81cbf6b53c7dc70d47be`, normal
+`LDpv2h`, ASan `XwDFhT`, and TSan `S718Pg` each passed 51/0. The existing
+`skip-retirement-detach` control (`kYKyNB`) retained exactly the three failures
+listed above, and `ignore-output-owner` (`ZSBqte`) retained exactly its four;
+both exited 1. All five source/generated validations passed without sanitizer
+diagnostics. No assertion or the existing twenty-second watchdog was relaxed.
+
 This remains a presentation/control boundary, not complete nib/window-close
 acceptance. `Tools/NativePlayerRouteTests` additionally uses the real native
 session and now checks detached output before calling terminal view `uninit`.

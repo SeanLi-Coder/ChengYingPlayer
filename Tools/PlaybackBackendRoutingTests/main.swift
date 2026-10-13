@@ -4,13 +4,14 @@ import QuartzCore
 var assertions = 0
 var failedAssertions = 0
 let initialIdleOnly = CommandLine.arguments.last == "initial-idle-only"
+let queueResumeOnly = CommandLine.arguments.last == "queue-resume-only"
 func check(_ condition: @autoclosure () -> Bool, _ message: String) {
   assertions += 1
   if !condition() {
     fputs("FAIL: \(message)\n", stderr)
-    if !initialIdleOnly { exit(1) }
+    if !initialIdleOnly && !queueResumeOnly { exit(1) }
     failedAssertions += 1
-  } else if initialIdleOnly { print("PASS: \(message)") }
+  } else if initialIdleOnly || queueResumeOnly { print("PASS: \(message)") }
 }
 func pump() {
   var finished = false
@@ -72,7 +73,9 @@ func checkInitialIdleFence(_ controller: MPVController, player: PlayerCore, inst
   while retainedInitialIdle == nil && Date() < initialIdleDeadline {
     controller.queue.sync {
       guard let pending = mpv_wait_event(controller.mpv, 0.01) else { return }
-      if pending.pointee.event_id == MPV_EVENT_IDLE { retainedInitialIdle = pending.pointee }
+      if let name = mpv_event_name(pending.pointee.event_id), String(cString: name) == "idle" {
+        retainedInitialIdle = pending.pointee
+      }
       else if pending.pointee.event_id != MPV_EVENT_NONE { controller.handleEvent(pending) }
     }
   }
@@ -91,6 +94,12 @@ func checkInitialIdleFence(_ controller: MPVController, player: PlayerCore, inst
   pump()
   check(player.actions.isEmpty && player.events.calls == 0,
         "Initial idle bookkeeping never leaks ordinary presentation or plugin events")
+}
+
+if queueResumeOnly {
+  runQueueResumeBridge()
+  print("Queue resume bridge: \(assertions) checks, \(failedAssertions) failures")
+  exit(failedAssertions == 0 ? 0 : 1)
 }
 
 if initialIdleOnly {

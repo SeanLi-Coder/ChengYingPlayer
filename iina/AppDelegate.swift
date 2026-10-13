@@ -1234,6 +1234,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   /// - Parameter sender: The object that initiated the clearing of the recent documents.
   @IBAction
   func clearRecentDocuments(_ sender: Any?) {
+    NativePlaybackResumeService.shared.invalidateRecentRecords()
     NSDocumentController.shared.clearRecentDocuments(sender)
     // An explicit history-clear action also removes the last-played file metadata.
     Preference.set(nil, for: .iinaLastPlayedFilePath)

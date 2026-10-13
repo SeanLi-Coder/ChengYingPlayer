@@ -85,6 +85,27 @@ QUEUE_REQUIRED_CHECKS = {
     "queue_unsupported_plan_initial_red", "queue_unsupported_whole_plan_fallback", "queue_unsupported_old_layer_detached",
     "queue_second_core_close", "queue_second_core_shutdown", "queue_all_registered_cores_shutdown",
 }
+RESUME_REQUIRED_CHECKS = {
+    "resume_isolated_state", "resume_stop_pristine", "resume_stop_initial", "resume_stop_ready",
+    "resume_stop_closed", "resume_stop_saved_fields", "resume_stop_shutdown",
+    "resume_reopen_pristine", "resume_reopen_actual_mpv", "resume_reopen_consumed", "resume_reopen_stable",
+    "resume_reopen_closed", "resume_reopen_shutdown", "resume_preview_prepare_clear",
+    "resume_preview_pristine", "resume_preview_initial", "resume_preview_ready", "resume_preview_menu_attached",
+    "resume_preview_clock_in_range", "resume_preview_restore_pending", "resume_preview_closed",
+    "resume_preview_baseline_saved", "resume_preview_shutdown", "resume_clear_prepare_clear",
+    "resume_clear_pristine", "resume_clear_initial", "resume_clear_ready", "resume_clear_completed",
+    "resume_clear_closed", "resume_clear_no_refill", "resume_clear_shutdown",
+    "resume_optout_pristine", "resume_optout_initial", "resume_optout_ready", "resume_optout_applied",
+    "resume_optout_closed", "resume_optout_no_refill", "resume_optout_shutdown",
+    "resume_quit_pristine", "resume_quit_initial", "resume_quit_ready",
+    "resume_quit_record_absent_before_terminate", "resume_all_registered_cores_shutdown", "resume_quit_saved_fields",
+}
+RESUME_VERIFY_REQUIRED_CHECKS = {
+    "resume_verify_isolated_state", "resume_verify_quit_saved_fields", "resume_verify_pristine",
+    "resume_verify_actual_mpv", "resume_verify_consumed", "resume_verify_stable",
+    "resume_verify_closed", "resume_verify_no_refill", "resume_verify_shutdown",
+    "resume_verify_all_registered_cores_shutdown",
+}
 PIXEL_POINTS = [(x, y) for y in (8, 48, 86) for x in (8, 80, 150)]
 MAX_REPORT_BYTES = 1024 * 1024
 
@@ -109,9 +130,11 @@ def validate_result(result, *, run_id, exit_code, required_checks=REQUIRED_CHECK
     return checks
 
 
-def preserve_result(fixture_root, report, run_id, *, required_checks=REQUIRED_CHECKS):
+def preserve_result(fixture_root, report, run_id, *, required_checks=REQUIRED_CHECKS, result_filename="result.json"):
     """Retain bounded, run-owned evidence before workspace cleanup, even on timeout."""
-    output = fixture_root / "result.json"
+    if result_filename not in {"result.json", "result-resume-verify.json"}:
+        raise RuntimeError("Unexpected test report filename.")
+    output = fixture_root / result_filename
     try:
         details = output.lstat()
     except FileNotFoundError:
@@ -183,7 +206,8 @@ def verify_identity(groups, expected, report, *, stage):
 
 
 def run_application(command, *, workspace, environment, log, fixtures, report, run_id, timeout=150,
-                    required_checks=REQUIRED_CHECKS, identity_groups=None, identity_expected=None):
+                    required_checks=REQUIRED_CHECKS, identity_groups=None, identity_expected=None,
+                    result_filename="result.json"):
     result_data = None
     execution = {"run_id": run_id, "started": False, "exit_code": None, "timed_out": False}
     try:
@@ -201,7 +225,8 @@ def run_application(command, *, workspace, environment, log, fixtures, report, r
         # A partial report is diagnostic evidence only. validate_result still
         # requires clean process exit, all checks and the final shutdown record.
         try:
-            result_data = preserve_result(fixtures, report, run_id, required_checks=required_checks)
+            result_data = preserve_result(fixtures, report, run_id, required_checks=required_checks,
+                                          result_filename=result_filename)
         finally:
             if identity_groups is not None:
                 verify_identity(identity_groups, identity_expected, report, stage="after-process")
@@ -312,6 +337,82 @@ def run_queue_scenario(executable, *, workspace, environment, fixtures, report, 
         (queue_report / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
 
+def make_resume_fixtures(source, destination, writer_id, reader_id):
+    make_queue_fixtures(source, destination, writer_id)
+    marker_path = destination / "native-app-fixture.json"
+    marker = json.loads(marker_path.read_text())
+    marker.update(scenario="resume", resume_verify_run_id=reader_id)
+    marker_path.write_text(json.dumps(marker) + "\n", encoding="utf-8")
+    (destination / "watch-later").mkdir(mode=0o700)
+
+
+def run_resume_scenarios(executable, *, workspace, environment, fixtures, report, build_id,
+                         shared_identity_groups=None, shared_identity_expected=None):
+    writer_id, reader_id = str(uuid.uuid4()), str(uuid.uuid4())
+    resume_fixtures = workspace / "resume-fixtures"
+    make_resume_fixtures(fixtures, resume_fixtures, writer_id, reader_id)
+    summaries = {}
+    fixture_identity = None
+    for scenario, identifier, required, filename in (
+            ("resume", writer_id, RESUME_REQUIRED_CHECKS, "result.json"),
+            ("resume-verify", reader_id, RESUME_VERIFY_REQUIRED_CHECKS, "result-resume-verify.json")):
+        current_report = report / scenario
+        current_report.mkdir(exist_ok=False)
+        summary = {"format": 1, "run_id": identifier, "scenario": scenario, "passed": False}
+        try:
+            # The two processes intentionally share exact media paths so MPV's
+            # filename digest remains stable. Mutable watch-later state is not a fixture.
+            groups = dict(shared_identity_groups or {}, fixtures=[resume_fixtures / name for name in
+                ("red/red.mp4", "blue/blue.mp4", "compat/compat.mp4", "delayed/delayed.mp4", "native-app-fixture.json")])
+            expected = snapshot_identity(groups, current_report)
+            if fixture_identity is not None and expected["fixtures"] != fixture_identity:
+                raise RuntimeError("Resume media or marker identity changed between processes.")
+            fixture_identity = expected["fixtures"]
+            if shared_identity_groups:
+                for name in shared_identity_groups:
+                    if expected[name] != shared_identity_expected[name]:
+                        raise RuntimeError("The resume process would use a different source or application build.")
+            current_environment = dict(environment, CHENGYING_NATIVE_APP_TEST_ROOT=str(resume_fixtures),
+                CHENGYING_NATIVE_APP_TEST_RUN_ID=identifier, CHENGYING_NATIVE_APP_TEST_BUILD_ID=build_id,
+                CHENGYING_NATIVE_APP_TEST_SCENARIO=scenario)
+            with (current_report / "app.log").open("wb") as log:
+                result, data = run_application([str(executable), "--no-stdin"], workspace=workspace,
+                    environment=current_environment, log=log, fixtures=resume_fixtures, report=current_report,
+                    run_id=identifier, required_checks=required, result_filename=filename,
+                    identity_groups=groups, identity_expected=expected)
+            summary["app_exit_code"] = result.returncode
+            if data is None:
+                raise RuntimeError("The resume App process produced no test result.")
+            summary["checks"] = validate_result(data, run_id=identifier, exit_code=result.returncode,
+                                                required_checks=required)
+            summary["passed"] = True
+            summaries[scenario] = summary
+        finally:
+            (current_report / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    return summaries
+
+
+def cleanup_resume_preferences(bundle_id, report):
+    if not re.fullmatch(r"io\.chengying\.tests\.native-app\.[0-9a-f]{32}", bundle_id):
+        raise ValueError("Only the current disposable application domain can be removed.")
+    source = r'''
+import Foundation
+guard CommandLine.arguments.count == 2, let defaults = UserDefaults(suiteName: CommandLine.arguments[1]) else { exit(1) }
+let domain = CommandLine.arguments[1]
+defaults.removePersistentDomain(forName: domain)
+_ = defaults.synchronize()
+guard defaults.persistentDomain(forName: domain)?.isEmpty != false else { exit(1) }
+print("NATIVE_APP_TEST_PREFERENCES_CLEANED")
+'''
+    result = subprocess.run(["/usr/bin/xcrun", "swift", "-e", source, bundle_id],
+                            capture_output=True, text=True, timeout=60)
+    passed = result.returncode == 0 and result.stdout.strip() == "NATIVE_APP_TEST_PREFERENCES_CLEANED"
+    (report / "resume-preferences-cleanup.json").write_text(json.dumps({
+        "passed": passed, "exit_code": result.returncode}) + "\n")
+    if not passed:
+        raise RuntimeError("Disposable resume preference cleanup was not confirmed.")
+
+
 def build_command(workspace, source_packages, bundle_id):
     return ["xcodebuild", "-project", str(ROOT / "iina.xcodeproj"), "-scheme", "iina",
             "-configuration", "Release", "-derivedDataPath", str(workspace / "DerivedData"),
@@ -342,6 +443,7 @@ def main():
     parser.add_argument("--report-directory", type=Path, required=True)
     parser.add_argument("--production-app", type=Path, required=True)
     parser.add_argument("--include-queue", action="store_true", help="Also run the independent native queue process.")
+    parser.add_argument("--include-resume", action="store_true", help="Also run independent resume write/readback processes.")
     args = parser.parse_args()
     environment = dict(os.environ)
     validate_environment(environment)
@@ -402,12 +504,28 @@ def main():
                 summary["queue"] = run_queue_scenario(executable, workspace=workspace, environment=environment,
                     fixtures=fixtures, report=report, build_id=run_id,
                     shared_identity_groups=shared_groups, shared_identity_expected=shared_expected)
+            if args.include_resume:
+                summary["resume"] = run_resume_scenarios(executable, workspace=workspace, environment=environment,
+                    fixtures=fixtures, report=report, build_id=run_id,
+                    shared_identity_groups=shared_groups, shared_identity_expected=shared_expected)
         if summary["cleanup"] != "completed":
             raise RuntimeError("Owned application workspace cleanup was not confirmed.")
+        if args.include_resume:
+            cleanup_resume_preferences(bundle_id, report)
+            summary["resume_preference_cleanup"] = "completed"
         summary["passed"] = True
         print("PASS: Complete native App test and owned workspace cleanup", flush=True)
     finally:
-        (report / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+        try:
+            if args.include_resume and summary.get("resume_preference_cleanup") != "completed":
+                cleanup_resume_preferences(bundle_id, report)
+                summary["resume_preference_cleanup"] = "completed"
+        except BaseException:
+            summary["passed"] = False
+            summary["resume_preference_cleanup"] = "unconfirmed"
+            raise
+        finally:
+            (report / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
 
 if __name__ == "__main__":

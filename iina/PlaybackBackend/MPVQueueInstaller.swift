@@ -42,6 +42,7 @@ final class MPVQueueInstaller {
     let itemIDs: [UUID]
     let entryIDs: [Int64]
     let selectedIndex: Int
+    var playbackRestarted = false
     var selectedEntryID: Int64 { entryIDs[selectedIndex] }
   }
   enum Outcome: Equatable {
@@ -54,7 +55,7 @@ final class MPVQueueInstaller {
   /// FILE_LOADED has no native payload. The MPV event reader must attach the
   /// entry ID copied from its preceding START_FILE, before dispatch to main.
   /// Never attach the current operation token to an already queued old event.
-  enum Event { case startFile(entryID: Int64), fileLoaded(entryID: Int64), endFile(entryID: Int64), shutdown, queueOverflow }
+  enum Event { case startFile(entryID: Int64), fileLoaded(entryID: Int64), playbackRestart(entryID: Int64), endFile(entryID: Int64), shutdown, queueOverflow }
   enum Admission: Equatable { case accepted, rejected(Failure) }
   private enum Phase { case appending, awaitingStart, awaitingLoaded, cleaning }
   private enum Terminal { case failed(Failure), cancelled }
@@ -68,9 +69,12 @@ final class MPVQueueInstaller {
     var terminal: Terminal?
     var activationAcknowledged = false
     var receivedLoaded = false
+    var receivedRestart = false
+    let waitsForPlaybackRestart: Bool
     init(_ checkpoint: NativeQueueState.HandoffCheckpoint, _ token: NativeQueueState.InstallationToken,
-         deadline: TimeInterval, completion: @escaping (Outcome) -> Void) {
+         deadline: TimeInterval, waitsForPlaybackRestart: Bool, completion: @escaping (Outcome) -> Void) {
       self.checkpoint = checkpoint; self.token = token; self.deadline = deadline; self.completion = completion
+      self.waitsForPlaybackRestart = waitsForPlaybackRestart
     }
   }
   private let backend: MPVQueueInstallationBackend
@@ -93,6 +97,7 @@ final class MPVQueueInstaller {
   /// retire native before acceptance and keep the installation token current.
   func begin(_ checkpoint: NativeQueueState.HandoffCheckpoint,
              installation: NativeQueueState.InstallationToken,
+             waitForPlaybackRestart: Bool = false,
              completion: @escaping (Outcome) -> Void) -> Admission {
     dispatchPrecondition(condition: .onQueue(.main))
     guard operation == nil else { return .rejected(.busy) }
@@ -104,7 +109,8 @@ final class MPVQueueInstaller {
     guard operation == nil else { return .rejected(.busy) }
     guard snapshot.entries.isEmpty, snapshot.idle, snapshot.activePath == nil else { return .rejected(.notFreshIdle) }
     guard isCurrent(installation) else { return .rejected(.invalidRequest) }
-    let value = Operation(checkpoint, installation, deadline: clock() + Self.loadTimeout, completion: completion)
+    let value = Operation(checkpoint, installation, deadline: clock() + Self.loadTimeout,
+                          waitsForPlaybackRestart: waitForPlaybackRestart, completion: completion)
     operation = value
     let status = backend.queueSetPaused()
     guard owns(value) else { return .accepted }
@@ -164,6 +170,14 @@ final class MPVQueueInstaller {
       }
       value.receivedLoaded = true
       if value.activationAcknowledged { completeLoaded(value) }
+    case .playbackRestart(let entryID):
+      guard value.entryIDs.contains(entryID) else { return }
+      guard beforeDeadline(value) else { fail(value, .timedOut); return }
+      guard value.phase == .awaitingLoaded, entryID == value.entryIDs[value.checkpoint.selectedIndex] else {
+        fail(value, .loadedMismatch); return
+      }
+      value.receivedRestart = true
+      if value.activationAcknowledged && value.receivedLoaded { completeLoaded(value) }
     case .endFile(let entryID):
       guard value.entryIDs.contains(entryID) else { return }
       fail(value, .loadFailed)
@@ -194,6 +208,7 @@ final class MPVQueueInstaller {
 
   private func completeLoaded(_ value: Operation) {
     guard owns(value), value.phase == .awaitingLoaded, value.activationAcknowledged, value.receivedLoaded else { return }
+    guard !value.waitsForPlaybackRestart || value.receivedRestart else { return }
     guard beforeDeadline(value) else { fail(value, .timedOut); return }
     guard let snapshot = backend.queueSnapshot(),
           matchesPrefix(snapshot, value: value, count: value.checkpoint.plan.items.count),
@@ -206,7 +221,8 @@ final class MPVQueueInstaller {
     guard owns(value), value.phase == .awaitingLoaded else { return }
     guard beforeDeadline(value) else { fail(value, .timedOut); return }
     let receipt = Receipt(installation: value.token, itemIDs: value.checkpoint.plan.items.map(\.id),
-                          entryIDs: value.entryIDs, selectedIndex: value.checkpoint.selectedIndex)
+                          entryIDs: value.entryIDs, selectedIndex: value.checkpoint.selectedIndex,
+                          playbackRestarted: value.receivedRestart)
     finish(value, .installed(receipt))
   }
 

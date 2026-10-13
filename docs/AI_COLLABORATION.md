@@ -29,8 +29,14 @@
 各 406/0 及三精确负控通过，原失败不删除。详细版本／目录以迁移交接和各专项 README 为准。
 另已确认 native 关闭／换片缺少续播保存，且显式队列遇旧 watch-later 时可能用零位置
 覆盖 MPV 的恢复。参见 [续播设计与待验收矩阵](handoffs/2026-10-13-native-resume-design.md)：
-这是未实现的下一切片，不能由当前显式关闭续播偏好的 95 项整窗候选推断已解决。
-最新验证冻结于 `0455ab7c7dc207e3bc46349eda1ea6c148c1b891`：开发 CI
+这条切片正在实现并进行组件与真实播放接线测试，尚未完成整窗验收；不能由当前
+显式关闭续播偏好的 95 项整窗候选推断已解决。
+最新提交 `24b6666bcb3ad50721dd270b7e9fa151728c008d` 已推送，开发 CI
+`38398139742` 于 2026-10-13 12:33:17 UTC 派发，已结束且失败；开发 App 上传关闭。
+该次 media-helper job 通过，但生产 App 编译在 `MPVController.swift:1460` 报
+`cannot find 'MPV_EVENT_IDLE' in scope`。95+54 整窗没有执行，正在检查生产头文件
+禁用 deprecated API 与独立夹具之间的差异；不能用本地专项替代该次失败。
+下面保留上一轮结果。上一轮验证冻结于 `0455ab7c7dc207e3bc46349eda1ea6c148c1b891`：开发 CI
 `38381002473` 于 2026-10-13 10:05:47 UTC 派发，已结束且整体失败；开发 App 上传关闭。
 该次 media-helper 已在 PlaylistFilterTests 旧边界缺 `nativeQueueOwnsPlaylist` 处
 编译失败。主代理本地复现相同编译错误后补明确可变 service

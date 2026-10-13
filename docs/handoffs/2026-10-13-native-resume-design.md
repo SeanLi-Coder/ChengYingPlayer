@@ -2,12 +2,50 @@
 
 ## 状态与范围
 
-**设计未实现，不能当作功能完成、测试通过或默认换核完成。**
+**续播切片正在实现，尚未完成真实整窗验收，不能当作功能完成或默认换核完成。**
+
+后续工作树已加入 Store、Service/Receipt、Session 最终采点和 Core 退出接线；组件专项
+与真实 MPV 互操作记录在各 `Tools/NativeResume*Tests/README.md`。Core 生命周期与
+显式队列恢复仍在验证，尚无完整 App 续播结论。下文保留实现前的审查依据；其中
+“当前源码”与“未实现”描述指下列记录时点，不等于后续工作树没有改动。
 
 本记录来自 2026-10-13 对 `codex/native-playback-core` 的只读审查。审查时 HEAD 为
 `e8453cda6ec27736ab4c3212944e7d3b748b3ffc`；工作树另有其他代理的动作门禁、音频偏好及
 队列启动修补。本文不修改生产代码、不新增续播测试、不运行完整 App、不读取用户媒体或真实偏好。
 下列行号是记录时的定位辅助，后续应按方法名重新核实，不能把该工作树当作已提交的冻结版本。
+
+## 后续实现进展（本地组件，不是整窗结论）
+
+工作树已接入以下链路，尚待新的冻结提交与真实完整 App 验收：
+
+- `NativePlaybackSession.shutdown(capturingState:completion:)` 在取消后的 worker reset 前
+  捕获同一媒体的稳定时钟，不放宽正常 query；主线程依次收到最终采点与关闭回调。
+- `NativePlaybackResumeReceipt` 将采点与用户明确退出意图区分，兼容交接和列表导航不自行
+  产生保存；预览基准及正在恢复的 checkpoint 优先于临时播放位置。
+- `NativePlaybackResumeStore` 用上游标准大写 MD5 名称、首行 `start` 和 `speed` 发布新记录，
+  不保存音量或明文媒体路径；有界数值、票据代次、原子不覆盖发布与未知旧记录保留分别验证。
+- `NativePlaybackResumeService` 观察实际偏好变化并协调清除屏障；关窗、退出及真正换片的
+  Core 接线异步等待保存，已完成 receipt 的缓存／LastPlayed 副作用至多一次。
+- 尚未开始播放的队列回退要等真实 MPV `FILE_LOADED` 与 `PLAYBACK_RESTART`，保留 MPV 自己
+  恢复的位置与速度；已播放的 native 媒体仍恢复其拥有的快照及明确的新 seek／速度意图。
+
+已独立完成的组件证据（具体目录、负控、源码身份与范围以各 README 为准）：
+
+| 专项 | 正常结果 | 边界 |
+| --- | --- | --- |
+| NativeResumeInteropTests | 三模式各 83/0，四组精确负控 | 实际 MPV 保存／消费标准记录，不启动 App |
+| NativeResumeStoreTests | 三模式各 158/0 + 实际 MPV 8/0，三个精确负控 | 文件发布组件；主代理另行普通复核通过 |
+| NativeResumeSessionTests | 三模式各 148/0，五个精确负控 | 实际 Session worker／时钟／关闭，不等于完整 Core |
+| NativeResumeServiceTests | 三模式各 145/0，七个精确负控 | 实际隔离 UserDefaults KVO、Receipt 与 Store，不等于窗口退出 |
+| NativeResumeCoreTests | 三模式各 230/0，两个精确负控 230/49、230/4 | 实际 Session／libmpv 与抽取 Core，App 服务边界明确，不等于 nib／菜单整窗 |
+
+完整 App 续播候选已加入既有隔离验收驱动，原 95 项与独立队列 54 项不减少；新增独立
+writer 44 项与 reader 10 项。59 项准备检查及声明边界 typecheck 通过，但真实 App 场景
+尚待 CI，不将准备检查写为整窗通过。
+M4 AV1 目标机报告已经收到：文件运行前后 SHA 校验通过，子进程被 SIGKILL（9）终止，
+未返回解码或实际加载库结果，硬解验收仍未完成。旧启动器误将该退出归类为 normal，
+正在修补诊断；不能据此断言 M4 不支持 AV1，也不能确定系统终止的具体原因。
+这些进展不改变正式默认播放内核、版本、签名或自动更新源。
 
 正式默认仍为 MPV，native 仅内部 opt-in。当前 95 项完整 App 候选在
 `Tools/NativeAppTests/NativeAppTestDriver.swift:88–89` 明确设置
@@ -220,6 +258,87 @@ MainWindowController.windowWillClose
 真正 App 产物继续用 `TestAppWorkspace`，不本地绕过 CI-only 完整 App 约定，不改正式安装、
 系统权限、默认后端、签名、版本或发行资产。必须记录相同源码和生成物前后身份、子进程退出、
 负控准确失败集合及清理结果；静态审查、编译和 policy 通过分别报告，不冒充完整恢复验收。
+
+## 发布前仍待修补
+
+2026-10-13 再次只读核实以下两项 P2；**尚未修复，也未在完整 App 中复现验收**。
+这里的行号对应后续续播候选工作树，区别于前文保留的实现前证据。当前继续保持源码冻结，
+可以发送新版 M4 诊断包并运行一轮开发 CI；不对外发布，不将 native 改为默认。
+完整 App writer 44／reader 10 即使通过，也不会自动覆盖下述两个缺口。
+
+### P2：当前 native 媒体中途开启续播，不会获得新的保存票据
+
+源码路径：
+
+- `PlayerCore.beginNativeOpen():1427–1429` 只在本次媒体打开时创建 receipt。
+- `NativePlaybackResumeService.swift:26,38–44` 将 ticket 固定为 `let`，创建时调用
+  `store.begin()`；`NativePlaybackResumeStore.swift:60–62` 在偏好关闭或正在清理时返回 `nil`。
+- Service 的实际 KVO 处理 `132–143` 只改变 Store 的 enabled gate，没有更新仍在播放的
+  receipt。`Receipt.attemptFinish():75–78` 遇 `nil` ticket 直接 `complete(nil)`，不会写记录。
+- Store `81–97,130–133` 在关闭偏好时失效所有旧票据；重新开启不会复活它们。因此不仅
+  “关闭续播时开片，再开启”受影响，“开启时开片，播放中关闭再开启”也会在退出时得到
+  `.stale`，而不是重新保存当前播放点。
+- 旧 MPV 路径不同：`MPVController.swift:785–788,2172–2174,2223–2228` 以实际偏好观察
+  更新 `save-position-on-quit`／`resume-playback`，`PlayerCore.savePlaybackPosition():3958–3965`
+  在退出时使用当前选项。不能把 native 的“下次开片才生效”当成已说明的通用偏好语义。
+
+最小安全设计：在明确的 `false → true` 变化后，为**仍持有当前媒体的活动 native owner**
+建立新的未来退出保存资格，而不是在 `attemptFinish()` 遇空／失效票据时无条件补发。
+主线程接收时再次核实当前偏好、媒体 URL／generation／route、transport、未开始退休／
+退出／保存；已捕获、正在写、已结束或旧媒体的 receipt 必须继续失效。多 core 同一路径
+不能按 observer 到达顺序夺取较新媒体的所有权，应保留打开时的 owner 次序并按其重新核准。
+已有预览 baseline／恢复 checkpoint 的权属和优先级不能因开启偏好而丢失。
+
+不能通过简单重建 receipt 顺便刷新历史／清理 epoch：保留原最近记录 epoch，且本次打开
+的 progress epoch 已被清理推进时不重新获批，避免开启偏好后回填用户刚清掉的记录。
+若暂不扩展票据模型，也可评估以既有、受 owner 保护的同片兼容交接切到 MPV 来立即执行
+新偏好，但仍须验证预览／退出竞态，不能直接裸调 MPV load 或虚构恢复点。
+
+新增验收至少覆盖：disabled 开片→enable→非零点关闭；true→false→true 活动媒体；旧保存
+已经排队后 false→true 仍不复活；enable 与 clear／replacement／关窗交错；两个 core 同路径；
+预览中开启后的原点保存。现有 Service 测试只证明旧请求不复活和**新准入**可以通过，
+没有证明活动媒体重新取得保存资格。
+
+发布判断：不阻止开发 CI；影响实验性 native 的续播完整性，在宣称续播完成或正式启用
+native 前必须处理。保持 MPV 默认只能限制这一项的影响范围，不能解决下一项。
+
+### P2：异步清除进度没有应用级退出等待，也影响默认 MPV
+
+源码路径：
+
+- `PrefUtilsViewController.clearWatchLaterBtnAction():127–140` 已由原同步删除／重建改为
+  无条件调用 Service 的异步清理。此入口没有 native opt-in 判断，**默认 MPV 用户也走它**。
+- `NativePlaybackResumeService.clearPlaybackProgress():151–155` 推进 epoch 后立即返回；
+  `NativePlaybackResumeStore.performClear():158–173` 将实际删除／重建放到后台串行队列，
+  再向主线程交付完成。它能阻止 native 旧票据回填，但不自行保持 App 存活。
+- `AppDelegate.applicationShouldTerminate():543–577` 仅检查 player shutdown、字幕注销与
+  播放历史任务；无 core 或所有 core 已 shutdown 时可以 `.terminateNow`。其后异步完成
+  门禁 `proceedWithTermination():651–678` 同样不检查清理任务。
+- `PlayerCore.shutdown():2283–2291` 只有特定 `savedByNative` 分支等待 Store drain；普通
+  MPV 分支直接发送 quit。故即使还有一个 MPV core，退出稍慢也不是清理完成的保证。
+
+实际风险是确认清理后立刻退出，后台删除可能尚未开始或尚未完成，残留旧进度；成功提示
+目前确实等 completion 才显示，不能把问题夸大为必然“显示成功但未删除”。这不是需要
+native 才能触发的缺口，也不能依赖 OS 偶然在进程结束前让 utility queue 跑完。
+
+最小低风险设计：Service 在主线程维护独立的 pending clear 计数／操作身份，在排队前增加，
+在无论成功失败的主线程 completion 中解除；它不能依赖已关闭的偏好窗口存活。App 在开始
+关闭窗口、设置 `isTerminating` 等不可逆退出步骤前，若仍有清理则明确暂缓／取消本次退出，
+提示等待清理完成后再退出；不得同步等待 worker 或阻塞主线程。这个方案可以先不重构
+现有多个异步退出完成点，且不会因原 10 秒退出超时强制结束而中断清理。
+
+若采用自动等待后退出，必须把同一清理任务纳入 `.terminateNow` 与全部延迟完成路径，
+关闭新的清理准入、保证回复 AppKit 至多一次，并明确清理失败及超时策略；不能只在某个
+PlayerCore 中加 drain，或只改快速退出分支。强制终止／系统杀进程仍不保证磁盘操作完成，
+应如实保留这一边界。
+
+新增验收至少覆盖：无 core、全部已 shutdown、仅默认 MPV core、native core 四种情况；
+确认清理与立即 quit、连续清理、偏好窗口先释放、删除失败和清理完成后再次 quit。使用
+独立临时目录与可控 worker 屏障验证退出门禁，完整 App 场景仅在隔离 CI 运行；不能仅把
+清理 completion 显示成功作为“进程退出前必完成”的证明。
+
+发布判断：不阻止取得当前冻结候选的开发 CI 证据，但这是默认生产路径的新异步退出缺口，
+**必须在对外发布该候选前修补并验证**。没有 active player 不代表没有必须完成的清理任务。
 
 ## 下一步
 

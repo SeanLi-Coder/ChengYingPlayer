@@ -26,7 +26,16 @@ final class TestTouchBar { func setupTouchBarUI() {} }
 extension VideoTime { static var zero: VideoTime { VideoTime(0) } }
 extension Preference {
   enum SeekOption { case relative, exact, auto }
-  static func set(_ value: Double, for key: Key) { precondition(key == .softVolume) }
+  static var resumePositionWrites = [Double]()
+  static var resumePathWrites = [URL]()
+  static func set(_ value: Double, for key: Key) {
+    if key == .iinaLastPlayedFilePosition { resumePositionWrites.append(value) }
+    else { precondition(key == .softVolume) }
+  }
+  static func set(_ value: URL, for key: Key) {
+    precondition(key == .iinaLastPlayedFilePath)
+    resumePathWrites.append(value)
+  }
 }
 enum AppData { static let mpvMinPlaybackSpeed = 0.01 }
 extension Notification.Name { static let iinaPlaylistChanged = Self("queue-playlist") }
@@ -40,7 +49,11 @@ extension String { var lowercasedPathExtension: String { (self as NSString).path
 extension PlaybackInfoFields {
   func getMatchedSubs(_ path: String) -> [URL]? { nil }
   func setCachedVideoDuration(_ path: String, _ duration: Double) {}
+  func setCachedVideoDurationAndProgress(_ path: String, _ value: (duration: Double, progress: Double)) {
+    cachedResumeWrites.append((path, value.duration, value.progress))
+  }
 }
+var cachedResumeWrites = [(String, Double, Double)]()
 extension MainWindowDouble {
   enum SettingsTab { case tools }
   func showSettingsSidebar(tab: SettingsTab, hideIfAlreadyShown: Bool) {}
@@ -128,7 +141,8 @@ final class MPVController: MPVQueueInstallationBackend {
       let id = event.pointee.data.assumingMemoryBound(to: mpv_event_end_file.self).pointee.playlist_entry_id
       receiver?(.endFile(entryID: id))
     case MPV_EVENT_PLAYBACK_RESTART:
-      if receiver == nil, player?.captureMPVEventRevision() != nil {
+      if let receiver, let id = contextEntryID { receiver(.playbackRestart(entryID: id)) }
+      else if player?.captureMPVEventRevision() != nil {
         let callback = beforeRestart; beforeRestart = nil; callback?()
         player?.playbackRestarted()
       }

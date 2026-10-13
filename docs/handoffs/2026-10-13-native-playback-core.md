@@ -50,11 +50,19 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
   新共享清单下 actions 普通／ASan／TSan `JhkugU`／`5ByvNO`／`BiJGKC` 各 406/0，
   三精确负控 `FjdqZa`／`vCkxoH`／`KmclQL` 为 11／18／29 项准确失败、验证器 0。
 
-续播尚未实现，设计与具体静态缺口另见
+续播切片正在实现，组件和真实播放接线正在验证，尚未整窗验收；设计与初始静态缺口另见
 [续播保存与兼容恢复设计](2026-10-13-native-resume-design.md)。正式默认仍 MPV，
 没有版本／发布／签名／更新源变更，不能因这批专项通过而宣布整体替换完成。
 
-最新开发 CI `38381002473` 于 2026-10-13 10:05:47 UTC 派发，冻结
+新冻结 `24b6666bcb3ad50721dd270b7e9fa151728c008d` 已推送；开发 CI
+`38398139742` 于 2026-10-13 12:33:17 UTC 派发，已结束且失败，
+`upload_development_build=false`。media-helper job 通过；生产 App 在
+`iina/MPVController.swift:1460` 编译失败：`cannot find 'MPV_EVENT_IDLE' in scope`。
+当前 95+54 整窗没有执行；正在核查生产头文件与独立夹具的 deprecated API 差异。
+该失败不能由局部测试通过覆盖，也不改变版本或正式默认路径。
+下段为上一轮完整保留的证据。
+
+上一轮开发 CI `38381002473` 于 2026-10-13 10:05:47 UTC 派发，冻结
 `0455ab7c7dc207e3bc46349eda1ea6c148c1b891`，已结束且整体失败。
 `upload_development_build=false`；没有新发行或可交付 App 验收结论。
 该冻结版本的生产 App 与隔离测试 App 均编译通过，实际 baseline 92/92、独立队列
@@ -139,12 +147,12 @@ DraggingDetect `bda1fc35092fdc3bf954fcda0a5c3309b2bc8808cf4c3a6803928a7a288b0306
 两个原负控，不能当成真实 Session／完整窗口结果。新专项加入 CI，自动更新身份、
 默认后端和正式发行不变。
 
-### M4 AV1 独立验收包（待目标机运行）
+### M4 AV1 独立验收包（目标报告异常退出，硬解未验收）
 
 `Tools/NativeAV1Tests/Portable/` 生成不依赖目标机开发环境的离线包，复用已有精确身份的
 arm64 解码测试与五个播放库，不重签名、不安装 App。要求 macOS 26+；包内含合成素材、
 原许可证及 16 份锁定上游对应源码，既有项目构建材料仍完整保留。
-最终包位于 `build/m4-av1-acceptance.pc6dued3.noindex/M4-AV1-Acceptance.zip`，
+第一版包位于 `build/m4-av1-acceptance.pc6dued3.noindex/M4-AV1-Acceptance.zip`，
 62,464,107 字节，SHA-256 为
 `394f60c480022355e86b46b8d9db923b782ea7242d1f868955edd99dcd4ac7d3`。
 主代理独立重跑 14 项离线测试及该包 `--verify-only` 通过；后者只记
@@ -155,6 +163,21 @@ arm64 解码测试与五个播放库，不重签名、不安装 App。要求 mac
 `reports/run-*/report.json`；不会联网、读取私人媒体或自动修改权限。系统阻止运行时
 记录提示，不解除安全限制。SHA 用于检测传输损坏，不是发行者认证；无 Developer ID
 签名／公证。该包不证明完整 App、4K 长时性能、HDR 屏幕或真实音响验收。
+
+目标机报告已收到：arm64、macOS 27.0，运行前后 SHA 均通过，但测试进程收到 SIGKILL
+（9），没有返回实际解码计数或库加载证据。原报告将信号退出误写成 normal，exit_code=0
+也不代表成功；缺少输出不能证明进程未进入 main，更不能据此断言 AV1 不受支持或认定
+Gatekeeper 是唯一原因。原报告与第一版 ZIP 保留，不覆盖或重签名。
+
+新诊断包为 `build/m4-av1-acceptance.sb9syqua.noindex/M4-AV1-Acceptance.zip`，
+62,467,202 字节，SHA-256 为
+`d8c7ed86c931378f310ffba141ee906ecc98eee57cf439fd4d4050899408e3ac`。
+同一锁定二进制与库不变，启动器新增六文件的有界只读签名／隔离属性状态，信号退出码
+为 null，并记录输出字节、dyld 行与摘要数量，不采集原始输出或修改安全策略。
+主代理独立 19/19 离线测试通过；新包 verify-only 报告 `run-5DM5FkIL` 为
+VERIFIED_NOT_RUN，实际 M2 报告 `run-lK7UPcqj` 为 1738 项中 18 项失败、两位深各 24 帧
+软件输出，明确不是硬解 PASS。六个签名完整性检查通过，库加载和前后 SHA 正确；这些
+本机结果不能证明 M4 上的启动策略或硬件路径。新版目标机诊断仍待回传。
 
 ### 音频设备菜单的实际换核入口
 

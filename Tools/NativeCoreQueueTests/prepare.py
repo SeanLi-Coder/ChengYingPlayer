@@ -23,6 +23,7 @@ methods = [
     "  func captureMPVEventRevision()", "  func acceptsMPVEventRevision(", "  func noteMPVMediaCommand()",
     "  private func attemptNativeOpen(", "  private func beginNativeOpen(", "  private func receiveNativeSnapshot(",
     "  func requireMPVCompatibility(", "  private func retireNativePlayback(",
+    "  @discardableResult\n  private func requestNativeResumeSave(", "  private func finishNativeResumeSave(",
     "  private func projectNativeWindowOptionsToMPV(", "  private func open(_",
     "  private func openMainWindow(", "  func initVideo()", "  func shutdown()", "  func stop()", "  func idleActiveChanged()",
     "  func notifyWindowVideoSizeChanged()", "  func getMediaTitle(", "  func syncAbLoop()",
@@ -59,8 +60,27 @@ state = info[info.index("  var state: PlayerState = .idle {"):info.index("\n  va
 output = "import AppKit\nimport AVFoundation\n" + viewport + "\nfinal class PlayerCore {\n"
 output += boundary + declarations + no_enqueue + queue + "\n".join(map(method, methods)) + "\n}\n"
 output += "final class PlaybackInfoDouble: PlaybackInfoFields { unowned let player: PlayerCore; init(player: PlayerCore) { self.player = player; super.init() }\n" + state + "\n}\n"
+# Real receipt/store behavior remains linked, but its preference service uses a
+# unique volatile domain and an artifact-owned directory. Legacy fixtures keep
+# native saving disabled and never read or write the user's standard domain.
+resume_service = (root / "iina/NativePlayback/NativePlaybackResumeService.swift").read_text()
+shared = "  static let shared = NativePlaybackResumeService(rootURL: Utility.watchLaterURL, defaults: .standard)"
+if resume_service.count(shared) != 1:
+    raise SystemExit("Resume service shared boundary changed")
+resume_service = resume_service.replace(shared, '''  static let shared: NativePlaybackResumeService = {
+    let defaults = UserDefaults(suiteName: "NativeResumeFixture." + UUID().uuidString)!
+    defaults.setVolatileDomain(["resumeLastPosition": false], forName: UserDefaults.argumentDomain)
+    let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
+      .appendingPathComponent("native-resume-records", isDirectory: true)
+    return NativePlaybackResumeService(rootURL: root, defaults: defaults)
+  }()''', 1)
+if resume_service.count("Preference.Key.resumeLastPosition.rawValue") != 2:
+    raise SystemExit("Resume preference key boundary changed")
+resume_service = resume_service.replace("Preference.Key.resumeLastPosition.rawValue", '"resumeLastPosition"')
 # Tests inspect ownership without changing the production function bodies.
 output = output.replace("private ", "")
+output += "\n" + (root / "iina/NativePlayback/NativePlaybackResumeStore.swift").read_text()
+output += "\n" + resume_service
 negative = os.environ.get("NATIVE_QUEUE_NEGATIVE_CONTROL", "")
 replacements = {
     "deduplicate-plan": ("NativeQueuePlan(urls: urls)", "NativeQueuePlan(urls: playableFiles)"),
@@ -128,9 +148,12 @@ services = services.replace("enum LoopMode { case off, file, playlist }", "")
 services = services.replace("func showWindow(_ sender: Any?) { showCount += 1; window?.orderFront(nil) }",
                             "func showWindow(_ sender: Any?) { showCount += 1 }")
 services = services.replace("enum OSDMessage { case custom(String) }", "enum OSDMessage { case custom(String), addToPlaylist(Int), speed(Double) }")
-services = services.replace("enum Key {", "enum Key { case useExactSeek, recordRecentFiles, trackAllFilesInRecentOpenMenu, maxVolume, softVolume\n")
+services = services.replace("enum Key {", "enum Key { case useExactSeek, recordRecentFiles, trackAllFilesInRecentOpenMenu, maxVolume, softVolume, iinaLastPlayedFilePath, iinaLastPlayedFilePosition\n")
 services = services.replace("static func integer(for key: Key) -> Int { 0 }", "static func integer(for key: Key) -> Int { key == .maxVolume ? 100 : 0 }")
 services = services.replace("enum Name { case fileLoaded, mpvInitialized }", "enum Name { case fileLoaded, mpvInitialized, fileStarted }")
 services = services.replace("  static func savedLoopMode(in defaults: UserDefaults, domain: String?) -> LoopMode? { .off }",
                             "  static var loopMode: LoopMode = .off\n  static func savedLoopMode(in defaults: UserDefaults, domain: String?) -> LoopMode? { loopMode }")
+utility = (root / "iina/Utility.swift").read_text()
+start = utility.index("  static func existingWatchLaterURL(")
+services += "\nextension Utility {\n" + utility[start:utility.index("\n  }", start) + 4] + "\n}\n"
 (out / "Services.swift").write_text(services)

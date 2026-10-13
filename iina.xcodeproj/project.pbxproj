@@ -17,6 +17,8 @@
 		D4F500010000000000000001 /* CYNMediaDecoder.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000002 /* CYNMediaDecoder.m */; };
 		D4F500010000000000000002 /* NativeSampleBufferOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000003 /* NativeSampleBufferOutput.swift */; };
 		D4F500010000000000000003 /* NativePlaybackSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000004 /* NativePlaybackSession.swift */; };
+		D4F500010000000000000010 /* NativePlaybackResumeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000010 /* NativePlaybackResumeStore.swift */; };
+		D4F500010000000000000011 /* NativePlaybackResumeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000011 /* NativePlaybackResumeService.swift */; };
 		D4F500010000000000000004 /* NativePlaybackSampleGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000005 /* NativePlaybackSampleGate.swift */; };
 		D4F500010000000000000005 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000006 /* AVFoundation.framework */; };
 		D4F500010000000000000006 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4F500020000000000000007 /* CoreMedia.framework */; };
@@ -468,6 +470,8 @@
 		D4F500020000000000000002 /* CYNMediaDecoder.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = CYNMediaDecoder.m; sourceTree = "<group>"; };
 		D4F500020000000000000003 /* NativeSampleBufferOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSampleBufferOutput.swift; sourceTree = "<group>"; };
 		D4F500020000000000000004 /* NativePlaybackSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlaybackSession.swift; sourceTree = "<group>"; };
+		D4F500020000000000000010 /* NativePlaybackResumeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlaybackResumeStore.swift; sourceTree = "<group>"; };
+		D4F500020000000000000011 /* NativePlaybackResumeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlaybackResumeService.swift; sourceTree = "<group>"; };
 		D4F500020000000000000005 /* NativePlaybackSampleGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlaybackSampleGate.swift; sourceTree = "<group>"; };
 		D4F500020000000000000006 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		D4F500020000000000000007 /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
@@ -2025,6 +2029,8 @@
 				D4F500020000000000000002 /* CYNMediaDecoder.m */,
 				D4F500020000000000000003 /* NativeSampleBufferOutput.swift */,
 				D4F500020000000000000004 /* NativePlaybackSession.swift */,
+				D4F500020000000000000010 /* NativePlaybackResumeStore.swift */,
+				D4F500020000000000000011 /* NativePlaybackResumeService.swift */,
 				D4F500020000000000000005 /* NativePlaybackSampleGate.swift */,
 			);
 			path = NativePlayback;
@@ -3148,6 +3154,8 @@
 				D4F500010000000000000001 /* CYNMediaDecoder.m in Sources */,
 				D4F500010000000000000002 /* NativeSampleBufferOutput.swift in Sources */,
 				D4F500010000000000000003 /* NativePlaybackSession.swift in Sources */,
+				D4F500010000000000000010 /* NativePlaybackResumeStore.swift in Sources */,
+				D4F500010000000000000011 /* NativePlaybackResumeService.swift in Sources */,
 				D4F500010000000000000004 /* NativePlaybackSampleGate.swift in Sources */,
 				D4F510010000000000000001 /* PlaybackTransport.swift in Sources */,
 				D4F510010000000000000002 /* MPVPlaybackTransport.swift in Sources */,

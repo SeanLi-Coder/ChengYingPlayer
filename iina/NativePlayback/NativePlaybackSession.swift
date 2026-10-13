@@ -381,22 +381,48 @@ final class NativePlaybackSession {
     }
   }
 
-  func shutdown(completion: @escaping () -> Void) {
+  /// Capture only the first retirement's stable worker state, before reset. Cancellation
+  /// still happens immediately on main; this terminal receipt never reopens normal queries.
+  /// Both callbacks arrive once on main, with the capture delivered before completion.
+  func shutdown(capturingState: ((NativePlaybackQueryResult) -> Void)? = nil,
+                completion: @escaping () -> Void) {
     dispatchPrecondition(condition: .onQueue(.main))
     guard !terminal else {
-      worker.async { [output] in output.shutdown(completion: completion) }
+      worker.async { [output] in
+        output.shutdown {
+          capturingState?(.unavailable)
+          completion()
+        }
+      }
       return
     }
+    let retiringRevision = identity.current()
+    let retiringGeneration = nextGeneration
     terminal = true
     mainPhase = .closed
     let request = identity.advance(cancel: true)
     worker.async { [self] in
+      let result: NativePlaybackQueryResult
+      // An accepted but not yet applied open/seek/stop cannot save the old worker's
+      // position. Earlier media commands are cancelled as before, not replayed here.
+      if capturingState != nil, identity.accepts(request), revision == retiringRevision,
+         generation == retiringGeneration, decoder != nil, let media,
+         media.duration.isFinite, media.duration > 0,
+         [.playing, .paused, .ended].contains(phase), !preroll,
+         output.currentTime.seconds.isFinite, output.currentTime.seconds >= 0 {
+        result = .ready(snapshotOnWorker())
+      } else {
+        result = .unavailable
+      }
       resetOnWorker()
       revision = request
       phase = .closed
       _ = identity.install(nil, revision: request)
       publish(force: true)
-      output.shutdown(completion: completion)
+      output.shutdown {
+        capturingState?(result)
+        completion()
+      }
     }
   }
 

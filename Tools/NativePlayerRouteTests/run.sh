@@ -29,6 +29,7 @@ source_files=(
   Tools/NativePlayerRouteTests/Boundary.swift Tools/NativePlayerRouteTests/PlayerBoundary.txt
   Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt
   Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt
+  Tools/NativePlayerCoreTests/NoResumeTypes.swift Tools/NativePlayerCoreTests/NoResumeMethods.txt
   Tools/NativePlayerRouteTests/extract.swift Tools/NativePlayerRouteTests/main.swift Tools/NativePlayerRouteTests/run.sh
   deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib
   deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib
@@ -50,6 +51,7 @@ xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm6
   iina/NativePlayback/NativePlaybackSession.swift iina/NativePlayback/NativePlaybackSurface.swift \
   iina/VideoView.swift "$test_dir/ExtractedPlayer.swift" \
   Tools/NativePlayerRouteTests/Boundary.swift Tools/NativePlayerRouteTests/main.swift "$test_dir/decoder.o" \
+  Tools/NativePlayerCoreTests/NoResumeTypes.swift \
   deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib \
   deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib \
   -Xlinker -rpath -Xlinker "$repo_root/deps/lib" \

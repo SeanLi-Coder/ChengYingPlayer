@@ -256,6 +256,9 @@ class PlayerCore: NSObject {
       let range = VideoToolsLoopRange(start: restore.loopA, end: restore.loopB, duration: restore.duration)
       let ceiling = restore.duration.flatMap { $0.isFinite && $0 > 0 ? $0.nextDown : nil } ?? Double.greatestFiniteMagnitude
       restore.position = range?.clamped(position) ?? min(max(0, position), ceiling)
+      // An explicit seek replaces MPV's initial watch-later target with the
+      // ordinary same-owner exact-seek barrier.
+      restore.restoresMPVWatchLater = false
     }
     if let paused {
       restore.paused = paused
@@ -297,6 +300,7 @@ class PlayerCore: NSObject {
       return true
     }
     restore.rate = speed
+    restore.speedIntentChanged = true
     nativeCompatibilityRestore = restore
     return true
   }
@@ -422,6 +426,8 @@ class PlayerCore: NSObject {
   private var nativeRetiring = false
   private var nativeTerminationRequested = false
   private var nativeRetirementCompletion: (() -> Void)?
+  private var nativeResumeReceipt: NativePlaybackResumeReceipt?
+  private var nativeResumeSuppressedMPVAutoSave = false
   private var nativeLoopMode: LoopMode = .off
   private var nativePreferredRate: Double = 1
   private var nativeSingleInput = false
@@ -447,10 +453,13 @@ class PlayerCore: NSObject {
     let position: Double
     let paused: Bool
     let atEOF: Bool
+    let duration: Double
+    let speed: Double
     let loopA: Double?
     let loopB: Double?
   }
   private var nativePreviewBaseline: NativePreviewBaseline?
+  private var nativeResumePreviewCheckpoint: NativePreviewBaseline?
   private var nativePreviewRequestID: UUID?
   private var nativePreviewCompletion: ((NativePreviewResult) -> Void)?
   private var nativePreviewRevision: UInt64 = 0
@@ -501,6 +510,7 @@ class PlayerCore: NSObject {
         position: snapshot.phase == .ended ? snapshot.duration : snapshot.position,
         paused: snapshot.phase == .ended || !snapshot.wantsPlayback,
         atEOF: snapshot.phase == .ended || self.nativeRestoredPreviewEOF,
+        duration: snapshot.duration, speed: Double(snapshot.rate),
         loopA: self.nativeLoopA, loopB: self.nativeLoopB)
       self.nativeRestoredPreviewEOF = false
       apply()
@@ -517,6 +527,7 @@ class PlayerCore: NSObject {
       DispatchQueue.main.async { completion(.applied) }; return
     }
     nativePreviewBaseline = nil
+    nativeResumePreviewCheckpoint = restorePlaybackState ? baseline : nil
     guard let transport = nativeTransport, !nativeRetiring, !nativeTerminationRequested,
           playbackEventRoute.revision == baseline.route,
           videoToolsMediaGeneration == baseline.generation else {
@@ -537,7 +548,10 @@ class PlayerCore: NSObject {
     captureNativePreviewState(transport, route: baseline.route, generation: baseline.generation,
       isCurrent: { [weak self] in self?.nativePreviewRequestID == id }) { [weak self] result in
       guard let self else { return }
-      if case .ready = result { self.completeNativePreview(id, .applied) }
+      if case .ready = result {
+        self.nativeResumePreviewCheckpoint = nil
+        self.completeNativePreview(id, .applied)
+      }
       else { self.completeNativePreview(id, .unavailable) }
     }
   }
@@ -546,6 +560,7 @@ class PlayerCore: NSObject {
   /// are queued. They must not later restore the old position or pause intent.
   func cancelNativePreview(restoreLoop: Bool) {
     nativeRestoredPreviewEOF = false
+    nativeResumePreviewCheckpoint = nil
     invalidateNativePreviewRequest()
     let baseline = nativePreviewBaseline
     nativePreviewBaseline = nil
@@ -633,6 +648,10 @@ class PlayerCore: NSObject {
     var volume: Double
     var rate: Double
     var paused: Bool
+    var restoresMPVWatchLater = false
+    // Captured native rates are authoritative. An unopened MPV restore clears
+    // this until an explicit speed action, independently of an explicit seek.
+    var speedIntentChanged = true
     var unmuteRequested = false
     var preservesWindowOptions = false
     var duration: Double? = nil
@@ -1201,8 +1220,10 @@ class PlayerCore: NSObject {
 
   private func handoffUnopenedNativeQueue() {
     guard let queue = nativeQueue else { return }
-    let restore = NativeCompatibilityRestore(url: queue.selectedItem.url, position: 0, volume: 0,
+    var restore = NativeCompatibilityRestore(url: queue.selectedItem.url, position: 0, volume: 0,
       rate: nativePreferredRate, paused: queue.intent == .paused, completion: {})
+    restore.restoresMPVWatchLater = true
+    restore.speedIntentChanged = false
     beginNativeQueueHandoff(restore)
   }
 
@@ -1240,7 +1261,8 @@ class PlayerCore: NSObject {
         self.finishNativeQueueInstallation(installation, outcome: .failed(.backendUnavailable, .unverified))
         return
       }
-      let admission = installer.begin(checkpoint, installation: token) { [weak self, weak installation] outcome in
+      let admission = installer.begin(checkpoint, installation: token,
+                                      waitForPlaybackRestart: capturedRestore.restoresMPVWatchLater) { [weak self, weak installation] outcome in
         guard let self, let installation else { return }
         self.finishNativeQueueInstallation(installation, outcome: outcome)
       }
@@ -1279,9 +1301,20 @@ class PlayerCore: NSObject {
       fileStarted(path: accepted.selectedItem.url.path)
       guard hasPendingNativeQueueRestore else { return }
       applyLoopMode(accepted.repeatMode)
+      let restoreID = nativeCompatibilityRestore?.id
+      let restoreRoute = captureMPVEventRevision()
       fileLoaded()
       guard hasPendingNativeQueueRestore else { return }
       onVideoReconfig()
+      // The reader may drain the initial restart before main handles FILE_LOADED.
+      // The installer retains that exact entry's real event until its receipt is
+      // accepted. Captured native restores still await their new exact seek.
+      if receipt.playbackRestarted, let restoreRoute, acceptsMPVEventRevision(restoreRoute),
+         nativeCompatibilityRestore?.id == restoreID,
+         nativeCompatibilityRestore?.queueMedia == installation.token.media,
+         nativeCompatibilityRestore?.restoresMPVWatchLater == true {
+        playbackRestarted()
+      }
     case .failed, .cancelled, .superseded:
       _ = nativeQueue?.completeHandoff(installation.token, verified: false)
       nativeCompatibilityRestore = nil
@@ -1330,11 +1363,11 @@ class PlayerCore: NSObject {
     let queueMedia = nativeQueue?.mediaToken
     let loadSiblings = nativeQueue == nil && info.shouldAutoLoadFiles && Preference.bool(for: .playlistAutoAdd)
     let loadSubs = Preference.integer(for: .subAutoLoadIINA) != 0
-    let watchLater = Utility.watchLaterURL.appendingPathComponent(Utility.mpvWatchLaterMd5(url.path))
+    let watchLaterDigest = Utility.mpvWatchLaterMd5(url.path)
     let honorWatchLater = Preference.bool(for: .resumeLastPosition)
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       var reason: String?
-      if honorWatchLater && FileManager.default.fileExists(atPath: watchLater.path) {
+      if honorWatchLater && Utility.existingWatchLaterURL(watchLaterDigest) != nil {
         reason = "existing_watch_later_configuration"
       } else if loadSiblings || loadSubs {
         do {
@@ -1391,6 +1424,9 @@ class PlayerCore: NSObject {
     nativeLoopMode = nativeQueue?.repeatMode ?? Preference.savedLoopMode(in: .standard, domain: Bundle.main.bundleIdentifier) ?? .off
     invalidateThumbnails()
     videoToolsMediaGeneration &+= 1
+    nativeResumeReceipt?.invalidate()
+    nativeResumeReceipt = NativePlaybackResumeReceipt(url: url, generation: videoToolsMediaGeneration,
+      digest: Utility.mpvWatchLaterMd5(url.path).uppercased(), service: .shared)
     info.currentURL = url
     info.isNetworkResource = false
     info.audioTracks = []; info.videoTracks = []; info.subTracks = []; info.chapters = []
@@ -1694,6 +1730,11 @@ class PlayerCore: NSObject {
 
   private func retireNativePlayback(genericOwnerID: UUID? = nil, completion: @escaping () -> Void) {
     guard ownsGenericHandoff(genericOwnerID) else { return }
+    let resumeReceipt = nativeResumeReceipt
+    if nativeTransport != nil, let restore = nativeCompatibilityRestore,
+       restore.url == resumeReceipt?.url, resumeReceipt?.generation == videoToolsMediaGeneration {
+      resumeReceipt?.compatibilityRestoreID = restore.id
+    }
     cancelNativePreview(restoreLoop: false)
     nativeInitialPauseIntent = nil
     cancelNativeLoopRequests()
@@ -1715,15 +1756,86 @@ class PlayerCore: NSObject {
     if mainWindow.loaded {
       mainWindow.videoView.detachNativePlaybackOutput(transport.session.output)
     }
-    transport.session.shutdown { [weak self] in
+    transport.session.shutdown(capturingState: { result in
+      let point: NativePlaybackResumePoint?
+      if case .ready(let snapshot) = result {
+        point = NativePlaybackResumePoint(position: snapshot.position, duration: snapshot.duration,
+          speed: Double(snapshot.rate))
+      } else { point = nil }
+      resumeReceipt?.captureFinal(point)
+    }) { [weak self] in
       guard let self else { return }
-      self.nativeTransport = nil
-      self.nativeRetiring = false
-      self.nativeReady = false
-      if self.info.state == .stopping { self.info.state = .idle }
-      let completion = self.nativeRetirementCompletion
-      self.nativeRetirementCompletion = nil
-      completion?()
+      self.finishNativeResumeSave(resumeReceipt) { [weak self] in
+        guard let self else { return }
+        self.nativeTransport = nil
+        self.nativeRetiring = false
+        self.nativeReady = false
+        if self.info.state == .stopping { self.info.state = .idle }
+        let completion = self.nativeRetirementCompletion
+        self.nativeRetirementCompletion = nil
+        completion?()
+      }
+    }
+  }
+
+  /// Called before exit invalidates any preview or compatibility owner. Saving is
+  /// armed by user close/quit/replacement, never by queue navigation or handoff.
+  @discardableResult
+  private func requestNativeResumeSave(replacement: Bool = false) -> Bool {
+    guard let receipt = nativeResumeReceipt, receipt.url == info.currentURL else { return false }
+    var point: NativePlaybackResumePoint?
+    var authoritative = false
+    if nativeTransport != nil {
+      guard receipt.generation == videoToolsMediaGeneration else { return false }
+      let checkpoint = nativePreviewBaseline ?? nativeResumePreviewCheckpoint
+      if let checkpoint, checkpoint.generation == receipt.generation,
+         checkpoint.route == playbackEventRoute.revision {
+        point = NativePlaybackResumePoint(position: checkpoint.position, duration: checkpoint.duration,
+          speed: checkpoint.speed)
+        authoritative = true
+      } else if let restore = nativeCompatibilityRestore,
+                receipt.compatibilityRestoreID == restore.id, restore.url == receipt.url,
+                !restore.restoresMPVWatchLater {
+        point = NativePlaybackResumePoint(position: restore.position,
+          duration: restore.duration ?? receipt.point?.duration ?? 0, speed: restore.rate)
+        authoritative = true
+      }
+      // Retirement retains the transport identity; periodic UI time is not a
+      // replacement for the final worker sample.
+    } else if let restore = nativeCompatibilityRestore,
+              receipt.compatibilityRestoreID == restore.id, restore.url == receipt.url,
+              !restore.restoresMPVWatchLater {
+      point = NativePlaybackResumePoint(position: restore.position,
+        duration: restore.duration ?? receipt.point?.duration ?? 0, speed: restore.rate)
+      authoritative = true
+    } else if !receipt.saveRequested {
+      // A completed handoff belongs to MPV, including its richer watch-later state.
+      return false
+    }
+    receipt.requestSave(replacement: replacement, overriding: point, authoritative: authoritative)
+    if nativeTransport == nil { finishNativeResumeSave(receipt, completion: {}) }
+    return true
+  }
+
+  private func finishNativeResumeSave(_ receipt: NativePlaybackResumeReceipt?, completion: @escaping () -> Void) {
+    guard let receipt else { completion(); return }
+    receipt.finishIfRequested { [weak self] in
+      guard receipt.claimResultDelivery() else { completion(); return }
+      if receipt.result == .saved, Preference.bool(for: .resumeLastPosition),
+         receipt.progressRecordsEpoch == NativePlaybackResumeService.shared.progressRecordsEpoch,
+         let self, let point = receipt.point {
+        self.info.setCachedVideoDurationAndProgress(receipt.url.path,
+          (duration: point.duration, progress: point.position))
+        if !receipt.isReplacement, self.nativeResumeReceipt === receipt,
+           self.info.currentURL == receipt.url,
+           receipt.recentRecordsEpoch == NativePlaybackResumeService.shared.recentRecordsEpoch {
+          Preference.set(receipt.url, for: .iinaLastPlayedFilePath)
+          Preference.set(point.position, for: .iinaLastPlayedFilePosition)
+        }
+      } else if let result = receipt.result, case .ioError(let code) = result {
+        self?.log("Native resume save failed (errno \(code)); existing records were preserved", level: .warning)
+      }
+      completion()
     }
   }
 
@@ -1738,6 +1850,7 @@ class PlayerCore: NSObject {
       log("Ignoring a remote media URL in the local player", level: .warning)
       return
     }
+    requestNativeResumeSave(replacement: true)
     invalidateGenericHandoff()
     resetNativeQueue()
     resetURLPlaylistEnqueue()
@@ -1827,6 +1940,7 @@ class PlayerCore: NSObject {
 
     // Subtitle attachments and other non-playable inputs are not a new media
     // request and must not revoke an in-flight compatibility restoration.
+    requestNativeResumeSave(replacement: true)
     invalidateGenericHandoff()
     resetNativeQueue()
     resetURLPlaylistEnqueue()
@@ -1930,6 +2044,7 @@ class PlayerCore: NSObject {
     guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
     guard ownsGenericHandoff(genericOwnerID) else { return }
     if allowNative {
+      requestNativeResumeSave(replacement: true)
       invalidateGenericHandoff()
       resetNativeQueue()
       resetURLPlaylistEnqueue()
@@ -1946,6 +2061,14 @@ class PlayerCore: NSObject {
     }
     if let queueInstallationID {
       guard nativeQueueInstallation?.token.id == queueInstallationID else { return }
+    }
+    if nativeResumeSuppressedMPVAutoSave {
+      mpv.setFlag(MPVOption.WatchLater.savePositionOnQuit, Preference.bool(for: .resumeLastPosition))
+      nativeResumeSuppressedMPVAutoSave = false
+    }
+    if nativeCompatibilityRestore == nil {
+      nativeResumeReceipt?.invalidate()
+      nativeResumeReceipt = nil
     }
     projectNativeWindowOptionsToMPV()
     let loadRoute = advancePlaybackRoute(acceptsMPV: queueInstallationID == nil)
@@ -2127,6 +2250,7 @@ class PlayerCore: NSObject {
   ///     down was in progress and will call this method again to continue the process of shutting down..
   func shutdown() {
     guard !nativeTerminationRequested else { return }
+    let savedByNative = requestNativeResumeSave()
     invalidateGenericHandoff()
     pendingNativeQueueStopOwner = nil
     resetNativeQueue()
@@ -2156,8 +2280,16 @@ class PlayerCore: NSObject {
     info.state = .shuttingDown
     guard !backgroundTaskInUse else { return }
     log("Shutting down")
-    savePlayerState()
-    mpv.mpvQuit()
+    if savedByNative {
+      nativeTerminationRequested = true
+      // Do not overwrite an owned native checkpoint with a partially restored
+      // MPV clock. The private writer drains before the actual quit event.
+      mpv.setFlag(MPVOption.WatchLater.savePositionOnQuit, false)
+      NativePlaybackResumeService.shared.store.drain { [weak self] in self?.mpv.mpvQuit() }
+    } else {
+      savePlayerState()
+      mpv.mpvQuit()
+    }
   }
 
   /// Notify the task running in the background queue it should stop.
@@ -2341,6 +2473,7 @@ class PlayerCore: NSObject {
     // Closing a window while the native output is draining must not replace
     // the terminal completion which will quit the idle compatibility core.
     guard !nativeTerminationRequested, info.state != .shuttingDown, info.state != .shutDown else { return }
+    let savedByNative = requestNativeResumeSave()
     invalidateGenericHandoff()
     let cancelledQueueOwner = nativeQueueInstallation?.token.id ?? pendingNativeQueueStopOwner
     resetNativeQueue()
@@ -2372,7 +2505,10 @@ class PlayerCore: NSObject {
     advancePlaybackRoute(acceptsMPV: true)
     guard info.state != .shutDown else { return }
     invalidateThumbnails()
-    savePlaybackPosition()
+    if savedByNative {
+      mpv.setFlag(MPVOption.WatchLater.savePositionOnQuit, false)
+      nativeResumeSuppressedMPVAutoSave = true
+    } else { savePlaybackPosition() }
     videoToolsClearLoop()
 
     // The player may already be stopped in which case the state must not be set to stopping.
@@ -4091,6 +4227,10 @@ class PlayerCore: NSObject {
     syncUI(.playlist)
     guard ownsGenericRestoreReceipt(genericReceipt) else { return }
     if var restore = nativeCompatibilityRestore, restore.url == info.currentURL {
+      if !restore.speedIntentChanged {
+        let restoredRate = playbackTransport.rate
+        if restoredRate.isFinite, restoredRate > 0 { restore.rate = restoredRate }
+      }
       restore.waitingForSeek = true
       nativeCompatibilityRestore = restore
       playbackTransport.setPaused(true)
@@ -4100,7 +4240,9 @@ class PlayerCore: NSObject {
       info.playSpeed = restore.rate
       restoreNativeLoopToMPV(start: restore.loopA, end: restore.loopB)
       videoToolsRestoreViewportToMPV(restore.viewport)
-      seek(absoluteSecond: restore.position, preservingRotationHandoff: restore.id)
+      if !restore.restoresMPVWatchLater {
+        seek(absoluteSecond: restore.position, preservingRotationHandoff: restore.id)
+      }
       let restoreID = restore.id
       DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
         guard let self, self.nativeCompatibilityRestore?.id == restoreID else { return }
@@ -4302,7 +4444,7 @@ class PlayerCore: NSObject {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.info.disableOSDForFileLoading = false }
     if let restore = nativeCompatibilityRestore, restore.waitingForSeek,
        restore.url == info.currentURL, let position = playbackPosition,
-       abs(position - restore.position) <= 0.05 {
+       restore.restoresMPVWatchLater || abs(position - restore.position) <= 0.05 {
       guard let completion = consumeGenericHandoffCompletion(restore) else { return }
       // User actions during loading or the exact seek supersede the original
       // capture. Apply them only after this same-media restoration is verified.

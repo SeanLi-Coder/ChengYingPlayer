@@ -1,5 +1,9 @@
 # Controlled permanent-rotation handoff regression
 
+本套明确关闭 resume，使用 `Tools/NativePlayerCoreTests/README.md` 所述严格
+nil/fail-fast 保存边界。受控 Session 在原 finish 时先回 `.unavailable` 再完成，
+不制造最终 worker 快照，也不模拟 writer drain。原生产交接逻辑和四负控均保留。
+
 Run `bash Tools/NativeRotationHandoffTests/run.sh`. Optional
 `ROTATION_HANDOFF_SANITIZER=address` or `thread` applies the sanitizer to every
 positive and negative executable. The test opens and retires one short-lived CLI

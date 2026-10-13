@@ -1,5 +1,29 @@
 # Complete native playback application checks
 
+## 独立续播候选：44 + 10 项，等待完整 App CI
+
+`--include-resume` 新增两个独立的完整 App 进程，不删除或替代 baseline 的 95 项和 queue 的 54 项。当前仅完成测试实现和本机 CLI 准备检查；没有在本机构建或启动完整 App，也没有将环境伪装成 CI。新场景的真实运行结果和总耗时必须等待 GitHub-hosted macOS CI。
+
+第一个 `resume` 进程要求 44 项独立断言：
+
+- 启用真实续播偏好，使用原生暂停播放、非零位置 4.2 秒、1.25 倍速和真实音量滑块 37%。关闭窗口后，实际 watch-later 必须是 0600 的普通文件，仅含首行 `start` 与第二行 `speed`，不得记录音量或 A/B 预览区间。
+- 关闭并完成 Core shutdown 后创建不同 Core。现有 watch-later 必须触发真正的 MPV 加载；直接查询 libmpv 的位置、速度、暂停和音量，并确认文件已被 MPV 消费。再等 0.2 秒重复检查；新打开的音量和滑块必须为 0。
+- 真实剪辑面板先以 1.25 秒为基准，输入 4.2～5 秒的预览区间。实际 worker 必须已在该区间播放，然后在同一 main turn 调用 `finishNativePreview`、确认恢复回调仍 pending、立即执行真实窗口关闭。保存结果必须仍是 1.25 秒基准，不得变成 4.x 秒的临时预览位置。测试不暂停 worker、不构造快照、不直接修改 Core 私有保存状态。
+- 分别在原生媒体仍打开时调用真实清除服务和修改真实 `resumeLastPosition=false`。随后关闭，旧位置和 LastPlayed 元数据不能重新写回。清除使用生产 Service barrier 和相同的 remove/recreate 语义；它不声称已验证设置面板的确认框。
+- 最后保留一个实际原生暂停 Core，调用真正的 `NSApp.terminate`，由真实 AppDelegate 退出流程保存蓝色视频的 4.2 秒 / 1.25 倍速。`willTerminate` 必须确认所有已登记 Core 已关闭、原生层已脱离，并且隔离目录只有预期的有效记录。
+
+第二个 `resume-verify` 进程要求 10 项断言：重新启动同一份测试 App，在原路径下检查上一进程真实退出留下的记录，再让新 Core 的真实 MPV 读取、消费它，并验证位置 / 速度和静音。读取完成后通过真实偏好关闭续播，再关闭 Core 和应用，不能重新生成已消费的位置。
+
+两个进程具有不同的 run UUID 和独立 `resume/`、`resume-verify/` 报告目录。合成媒体和 marker 路径保持相同，避免改变 MPV 的路径摘要；两个结果文件分别为 `result.json` 和 `result-resume-verify.json`，读回不能覆盖或代替写入结果。各进程仍使用原有 110 秒内部期限和 150 秒外部期限。writer 失败则不启动 reader；reader 失败或超时保留 writer 证据，但整体验收失败。
+
+隔离 watch-later 位于当前 `TestAppWorkspace` 管理的 `.noindex` 树内。唯一的生产文件测试接线是 `Utility.watchLaterURL` 下的 `CHENGYING_NATIVE_APP_TESTS` 条件分支：只有 Driver 完成 CI 身份、bundle UUID、marker、媒体、目录所有权及 0700 / 无 symlink 验证后才能返回该目录；普通版本和 baseline / queue 均不使用该分支。不会改变安装版的 Application Support 或权限。
+
+baseline / queue 的续播偏好继续明确为 false；resume 场景才从 argument domain 去掉该键，并使用本轮独占 bundle ID 的真实持久偏好，使 opt-out 走实际 KVO。runner 最后只清除 `io.chengying.tests.native-app.<本轮 UUID>` 域并核实为空，任何配置清理失败均阻止整体成功。既有 `TestAppWorkspace` 的进程、挂载点、LaunchServices 和文件清理约束保持不变。
+
+源码 / 测试 App / fixture 的 SHA-256 在各次实际运行前后检查；reader 还必须与 writer 的 fixture 清单完全一致。准备自测覆盖新增结果全集、缺失断言、错误退出、错误 UUID、跨进程源码或媒体变化、两种失败顺序、报告路径边界和清理确认。实际记录字段比较器还用正确、错误位置/速度、非有限值、额外音量/A-B/路径注释等 15 个输入进行 CLI 验证。这些检查和 declaration-only macOS 12 类型检查均不是完整 App 已通过的证据。
+
+2026-10-13 最终本机准备证据为 `build/native-app-resume-preparation.HBvWQg`：59 项自测通过，实际测试进程退出 0；包括原有比较器、macOS 12 类型检查及原有 AppKit 退出调度 CLI 正负控。11 个相关源码文件（含 Utility 测试接线、真实 Service / Store）的运行前后 SHA-256 一致，独立复查通过。Driver SHA-256 为 `3922701899d754fa7fe54221a1062a63a11a69887c5198ac9295d73665ae8c91`。较早的 `JhbSme` 因 zsh 包装器使用只读变量名而未记录退出码和运行后身份，保留为不完整证据，不作为最终验收。当前没有 44/10 完整 App 通过结果。
+
 ## Current 95-check candidate: awaiting complete-App CI
 
 The candidate retains all 92 baseline labels and their assertions, then adds three

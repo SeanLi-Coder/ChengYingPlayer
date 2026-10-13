@@ -194,3 +194,38 @@ extract_production，确认其两份生成 Swift 与 `67zve9ln` 逐字节相同�
 `5452b5418df9eaa42da5a5b212613ffb3980007533d78c2ed2aefe5cc3af9dce`。
 没有为了日志文案再重复三模式；上表完整文件输入身份仍明确属于 bf4deeba，不能说
 4af2e24d 已完成新的同源 CI。其后段行为以最终音频偏好专项为准。
+
+## 生产头配置与队列初始 restart（2026-10-13）
+
+冻结 CI `38398139742` 的 App 编译暴露了隔离 probe 的头选项遗漏：生产
+`IINA-Bridging-Header.h` 定义 `MPV_ENABLE_DEPRECATED=0`，原 probe 直接导入
+`client.h` 则默认开启 deprecated。`ieyy76lu` 原样复现编译退出 1、
+`MPV_EVENT_IDLE` 不可见；没有运行行为检查。现在 probe 将实际生产头加入
+source manifest，校验该定义，并以同样的 `-Xcc -DMPV_ENABLE_DEPRECATED=0`
+编译所有真实事件方法，保留完整 `compile-command.json`。
+
+Controller 用公开 `mpv_event_name` 识别实际收到的 `idle` 通知，不构造或硬编码
+enum 值，也不把早期 `idle-active=true` 属性查询当作就绪。因果屏障仍依赖 pinned
+MPV 0.38 在 `prepare_playlist` 后发出的 legacy idle 通知，**不是**消除了该通知
+的 deprecated 语义。升级必须重审顺序；通知缺失时原安装 10 秒期限仍失败关闭，
+不是无限等待。Installer 现有 timeout/cancel/supersede/overflow/shutdown 检查保留。
+
+同源 Controller `216adb54b79a1a91675e84ebaa25c31e632f4686352f9d251add310b3cccbb92`、
+Core `d037183d5ac3ba8c4d398c4f43b5c468ef387bd56e4d81cbf6b53c7dc70d47be` 下：
+
+- `qqf5ppfz` 为首次 idle 正向 7/0，`atd68h7t` 精确负控 7/1（child 1）。
+- 完整桥普通 `xzdtbisv` 219/0、ASan `1_s4c7md` 231/0、TSan `q3i_z1qb` 242/0。
+- 新 `--queue-resume-only` 普通 `duij0gx_`、ASan `2hxj3kbt`、TSan `q6jkv97q`
+  均为 28/0；`--negative-control queue-resume-restart` 的 `prdulco0` 精确 28/8、child 1。
+
+新 28 项使用真实 libmpv 第三项重复 URL 的 entry ID。实际事件在生产 reader 读取后
+等待 main，另一个场景仅暂留真实 FILE_LOADED，先交付实际 restart，再释放该 loaded；
+两种顺序均只能生成一次正确收据。旧 owner 的实际延迟事件不能借用新 owner。
+负控仅撤掉生产 restart 转发，严格检查全部 CASE、28 项总数和八条完整失败集合，
+不能以崩溃、超时或仅出现一个预期字符串通过。不将此组件证明冒充 Core 续播行为。
+
+上述九次编译/runner 均为 0（负控 child 如上），source/generated 前后校验通过，
+无 sanitizer 诊断；共同 source manifest SHA-256 为
+`1e924520d186074b9917715d5309a1af49a0af09441ae6f32236958506c8c7e0`。
+完整 suite 的 drain 计数仍随调度变化，没有删断言或延长时限。CI App95 未运行的
+事实保留；本地组件通过不等同修补后的完整 App 或同源 CI 已通过。

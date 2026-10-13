@@ -34,11 +34,12 @@ def main():
                        "iina/MPVCommand.swift", "iina/MPVOption.swift", "iina/PlaybackBackend/PlaybackTransport.swift",
                        "iina/PlaybackBackend/NativePlaybackQueue.swift", "iina/PlaybackBackend/MPVQueueInstaller.swift",
                        "iina/VideoTools/VideoToolsShortcuts.swift", "iina/VideoTools/VideoToolsRotationIntent.swift",
-                       "Tools/NativePlayerCoreTests/Boundary.swift", "Tools/NativePlayerCoreTests/main.swift"]
+                       "Tools/NativePlayerCoreTests/Boundary.swift", "Tools/NativePlayerCoreTests/NoResumeTypes.swift",
+                       "Tools/NativePlayerCoreTests/main.swift"]
     source_paths = [ROOT / path for path in compile_sources + [
         "iina/PlayerCore.swift", "iina/PlaybackInfo.swift", "iina/VideoTools/VideoToolsPlayerBridge.swift",
         "Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt", "Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt",
-        "Tools/NativePlayerCoreTests/run.py"]]
+        "Tools/NativePlayerCoreTests/NoResumeMethods.txt", "Tools/NativePlayerCoreTests/run.py"]]
     source_before = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in source_paths}
     core = (ROOT / "iina/PlayerCore.swift").read_text()
     info = (ROOT / "iina/PlaybackInfo.swift").read_text()
@@ -63,6 +64,7 @@ def main():
     restore_end = core.index("\n  }", restore_start) + len("\n  }")
     generated += core[restore_start:restore_end] + "\n"
     generated += (ROOT / "Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt").read_text() + "\n"
+    generated += (ROOT / "Tools/NativePlayerCoreTests/NoResumeMethods.txt").read_text() + "\n"
     installation_start = core.index("  private final class NativeQueueInstallation {")
     installation_end = core.index("  var hasNativePlaybackQueue:", installation_start)
     generated += (ROOT / "Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt").read_text().replace(

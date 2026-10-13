@@ -1,5 +1,16 @@
 # Playback lifecycle regressions
 
+续播接线后本套仍明确限定 MPV-only、resume-off。共享
+`NativePlayerCoreTests/NoResumeTypes.swift`／`NoResumeMethods.txt` 只接受 nil
+收据；新 native 保存分支、writer drain 和 MPV 自动保存抑制写入若被触达均
+fail-fast，不模拟保存成功。实际 `stop`／`shutdown` 完整体和原断言保留。
+输入校验包括两份共享边界、生产源与生成片。
+
+原编译失败保留在 `build/resume-legacy-compile.6I1BLu/lifecycle-before.log`。
+`PLAYBACK_LIFECYCLE_BUILD_ONLY=1` 只做 Intel 10.15 typecheck 和 ASan 编译，
+不执行断言；修补后该模式通过。原普通命令随后通过全部 76 项 ASan 检查及
+source/generated 输入核验（`lifecycle-leased.log`），Core 为 `d037183d…`。
+
 Run `bash Tools/PlaybackLifecycleTests/run.sh` on macOS with Command Line Tools.
 
 The suite mechanically extracts the current `PlayerCore` task declarations and complete `fileStarted`, `stop`, `shutdown`, `postNotification`, and background-cancellation bodies, plus `MPVController.getFilters` and `removeFilter`. No implementation is copied into the test cases. Only private access is relaxed in a temporary copy. The real `MediaInfoModels` notification names, `NotificationCenter` delivery, serial dispatch queue, main-queue completion ordering, and filter pointer operations run under Address Sanitizer. The native APIs and unrelated window/media state are controlled boundary doubles. Intel macOS 10.15 typechecking is included.

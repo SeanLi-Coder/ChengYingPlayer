@@ -11,6 +11,8 @@ case "${NATIVE_PLAYBACK_SANITIZER:-}" in
   *) printf 'Unknown sanitizer\n'; exit 2 ;;
 esac
 sources=(iina/PlayerCore.swift iina/PlayerWindowController.swift iina/MainMenuActions.swift
+  iina/NativePlayback/NativePlaybackResumeStore.swift iina/NativePlayback/NativePlaybackResumeService.swift
+  iina/Utility.swift
   iina/MainWindowController.swift iina/PlaylistViewController.swift iina/PlaybackInfo.swift
   iina/VideoTools/VideoToolsPlayerBridge.swift iina/Atomic.swift iina/Lock.swift iina/ReadWriteAtomic.swift iina/ReadWriteLock.swift
   iina/MPVOption.swift iina/MPVProperty.swift iina/MPVCommand.swift iina/MPVNode.swift iina/PlayerState.swift iina/PlaylistPlaybackPolicy.swift

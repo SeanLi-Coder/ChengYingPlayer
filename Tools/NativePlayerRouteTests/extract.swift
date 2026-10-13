@@ -66,6 +66,7 @@ if negative == "ignore-opening-getter" {
 }
 let boundary = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerRouteTests/PlayerBoundary.txt"), encoding: .utf8)
 let noEnqueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt"), encoding: .utf8)
+let noResume = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoResumeMethods.txt"), encoding: .utf8)
 let noQueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt"), encoding: .utf8)
   .replacingOccurrences(of: "__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__",
     with: section("  private final class NativeQueueInstallation {", "  var hasNativePlaybackQueue:"))
@@ -89,6 +90,13 @@ let output = """
 import AppKit
 import AVFoundation
 \(model)
+extension Utility {
+  static func existingWatchLaterURL(_ digest: String) -> URL? {
+    precondition(digest == "synthetic-file-only" && !Preference.bool(for: .resumeLastPosition),
+                 "Saved-record lookup requires the real resume fixture")
+    return nil
+  }
+}
 
 // Mechanically extracted production declarations and methods, not a policy copy.
 final class PlayerCore {
@@ -96,6 +104,7 @@ final class PlayerCore {
 \(declarations)
 \(noEnqueue)
 \(noQueue)
+\(noResume)
 \(methods)
 }
 final class PlaybackInfoDouble: PlaybackInfoFields {

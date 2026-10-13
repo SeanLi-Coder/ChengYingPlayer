@@ -243,3 +243,15 @@ and verified dependency-manifest SHA-256
 Source/generated/dependency postchecks passed, with no sanitizer diagnostic.
 These are local conservative-fence regression results, not proof of the exact
 historical CI scheduling interleaving or a substitute for the next same-source CI.
+
+The unopened-resume integration subsequently added an opt-in requirement for
+matching FILE_LOADED and PLAYBACK_RESTART receipts. Its default remains false
+for every existing installer case. Installer SHA-256
+`fdc5a77746b98ce140076b95da16502668c0d8e862269882b50c99b8052d4ff5`
+passed ordinary `aWZ5ld` (253/0 plus all eight unchanged exact controls) and TSan
+200-partial `D8uZqV` (600/0). Both source manifests hash to
+`def111a7f9797c81df504328f757f1dad588102045930d9ccd657ea0198a240e`;
+source/generated/dependency checks and runner exits are zero. The production
+Controller's deprecated-disabled compilation fix identifies the same actual
+legacy idle event through public `mpv_event_name`; it does not weaken this
+startup fence or establish a new generic property-ordering guarantee.

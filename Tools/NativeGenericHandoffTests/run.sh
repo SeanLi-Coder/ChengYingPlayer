@@ -14,6 +14,8 @@ swift_sources=(iina/Atomic.swift iina/Lock.swift iina/ReadWriteAtomic.swift iina
 libraries=(deps/lib/libmpv.2.dylib deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib
   deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib)
 sources=("${swift_sources[@]}" "${libraries[@]}" iina/PlayerCore.swift iina/PlaybackInfo.swift iina/PlayerWindowController.swift
+  iina/NativePlayback/NativePlaybackResumeStore.swift iina/NativePlayback/NativePlaybackResumeService.swift
+  iina/Utility.swift
   iina/PlaybackBackend/NativePlaybackTransport.swift iina/VideoTools/VideoToolsPlayerBridge.swift
   iina/NativePlayback/CYNMediaDecoder.h iina/NativePlayback/CYNMediaDecoder.m
   Tools/NativePlayerRouteTests/Boundary.swift Tools/NativePlayerRouteTests/PlayerBoundary.txt

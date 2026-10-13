@@ -357,6 +357,7 @@ jobs:
           bash Tools/NativeAppTests/run_paused_probe.sh
           python3 -B Tools/NativeAppTests/run.py \
             --include-queue \
+            --include-resume \
             --source-packages "$RUNNER_TEMP/SourcePackages" \
             --production-app "$RUNNER_TEMP/DerivedData/Build/Products/Release/ChengYing.app" \
             --report-directory "$PWD/build/native-app-ci-report"
@@ -442,6 +443,65 @@ jobs:
             build/native-playback-rendered-tests.*/dependency-*.json
           if-no-files-found: ignore
           retention-days: 3
+
+      - name: Test native resume records and real MPV compatibility
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 10
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          bash Tools/NativeResumeInteropTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeResumeInteropTests/run.sh
+          bash Tools/NativeResumeStoreTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeResumeStoreTests/run.sh
+          bash Tools/NativeResumeServiceTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeResumeServiceTests/run.sh
+
+      - name: Test owned final native shutdown snapshots
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 8
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          bash Tools/NativeResumeSessionTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeResumeSessionTests/run.sh
+          for control in drop-owner allow-preroll drop-cancellation duplicate-callback capture-after-reset; do
+            NATIVE_RESUME_SESSION_NEGATIVE="$control" bash Tools/NativeResumeSessionTests/run.sh
+          done
+
+      - name: Test native resume lifecycle and actual queue restoration
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 12
+        run: |
+          export FFMPEG_BIN="$PWD/deps/executable/ffmpeg"
+          bash Tools/NativeResumeCoreTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeResumeCoreTests/run.sh
+          for control in drop-exit-save drop-preview-checkpoint; do
+            NATIVE_RESUME_CORE_NEGATIVE="$control" bash Tools/NativeResumeCoreTests/run.sh
+          done
+          bash Tools/NativeQueueResumeTests/run.sh
+          NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeQueueResumeTests/run.sh
+          for control in unopened-origin forget-saved-speed forget-speed-intent forget-seek-upgrade captured-rate-not-authoritative; do
+            NATIVE_QUEUE_RESUME_NEGATIVE_CONTROL="$control" bash Tools/NativeQueueResumeTests/run.sh
+          done
+          python3 -B Tools/PlaybackBackendRoutingTests/run.py --queue-resume-only
+          python3 -B Tools/PlaybackBackendRoutingTests/run.py --queue-resume-only --sanitize thread
+          python3 -B Tools/PlaybackBackendRoutingTests/run.py --negative-control queue-resume-restart
+
+      - name: Preserve native resume and queue restoration evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-resume-evidence-${{ github.sha }}
+          path: |
+            build/native-resume-*/**/*.log
+            build/native-resume-*/**/*.txt
+            build/native-resume-*/**/*.json
+            build/native-resume-*/**/*.sha256
+            build/native-queue-resume.*/*.log
+            build/native-queue-resume.*/*.txt
+            build/native-queue-resume.*/*.json
+            build/native-queue-resume.*/*.sha256
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Test portable AV1 acceptance launcher offline boundaries
         if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}

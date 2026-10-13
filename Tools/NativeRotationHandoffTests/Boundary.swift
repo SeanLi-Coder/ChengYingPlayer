@@ -4,7 +4,7 @@ enum LoopMode { case off, file, playlist }
 // Only external services are controlled. Production rotation arbitration,
 // asynchronous retirement, seek cancellation, key handling and coordinator run.
 enum Preference {
-  enum Key { case pauseWhenOpen, enableHdrSupport, useExactSeek }
+  enum Key { case pauseWhenOpen, enableHdrSupport, useExactSeek, resumeLastPosition }
   enum SeekOption { case relative, exact, auto }
   static func bool(for key: Key) -> Bool { false }
 }
@@ -20,13 +20,17 @@ struct NativePlaybackSnapshot {
   let phase: Phase
   let position: Double
   var duration: Double { 10 }
+  var rate: Float { preconditionFailure("Controlled shutdown returns unavailable, not a worker sample") }
 }
 enum CaptureResult { case ready(NativePlaybackSnapshot), unavailable, superseded }
 final class NativePlaybackSession {
   let output = PresentationOutputBoundary()
   var shutdowns: [() -> Void] = []
   var shutdownCalls = 0
-  func shutdown(completion: @escaping () -> Void) { shutdownCalls += 1; shutdowns.append(completion) }
+  func shutdown(capturingState: ((CaptureResult) -> Void)? = nil, completion: @escaping () -> Void) {
+    shutdownCalls += 1
+    shutdowns.append { capturingState?(.unavailable); completion() }
+  }
   func finish() { let current = shutdowns; shutdowns = []; current.forEach { $0() } }
 }
 final class NativePlaybackTransport: CommandTransport {
@@ -92,6 +96,8 @@ final class CoreInfo {
   @Atomic var matchedSubs: [String: String] = [:]
 }
 class CoreBoundary: NSObject {
+  var nativeResumeReceipt: NativePlaybackResumeReceipt?
+  var nativeResumeSuppressedMPVAutoSave = false
   enum NativePreviewResult { case applied, unavailable, superseded }
   var nativePreviewInProgress = false
   // This single-media fixture controls preview completion, not queue intent capture.

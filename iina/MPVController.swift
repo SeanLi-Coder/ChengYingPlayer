@@ -326,6 +326,9 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
     case MPV_EVENT_FILE_LOADED:
       if let entryID = nativeQueueStartedEntry { forwarded = .fileLoaded(entryID: entryID) }
       else { forwarded = .queueOverflow }
+    case MPV_EVENT_PLAYBACK_RESTART:
+      if let entryID = nativeQueueStartedEntry { forwarded = .playbackRestart(entryID: entryID) }
+      else { forwarded = .queueOverflow }
     case MPV_EVENT_END_FILE:
       if let data = event.pointee.data {
         let entryID = data.load(as: mpv_event_end_file.self).playlist_entry_id
@@ -1455,9 +1458,14 @@ class MPVController: NSObject, MPVQueueInstallationBackend {
 
   // Handle the event
   private func handleEvent(_ event: UnsafePointer<mpv_event>) {
-    // In our pinned MPV, the first IDLE follows startup prepare_playlist.
+    // Pinned MPV 0.38 emits "idle" after startup prepare_playlist. Identify the
+    // actual notification through the public API: production hides deprecated
+    // enum symbols. This still depends on that legacy event, not an idle property
+    // readback; if absent, the installer's original deadline fails closed.
     // Record it even when native ownership suppresses presentation events.
-    if event.pointee.event_id == MPV_EVENT_IDLE { hasReachedInitialQueueIdle = true }
+    if let name = mpv_event_name(event.pointee.event_id), String(cString: name) == "idle" {
+      hasReachedInitialQueueIdle = true
+    }
     if routeNativeQueueEvent(event) { return }
     let eventId = event.pointee.event_id
     let routeRevision = nativeQueueStopEventOwner == nil ? player.captureMPVEventRevision() : nil

@@ -1,5 +1,9 @@
 # Native URL enqueue handoff regression
 
+本套沿用 Rotation 的明确 resume-off 范围，共享
+`Tools/NativePlayerCoreTests/README.md` 所述 nil/fail-fast 保存边界。
+不模拟保存收据或 writer drain，原真实 Core 分支、断言和九负控均保留。
+
 Run `bash Tools/URLPlaylistEnqueueTests/run.sh`. Set `URL_ENQUEUE_SANITIZER=address`
 or `thread` for the same checks and negative controls under the sanitizer.
 Each run retains its generated Swift, input hashes, logs and exit/source-check

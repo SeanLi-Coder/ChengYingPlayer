@@ -18,8 +18,25 @@ enum MPVOption {
 enum PlayerState { case idle, loading, playing, paused, shutDown }
 enum LoopMode { case off, file, playlist }
 enum Preference {
+  enum Key { case resumeLastPosition, iinaLastPlayedFilePath, iinaLastPlayedFilePosition }
   enum SeekOption { case exact }
   static func savedLoopMode(in defaults: UserDefaults, domain: String?) -> LoopMode? { nil }
+  static func bool(for key: Key) -> Bool { false }
+  static func object(for key: Key) -> Any? { nil }
+  static func set(_ value: Bool, for key: Key) {}
+}
+enum Utility {
+  static var watchLaterURL = URL(fileURLWithPath: "/declaration-only")
+  static func mpvWatchLaterMd5(_ filename: String) -> String { "" }
+  static func existingWatchLaterURL(_ digest: String) -> URL? { nil }
+}
+enum NativePlaybackResumeClearResult { case cleared, ioError(Int32) }
+final class NativePlaybackResumeStore { func drain(completion: @escaping () -> Void) {} }
+final class NativePlaybackResumeService {
+  static let shared = NativePlaybackResumeService()
+  let store = NativePlaybackResumeStore()
+  func clearPlaybackProgress(operation: @escaping () throws -> Void,
+                             completion: @escaping (NativePlaybackResumeClearResult) -> Void) {}
 }
 struct VideoTime { var second: Double }
 enum NativePlaybackPhase: String { case paused, playing, ended }
@@ -99,7 +116,11 @@ final class MainWindowController: NSWindowController {
   @objc func menuAlwaysOnTop(_ sender: AnyObject) {}
 }
 final class MenuController { var alwaysOnTop: NSMenuItem! }
-final class AppDelegate { static let shared = AppDelegate(); let menuController = MenuController() }
+final class AppDelegate {
+  static let shared = AppDelegate()
+  let menuController = MenuController()
+  func clearRecentDocuments(_ sender: Any?) {}
+}
 extension NSWindow.Level { static let iinaFloating = NSWindow.Level(NSWindow.Level.floating.rawValue - 1) }
 final class MainMenuActionHandler: NSObject {
   @objc func menuTogglePause(_ sender: NSMenuItem) {}
@@ -110,6 +131,7 @@ final class MainMenuActionHandler: NSObject {
   @objc func menuChangeAudioDelay(_ sender: NSMenuItem) {}
 }
 final class PlayerCore {
+  enum NativePreviewResult { case applied, unavailable, superseded }
   enum NativeLoopAction { case moveB(Double) }
   enum NativeLoopActionResult { case applied, invalid, unavailable, superseded }
   static let first = PlayerCore()
@@ -145,5 +167,7 @@ final class PlayerCore {
   func getLoopMode() -> LoopMode { .off }
   func setLoopMode(_ mode: LoopMode) {}
   func requestNativeLoopAction(_ action: NativeLoopAction, completion: @escaping (NativeLoopActionResult) -> Void) {}
+  func finishNativePreview(restorePlaybackState: Bool = true,
+                           completion: @escaping (NativePreviewResult) -> Void = { _ in }) {}
   func shutdown() {}
 }

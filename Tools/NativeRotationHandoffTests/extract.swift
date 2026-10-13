@@ -22,6 +22,7 @@ func replaceOnce(_ source: inout String, _ old: String, _ new: String) {
 let core = try read("iina/PlayerCore.swift")
 let bridge = try read("iina/VideoTools/VideoToolsPlayerBridge.swift")
 var members = span(core, "  private var permanentRotationIntent", "  var touchBarSupport:")
+members += try read("Tools/NativePlayerCoreTests/NoResumeMethods.txt")
 members += span(core, "  private struct NativeCompatibilityRestore", "  private var playbackTransport:")
 // Keep enqueue ownership real even though this suite submits only rotations.
 // The focused URL suite supplies the controlled append service boundary.

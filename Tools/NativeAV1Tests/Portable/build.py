@@ -174,6 +174,7 @@ def build(evidence: Path, deps: Path, source_cache: Path) -> Path:
         "minimum_macos": 26,
         "architecture": "arm64",
         "timeout_seconds": 120,
+        "diagnostic_timeout_seconds": 2,
         "expected_checks": 1738,
         "files": {relative: digest for relative, (_, digest) in inputs.items()},
         "libraries": sorted(LIBRARIES),

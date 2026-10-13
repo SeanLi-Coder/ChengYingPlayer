@@ -127,9 +127,17 @@ class PrefUtilsViewController: PreferenceViewController, PreferenceWindowEmbedda
   @IBAction func clearWatchLaterBtnAction(_ sender: Any) {
     Utility.quickAskPanel("clear_watch_later", sheetWindow: view.window) { respond in
       guard respond == .alertFirstButtonReturn else { return }
-      try? FileManager.default.removeItem(atPath: Utility.watchLaterURL.path)
-      Utility.createDirIfNotExist(url: Utility.watchLaterURL)
-      self.savedPlaybackProgressClearedLabel.isHidden = false
+      let directory = Utility.watchLaterURL
+      NativePlaybackResumeService.shared.clearPlaybackProgress(operation: {
+        if FileManager.default.fileExists(atPath: directory.path) {
+          try FileManager.default.removeItem(at: directory)
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      }) { [weak self] result in
+        guard let self else { return }
+        if case .cleared = result { self.savedPlaybackProgressClearedLabel.isHidden = false }
+        else { Logger.log("Could not clear saved playback progress", level: .error) }
+      }
     }
   }
 

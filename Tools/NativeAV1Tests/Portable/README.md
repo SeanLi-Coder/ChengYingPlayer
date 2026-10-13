@@ -61,6 +61,18 @@ runner、锁定的 16 份完整播放栈源压缩包、原补丁和 build recipe
 原始 stdout/stderr 仅在内存中分类，不写入报告；不收集序列号、用户名、账号、媒体路径或网络数据。
 报告不自动上传。`actual` 数组顺序为 native opens / software opens / fallback / frames / VT / hardware。
 
+启动前另对通过完整性校验的 CLI 和五个 dylib 做只读诊断：固定调用系统 `codesign --verify --strict`
+和 `xattr`（只列属性名，不读值），每个命令限 2 秒、16 KiB 输出。报告只保存包内文件名、退出/信号和
+`verified / rejected / unavailable` 签名状态、`present / absent / unavailable` 隔离状态；读取失败或
+超时不会当作“不存在隔离属性”。诊断不修改权限、属性或签名，不调用 `spctl` 放行，也不查询系统日志。
+签名完整性通过不代表 Developer ID、公证或 Gatekeeper 放行；这些诊断不替代原有硬解验收门槛。
+`--verify-only` 也包含这些只读诊断，但其成功状态仍仅表示文件和平台校验完成，不能解释为可运行或硬解通过。
+
+进程被信号终止时 `child_exit_code` 为 JSON `null`，并分别报告 signal/timeout/cancelled/nonzero_exit；
+不会再把 `SIGKILL(9)` 写成正常退出或硬解检查失败。`raw_output_bytes`、`dyld_lines_seen`、`summary_count`
+仅统计解码子进程输出，不保存原始文本。没有计数时硬解验收未完成，不能推断机器不支持 AV1。
+诊断阶段取消会停止后续探测及解码。原始 `pc6dued3` ZIP 和报告保持不变，新诊断包必须另行生成。
+
 此包仍只覆盖小型合成 8/10-bit AV1 的解码、seek、同 FD restart 和同 URL reopen。
 完整 App、4K 长时、能耗、实体 HDR 屏及真实声卡仍需另验。目标 M4 真机结果必须单独回传，开发机的
 离线测试、`--verify-only` 或 M2 软件回退都不能替代它。
@@ -71,3 +83,10 @@ runner、锁定的 16 份完整播放栈源压缩包、原补丁和 build recipe
 覆盖安全通过基线和软件回退、signal、超时、非零退出、摘要不完整/重复、计数错误、错误 strict mode、
 实际库来源错误、前/后文件改变、缺文件、额外库、符号链接、manifest 改动及路径穿越等反例。
 测试输出绝不合并进目标机硬件验收记录。
+
+新增只读诊断控制在生成的测试副本内替换两个固定工具路径，真实启动模拟子进程覆盖：签名通过/拒绝、
+隔离存在/不存在/读取失败、SIGKILL、超时、超量输出、启动失败和用户取消。正式启动器不接受工具路径
+或环境覆盖入口。原 14 项测试保留；首次新增测试用 0.2 秒普通脚本启动预算出现 6 个超时断言失败，
+改为普通 fake 工具 1 秒、专门超时控制仍 0.2 秒，生产的 2 秒诊断预算未改变。
+最终 `python3 -B -m unittest discover -s Tools/NativeAV1Tests/Portable -v` 为 19/19、exit 0
+（21.180 秒），包括诊断取消后不得启动 decoder 的真实子进程控制；不是 M4 硬件验收。

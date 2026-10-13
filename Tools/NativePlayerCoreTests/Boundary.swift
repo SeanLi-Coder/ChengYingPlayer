@@ -2,9 +2,9 @@ import Cocoa
 
 enum LoopMode { case off, file, playlist }
 enum Preference {
-  enum Key { case pauseWhenOpen, enableHdrSupport }
+  enum Key { case pauseWhenOpen, enableHdrSupport, resumeLastPosition }
   static var pauseWhenOpen = false
-  static func bool(for key: Key) -> Bool { pauseWhenOpen }
+  static func bool(for key: Key) -> Bool { key == .resumeLastPosition ? false : pauseWhenOpen }
 }
 enum Logger { enum Level { case debug, verbose, error, warning } }
 enum Utility {
@@ -39,6 +39,7 @@ struct NativePlaybackSnapshot {
   // Controlled snapshots describe a four-second synthetic timeline, not a
   // decoded source; production now preserves this bound during a handoff.
   var duration: Double = 4
+  var rate: Float { preconditionFailure("Controlled shutdown returns unavailable, not a worker sample") }
 }
 enum CaptureResult { case ready(NativePlaybackSnapshot), unavailable, superseded }
 final class NativePlaybackSession {
@@ -46,7 +47,10 @@ final class NativePlaybackSession {
   let output = PresentationOutputBoundary()
   var completions: [() -> Void] = []
   var shutdownCalls = 0
-  func shutdown(completion: @escaping () -> Void) { shutdownCalls += 1; completions.append(completion) }
+  func shutdown(capturingState: ((CaptureResult) -> Void)? = nil, completion: @escaping () -> Void) {
+    shutdownCalls += 1
+    completions.append { capturingState?(.unavailable); completion() }
+  }
   func finish() {
     let pending = completions
     completions = []

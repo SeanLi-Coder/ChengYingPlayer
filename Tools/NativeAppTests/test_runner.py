@@ -17,6 +17,254 @@ SPEC.loader.exec_module(runner)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_resume_report_sets_cannot_replace_existing_scenarios(self):
+        self.assertEqual(len(runner.REQUIRED_CHECKS), 95)
+        self.assertEqual(len(runner.QUEUE_REQUIRED_CHECKS), 54)
+        self.assertEqual(len(runner.RESUME_REQUIRED_CHECKS), 44)
+        self.assertEqual(len(runner.RESUME_VERIFY_REQUIRED_CHECKS), 10)
+        groups = [runner.REQUIRED_CHECKS, runner.QUEUE_REQUIRED_CHECKS,
+                  runner.RESUME_REQUIRED_CHECKS, runner.RESUME_VERIFY_REQUIRED_CHECKS]
+        self.assertEqual(sum(map(len, groups)), len(set().union(*groups)))
+        for labels in groups[2:]:
+            result = {"format": 1, "run_id": "resume-run", "complete": True, "passed": True,
+                      "checks": [{"label": label, "passed": True} for label in sorted(labels)]}
+            runner.validate_result(result, run_id="resume-run", exit_code=0, required_checks=labels)
+            for label in labels:
+                broken = dict(result, checks=[entry for entry in result["checks"] if entry["label"] != label])
+                with self.subTest(label=label), self.assertRaises(RuntimeError):
+                    runner.validate_result(broken, run_id="resume-run", exit_code=0, required_checks=labels)
+            for identity, code in (("wrong", 0), ("resume-run", 1), ("resume-run", 142)):
+                with self.assertRaises(RuntimeError):
+                    runner.validate_result(result, run_id=identity, exit_code=code, required_checks=labels)
+            with self.assertRaises(RuntimeError):
+                runner.validate_result(result, run_id="resume-run", exit_code=0)
+
+    def test_resume_fixture_state_is_private_and_media_paths_survive_both_processes(self):
+        with tempfile.TemporaryDirectory(prefix="native-resume-fixture-") as directory:
+            root = Path(directory)
+            source, target = root / "source", root / "resume-fixtures"
+            source.mkdir()
+            names = ["red/red.mp4", "blue/blue.mp4", "compat/compat.mp4", "delayed/delayed.mp4"]
+            for index, name in enumerate(names):
+                path = source / name
+                path.parent.mkdir()
+                path.write_bytes(bytes([index + 1]))
+            (source / "native-app-fixture.json").write_text(json.dumps({"format": 1, "run_id": "old",
+                "fixtures": names, "pixel_references": {"red": [1] * 27}}))
+            (source / "result.json").write_text("baseline evidence")
+            runner.make_resume_fixtures(source, target, "writer", "reader")
+            marker = json.loads((target / "native-app-fixture.json").read_text())
+            self.assertEqual((marker["run_id"], marker["resume_verify_run_id"], marker["scenario"]),
+                             ("writer", "reader", "resume"))
+            self.assertEqual((target / "watch-later").stat().st_mode & 0o777, 0o700)
+            self.assertEqual(list((target / "watch-later").iterdir()), [])
+            self.assertFalse((target / "result.json").exists())
+            for name in names:
+                self.assertEqual((target / name).read_bytes(), (source / name).read_bytes())
+
+    def test_resume_processes_have_independent_ids_reports_and_exact_shared_media(self):
+        with tempfile.TemporaryDirectory(prefix="native-resume-process-") as directory:
+            root = Path(directory)
+            report = root / "report"
+            report.mkdir()
+            calls = []
+            def execute(command, **kwargs):
+                calls.append((command, kwargs))
+                data = {"format": 1, "run_id": kwargs["run_id"], "complete": True, "passed": True,
+                        "checks": [{"label": label, "passed": True} for label in sorted(kwargs["required_checks"])]}
+                return subprocess.CompletedProcess(command, 0), data
+            with patch.object(runner, "make_resume_fixtures") as copied, \
+                    patch.object(runner, "snapshot_identity", return_value={"fixtures": {"fixture": "sha"}}), \
+                    patch.object(runner, "run_application", side_effect=execute):
+                summary = runner.run_resume_scenarios(root / "App", workspace=root, environment={"BASE": "value"},
+                    fixtures=root / "fixtures", report=report, build_id="baseline-build")
+            self.assertEqual(set(summary), {"resume", "resume-verify"})
+            self.assertTrue(all(value["passed"] for value in summary.values()))
+            self.assertEqual(len(calls), 2)
+            writer, reader = (item[1] for item in calls)
+            self.assertNotEqual(writer["run_id"], reader["run_id"])
+            self.assertEqual(writer["fixtures"], reader["fixtures"])
+            self.assertEqual(writer["result_filename"], "result.json")
+            self.assertEqual(reader["result_filename"], "result-resume-verify.json")
+            for command, options in calls:
+                self.assertEqual(command, [str(root / "App"), "--no-stdin"])
+                self.assertEqual(options["environment"]["CHENGYING_NATIVE_APP_TEST_BUILD_ID"], "baseline-build")
+                self.assertEqual(options["environment"]["CHENGYING_NATIVE_APP_TEST_RUN_ID"], options["run_id"])
+                self.assertEqual(options["report"].name, options["environment"]["CHENGYING_NATIVE_APP_TEST_SCENARIO"])
+                self.assertNotIn("timeout", options)
+            copied.assert_called_once()
+
+    def test_resume_failure_cannot_launch_reader_or_overwrite_baseline(self):
+        for failure in (RuntimeError("writer failure"), subprocess.TimeoutExpired(["test"], 150)):
+            with tempfile.TemporaryDirectory(prefix="native-resume-failure-") as directory:
+                root = Path(directory)
+                report = root / "report"
+                report.mkdir()
+                (report / "result.json").write_text("baseline evidence")
+                with patch.object(runner, "make_resume_fixtures"), \
+                        patch.object(runner, "snapshot_identity", return_value={"fixtures": {"fixture": "sha"}}), \
+                        patch.object(runner, "run_application", side_effect=failure) as execute:
+                    with self.assertRaises(type(failure)):
+                        runner.run_resume_scenarios(root / "App", workspace=root, environment={},
+                            fixtures=root / "fixtures", report=report, build_id="baseline")
+                execute.assert_called_once()
+                self.assertFalse(json.loads((report / "resume/summary.json").read_text())["passed"])
+                self.assertFalse((report / "resume-verify").exists())
+                self.assertEqual((report / "result.json").read_text(), "baseline evidence")
+
+    def test_resume_rejects_different_build_before_launch(self):
+        with tempfile.TemporaryDirectory(prefix="native-resume-identity-") as directory:
+            root = Path(directory)
+            with patch.object(runner, "make_resume_fixtures"), \
+                    patch.object(runner, "snapshot_identity", return_value={"source": {"source": "changed"}, "fixtures": {}}), \
+                    patch.object(runner, "run_application") as execute, self.assertRaises(RuntimeError):
+                runner.run_resume_scenarios(root / "App", workspace=root, environment={}, fixtures=root / "fixtures",
+                    report=root, build_id="original", shared_identity_groups={"source": [root / "source"]},
+                    shared_identity_expected={"source": {"source": "original"}})
+            execute.assert_not_called()
+
+    def test_resume_reader_failure_retains_completed_writer_report(self):
+        with tempfile.TemporaryDirectory(prefix="native-resume-reader-failure-") as directory:
+            root = Path(directory)
+            def execute(command, **kwargs):
+                if kwargs["environment"]["CHENGYING_NATIVE_APP_TEST_SCENARIO"] == "resume-verify":
+                    raise subprocess.TimeoutExpired(command, 150)
+                data = {"format": 1, "run_id": kwargs["run_id"], "complete": True, "passed": True,
+                        "checks": [{"label": label, "passed": True} for label in sorted(kwargs["required_checks"])]}
+                return subprocess.CompletedProcess(command, 0), data
+            with patch.object(runner, "make_resume_fixtures"), \
+                    patch.object(runner, "snapshot_identity", return_value={"fixtures": {"fixture": "sha"}}), \
+                    patch.object(runner, "run_application", side_effect=execute), self.assertRaises(subprocess.TimeoutExpired):
+                runner.run_resume_scenarios(root / "App", workspace=root, environment={},
+                    fixtures=root / "fixtures", report=root, build_id="baseline")
+            self.assertTrue(json.loads((root / "resume/summary.json").read_text())["passed"])
+            self.assertFalse(json.loads((root / "resume-verify/summary.json").read_text())["passed"])
+
+    def test_resume_media_mutation_between_processes_rejects_reader(self):
+        with tempfile.TemporaryDirectory(prefix="native-resume-media-change-") as directory:
+            root = Path(directory)
+            def execute(command, **kwargs):
+                data = {"format": 1, "run_id": kwargs["run_id"], "complete": True, "passed": True,
+                        "checks": [{"label": label, "passed": True} for label in sorted(kwargs["required_checks"])]}
+                return subprocess.CompletedProcess(command, 0), data
+            with patch.object(runner, "make_resume_fixtures"), \
+                    patch.object(runner, "snapshot_identity", side_effect=[{"fixtures": {"fixture": "original"}},
+                        {"fixtures": {"fixture": "changed"}}]), \
+                    patch.object(runner, "run_application", side_effect=execute) as launched, self.assertRaises(RuntimeError):
+                runner.run_resume_scenarios(root / "App", workspace=root, environment={},
+                    fixtures=root / "fixtures", report=root, build_id="baseline")
+            launched.assert_called_once()
+            self.assertFalse(json.loads((root / "resume-verify/summary.json").read_text())["passed"])
+
+    def test_resume_report_filename_is_bounded_and_preserves_writer(self):
+        with tempfile.TemporaryDirectory(prefix="native-resume-report-") as directory:
+            root = Path(directory).resolve()
+            report = root / "report"
+            report.mkdir()
+            original = {"format": 1, "run_id": "writer", "complete": False, "passed": False, "checks": []}
+            reader = dict(original, run_id="reader")
+            (root / "result.json").write_text(json.dumps(original))
+            (root / "result-resume-verify.json").write_text(json.dumps(reader))
+            saved = runner.preserve_result(root, report, "reader", required_checks=runner.RESUME_VERIFY_REQUIRED_CHECKS,
+                                           result_filename="result-resume-verify.json")
+            self.assertEqual(saved, reader)
+            self.assertEqual(json.loads((root / "result.json").read_text()), original)
+            for name in ("../result.json", "/tmp/result.json", "unknown.json"):
+                with self.assertRaises(RuntimeError):
+                    runner.preserve_result(root, report, "reader", result_filename=name)
+
+    def test_resume_cleanup_only_accepts_disposable_domain_and_requires_confirmation(self):
+        with tempfile.TemporaryDirectory(prefix="native-resume-domain-") as directory:
+            report = Path(directory)
+            for domain in ("io.github.SeanLi-Coder.ChengYingPlayer", "io.chengying.tests.native-app.", "other"):
+                with patch.object(runner.subprocess, "run") as execute, self.assertRaises(ValueError):
+                    runner.cleanup_resume_preferences(domain, report)
+                execute.assert_not_called()
+            domain = "io.chengying.tests.native-app." + "a" * 32
+            for status, stdout in ((1, ""), (0, ""), (0, "NATIVE_APP_TEST_PREFERENCES_CLEANED\n")):
+                with patch.object(runner.subprocess, "run", return_value=subprocess.CompletedProcess([], status, stdout, "")) as execute:
+                    if status == 0 and stdout:
+                        runner.cleanup_resume_preferences(domain, report)
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            runner.cleanup_resume_preferences(domain, report)
+                self.assertEqual(execute.call_args.args[0][-1], domain)
+                self.assertNotIn("UserDefaults.standard", execute.call_args.args[0][-2])
+                self.assertEqual(json.loads((report / "resume-preferences-cleanup.json").read_text())["passed"], status == 0 and bool(stdout))
+
+    def test_resume_driver_uses_real_operations_and_does_not_enable_existing_suites(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        stages = source[source.index("  private func startResumeScenario()"):
+                        source.index("  private func prepareActiveQuit()")]
+        for actual in ("candidate.openURL", "waitForNativePaused", "MainMenuActionHandler.menuChangeSpeed",
+                       "window.performClose(nil)", "player.shutdown()", "NSApp.terminate(nil)",
+                       "player.mpv.getDouble(MPVProperty.timePos)", "player.mpv.getDouble(MPVOption.PlaybackControl.speed)",
+                       "player.mpv.getDouble(MPVOption.Audio.volume) == 0", "self.resumeRecordAbsent(name)",
+                       "player.finishNativePreview", "!restoreCompleted", "snapshot.position >= 4.2",
+                       "Preference.set(false, for: .resumeLastPosition)", "AppDelegate.shared.clearRecentDocuments(nil)",
+                       "NativePlaybackResumeService.shared.clearPlaybackProgress", "self.resumeMetadataEmpty()",
+                       "registered.allSatisfy", "self.quitNativeLayer = layer"):
+            self.assertIn(actual, stages)
+        for forbidden in (".nativeResumeReceipt", "retireNativePlayback", "requestNativeResumeSave", "requireMPVCompatibility",
+                          "mpv.setDouble", "mpv.setFlag", "Mirror(", "Thread.sleep"):
+            self.assertNotIn(forbidden, stages)
+        setup = source[source.index("    let overrides:"):source.index("  private static func hasOwnedWorkspace")]
+        self.assertIn('"resumeLastPosition": false', setup)
+        self.assertIn('arguments.removeValue(forKey: "resumeLastPosition")', setup)
+        self.assertEqual(source.count("deadline: .now() + 110"), 1)
+        self.assertEqual(runner.run_application.__kwdefaults__["timeout"], 150)
+
+    def test_resume_watchlater_seam_is_compile_gated_after_owned_preflight(self):
+        utility = (runner.ROOT / "iina/Utility.swift").read_text()
+        start = utility.index("  static let watchLaterURL: URL = {")
+        end = utility.index("  static let pluginsURL:", start)
+        section = utility[start:end]
+        self.assertIn("#if CHENGYING_NATIVE_APP_TESTS", section)
+        self.assertIn("if let url = NativeAppTestDriver.isolatedResumeWatchLaterURL { return url }", section)
+        self.assertLess(section.index("#endif"), section.index("Utility.appSupportDirUrl"))
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        seam_start = source.index("  static var isolatedResumeWatchLaterURL:")
+        seam_end = source.index("  private init(", seam_start)
+        self.assertIn("guard let driver = instance, driver.isResumeScenario else { return nil }", source[seam_start:seam_end])
+        self.assertNotIn("ProcessInfo", source[seam_start:seam_end])
+        preparation = source[source.index("  static func prepareForLaunch()"):source.index("  private static func hasOwnedWorkspace")]
+        self.assertLess(preparation.index("hasOwnedWorkspace(above: root)"), preparation.index("instance = NativeAppTestDriver"))
+        self.assertLess(preparation.index("== 0o700"), preparation.index("instance = NativeAppTestDriver"))
+        self.assertLess(preparation.index("directory.resolvingSymlinksInPath().path == directory.path"),
+                        preparation.index("instance = NativeAppTestDriver"))
+
+    def test_actual_resume_record_comparator_rejects_wrong_and_private_fields(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private static func matchesResumeRecord(")
+        end = source.index("\n  }", start) + len("\n  }")
+        method = source[start:end].replace("private ", "")
+        harness = '''import Foundation
+struct Comparator {
+METHOD
+}
+var checks = 0
+func expect(_ value: Bool) { checks += 1; precondition(value) }
+let valid = "start=4.2\\nspeed=1.25\\n"
+expect(Comparator.matchesResumeRecord(valid, position: 4.2, speed: 1.25))
+for invalid in ["", "start=0\\nspeed=1.25\\n", "start=4.2\\nspeed=1\\n", "speed=1.25\\nstart=4.2\\n",
+                "start=nan\\nspeed=1.25\\n", "start=inf\\nspeed=1.25\\n", "start=4.2\\nspeed=nan\\n",
+                valid + "volume=37\\n", valid + "ab-loop-a=1.25\\n", valid + "# /private/media\\n",
+                valid + "\\n", "start=4.2\\nspeed=1.25"] {
+  expect(!Comparator.matchesResumeRecord(invalid, position: 4.2, speed: 1.25))
+}
+expect(!Comparator.matchesResumeRecord(valid, position: .nan, speed: 1.25))
+expect(!Comparator.matchesResumeRecord(valid, position: 4.2, speed: .infinity))
+print("PASS: resume record comparator \\(checks) checks")
+'''.replace("METHOD", method)
+        with tempfile.TemporaryDirectory(prefix="native-resume-comparator-") as directory:
+            root = Path(directory)
+            main = root / "main.swift"
+            main.write_text(harness)
+            executable = root / "tests"
+            subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-warnings-as-errors", str(main), "-o", str(executable)],
+                           check=True, timeout=90)
+            subprocess.run([str(executable)], check=True, timeout=15)
+
     def test_queue_report_requires_its_own_exact_set_and_identity(self):
         labels = runner.QUEUE_REQUIRED_CHECKS
         self.assertEqual(len(labels), 54)

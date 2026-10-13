@@ -1,0 +1,13 @@
+  // Explicit no-resume service boundary. All calling lifecycle methods remain
+  // production extraction; this fixture never admits a non-nil save receipt.
+  @discardableResult
+  private func requestNativeResumeSave(replacement: Bool = false) -> Bool {
+    precondition(!Preference.bool(for: .resumeLastPosition) && nativeResumeReceipt == nil,
+                 "Resume saving requires the real Core resume fixture")
+    return false
+  }
+  private func finishNativeResumeSave(_ receipt: NativePlaybackResumeReceipt?, completion: @escaping () -> Void) {
+    precondition(!Preference.bool(for: .resumeLastPosition) && receipt == nil && nativeResumeReceipt == nil,
+                 "Resume receipt completion requires the real Core resume fixture")
+    completion()
+  }

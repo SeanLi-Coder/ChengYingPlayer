@@ -38,6 +38,7 @@ let rotationMethods = ["  @discardableResult\n  func cancelPendingPermanentRotat
 let compatibilityMembersEnd = source.range(of: "  private var playbackTransport:", range: end..<source.endIndex)!.lowerBound
 let compatibilityMembers = String(source[end..<compatibilityMembersEnd])
 let noEnqueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt"), encoding: .utf8)
+let noResume = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoResumeMethods.txt"), encoding: .utf8)
 let queueStart = source.range(of: "  private final class NativeQueueInstallation {")!.lowerBound
 let queueEnd = source.range(of: "  var hasNativePlaybackQueue:", range: queueStart..<source.endIndex)!.lowerBound
 let noQueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt"), encoding: .utf8)
@@ -71,6 +72,9 @@ final class PlayerCore {
 \(rotationMethods)
 \(noEnqueue)
 \(noQueue)
+\(noResume)
+  var nativeResumeReceipt: NativePlaybackResumeReceipt?
+  var nativeResumeSuppressedMPVAutoSave = false
   struct Info { var videoDuration: VideoTime?; var state = PlayerState.idle; var currentURL: URL? }
   var info = Info()
   var nativeTransport: NativePlaybackTransport?
@@ -174,7 +178,7 @@ final class PlayerCore {
 \(commands)
 \(compatibilityMethods)
 }
-enum Preference { enum Key { case pauseWhenOpen }; static func bool(for key: Key) -> Bool { false } }
+enum Preference { enum Key { case pauseWhenOpen, resumeLastPosition }; static func bool(for key: Key) -> Bool { false } }
 struct VideoToolsViewport { let zoom: Double; let panX: Double; let panY: Double }
 final class MPVBoundary {
   var preparations = 0

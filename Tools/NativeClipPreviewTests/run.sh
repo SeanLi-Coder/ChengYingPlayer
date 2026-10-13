@@ -15,6 +15,7 @@ source_files=(
   Tools/NativeClipPreviewTests/extract.swift Tools/NativeClipPreviewTests/main.swift Tools/NativeClipPreviewTests/run.sh
   Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt
   Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt
+  Tools/NativePlayerCoreTests/NoResumeTypes.swift Tools/NativePlayerCoreTests/NoResumeMethods.txt
 )
 shasum -a 256 "${source_files[@]}" > "$test_dir/source-before.sha256"
 ffmpeg_bin="${FFMPEG_BIN:-/opt/homebrew/bin/ffmpeg}"
@@ -40,6 +41,7 @@ xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm6
   iina/NativePlayback/NativePlaybackSession.swift iina/VideoTools/VideoToolsLoopPolicy.swift iina/PlayerState.swift \
   iina/VideoTools/VideoToolsRotationIntent.swift iina/MPVOption.swift \
   "$test_dir/Production.swift" "$test_dir/Panel.swift" Tools/NativeClipPreviewTests/main.swift \
+  Tools/NativePlayerCoreTests/NoResumeTypes.swift \
   "$test_dir/decoder.o" deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib \
   deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib \
   -Xlinker -rpath -Xlinker "$repo_root/deps/lib" \

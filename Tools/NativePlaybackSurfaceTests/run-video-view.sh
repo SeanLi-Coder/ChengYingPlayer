@@ -19,6 +19,7 @@ sources=(iina/PlayerCore.swift iina/VideoView.swift iina/PlayerState.swift
   iina/MPVOption.swift iina/MPVProperty.swift iina/NativePlayback/CYNMediaDecoder.h
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSurface.swift
   Tools/NativePlaybackSurfaceTests/VideoViewBoundary.swift Tools/NativePlaybackSurfaceTests/VideoViewMain.swift
+  Tools/NativePlayerCoreTests/NoResumeTypes.swift Tools/NativePlayerCoreTests/NoResumeMethods.txt
   Tools/NativePlaybackSurfaceTests/extract-retirement.swift Tools/NativePlaybackSurfaceTests/run-video-view.sh)
 shasum -a 256 "${sources[@]}" > "$test_dir/source.sha256"
 xcrun swift Tools/NativePlaybackSurfaceTests/extract-retirement.swift "$repo_root" "$test_dir"
@@ -30,10 +31,17 @@ xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm6
   iina/NativePlayback/NativeSampleBufferOutput.swift \
   iina/NativePlayback/NativePlaybackSurface.swift "$test_dir/VideoView.swift" "$test_dir/Retirement.swift" \
   Tools/NativePlaybackSurfaceTests/VideoViewBoundary.swift \
+  Tools/NativePlayerCoreTests/NoResumeTypes.swift \
   Tools/NativePlaybackSurfaceTests/VideoViewMain.swift \
   -framework AppKit -framework AVFoundation -framework CoreMedia -framework CoreVideo \
   -o "$test_dir/view-tests"
 printf 'Artifacts: %s\n' "$test_dir"
+if [[ "${NATIVE_VIEW_BUILD_ONLY:-0}" == 1 ]]; then
+  shasum -a 256 -c "$test_dir/source.sha256" > "$test_dir/source-validation.log"
+  shasum -a 256 -c "$test_dir/generated.sha256" > "$test_dir/generated-validation.log"
+  printf 'Compiled VideoView fixture only; no behavioral assertions were executed.\n'
+  exit 0
+fi
 set +e
 /usr/bin/perl -e 'alarm 20; exec @ARGV' "$test_dir/view-tests" 2>&1 | tee "$test_dir/results.log"
 statuses=("${PIPESTATUS[@]}")

@@ -1,5 +1,9 @@
 # 原生区间预览回归
 
+本套明确关闭 resume，使用 `Tools/NativePlayerCoreTests/README.md` 所述严格
+nil/fail-fast 保存边界，不访问用户 watch-later 或偏好。原真实 Session 与预览
+断言保持；本套不宣称验证新续播保存行为。
+
 这些测试不切换正式默认内核，不改用户设置、媒体或安装的 App，也不生成测试 `.app`。
 仅在独立 ignored `build/native-clip-preview-tests.*` 中合成短视频并运行 CLI。
 

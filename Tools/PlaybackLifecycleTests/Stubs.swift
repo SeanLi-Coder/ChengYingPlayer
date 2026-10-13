@@ -1,5 +1,9 @@
 import Foundation
 enum LoopMode { case off, file, playlist }
+enum Preference {
+  enum Key { case resumeLastPosition }
+  static func bool(for key: Key) -> Bool { false }
+}
 
 // Only OS/player boundaries are doubled. The production task registration,
 // completion, stop, shutdown, and filter pointer operations are extracted verbatim.
@@ -30,6 +34,7 @@ enum UIUpdate { case time }
 enum MPVCommand { case stop }
 enum MPVOption {
   enum PlaybackControl { static let pause = "pause" }
+  enum WatchLater { static let savePositionOnQuit = "save-position-on-quit" }
 }
 enum MPVProperty {
   static let vf = "vf"
@@ -61,6 +66,9 @@ final class PlaybackMPV {
   var paused = false
   func getFlag(_ name: String) -> Bool { paused }
   func setFlag(_ name: String, _ value: Bool, level: Logger.Level) { paused = value }
+  func setFlag(_ name: String, _ value: Bool) {
+    preconditionFailure("Native-owned resume suppression is outside the MPV-only fixture")
+  }
   func command(_ command: MPVCommand, level: Logger.Level) { stopped += 1 }
   func stopCancelledNativeQueue(owner: UUID) {
     preconditionFailure("Queue cancellation requires the real MPV bridge tests")
@@ -100,6 +108,8 @@ extension Data {
 }
 
 class PlayerFixture {
+  let nativeResumeReceipt: NativePlaybackResumeReceipt? = nil
+  var nativeResumeSuppressedMPVAutoSave = false
   // The legacy lifecycle has neither an explicit queue nor an installation.
   let nativeQueue: NativeQueueState? = nil
   func resetNativeQueue() { precondition(nativeQueue == nil) }

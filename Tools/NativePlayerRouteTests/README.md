@@ -1,5 +1,10 @@
 # Native route real-render verification
 
+续播接线说明：本套明确关闭 resume，使用
+`Tools/NativePlayerCoreTests/README.md` 所述严格 nil/fail-fast 保存边界，
+不访问用户 watch-later 或偏好。真实 Session 和原路由/像素断言均保留；
+新增保存行为由独立 Core resume 专项验证，不能用本套 build-only 代替。
+
 Run `bash Tools/NativePlayerRouteTests/run.sh` on Apple Silicon macOS 14.4+ with
 WindowServer and FFmpeg. The runner creates red/blue SDR H.264 + AAC fixtures
 and a real two-audio-stream fixture,

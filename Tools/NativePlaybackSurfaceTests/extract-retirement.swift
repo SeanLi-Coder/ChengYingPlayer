@@ -4,10 +4,11 @@ let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 let directory = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
 let source = try String(contentsOf: root.appendingPathComponent("iina/PlayerCore.swift"), encoding: .utf8)
 guard let start = source.range(of: "  private func retireNativePlayback(")?.lowerBound,
-      let end = source.range(of: "\n  private func open(", range: start..<source.endIndex)?.lowerBound else {
+      let end = source.range(of: "\n  }", range: start..<source.endIndex)?.upperBound else {
   fatalError("Production retirement extraction landmarks changed")
 }
 var method = String(source[start..<end])
+let noResume = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoResumeMethods.txt"), encoding: .utf8)
 let negative = ProcessInfo.processInfo.environment["NATIVE_VIEW_NEGATIVE_CONTROL"] ?? ""
 if negative == "skip-retirement-detach" {
   let call = "      mainWindow.videoView.detachNativePlaybackOutput(transport.session.output)\n"
@@ -18,6 +19,7 @@ let extracted = """
 // Mechanically extracted production retirement; no lifecycle policy copy.
 extension PlayerCore {
 \(method)
+\(noResume)
   func testRetire(completion: @escaping () -> Void) {
     retireNativePlayback(completion: completion)
   }

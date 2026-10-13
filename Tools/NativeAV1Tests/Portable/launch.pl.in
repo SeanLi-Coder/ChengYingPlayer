@@ -73,8 +73,8 @@ sub fixed_command {
     return $value;
 }
 
-sub capture {
-    my ($executable, $seconds) = @_;
+sub capture_command {
+    my ($command, $seconds, $limit, $environment) = @_;
     pipe(my $read, my $write) or die "pipe_failed\n";
     my $pid = fork();
     die "fork_failed\n" unless defined $pid;
@@ -83,9 +83,8 @@ sub capture {
         open STDOUT, '>&', $write or POSIX::_exit(125);
         open STDERR, '>&', $write or POSIX::_exit(125);
         close $write;
-        %ENV = (PATH => '/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL => 'C',
-                DYLD_LIBRARY_PATH => "$root/lib", DYLD_FALLBACK_LIBRARY_PATH => '', DYLD_PRINT_LIBRARIES => '1');
-        exec {$executable} $executable, "$root/fixtures", 'hardware' or POSIX::_exit(126);
+        %ENV = %{$environment};
+        exec {$command->[0]} @{$command} or POSIX::_exit(126);
     }
     close $write;
     my $select = IO::Select->new($read);
@@ -95,7 +94,7 @@ sub capture {
     local $SIG{INT} = sub { $cancelled = 1; };
     local $SIG{TERM} = sub { $cancelled = 1; };
     while ($select->count || !defined $status) {
-        if ($cancelled || time() >= $deadline || length($output) > 4 * 1024 * 1024) {
+        if ($cancelled || time() >= $deadline || length($output) > $limit) {
             $stopped = $cancelled ? 'cancelled' : time() >= $deadline ? 'timeout' : 'output_limit';
             if (!defined $status) {
                 kill 'KILL', $pid;
@@ -112,7 +111,49 @@ sub capture {
         if (!defined $status && waitpid($pid, WNOHANG) == $pid) { $status = $?; }
     }
     close $read if fileno($read);
-    return ($output, $status >> 8, $status & 127, $stopped);
+    my $signal = $status & 127;
+    return ($output, $signal ? undef : $status >> 8, $signal, $stopped);
+}
+
+sub capture {
+    my ($executable, $seconds) = @_;
+    return capture_command([$executable, "$root/fixtures", 'hardware'], $seconds, 4 * 1024 * 1024,
+        {PATH => '/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL => 'C',
+         DYLD_LIBRARY_PATH => "$root/lib", DYLD_FALLBACK_LIBRARY_PATH => '', DYLD_PRINT_LIBRARIES => '1'});
+}
+
+sub diagnostic_command {
+    my (@command) = @_;
+    my @captured = eval {
+        capture_command(\@command, $policy->{diagnostic_timeout_seconds}, 16384,
+                        {PATH => '/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL => 'C'});
+    };
+    # Report only bounded status fields. Tool output can contain local paths.
+    return ('', {termination => 'unavailable', exit_code => undef, signal => undef}) if $@;
+    my ($output, $exit, $signal, $stopped) = @captured;
+    my $termination = $stopped || ($signal ? 'signal' : $exit == 126 ? 'could_not_start'
+                                             : $exit ? 'nonzero_exit' : 'normal');
+    return ($output, {termination => $termination, exit_code => $exit, signal => $signal});
+}
+
+sub launch_diagnostics {
+    my %diagnostics;
+    $report->{launch_diagnostics} = \%diagnostics;
+    for my $relative ('bin/native-av1-tests', map { "lib/$_" } @{$policy->{libraries}}) {
+        # Recheck the exact already-verified regular file before each pair of probes.
+        die "integrity_changed_file\n" unless digest($relative) eq $policy->{files}{$relative};
+        my ($codesign_output, $signature) = diagnostic_command('/usr/bin/codesign', '--verify', '--strict', "$root/$relative");
+        die "launch_diagnostics_cancelled\n" if $signature->{termination} eq 'cancelled';
+        $signature->{status} = $signature->{termination} eq 'normal' ? 'verified'
+            : $signature->{termination} eq 'nonzero_exit' && $signature->{exit_code} == 1 ? 'rejected' : 'unavailable';
+        # Listing attribute names distinguishes absence from a failed read without reading their values.
+        my ($attributes, $quarantine) = diagnostic_command('/usr/bin/xattr', "$root/$relative");
+        die "launch_diagnostics_cancelled\n" if $quarantine->{termination} eq 'cancelled';
+        $quarantine->{state} = $quarantine->{termination} ne 'normal' ? 'unavailable'
+            : scalar(grep { $_ eq 'com.apple.quarantine' } split /\n/, $attributes) ? 'present' : 'absent';
+        my ($name) = $relative =~ m{([^/]+)$};
+        $diagnostics{$name} = {codesign => $signature, quarantine => $quarantine};
+    }
 }
 
 sub classify {
@@ -125,7 +166,12 @@ sub classify {
     $report->{child_exit_code} = $exit;
     $report->{child_signal} = $signal;
     $report->{failure_lines} = $failure_lines;
-    $report->{termination} = $stopped || 'normal';
+    $report->{termination} = $stopped || ($signal ? 'signal' : $exit ? 'nonzero_exit' : 'normal');
+    $report->{output_received} = length($output) ? JSON::PP::true : JSON::PP::false;
+    $report->{raw_output_bytes} = length($output);
+    $report->{dyld_lines_seen} = scalar grep { /^dyld\[\d+\]: / } @lines;
+    $report->{summary_count} = scalar @summaries;
+    $report->{child_exited_normally} = !$signal && !$stopped ? JSON::PP::true : JSON::PP::false;
     my $valid = @summaries == 1 && $summaries[0] =~ /^Native AV1 checks=(\d+) failures=(\d+) strict_hardware=(\d+)$/;
     if ($valid) {
         @{$report}{qw(checks failures strict_hardware)} = (0 + $1, 0 + $2, 0 + $3);
@@ -162,7 +208,7 @@ sub classify {
     $library_valid &&= !grep { $_ != 1 } values %loaded;
     $report->{loaded_libraries_verified} = $library_valid ? JSON::PP::true : JSON::PP::false;
     $report->{loaded_library_names} = [sort keys %loaded];
-    $valid &&= $library_valid && $exit == 0 && !$signal && !$stopped;
+    $valid &&= $library_valid && !$signal && defined($exit) && $exit == 0 && !$stopped;
     return $valid;
 }
 
@@ -177,9 +223,21 @@ eval {
         && $build =~ /\A[A-Za-z0-9.]+\z/;
     @{$report}{qw(architecture os_version os_build)} = ($arch, $os, $build);
     die "platform_requires_arm64_macos26\n" unless $arch eq $policy->{architecture} && (split /\./, $os)[0] >= $policy->{minimum_macos};
+    launch_diagnostics();
     if ($mode eq 'verify-only') { $result = 1; }
     else { $result = classify(capture("$root/bin/native-av1-tests", $policy->{timeout_seconds})); }
-    $error = "strict_hardware_checks_failed\n" unless $result;
+    unless ($result) {
+        my $termination = $report->{termination} // '';
+        my %stopped_errors = (timeout => 'test_process_timed_out', cancelled => 'test_process_cancelled',
+                              output_limit => 'test_process_output_limit');
+        my $category = $stopped_errors{$termination}
+            || ($report->{child_signal} == 9 ? 'test_process_killed'
+                : $report->{child_signal} ? 'test_process_signalled'
+                : $report->{child_exit_code} == 126 ? 'test_process_could_not_start'
+                : $report->{child_exit_code} ? 'test_process_nonzero_exit'
+                : 'strict_hardware_checks_failed');
+        $error = "$category\n";
+    }
     1;
 } or $error = $@ || "unknown_failure\n";
 if ($before) {

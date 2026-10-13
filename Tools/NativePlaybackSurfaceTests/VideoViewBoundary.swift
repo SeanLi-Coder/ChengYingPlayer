@@ -18,6 +18,14 @@ final class PlayerCore {
   var nativeRetirementCompletion: (() -> Void)?
   var nativeRetiring = false
   var nativeReady = true
+  var nativeResumeReceipt: NativePlaybackResumeReceipt?
+  let videoToolsMediaGeneration: UInt64 = 1
+  struct CompatibilityRestoreBoundary {
+    private init() {}
+    var url: URL { preconditionFailure("No compatibility restore in presentation retirement tests") }
+    var id: UUID { preconditionFailure("No compatibility restore in presentation retirement tests") }
+  }
+  let nativeCompatibilityRestore: CompatibilityRestoreBoundary? = nil
   var retirementRouteRevision: UInt64 = 0
   // This presentation fixture retires native output without a generic handoff
   // owner. Keep the real retirement body and reject any owned-handoff branch.
@@ -79,13 +87,20 @@ final class RetirementTransportBoundary {
   init(output: NativeSampleBufferOutput) { session = RetirementSessionBoundary(output: output) }
 }
 final class RetirementSessionBoundary {
+  struct Snapshot {
+    private init() {}
+    var position: Double { preconditionFailure("No decoded sample in controlled retirement") }
+    var duration: Double { preconditionFailure("No decoded sample in controlled retirement") }
+    var rate: Float { preconditionFailure("No decoded sample in controlled retirement") }
+  }
+  enum CaptureResult { case ready(Snapshot), unavailable }
   let output: NativeSampleBufferOutput
   var shutdownCalls = 0
   private var completions: [() -> Void] = []
   init(output: NativeSampleBufferOutput) { self.output = output }
-  func shutdown(completion: @escaping () -> Void) {
+  func shutdown(capturingState: ((CaptureResult) -> Void)? = nil, completion: @escaping () -> Void) {
     shutdownCalls += 1
-    completions.append(completion)
+    completions.append { capturingState?(.unavailable); completion() }
   }
   func finish() {
     let pending = completions
@@ -122,8 +137,8 @@ final class ViewLayer: CALayer {
 }
 
 enum Preference {
-  enum Key { case videoViewAcceptsFirstMouse, enableDisplayIdle, loadIccProfile, enableToneMapping, toneMappingTargetPeak, toneMappingAlgorithm }
-  static func bool(for key: Key) -> Bool { true }
+  enum Key { case videoViewAcceptsFirstMouse, enableDisplayIdle, loadIccProfile, enableToneMapping, toneMappingTargetPeak, toneMappingAlgorithm, resumeLastPosition }
+  static func bool(for key: Key) -> Bool { key == .resumeLastPosition ? false : true }
   static func integer(for key: Key) -> Int { 0 }
   enum ToneMappingAlgorithmOption: Int {
     case basic

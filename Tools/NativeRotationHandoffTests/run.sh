@@ -11,12 +11,14 @@ sources=(iina/Atomic.swift iina/Lock.swift iina/PlayerState.swift iina/MPVComman
   iina/PlaybackBackend/MPVQueueInstaller.swift
   iina/Updates/UpdateWorkAdmission.swift iina/VideoTools/VideoToolsModels.swift
   iina/VideoTools/VideoToolsLoopPolicy.swift iina/VideoTools/VideoToolsRotationIntent.swift
-  iina/VideoTools/VideoToolsRotationCoordinator.swift iina/VideoTools/VideoToolsShortcuts.swift)
+  iina/VideoTools/VideoToolsRotationCoordinator.swift iina/VideoTools/VideoToolsShortcuts.swift
+  Tools/NativePlayerCoreTests/NoResumeTypes.swift)
 shasum -a 256 "${sources[@]}" iina/PlayerCore.swift iina/PlayerWindowController.swift \
   iina/QuickSettingViewController.swift iina/VideoTools/VideoToolsViewController.swift \
   iina/VideoTools/VideoToolsPlayerBridge.swift Tools/NativeRotationHandoffTests/*.swift \
   Tools/URLPlaylistEnqueueTests/EnqueueServices.swift \
   Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt \
+  Tools/NativePlayerCoreTests/NoResumeMethods.txt \
   Tools/NativeRotationHandoffTests/run.sh Tools/URLPlaylistEnqueueTests/test_runner.py > "$test_dir/inputs.sha256"
 finish_evidence() {
   original_status=$?

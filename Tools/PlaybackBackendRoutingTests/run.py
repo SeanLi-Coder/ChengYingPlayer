@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[2]
 COMPILED_SOURCES = ["iina/Atomic.swift", "iina/Lock.swift", "iina/MPVOption.swift",
     "iina/MPVProperty.swift", "iina/MPVCommand.swift", "iina/MPVHook.swift", "iina/MPVNode.swift",
     "iina/PlaybackBackend/NativePlaybackQueue.swift", "iina/PlaybackBackend/MPVQueueInstaller.swift",
-    "Tools/PlaybackBackendRoutingTests/Boundary.swift", "Tools/PlaybackBackendRoutingTests/main.swift"]
+    "Tools/PlaybackBackendRoutingTests/Boundary.swift", "Tools/PlaybackBackendRoutingTests/main.swift",
+    "Tools/PlaybackBackendRoutingTests/QueueResume.swift"]
 
 
 def generated_digests(work):
@@ -156,10 +157,17 @@ def extract_production(args):
             raise RuntimeError("Pending restore volume boundary changed")
         generated = generated.replace(original, "let volume = data")
     elif args.negative_control == "initial-idle-recording":
-        original = "if event.pointee.event_id == MPV_EVENT_IDLE { hasReachedInitialQueueIdle = true }"
+        original = '''if let name = mpv_event_name(event.pointee.event_id), String(cString: name) == "idle" {
+      hasReachedInitialQueueIdle = true
+    }'''
         if generated.count(original) != 1:
             raise RuntimeError("Initial idle recording boundary changed")
         generated = generated.replace(original, "// Negative control: discard actual startup IDLE evidence.")
+    if args.negative_control == "queue-resume-restart":
+        original = "if let entryID = nativeQueueStartedEntry { forwarded = .playbackRestart(entryID: entryID) }"
+        if generated.count(original) != 1:
+            raise RuntimeError("Queue resume restart boundary changed")
+        generated = generated.replace(original, "if nativeQueueStartedEntry != nil { forwarded = nil }", 1)
     return generated, player
 
 
@@ -167,16 +175,19 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sanitize", choices=["address", "thread"])
     parser.add_argument("--initial-idle-only", action="store_true")
+    parser.add_argument("--queue-resume-only", action="store_true")
     parser.add_argument("--negative-control", choices=["epoch", "first-start", "queue-owner", "queue-start-context",
                                                      "queue-stop-completion", "queue-stop-current", "queue-stop-route",
                                                      "queue-stop-event-gate", "queue-stop-keep-list", "queue-stop-list-owner",
                                                      "queue-stop-reader-drain", "queue-stop-preparation", "pending-volume",
-                                                     "initial-idle-recording"])
+                                                     "initial-idle-recording", "queue-resume-restart"])
     args = parser.parse_args()
     if args.initial_idle_only and args.negative_control not in {None, "initial-idle-recording"}:
         parser.error("The initial idle scope cannot run another negative control")
+    if args.queue_resume_only and (args.initial_idle_only or args.negative_control not in {None, "queue-resume-restart"}):
+        parser.error("The queue resume scope cannot run another scope or control")
     sources = [ROOT / name for name in COMPILED_SOURCES + ["iina/MPVController.swift", "iina/PlayerCore.swift",
-        "Tools/PlaybackBackendRoutingTests/run.py", "deps/include/mpv/client.h"]]
+        "Tools/PlaybackBackendRoutingTests/run.py", "deps/include/mpv/client.h", "iina/IINA-Bridging-Header.h"]]
     sources += sorted((ROOT / "deps/lib").glob("*.dylib"))
     with evidence_directory(sources) as work:
         generated, player = extract_production(args)
@@ -191,13 +202,18 @@ def main():
         (work / "Player.swift").write_text(player)
         (work / "generated-before.json").write_text(json.dumps(generated_digests(work), indent=2) + "\n")
         executable = work / "RoutingTests"
+        production_header = (ROOT / "iina/IINA-Bridging-Header.h").read_text()
+        if production_header.splitlines()[0] != "#define MPV_ENABLE_DEPRECATED 0":
+            raise RuntimeError("Production MPV deprecation configuration changed")
         command = ["xcrun", "swiftc", "-warnings-as-errors", "-o", str(executable),
+                   "-Xcc", "-DMPV_ENABLE_DEPRECATED=0",
                    "-import-objc-header", str(ROOT / "deps/include/mpv/client.h")]
         if args.sanitize:
             command += ["-sanitize=" + args.sanitize]
         command += [str(ROOT / path) for path in COMPILED_SOURCES]
         command += [str(work / "Production.swift"), str(work / "Player.swift"),
                     str(ROOT / "deps/lib/libmpv.2.dylib"), "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "deps/lib")]
+        (work / "compile-command.json").write_text(json.dumps(command, indent=2) + "\n")
         compilation = subprocess.run(command, capture_output=True, text=True, timeout=90)
         (work / "compile-stdout.log").write_text(compilation.stdout)
         (work / "compile-stderr.log").write_text(compilation.stderr)
@@ -206,9 +222,12 @@ def main():
             print(compilation.stderr, end="")
         compilation.check_returncode()
         initial_idle_only = args.initial_idle_only or args.negative_control == "initial-idle-recording"
+        queue_resume_only = args.queue_resume_only or args.negative_control == "queue-resume-restart"
         runtime = [str(executable), str(media), str(video)]
         if initial_idle_only:
             runtime.append("initial-idle-only")
+        if queue_resume_only:
+            runtime.append("queue-resume-only")
         result = subprocess.run(runtime, capture_output=True, text=True, timeout=35)
         (work / "stdout.log").write_text(result.stdout)
         (work / "stderr.log").write_text(result.stderr)
@@ -217,6 +236,26 @@ def main():
         print(result.stderr, end="")
         if "WARNING: ThreadSanitizer" in result.stderr or "ERROR: AddressSanitizer" in result.stderr:
             raise RuntimeError("Event bridge emitted a sanitizer diagnostic")
+        if queue_resume_only:
+            lines = (result.stdout + result.stderr).splitlines()
+            failures = [line for line in lines if line.startswith("FAIL:")]
+            expected = []
+            if args.negative_control:
+                for label in ["reader-before-main", "restart-before-loaded-delivery"]:
+                    expected += [f"FAIL: {label}: {suffix}" for suffix in [
+                        "exact owned initial restart completes one verified receipt",
+                        "restart receipt identifies selected duplicate entry",
+                        "production reader forwards initial restart exactly once",
+                        "duplicate restart cannot deliver a second receipt"]]
+            count = 28
+            if (result.returncode != (1 if expected else 0)
+                    or [line for line in lines if line.startswith("CASE:")] != ["CASE: queue-resume"]
+                    or [line for line in lines if line.startswith("Queue resume bridge:")] != [f"Queue resume bridge: {count} checks, {len(expected)} failures"]
+                    or failures != expected
+                    or sum(line.startswith(("PASS:", "FAIL:")) for line in lines) != count):
+                raise RuntimeError("Queue resume scope did not produce its complete exact result")
+            print("PASS: Exact queue resume scope accepted")
+            return
         if initial_idle_only:
             expected = "FAIL: Production reader records actual IDLE before the native presentation gate"
             expected_failures = 1 if args.negative_control else 0

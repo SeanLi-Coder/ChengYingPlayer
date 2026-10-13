@@ -6,10 +6,12 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -27,7 +29,7 @@ class LauncherTests(unittest.TestCase):
         self.root = Path(self.temp.name) / "bundle with spaces"
         self.root.mkdir()
 
-    def make(self, scenario="pass", minimum=26):
+    def make(self, scenario="pass", minimum=26, diagnostic_tools=None):
         for folder in ("bin", "lib", "fixtures"):
             (self.root / folder).mkdir(exist_ok=True)
         for name in builder.LIBRARIES:
@@ -79,18 +81,80 @@ exit($scenario eq 'bad_exit' ? 1 : 0);
         guide.write_text("Offline unit test; no hardware evidence\n")
         files = {str(p.relative_to(self.root)): builder.sha(p) for p in self.root.rglob('*') if p.is_file()}
         policy = {"schema": 1, "minimum_macos": minimum, "architecture": "arm64", "expected_checks": 1738,
-                  "timeout_seconds": 1, "files": files, "libraries": sorted(builder.LIBRARIES)}
+                  "timeout_seconds": 1,
+                  "diagnostic_timeout_seconds": 0.2 if diagnostic_tools and set(diagnostic_tools.values()) == {"timeout"} else 1,
+                  "files": files, "libraries": sorted(builder.LIBRARIES)}
         verifier = self.root / "verify-and-run.pl"
-        verifier.write_text(builder.render_launcher(policy))
+        rendered = builder.render_launcher(policy)
+        if diagnostic_tools is not None:
+            # Only the test-generated copy substitutes tools. Production accepts no tool override.
+            for tool, behavior in diagnostic_tools.items():
+                replacement = self.make_diagnostic_tool(tool, behavior)
+                literal = "'/usr/bin/" + tool + "'"
+                self.assertEqual(rendered.count(literal), 1)
+                rendered = rendered.replace(literal, "'" + str(replacement) + "'")
+        verifier.write_text(rendered)
         (self.root / "manifest.json").write_text(json.dumps({"files": {**files, verifier.name: builder.sha(verifier)}}))
         return launcher
 
-    def invoke(self, verify_only=False):
+    def make_diagnostic_tool(self, tool, behavior):
+        target = self.root.parent / (self.root.name + "-offline-" + tool)
+        if behavior == "missing":
+            return target
+        program = r'''#!/usr/bin/perl
+use strict;
+use warnings;
+die "Inherited environment" if exists $ENV{HOME} || exists $ENV{DYLD_LIBRARY_PATH} || exists $ENV{AV1_TEST_SECRET};
+my $tool = 'TOOL'; my $behavior = 'BEHAVIOR';
+die "Unexpected arguments" unless $tool eq 'codesign'
+    ? @ARGV == 3 && $ARGV[0] eq '--verify' && $ARGV[1] eq '--strict'
+    : @ARGV == 1;
+die "Unexpected target" unless $ARGV[-1] =~ m{/(?:bin/native-av1-tests|lib/lib(?:avcodec\.61|avformat\.61|avutil\.59|swresample\.5|swscale\.8)\.dylib)$};
+if ($behavior eq 'timeout') { sleep 2; }
+if ($behavior eq 'wait_for_cancel') {
+    open my $ready, '>', "$0.started" or die; print {$ready} "ready\n"; close $ready;
+    sleep 2;
+}
+if ($behavior eq 'signal') { kill 'KILL', $$; }
+if ($behavior eq 'output_limit') { print 'x' x 70000; exit 0; }
+print STDERR "PRIVATE /Users/private/hidden account=do-not-record\n";
+if ($behavior eq 'rejected') { exit 1; }
+if ($behavior eq 'failed') { exit 2; }
+if ($tool eq 'xattr') {
+    print "com.apple.provenance\n";
+    print "com.apple.quarantine\n" if $behavior eq 'present';
+}
+exit 0;
+'''.replace("TOOL", tool).replace("BEHAVIOR", behavior)
+        # Attribute listing stdout must stay separate from the diagnostic stderr text.
+        if tool == "xattr":
+            program = program.replace('print STDERR "PRIVATE /Users/private/hidden account=do-not-record\\n";', '')
+        target.write_text(program)
+        target.chmod(0o755)
+        return target
+
+    def invoke(self, verify_only=False, cancel_diagnostic=False):
         command = ["/bin/sh", str(self.root / "Run-M4-AV1-Check.command")]
         if verify_only:
             command.append("--verify-only")
-        result = subprocess.run(command, env={**os.environ, "PERL5OPT": "-MNonexistentBadModule", "AV1_TEST_SECRET": "no"},
-                                capture_output=True, text=True, timeout=8)
+        environment = {**os.environ, "PERL5OPT": "-MNonexistentBadModule", "AV1_TEST_SECRET": "no"}
+        if cancel_diagnostic:
+            process = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            marker = self.root.parent / (self.root.name + "-offline-codesign.started")
+            deadline = time.monotonic() + 3
+            try:
+                while not marker.exists() and time.monotonic() < deadline and process.poll() is None:
+                    time.sleep(0.01)
+                self.assertTrue(marker.exists(), "Diagnostic child did not reach its cancellation barrier")
+                process.send_signal(signal.SIGINT)
+                stdout, stderr = process.communicate(timeout=8)
+                result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate()
+        else:
+            result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=8)
         reports = sorted((self.root / "reports").glob('run-*/report.json'))
         self.assertEqual(len(reports), 1, result.stderr)
         report_text = reports[0].read_text()
@@ -108,12 +172,82 @@ exit($scenario eq 'bad_exit' ? 1 : 0);
         self.assertEqual(report["status"], "PASS")
         self.assertTrue(report["loaded_libraries_verified"])
         self.assertTrue(report["post_hashes_verified"])
+        self.assertEqual(report["termination"], "normal")
+        self.assertTrue(report["child_exited_normally"])
+        self.assertTrue(report["output_received"])
+        self.assertGreater(report["raw_output_bytes"], 0)
+        self.assertEqual(report["dyld_lines_seen"], 6)
+        self.assertEqual(report["summary_count"], 1)
+        self.assertEqual(set(report["launch_diagnostics"]), {"native-av1-tests", *builder.LIBRARIES})
+        # These are text scripts/fake dylibs, not successfully signed Mach-O files.
+        for diagnostic in report["launch_diagnostics"].values():
+            self.assertEqual(diagnostic["codesign"]["status"], "rejected")
+            self.assertEqual(diagnostic["quarantine"]["state"], "absent")
 
     def test_verify_only_never_runs_binary(self):
         self.make("signal")
         result, report = self.invoke(True)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(report["status"], "VERIFIED_NOT_RUN")
+        self.assertFalse(report["hardware_acceptance"])
+        self.assertNotIn("child_exit_code", report)
+        self.assertEqual(len(report["launch_diagnostics"]), 6)
+
+    def test_diagnostics_valid_and_quarantine_present(self):
+        self.make(diagnostic_tools={"codesign": "valid", "xattr": "present"})
+        result, report = self.invoke(True)
+        self.assertEqual(result.returncode, 0)
+        for diagnostic in report["launch_diagnostics"].values():
+            self.assertEqual(diagnostic["codesign"],
+                             {"status": "verified", "termination": "normal", "exit_code": 0, "signal": 0})
+            self.assertEqual(diagnostic["quarantine"],
+                             {"state": "present", "termination": "normal", "exit_code": 0, "signal": 0})
+
+    def test_diagnostics_rejected_is_distinct_from_unavailable(self):
+        self.make(diagnostic_tools={"codesign": "rejected", "xattr": "failed"})
+        result, report = self.invoke(True)
+        self.assertEqual(result.returncode, 0)
+        for diagnostic in report["launch_diagnostics"].values():
+            self.assertEqual(diagnostic["codesign"]["status"], "rejected")
+            self.assertEqual(diagnostic["codesign"]["exit_code"], 1)
+            self.assertEqual(diagnostic["quarantine"]["state"], "unavailable")
+            self.assertEqual(diagnostic["quarantine"]["exit_code"], 2)
+
+    def test_diagnostics_absent_requires_successful_attribute_listing(self):
+        self.make(diagnostic_tools={"codesign": "valid", "xattr": "absent"})
+        result, report = self.invoke(True)
+        self.assertEqual(result.returncode, 0)
+        for diagnostic in report["launch_diagnostics"].values():
+            self.assertEqual(diagnostic["quarantine"]["state"], "absent")
+            self.assertEqual(diagnostic["quarantine"]["termination"], "normal")
+
+    def test_diagnostic_process_failures_are_bounded_and_unknown(self):
+        for behavior, termination in (("timeout", "timeout"), ("signal", "signal"),
+                                      ("output_limit", "output_limit"), ("missing", "could_not_start"),
+                                      ("failed", "nonzero_exit")):
+            with self.subTest(behavior=behavior):
+                old_root = self.root
+                self.root = old_root / behavior
+                self.root.mkdir()
+                self.make(diagnostic_tools={"codesign": behavior, "xattr": behavior})
+                result, report = self.invoke(True)
+                self.assertEqual(result.returncode, 0)
+                for diagnostic in report["launch_diagnostics"].values():
+                    self.assertEqual(diagnostic["codesign"]["status"], "unavailable")
+                    self.assertEqual(diagnostic["quarantine"]["state"], "unavailable")
+                    for command in diagnostic.values():
+                        self.assertEqual(command["termination"], termination)
+                        if behavior in ("signal", "timeout"):
+                            self.assertIsNone(command["exit_code"])
+                            self.assertEqual(command["signal"], 9)
+                self.root = old_root
+
+    def test_cancelling_diagnostics_does_not_start_decoder(self):
+        self.make("tamper", diagnostic_tools={"codesign": "wait_for_cancel", "xattr": "absent"})
+        result, report = self.invoke(cancel_diagnostic=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(report["error_category"], "launch_diagnostics_cancelled")
+        self.assertTrue(report["post_hashes_verified"], "The fake decoder must not run its mutation")
         self.assertFalse(report["hardware_acceptance"])
         self.assertNotIn("child_exit_code", report)
 
@@ -138,12 +272,34 @@ exit($scenario eq 'bad_exit' ? 1 : 0);
                 self.assertEqual(report["status"], "FAIL")
                 self.assertFalse(report["hardware_acceptance"])
                 self.assertTrue(report["post_hashes_verified"])
-                if scenario == "timeout": self.assertEqual(report["termination"], "timeout")
-                if scenario == "signal": self.assertNotEqual(report["child_signal"], 0)
+                if scenario == "timeout":
+                    self.assertEqual(report["termination"], "timeout")
+                    self.assertEqual(report["error_category"], "test_process_timed_out")
+                    self.assertFalse(report["child_exited_normally"])
+                if scenario == "signal":
+                    self.assertEqual(report["child_signal"], 9)
+                    self.assertEqual(report["termination"], "signal")
+                    self.assertEqual(report["error_category"], "test_process_killed")
+                    self.assertFalse(report["child_exited_normally"])
+                    self.assertFalse(report["output_received"])
+                    self.assertEqual(report["actual"], {})
+                    self.assertFalse(report["loaded_libraries_verified"])
+                    self.assertIsNone(report["child_exit_code"])
+                    self.assertEqual(report["raw_output_bytes"], 0)
+                    self.assertEqual(report["dyld_lines_seen"], 0)
+                    self.assertEqual(report["summary_count"], 0)
+                if scenario == "missing_summary":
+                    self.assertEqual(report["summary_count"], 0)
+                if scenario == "double_summary":
+                    self.assertEqual(report["summary_count"], 2)
+                if scenario == "bad_exit":
+                    self.assertEqual(report["termination"], "nonzero_exit")
+                    self.assertEqual(report["error_category"], "test_process_nonzero_exit")
                 if scenario == "inherited_pipe":
                     self.assertEqual(report["child_exit_code"], 0)
                     self.assertEqual(report["child_signal"], 0)
                     self.assertEqual(report["termination"], "timeout")
+                    self.assertEqual(report["error_category"], "test_process_timed_out")
                 self.root = old_root
 
     def test_post_run_mutation_rejected(self):
@@ -205,6 +361,9 @@ class BuilderTests(unittest.TestCase):
         source = (HERE / 'launch.pl.in').read_text()
         self.assertEqual(source.count("kill 'KILL', $pid;"), 1)
         self.assertIn("if (!defined $status) {\n                kill 'KILL', $pid;\n                waitpid($pid, 0);\n                $status = $?;\n            }", source)
+        self.assertNotIn("'spctl'", source)
+        self.assertIn("diagnostic_command('/usr/bin/codesign', '--verify', '--strict'", source)
+        self.assertIn("diagnostic_command('/usr/bin/xattr', \"$root/$relative\")", source)
 
     def test_bad_macho_rejected(self):
         target = self.root / "binary"

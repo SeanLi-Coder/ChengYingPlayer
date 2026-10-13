@@ -8,7 +8,7 @@ import CoreVideo
 final class NativeAppTestDriver {
   private static var instance: NativeAppTestDriver?
   private static let fixtureNames = ["red/red.mp4", "blue/blue.mp4", "compat/compat.mp4", "delayed/delayed.mp4"]
-  private enum Scenario: String { case baseline, queue }
+  private enum Scenario: String { case baseline, queue, resume, resumeVerify = "resume-verify" }
   private let root: URL
   private let runID: String
   private let scenario: Scenario
@@ -28,6 +28,13 @@ final class NativeAppTestDriver {
   private var startedAt: TimeInterval?
   private var queueItemIdentities: [ObjectIdentifier] = []
   private let queueNames = ["red/red.mp4", "blue/blue.mp4", "red/red.mp4"]
+  private var isResumeScenario: Bool { scenario == .resume || scenario == .resumeVerify }
+  private var resultFilename: String { scenario == .resumeVerify ? "result-resume-verify.json" : "result.json" }
+
+  static var isolatedResumeWatchLaterURL: URL? {
+    guard let driver = instance, driver.isResumeScenario else { return nil }
+    return driver.root.appendingPathComponent("watch-later", isDirectory: true)
+  }
 
   private init(root: URL, runID: String, scenario: Scenario, pixelReferences: [String: [Int]]) {
     self.root = root
@@ -66,19 +73,29 @@ final class NativeAppTestDriver {
           let data = try? Data(contentsOf: marker), data.count < 4096,
           let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           payload["format"] as? Int == 1,
-          payload["run_id"] as? String == runID,
-          (payload["scenario"] as? String ?? "baseline") == scenario.rawValue,
+          payload[scenario == .resumeVerify ? "resume_verify_run_id" : "run_id"] as? String == runID,
+          (payload["scenario"] as? String ?? "baseline") == (scenario == .resumeVerify ? "resume" : scenario.rawValue),
           payload["fixtures"] as? [String] == fixtureNames,
           let references = payload["pixel_references"] as? [String: [Int]],
           Set(references.keys) == Set(["red", "green", "blue", "delayed_red"]),
           references.values.allSatisfy({ $0.count == 27 && $0.allSatisfy { (0...255).contains($0) } }),
-          !manager.fileExists(atPath: root.appendingPathComponent("result.json").path) else { preflightFailure() }
+          !manager.fileExists(atPath: root.appendingPathComponent(scenario == .resumeVerify ?
+            "result-resume-verify.json" : "result.json").path) else { preflightFailure() }
     for name in fixtureNames {
       let url = root.appendingPathComponent(name)
       guard url.resolvingSymlinksInPath().path == url.path,
             let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
             values.isRegularFile == true, values.isSymbolicLink != true,
             let size = values.fileSize, size > 0, size <= 16 * 1024 * 1024 else { preflightFailure() }
+    }
+    if scenario == .resume || scenario == .resumeVerify {
+      let directory = root.appendingPathComponent("watch-later", isDirectory: true)
+      guard let writer = payload["run_id"] as? String, let reader = payload["resume_verify_run_id"] as? String,
+            UUID(uuidString: writer) != nil, UUID(uuidString: reader) != nil, writer != reader,
+            directory.resolvingSymlinksInPath().path == directory.path,
+            let attributes = try? manager.attributesOfItem(atPath: directory.path),
+            attributes[.type] as? FileAttributeType == .typeDirectory,
+            (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o700 else { preflightFailure() }
     }
     instance = NativeAppTestDriver(root: root, runID: runID, scenario: scenario, pixelReferences: references)
     // The argument domain wins over registration and persistence without changing
@@ -104,7 +121,19 @@ final class NativeAppTestDriver {
       arguments["playlistAutoPlayNext"] = true
       arguments["keepOpenOnFileEnd"] = true
     }
+    if scenario == .resume || scenario == .resumeVerify {
+      // A real per-bundle persistent preference is required to exercise actual
+      // KVO opt-out. This disposable bundle never shares the release domain.
+      arguments.removeValue(forKey: "resumeLastPosition")
+      arguments["pauseWhenOpen"] = true
+      arguments["playlistAutoPlayNext"] = false
+      arguments["keepOpenOnFileEnd"] = true
+      arguments["autoRepeat"] = false
+    }
     UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+    if scenario == .resume || scenario == .resumeVerify {
+      UserDefaults.standard.set(true, forKey: "resumeLastPosition")
+    }
   }
 
   private static func hasOwnedWorkspace(above root: URL) -> Bool {
@@ -157,6 +186,10 @@ final class NativeAppTestDriver {
         self.completeQueueTermination()
         return
       }
+      if self.isResumeScenario {
+        self.completeResumeTermination()
+        return
+      }
       let registered = PlayerCore.playerCores
       guard self.quitPlayers.count == 2, self.quitPlayers[0] !== self.quitPlayers[1],
             registered.count >= 2,
@@ -181,6 +214,10 @@ final class NativeAppTestDriver {
     }
     if scenario == .queue {
       startQueueScenario()
+      return
+    }
+    if isResumeScenario {
+      startResumeScenario()
       return
     }
     let player = PlayerCore.first
@@ -1791,6 +1828,308 @@ final class NativeAppTestDriver {
     print("NATIVE_APP_TEST_COMPLETE")
   }
 
+  private func startResumeScenario() {
+    let directory = root.appendingPathComponent("watch-later", isDirectory: true)
+    let label = scenario == .resume ? "resume_isolated_state" : "resume_verify_isolated_state"
+    guard Utility.watchLaterURL == directory, Preference.bool(for: .resumeLastPosition),
+          UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["resumeLastPosition"] == nil,
+          let entries = try? FileManager.default.contentsOfDirectory(atPath: directory.path),
+          scenario == .resumeVerify || entries.isEmpty else { fail(label); return }
+    record(label)
+    if scenario == .resumeVerify {
+      guard resumeDirectoryContainsOnly("blue/blue.mp4"), resumeRecordMatches("blue/blue.mp4", position: 4.2, speed: 1.25) else {
+        fail("resume_verify_quit_saved_fields"); return
+      }
+      record("resume_verify_quit_saved_fields")
+      openResumeMPV("blue/blue.mp4", prefix: "resume_verify") { player in
+        Preference.set(false, for: .resumeLastPosition)
+        AppDelegate.shared.clearRecentDocuments(nil)
+        self.closeResumeCore(player, prefix: "resume_verify", assertionLabel: "resume_verify_no_refill",
+          assertion: { self.resumeRecordAbsent("blue/blue.mp4") && self.resumeMetadataEmpty() }) {
+          self.requestResumeTermination()
+        }
+      }
+      return
+    }
+    openResumeNative("red/red.mp4", position: 4.2, color: .green, volume: 37, prefix: "resume_stop") { player in
+      self.closeResumeCore(player, prefix: "resume_stop", assertionLabel: "resume_stop_saved_fields",
+        assertion: { self.resumeRecordMatches("red/red.mp4", position: 4.2, speed: 1.25) }) {
+        self.openResumeMPV("red/red.mp4", prefix: "resume_reopen") { restored in
+          self.closeResumeCore(restored, prefix: "resume_reopen") {
+            self.clearResumeProgress(label: "resume_preview_prepare_clear") { self.startResumePreview() }
+          }
+        }
+      }
+    }
+  }
+
+  private func resumeRecordURL(_ name: String) -> URL {
+    let digest = Utility.mpvWatchLaterMd5(fixture(name).path).uppercased()
+    return Utility.watchLaterURL.appendingPathComponent(digest)
+  }
+
+  private func resumeRecordMatches(_ name: String, position: Double, speed: Double) -> Bool {
+    let url = resumeRecordURL(name)
+    guard url.resolvingSymlinksInPath() == url,
+          let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+          attributes[.type] as? FileAttributeType == .typeRegular,
+          (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
+          let size = attributes[.size] as? NSNumber, size.intValue > 0, size.intValue < 256,
+          let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else { return false }
+    return Self.matchesResumeRecord(text, position: position, speed: speed)
+  }
+
+  private static func matchesResumeRecord(_ text: String, position: Double, speed: Double) -> Bool {
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+    guard lines.count == 3, lines[2].isEmpty, lines[0].hasPrefix("start="), lines[1].hasPrefix("speed="),
+          let actualPosition = Double(lines[0].dropFirst(6)), let actualSpeed = Double(lines[1].dropFirst(6)),
+          position.isFinite, speed.isFinite, actualPosition.isFinite, actualSpeed.isFinite else { return false }
+    return abs(actualPosition - position) < 0.000001 && abs(actualSpeed - speed) < 0.000001
+  }
+
+  private func resumeRecordAbsent(_ name: String) -> Bool {
+    Utility.existingWatchLaterURL(Utility.mpvWatchLaterMd5(fixture(name).path)) == nil
+  }
+
+  private func resumeDirectoryContainsOnly(_ name: String) -> Bool {
+    guard let entries = try? FileManager.default.contentsOfDirectory(atPath: Utility.watchLaterURL.path) else { return false }
+    return entries == [resumeRecordURL(name).lastPathComponent]
+  }
+
+  private func resumeMetadataEmpty() -> Bool {
+    Preference.object(for: .iinaLastPlayedFilePath) == nil && Preference.object(for: .iinaLastPlayedFilePosition) == nil
+  }
+
+  private func openResumeNative(_ name: String, position: Double, color: Color, volume: Double,
+                                prefix: String, then continuation: @escaping (PlayerCore) -> Void) {
+    let candidate = quitPlayers.isEmpty ? PlayerCore.first : PlayerCore.newPlayerCore
+    guard !quitPlayers.contains(where: { $0 === candidate }) else { fail(prefix + "_pristine"); return }
+    quitPlayers.append(candidate)
+    player = candidate
+    wait(prefix + "_pristine", until: {
+      candidate.mpv.getFlag(MPVProperty.idleActive) && candidate.mpv.getString(MPVProperty.path) == nil &&
+        candidate.mpv.mpvRenderContext == nil
+    }) {
+      candidate.openURL(self.fixture(name), shouldAutoLoad: false)
+      self.waitForNativePaused(candidate, position: 0, color: name.hasPrefix("blue/") ? .blue : .red,
+        label: prefix + "_initial") {
+        guard let slider = candidate.mainWindow.volumeSlider, let action = slider.action else {
+          self.fail(prefix + "_ready"); return
+        }
+        candidate.seek(absoluteSecond: position)
+        slider.doubleValue = volume
+        let speed = NSMenuItem()
+        speed.representedObject = 1.25
+        guard NSApp.sendAction(action, to: slider.target, from: slider),
+              NSApp.sendAction(#selector(MainMenuActionHandler.menuChangeSpeed(_:)),
+                to: candidate.mainWindow.menuActionHandler, from: speed) else { self.fail(prefix + "_ready"); return }
+        self.waitForNativePaused(candidate, position: position, color: color, label: prefix + "_ready",
+          expectedVolume: volume / 100, extra: {
+            candidate.info.currentURL == self.fixture(name) && Self.matchesVolumePercent(slider.doubleValue, volume)
+          }, snapshotCheck: { !($0.wantsPlayback) && abs(Double($0.rate) - 1.25) < 0.000001 }) {
+          continuation(candidate)
+        }
+      }
+    }
+  }
+
+  private func openResumeMPV(_ name: String, prefix: String, then continuation: @escaping (PlayerCore) -> Void) {
+    let candidate = quitPlayers.isEmpty ? PlayerCore.first : PlayerCore.newPlayerCore
+    guard !quitPlayers.contains(where: { $0 === candidate }) else { fail(prefix + "_pristine"); return }
+    quitPlayers.append(candidate)
+    player = candidate
+    wait(prefix + "_pristine", until: {
+      candidate.mpv.getFlag(MPVProperty.idleActive) && candidate.mpv.getString(MPVProperty.path) == nil &&
+        candidate.mpv.mpvRenderContext == nil
+    }) {
+      candidate.openURL(self.fixture(name), shouldAutoLoad: false)
+      self.wait(prefix + "_actual_mpv", until: { self.resumeMPVMatches(candidate, name: name) }) {
+        guard self.resumeRecordAbsent(name) else { self.fail(prefix + "_consumed"); return }
+        self.record(prefix + "_consumed")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+          guard self.resumeMPVMatches(candidate, name: name), self.resumeRecordAbsent(name) else {
+            self.fail(prefix + "_stable"); return
+          }
+          self.record(prefix + "_stable")
+          continuation(candidate)
+        }
+      }
+    }
+  }
+
+  private func resumeMPVMatches(_ player: PlayerCore, name: String) -> Bool {
+    player.info.state == .paused && player.playbackIsPaused && !player.isUsingNativePlayback &&
+      player.info.currentURL == fixture(name) && player.mpv.getString(MPVProperty.path) == fixture(name).path &&
+      player.nativePlaybackSession == nil && player.nativePlaybackOutput == nil &&
+      player.mpv.mpvRenderContext != nil && player.mainWindow.videoView.hasInitializedOpenGL &&
+      player.mainWindow.window?.isVisible == true && player.mpv.getFlag(MPVOption.PlaybackControl.pause) &&
+      abs(player.mpv.getDouble(MPVProperty.timePos) - 4.2) < 0.05 &&
+      abs(player.mpv.getDouble(MPVOption.PlaybackControl.speed) - 1.25) < 0.000001 &&
+      player.mpv.getDouble(MPVOption.Audio.volume) == 0 && player.mainWindow.volumeSlider.doubleValue == 0
+  }
+
+  private func closeResumeCore(_ player: PlayerCore, prefix: String, assertionLabel: String? = nil,
+                                assertion: @escaping () -> Bool = { true }, then continuation: @escaping () -> Void) {
+    guard let window = player.mainWindow.window else { fail(prefix + "_closed"); return }
+    let layer = player.nativePlaybackOutput?.displayLayer
+    window.performClose(nil)
+    wait(prefix + "_closed", until: {
+      player.info.state == .idle && !window.isVisible && player.nativePlaybackSession == nil &&
+        player.nativePlaybackOutput == nil && layer?.superlayer == nil && player.mpv.getFlag(MPVProperty.idleActive)
+    }) {
+      NativePlaybackResumeService.shared.store.drain {
+        if let label = assertionLabel {
+          guard assertion() else { self.fail(label); return }
+          self.record(label)
+        }
+        player.shutdown()
+        self.wait(prefix + "_shutdown", until: {
+          player.info.state == .shutDown && player.mpv.mpvRenderContext == nil && player.mainWindow.videoView.isUninited
+        }, then: continuation)
+      }
+    }
+  }
+
+  private func clearResumeProgress(label: String, then continuation: @escaping () -> Void) {
+    let directory = Utility.watchLaterURL
+    guard directory == root.appendingPathComponent("watch-later", isDirectory: true),
+          directory.resolvingSymlinksInPath() == directory else { fail(label); return }
+    // Invoke the real service barrier with the same remove/recreate operation as
+    // preferences. This does not claim to exercise the UI confirmation sheet.
+    NativePlaybackResumeService.shared.clearPlaybackProgress(operation: {
+      if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: 0o700])
+    }) { result in
+      guard case .cleared = result, Thread.isMainThread,
+            let entries = try? FileManager.default.contentsOfDirectory(atPath: directory.path), entries.isEmpty else {
+        self.fail(label); return
+      }
+      self.record(label)
+      continuation()
+    }
+  }
+
+  private func startResumePreview() {
+    openResumeNative("red/red.mp4", position: 1.25, color: .red, volume: 0, prefix: "resume_preview") { player in
+      guard NSApp.sendAction(#selector(MainMenuActionHandler.menuShowVideoTools(_:)),
+        to: player.mainWindow.menuActionHandler, from: NSMenuItem()) else { self.fail("resume_preview_menu_attached"); return }
+      self.wait("resume_preview_menu_attached", until: {
+        self.previewControls(player) != nil && self.previewActive(player, start: 1.25, end: 6.25)
+      }) {
+        guard let controls = self.previewControls(player),
+              self.editPreviewField(controls.start, text: "00:04.200000", panel: controls.panel),
+              self.editPreviewField(controls.end, text: "00:05.000000", panel: controls.panel) else {
+          self.fail("resume_preview_clock_in_range"); return
+        }
+        self.waitResumePreviewClock(player) {
+          var restoreCompleted = false
+          player.finishNativePreview { _ in restoreCompleted = true }
+          guard player.nativePreviewInProgress, !restoreCompleted else {
+            self.fail("resume_preview_restore_pending"); return
+          }
+          self.record("resume_preview_restore_pending")
+          // No dispatch turn intervenes: close while the real restore callback
+          // is still pending, without pausing its worker or manufacturing state.
+          self.closeResumeCore(player, prefix: "resume_preview", assertionLabel: "resume_preview_baseline_saved",
+            assertion: { self.resumeRecordMatches("red/red.mp4", position: 1.25, speed: 1.25) }) {
+            self.clearResumeProgress(label: "resume_clear_prepare_clear") { self.startResumeClear() }
+          }
+        }
+      }
+    }
+  }
+
+  private func waitResumePreviewClock(_ player: PlayerCore, then continuation: @escaping () -> Void) {
+    guard let session = player.nativePlaybackSession else { fail("resume_preview_clock_in_range"); return }
+    let generation = player.videoToolsMediaGeneration
+    let deadline = ProcessInfo.processInfo.systemUptime + 12
+    func poll() {
+      guard !self.terminal, player.nativePlaybackSession === session,
+            player.videoToolsMediaGeneration == generation else { self.fail("resume_preview_clock_in_range"); return }
+      session.captureCurrentState { result in
+        guard !self.terminal, player.nativePlaybackSession === session,
+              player.videoToolsMediaGeneration == generation else { self.fail("resume_preview_clock_in_range"); return }
+        if case .ready(let snapshot) = result, snapshot.phase == .playing, snapshot.wantsPlayback,
+           snapshot.position >= 4.2, snapshot.position < 5, snapshot.volume == 0,
+           self.previewActive(player, start: 4.2, end: 5) {
+          self.record("resume_preview_clock_in_range")
+          continuation()
+        } else if ProcessInfo.processInfo.systemUptime >= deadline { self.fail("resume_preview_clock_in_range") }
+        else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: poll) }
+      }
+    }
+    poll()
+  }
+
+  private func startResumeClear() {
+    openResumeNative("red/red.mp4", position: 4.2, color: .green, volume: 0, prefix: "resume_clear") { player in
+      AppDelegate.shared.clearRecentDocuments(nil)
+      self.clearResumeProgress(label: "resume_clear_completed") {
+        self.closeResumeCore(player, prefix: "resume_clear", assertionLabel: "resume_clear_no_refill",
+          assertion: { self.resumeRecordAbsent("red/red.mp4") && self.resumeMetadataEmpty() }) {
+          self.startResumeOptOut()
+        }
+      }
+    }
+  }
+
+  private func startResumeOptOut() {
+    openResumeNative("blue/blue.mp4", position: 4.2, color: .blue, volume: 0, prefix: "resume_optout") { player in
+      AppDelegate.shared.clearRecentDocuments(nil)
+      Preference.set(false, for: .resumeLastPosition)
+      guard !Preference.bool(for: .resumeLastPosition) else { self.fail("resume_optout_applied"); return }
+      self.record("resume_optout_applied")
+      self.closeResumeCore(player, prefix: "resume_optout", assertionLabel: "resume_optout_no_refill",
+        assertion: { self.resumeRecordAbsent("blue/blue.mp4") && self.resumeMetadataEmpty() }) {
+        Preference.set(true, for: .resumeLastPosition)
+        self.openResumeNative("blue/blue.mp4", position: 4.2, color: .blue, volume: 37, prefix: "resume_quit") { active in
+          guard self.resumeRecordAbsent("blue/blue.mp4"), let layer = active.nativePlaybackOutput?.displayLayer else {
+            self.fail("resume_quit_record_absent_before_terminate"); return
+          }
+          self.record("resume_quit_record_absent_before_terminate")
+          self.quitNativeLayer = layer
+          self.requestResumeTermination()
+        }
+      }
+    }
+  }
+
+  private func requestResumeTermination() {
+    awaitingQuit = true
+    quitRequestedAt = ProcessInfo.processInfo.systemUptime
+    writeReport(complete: false, passed: false)
+    Self.performTerminationFromRunLoop {
+      guard !self.terminal, self.awaitingQuit else { return }
+      NSApp.terminate(nil)
+    }
+  }
+
+  private func completeResumeTermination() {
+    let label = scenario == .resume ? "resume_all_registered_cores_shutdown" : "resume_verify_all_registered_cores_shutdown"
+    let registered = PlayerCore.playerCores
+    guard !quitPlayers.isEmpty, registered.count >= quitPlayers.count,
+          Set(quitPlayers.map(ObjectIdentifier.init)).count == quitPlayers.count,
+          quitPlayers.allSatisfy({ expected in registered.contains { $0 === expected } }),
+          registered.allSatisfy({ $0.info.state == .shutDown && $0.nativePlaybackSession == nil &&
+            $0.nativePlaybackOutput == nil && $0.mpv.mpvRenderContext == nil && $0.mainWindow.loaded &&
+            $0.mainWindow.videoView.isUninited }), quitNativeLayer?.superlayer == nil,
+          scenario != .resumeVerify || (resumeRecordAbsent("blue/blue.mp4") && resumeMetadataEmpty()) else {
+      fail(label); return
+    }
+    record(label)
+    if scenario == .resume {
+      guard quitNativeLayer != nil, resumeDirectoryContainsOnly("blue/blue.mp4"),
+            resumeRecordMatches("blue/blue.mp4", position: 4.2, speed: 1.25) else {
+        fail("resume_quit_saved_fields"); return
+      }
+      record("resume_quit_saved_fields")
+    }
+    terminal = true
+    writeReport(complete: true, passed: true)
+    print("NATIVE_APP_TEST_COMPLETE")
+  }
+
   private func prepareActiveQuit() {
     // The first core stays loaded in compatibility, so this is a genuinely new core.
     let second = PlayerCore.newPlayerCore
@@ -1976,7 +2315,7 @@ final class NativeAppTestDriver {
     let report: [String: Any] = ["format": 1, "run_id": runID, "complete": complete,
                                "passed": passed, "checks": checks]
     do {
-      let output = root.appendingPathComponent("result.json")
+      let output = root.appendingPathComponent(resultFilename)
       guard output.resolvingSymlinksInPath().path == output.path else { throw CocoaError(.fileWriteInvalidFileName) }
       let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
       try data.write(to: output, options: .atomic)

@@ -157,6 +157,8 @@ final class LiveQueueClient: MPVQueueInstallationBackend {
       loadedReadback = queueSnapshot()
       beforeForwardLoaded?()
       if !dropLoadedEvents { installer.receive(.fileLoaded(entryID: id)) }
+    case MPV_EVENT_PLAYBACK_RESTART:
+      if let id = eventEntryID { installer.receive(.playbackRestart(entryID: id)) }
     case MPV_EVENT_END_FILE:
       let id = event.pointee.data.assumingMemoryBound(to: mpv_event_end_file.self).pointee.playlist_entry_id
       actualEnds.append(id)
