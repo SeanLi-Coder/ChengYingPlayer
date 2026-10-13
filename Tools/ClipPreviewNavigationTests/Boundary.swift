@@ -30,6 +30,7 @@ final class PlayerBoundary {
   let mpv = MPVBoundary()
   var currentPlaybackSpeed: Double { mpv.speed }
   var isUsingNativePlayback = false
+  let hasPendingGenericPlaybackHandoff = false
   let nativePreviewInProgress = false
   func cancelNativePreview(restoreLoop: Bool) {
     preconditionFailure("Native preview is outside the legacy navigation boundary")

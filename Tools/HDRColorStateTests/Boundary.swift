@@ -125,6 +125,9 @@ class PlaybackBoundary {
   // The suite retains the MPV color-state branch; native handoff has its own
   // real-session and controlled PlayerCore regression suites.
   var nativeCompatibilityRestore: NativeRestoreBoundary?
+  func consumeGenericHandoffCompletion(_ restore: NativeRestoreBoundary) -> (() -> Void)? {
+    preconditionFailure("Native restoration is outside MPV color-state tests")
+  }
   func resetNativeQueue() {
     preconditionFailure("Native queue restore is outside MPV color-state tests")
   }

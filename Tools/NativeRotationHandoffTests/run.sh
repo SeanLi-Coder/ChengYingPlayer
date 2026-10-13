@@ -49,6 +49,10 @@ for mutation in positive loaded-only resurrect-restore unowned-restore drop-play
   "${compiler[@]}" "${sources[@]}" Tools/NativeRotationHandoffTests/Boundary.swift \
     Tools/URLPlaylistEnqueueTests/EnqueueServices.swift \
     "$test_dir/$mutation.swift" Tools/NativeRotationHandoffTests/main.swift -o "$test_dir/$mutation"
+  if [[ "${ROTATION_HANDOFF_BUILD_ONLY:-0}" == 1 ]]; then
+    printf 'Compiled %s rotation fixture only; no test was executed.\n' "$mutation"
+    continue
+  fi
   set +e
   /usr/bin/perl -e 'alarm 25; exec @ARGV' "$test_dir/$mutation" 2>&1 | tee "$test_dir/$mutation.log"
   statuses=("${PIPESTATUS[@]}")

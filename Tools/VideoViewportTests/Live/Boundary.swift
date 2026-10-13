@@ -3,6 +3,7 @@ import Foundation
 // Only the unrelated application shell is replaced. The production shortcut
 // resolver, viewport model, and PlayerCore bridge execute unchanged against mpv.
 final class PlayerCore {
+  let hasPendingGenericPlaybackHandoff = false
   var nativeViewport: VideoToolsViewport { preconditionFailure("Unexpected native viewport in live MPV viewport tests") }
   @discardableResult
   func applyNativeViewport(_ viewport: VideoToolsViewport) -> Bool {

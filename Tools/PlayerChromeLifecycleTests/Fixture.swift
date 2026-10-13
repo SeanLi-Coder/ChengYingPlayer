@@ -107,6 +107,8 @@ final class ChromeEvents {
 final class ChromePlayer {
   // This fixture verifies the existing MPV sidebar and chrome lifecycle.
   let isUsingNativePlayback = false
+  let hasNativePlaybackQueue = false
+  var hasPendingGenericPlaybackHandoff = false
   func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
     preconditionFailure("Unexpected native route in legacy chrome lifecycle tests")
   }

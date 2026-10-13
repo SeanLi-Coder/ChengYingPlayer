@@ -25,8 +25,12 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 两种开片暂停偏好、实际切换途中关窗并立即开片、替换后的 MPV 列表、静音、
 渲染视图所有权及三个 Core 关闭均必须通过。44 项准备测试已过，包括 macOS 12
 类型检查及实际像素／列表比较器；完整 App 执行仍待验证。冻结提交 `67dbc550`
-的开发 CI `38356250711` 已运行：media-helper job 在 HDRColorStateTests 旧边界
-编译处失败，build job 仍运行；没有发行或开发 App 上传。下文保留的失败
+的开发 CI `38356250711` 已结束且失败：media-helper job 在 HDRColorStateTests 旧边界
+编译处失败，build job 在 ClipPreviewLiveTests 缺 `nativePreviewBaseline` 的旧边界
+编译处失败。完整 App 编译与队列／bridge／整窗均未到达；日志证据在
+`build/native-ci-38356250711.l5hmdB`，没有 workflow artifacts。后续明确无 native
+边界修补通过本地颜色 149 项及剪辑预览 build-only，不冒充运行中的预览验收。
+没有发行或开发 App 上传。下文保留的失败
 `38337569102` 不被本次准备结果覆盖。
 
 显式有界列表已接实际 Core、native Session 与 MPV 命令；周围 App 服务边界见
@@ -47,9 +51,22 @@ TSan `HRuQt2` 各 206/0，source/dependency/generated 前后身份校验通过�
 负控全部产生精确失败，wrapper 均为 0，完整证据表见 CoreQueue README。
 旧静音开片 ASan 363、受控 Core TSan 41 与两负控、
 lifecycle 76 也在该 Core 上通过；Rotation/URL 本轮仅类型检查，不冒充 GUI 实测。
-**普通单文件 generic compatibility 切换没有上述 queue／rotation／
-enqueue owner，load／seek 短窗仍可能丢失新音量／速度；尚须单独所有权设计，不能
-仅靠 URL 相等放开门禁。** 当前仍不切默认或发布，能力门禁与发行身份均不变。
+后续普通单文件 generic compatibility 已补独立 action UUID、媒体 epoch、
+实际 route revision 与 capture／retire／start／restore 阶段所有权；URL 只作额外检查。
+冻结 Core `bbd871b4` 的新专项普通 `DDXugx`、ASan `rpmA43`、TSan `oUxbJF` 各
+218/0，实际 setter 已复现并修补旧回调覆盖新音量／速度，以及捕获取消后支持范围内
+的新意图丢失。完整发现历史与测试边界见 `Tools/NativeGenericHandoffTests/README.md`；
+十一项精确负控仍在执行，不把正向结果当作负控通过。
+
+菜单／既有侧栏／原始和 typed 快捷键已保护半加载窗口；既有剪辑面板的预览、
+自动 debounce 与采点也受门禁保护，内部 A/B／viewport 恢复仍可执行。实际 libmpv
+预览专项 42/0、工具 UI 17/0，撤 controller／bridge 门禁的两个负控分别准确失败
+1 项，证据 `build/generic-preview-admission.8M2B2R`。它控制 busy admission，不冒充
+完整 Core 事件桥接。根复测静音开片 363、菜单 14 加 23 入口、预览导航 317、
+侧栏 lifecycle 190 加 4 source 检查均过。受控 Core 41 加两负控本轮亦通过；
+CoreQueue 普通加 18 负控仅重新生成和核对唯一替换点，不能继承旧 Core 的运行结论。
+旧 Rotation／URL／AB／NativeClipPreview／NativeViewport 仅补接口并编译，
+完整 App 与新同源 CI 尚待执行。当前仍不切默认或发布，能力门禁与发行身份均不变。
 以下历史候选与失败保留各自源码身份，不当作后续 Core 变更的验收。
 
 ### AV1 与队列后续切片（2026-10-13，未切默认）

@@ -25,7 +25,7 @@ def method(source, declaration):
 source = SOURCE.read_text()
 guarded = [
     "menuDeleteCurrentFile", "menuChapterSwitch", "menuNextChapter", "menuPreviousChapter",
-    "menuChangeAspect", "menuChangeCrop", "menuChangeRotation", "menuToggleFlip", "menuToggleMirror",
+    "menuChangeTrack", "menuChangeAspect", "menuChangeCrop", "menuChangeRotation", "menuToggleFlip", "menuToggleMirror",
     "menuToggleDeinterlace", "menuLoadExternalAudio", "menuChangeAudioDelay", "menuResetAudioDelay",
     "menuLoadExternalSub", "menuToggleSubVisibility", "menuToggleSecondSubVisibility", "menuChangeSubDelay",
     "menuChangeSubScale", "menuResetSubDelay", "menuSetSubEncoding", "menuSubFont", "menuCycleTrack",

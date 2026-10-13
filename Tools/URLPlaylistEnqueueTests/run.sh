@@ -39,6 +39,10 @@ for mutation in positive early-append drop-owner drop-pause-restore ignore-resul
     Tools/URLPlaylistEnqueueTests/EnqueueServices.swift Tools/URLPlaylistEnqueueTests/URLDispatchServices.swift \
     "$test_dir/$mutation.swift" Tools/URLPlaylistEnqueueTests/main.swift \
     -o "$test_dir/$mutation"
+  if [[ "${URL_ENQUEUE_BUILD_ONLY:-0}" == 1 ]]; then
+    printf 'Compiled %s URL enqueue fixture only; no test was executed.\n' "$mutation"
+    continue
+  fi
   set +e
   /usr/bin/perl -e 'alarm 20; exec @ARGV' "$test_dir/$mutation" 2>&1 | tee "$test_dir/$mutation.log"
   statuses=("${PIPESTATUS[@]}")

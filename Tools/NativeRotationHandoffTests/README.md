@@ -5,6 +5,10 @@ Run `bash Tools/NativeRotationHandoffTests/run.sh`. Optional
 positive and negative executable. The test opens and retires one short-lived CLI
 `NSWindow`; it does not create an application bundle or use personal media.
 
+`ROTATION_HANDOFF_BUILD_ONLY=1` compiles the positive fixture and all four
+negative variants without executing any binary or creating a window. This mode
+checks extraction and compilation only, not behavior or negative-control failures.
+
 The extractor copies production `PlayerCore` rotation ownership, compatibility
 capture, retirement, open arbitration, pause/resume, three seek forms, shutdown
 and stop methods. It copies the real window shortcut/play-button handlers and
@@ -12,6 +16,8 @@ the panel/quick-settings forwarding entry. The production helper, shortcut
 resolver, loop policy and rotation coordinator are compiled directly. Source
 landmarks must occur exactly once. Private visibility is removed only in the
 generated test compilation.
+The controlled legacy-open boundary starts after the production route and
+generic-owner phase transition; it does not add a second route increment.
 
 Native clock capture, asynchronous renderer shutdown, MPV load/restart events,
 unrelated UI work and the export task service are controlled recording

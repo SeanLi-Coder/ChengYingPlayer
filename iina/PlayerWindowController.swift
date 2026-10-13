@@ -264,7 +264,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
       }
     } else {
       if handleVolumeKeyBinding(keyBinding.action) { return true }
-      if player.isUsingNativePlayback || player.hasNativePlaybackQueue {
+      if player.isUsingNativePlayback || player.hasNativePlaybackQueue || player.hasPendingGenericPlaybackHandoff {
         // Typed transport commands must never reach the idle compatibility
         // core. Preserve arbitrary custom mpv bindings by switching explicitly
         // before replaying the original binding on that backend.
@@ -433,7 +433,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     let responder = window.firstResponder
     let isTextInput = responder is NSText || responder is NSTextField || responder is NSTextInputClient
     guard let action = VideoToolsShortcuts.resolve(
-      event, hasMedia: player.info.state.loaded || player.hasPendingPermanentRotation, isTextInput: isTextInput,
+      event, hasMedia: player.info.state.loaded || player.hasPendingPermanentRotation || player.hasPendingGenericPlaybackHandoff, isTextInput: isTextInput,
       isModal: NSApp.modalWindow != nil || window.attachedSheet != nil
     ) else { return false }
     // A handoff temporarily clears loaded state. Only its already-owned rotation
@@ -441,8 +441,16 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
     if !player.info.state.loaded {
       switch action {
       case .rotateLeft, .rotateRight: break
+      case .speedUp, .speedDown:
+        guard player.hasPendingGenericPlaybackHandoff else { return false }
       case .consume where event.keyCode == 37 || event.keyCode == 15: return true
       default: return false
+      }
+    }
+    if player.hasPendingGenericPlaybackHandoff {
+      switch action {
+      case .consume, .speedUp, .speedDown: break
+      default: return true
       }
     }
     if action == .rotateLeft || action == .rotateRight {
@@ -511,7 +519,7 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
         return false
       }
       player.mainWindow.quickSettingView.prepareVideoToolsForUserSeek()
-      guard player.isUsingNativePlayback || player.videoToolsLoopRange != nil else { return false }
+      guard player.isUsingNativePlayback || player.hasPendingGenericPlaybackHandoff || player.videoToolsLoopRange != nil else { return false }
       switch mode {
       case .absolute:
         guard let target = VideoToolsPlaybackCommand.absoluteSeekTarget(amount, duration: player.info.videoDuration?.second) else {
@@ -526,13 +534,13 @@ class PlayerWindowController: NSWindowController, NSWindowDelegate {
         }
       }
     case .frame(let backwards):
-      guard !player.isUsingNativePlayback else { return false }
+      guard !player.isUsingNativePlayback, !player.hasPendingGenericPlaybackHandoff else { return false }
       player.mainWindow.quickSettingView.prepareVideoToolsForUserSeek()
       guard player.videoToolsLoopRange != nil else { return false }
       player.pause()
       player.frameStep(backwards: backwards)
     case .speed(let amount, let mode):
-      guard player.isUsingNativePlayback || player.videoToolsLoopRange != nil else { return false }
+      guard player.isUsingNativePlayback || player.hasPendingGenericPlaybackHandoff || player.videoToolsLoopRange != nil else { return false }
       let current = player.currentPlaybackSpeed
       let target: Double
       switch mode {

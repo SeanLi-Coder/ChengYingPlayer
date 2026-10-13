@@ -26,15 +26,23 @@
 **92／54 尚未重新运行，不能把准备测试当成窗口验收。** 队列进程新增切换中实际
 关窗并立即打开另一文件，检查真实列表、静音、GL／native 资源、退出和清理。
 冻结提交 `67dbc55038d82df04ceae7d4248ddfe50eddbd3d` 已推送，开发 CI
-`38356250711` 于 2026-10-13 06:21 UTC 派发，结果待核实；开发 App 上传关闭，
+`38356250711` 于 2026-10-13 06:21 UTC 派发，已结束且失败；开发 App 上传关闭，
 没有创建发行、版本或安装包。本轮记录更新不改变该次 CI 的冻结源码。
-该运行的 media-helper job 已在 HDRColorStateTests 旧边界编译处失败，未执行该测试
-或后续 PlaybackMode／UI；build job 仍独立运行。不能将未运行步骤计为通过。
+media-helper job 在 HDRColorStateTests 旧边界编译处失败；build job 在
+ClipPreviewLiveTests 缺 `nativePreviewBaseline` 的旧边界编译处失败。两者均未运行
+相应行为断言；生产 App 编译、队列／bridge／整窗检查均未执行。必要日志已保留，
+本次没有 workflow artifact，不能将留存步骤的 success 当作存在测试证据。
+两处 fixture 已补明确无 native 的边界；本地颜色检查 149 项及剪辑预览 build-only
+通过，不冒充实际剪辑预览或下一轮 CI 通过。
 本轮审查另发现运行中自动下一项偏好、队列交接中音量／速度意图未保留，已修补。
 冻结 Core `a30bcd00` 普通／ASan／TSan 各 206 项通过，18 个精确负控也已通过；
 这是实际 Session／MPV 与抽取 Core 的服务边界测试，不是完整 App 通过。
-普通单文件 generic compatibility 尚缺上述 owner，交接短窗的
-音量／速度意图仍可能丢失；必须另行补所有权，不能宣称所有换核场景已解决。
+后续普通单文件 generic compatibility 已补独立 action／媒体 epoch／route／阶段 owner，
+修复旧回调覆盖新音量／速度，以及捕获取消丢失支持范围内的新意图；冻结 Core
+`bbd871b4` 专项普通／ASan／TSan 各 218 项通过，十一精确负控仍在执行。
+菜单、侧栏、typed／原始快捷键与既有剪辑面板均增加交接中保护；真实预览 admission
+专项 42/0 和两个精确负控、工具 UI 17/0 通过。完整 App／新同源 CI 尚待验证，
+不得把受控事件服务、忙状态 fixture 或旧 Core 测试当作所有换核场景验收。
 以下按时间保留旧候选结果；它们不替代本段的最新状态。
 内部路径只有从未加载过 MPV 的 core 才准入；原孤立本地 SDR 单视频边界保留，新增显式
 有界本地视频列表正在验证，字幕、轨道与旋转等尚走兼容内核，不自动放开目录或 HDR。

@@ -81,6 +81,7 @@ final class MainWindowBoundary {
 }
 
 final class PlayerCore {
+  let hasPendingGenericPlaybackHandoff = false
   let hasPendingPermanentRotation = false
   func requestPermanentRotation(clockwiseQuarterTurns: Int) -> Bool {
     preconditionFailure("Rotation routing is outside the legacy viewport fixture")

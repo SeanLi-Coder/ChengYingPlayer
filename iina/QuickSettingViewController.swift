@@ -627,7 +627,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
 
   private func switchToTab(_ tab: TabViewType) {
     guard isViewLoaded else { return }
-    if player.isUsingNativePlayback, tab != .tools {
+    if player.isUsingNativePlayback || player.hasPendingGenericPlaybackHandoff, tab != .tools {
       videoToolsViewController?.cancelPendingAutomaticPreview()
       player.requireMPVCompatibility(reason: "Unmigrated settings tab") { [weak self] in self?.switchToTab(tab) }
       return
@@ -806,6 +806,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
   }
 
   func tableViewSelectionDidChange(_ notification: Notification) {
+    guard !player.hasPendingGenericPlaybackHandoff else { return }
     withAllTableViews { (view, type) in
       if view.numberOfSelectedRows > 0 {
         // note that track ids start from 1
@@ -1137,6 +1138,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
   }
 
   @objc func chosenSubFromMenu(_ sender: NSMenuItem) {
+    guard !player.hasPendingGenericPlaybackHandoff else { return }
     if let fileInfo = sender.representedObject as? FileInfo {
       player.loadExternalSubFile(fileInfo.url)
     } else if let sub = sender.representedObject as? MPVTrack {

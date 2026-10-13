@@ -15,4 +15,8 @@ sources=(
 )
 xcrun swiftc -target x86_64-apple-macos10.15 -typecheck "${sources[@]}"
 xcrun swiftc -sanitize=address -o "$test_dir/PlayerChromeLifecycleTests" "${sources[@]}"
+if [ "${PLAYER_CHROME_LIFECYCLE_BUILD_ONLY:-0}" = 1 ]; then
+  printf 'BUILD-ONLY: chrome lifecycle fixtures compiled; window checks were not run\n'
+  exit 0
+fi
 ASAN_OPTIONS=detect_leaks=0 "$test_dir/PlayerChromeLifecycleTests"

@@ -194,6 +194,69 @@ func run() throws {
     }
   }
 
+  let handoffBusyCase: (String, () throws -> Void) = ("handoff-busy", {
+      try reset(position: 0.25)
+      try setupFields(0.8, 1.5)
+      try until("Busy admission starts after the real setup seek settles") { !mpv.getFlag("seeking") }
+      var commands: [LivePlaybackCommand] = []
+      mpv.playbackCommandObserver = { commands.append($0) }
+      defer {
+        player.hasPendingGenericPlaybackHandoff = false
+        mpv.playbackCommandObserver = nil
+      }
+      // Only admission is controlled. The Core generic state machine and its
+      // START/seek receipts are not simulated by this live MPV fixture.
+      player.hasPendingGenericPlaybackHandoff = true
+      try check(!player.isUsingNativePlayback && player.info.state.loaded,
+                "The busy boundary matches native-nil loaded MPV during handoff")
+      try check(player.videoToolsCaptureSnapshot() == nil,
+                "Busy bridge refuses a temporary preview snapshot")
+      var captureCalled = false
+      var captured: Double? = 99
+      player.videoToolsCaptureTime { captured = $0; captureCalled = true }
+      try check(captureCalled && captured == nil, "Busy bridge completes marker capture with no partial clock")
+      player.videoToolsPreviewRange(start: 0.8, end: 1.5)
+      try check(player.videoToolsLoopRange == nil && commands.isEmpty,
+                "Busy bridge does not install a loop, seek, or resume")
+      try edit(end, "1.600000")
+      try check(!hasPendingTimer(), "Busy native input cannot schedule an automatic preview")
+      try action(preview)
+      try check(!hasPreviewSnapshot() && !hasPendingTimer(), "Busy manual preview creates no snapshot or timer")
+      let markerStart = start.stringValue
+      let markerEnd = end.stringValue
+      try action(setStart)
+      try action(setEnd)
+      try check(start.stringValue == markerStart && end.stringValue == markerEnd,
+                "Busy current-time marker actions preserve the user's typed range")
+      controller.setPlaybackControlsVisible(false)
+      controller.setPlaybackControlsVisible(true)
+      pump(0.5)
+      try check(!hasPendingTimer() && !hasPreviewSnapshot() && player.videoToolsLoopRange == nil && commands.isEmpty,
+                "Busy sidebar automatic preview submits no playback work")
+
+      player.hasPendingGenericPlaybackHandoff = false
+      try edit(end, "1.700000")
+      try check(hasPendingTimer(), "An idle owner still schedules the real preview debounce")
+      player.hasPendingGenericPlaybackHandoff = true
+      pump(0.5)
+      try check(!hasPendingTimer() && !hasPreviewSnapshot() && player.videoToolsLoopRange == nil && commands.isEmpty,
+                "A preview queued before handoff is rejected when its real timer fires")
+
+      player.restoreNativeLoopToMPV(start: 0.7, end: 1.4)
+      player.videoToolsRestoreViewportToMPV(VideoToolsViewport(zoom: 0.25, panX: 0, panY: 0))
+      try check(player.videoToolsLoopRange == VideoToolsLoopRange(start: 0.7, end: 1.4) &&
+                abs(mpv.getDouble(MPVOption.Video.videoZoom) - 0.25) < 0.000001,
+                "Busy admission still permits internal compatibility A-B and viewport restoration")
+      player.videoToolsClearLoop()
+      player.videoToolsRestoreViewportToMPV(VideoToolsViewport(zoom: 0, panX: 0, panY: 0))
+      player.hasPendingGenericPlaybackHandoff = false
+      try action(preview)
+      try waitForRange(0.8, 1.7)
+      try proveMotion()
+      try check(hasPreviewSnapshot() && commands.contains { $0.kind == .seek } && commands.contains { $0.kind == .unpause },
+                "After handoff the same manual entry installs and renders a real preview")
+      controller.stopPreview()
+    })
   let cases: [(String, () throws -> Void)] = [
     ("opening", {
       try waitForRange(0, 5)
@@ -641,7 +704,7 @@ func run() throws {
     }),
   ]
   let selected = argument("--case") ?? "all"
-  for (name, body) in cases where selected == "all" || selected == name || (selected == "markers" && name.hasPrefix("marker-")) {
+  for (name, body) in cases + [handoffBusyCase] where selected == "all" || selected == name || (selected == "markers" && name.hasPrefix("marker-")) {
     print("CASE: \(name)")
     do { try body() }
     catch let error as TestFailure { failures += 1; print("FAIL [\(name)]: \(error.message)") }

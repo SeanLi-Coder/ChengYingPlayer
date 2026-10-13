@@ -753,6 +753,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   @objc private func setStartToCurrentTime(_ sender: NSButton) {
+    guard player?.hasPendingGenericPlaybackHandoff != true else { return }
     if player?.isUsingNativePlayback == true { captureNativeRangeMarker(isEnd: false); return }
     defaultRangeNeedsDuration = false
     rangeIsUntouched = false
@@ -770,6 +771,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   @objc private func setEndToCurrentTime(_ sender: NSButton) {
+    guard player?.hasPendingGenericPlaybackHandoff != true else { return }
     if player?.isUsingNativePlayback == true { captureNativeRangeMarker(isEnd: true); return }
     defaultRangeNeedsDuration = false
     rangeIsUntouched = false
@@ -948,6 +950,11 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   // MARK: - Preview
 
   private func startAutomaticPreviewIfReady() {
+    guard player?.hasPendingGenericPlaybackHandoff != true else {
+      automaticPreviewPending = false
+      cancelScheduledPreview()
+      return
+    }
     guard automaticPreviewPending, playbackControlsVisible, selectedOperation == .clip else { return }
     guard !nativeAnchorPending else { return }
     if let player, player.isUsingNativePlayback, let intent = nativeAutomaticIntent,
@@ -979,6 +986,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   private func scheduleRangePreview() {
     guard player?.hasPendingPermanentRotation != true else { return }
     cancelScheduledPreview()
+    guard player?.hasPendingGenericPlaybackHandoff != true else { return }
     guard selectedOperation == .clip || selectedOperation == .frames else { return }
     guard validatedRange(showError: false) != nil else {
       // Keep the saved playback state while the user is still typing: only the loop
@@ -1007,7 +1015,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func previewRange(showValidationError: Bool) {
-    guard !UpdateWorkAdmission.shared.isBlocked else {
+    guard !UpdateWorkAdmission.shared.isBlocked, player?.hasPendingGenericPlaybackHandoff != true else {
       automaticPreviewPending = false
       cancelScheduledPreview()
       updatePreviewButtons()
@@ -1102,6 +1110,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   /// A default range nobody edited follows the position the user is actually watching when
   /// the clip tab is revealed, not the position recorded when the file finished loading.
   private func anchorUntouchedRangeToCurrentPosition() {
+    guard player?.hasPendingGenericPlaybackHandoff != true else { return }
     if let player, player.isUsingNativePlayback, rangeIsUntouched, currentLocalMediaURL != nil {
       let revision = previewInputRevision
       let generation = player.videoToolsMediaGeneration
@@ -1183,7 +1192,7 @@ final class VideoToolsViewController: NSViewController, NSTextFieldDelegate {
   }
 
   private func captureNativeRangeMarker(isEnd: Bool) {
-    guard let player, player.info.state.loaded else { return }
+    guard let player, !player.hasPendingGenericPlaybackHandoff, player.info.state.loaded else { return }
     automaticPreviewPending = false
     cancelScheduledPreview()
     defaultRangeNeedsDuration = false

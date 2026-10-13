@@ -195,6 +195,7 @@ extension PlayerCore {
 
   /// Editing markers need the decoder clock, not the periodic presentation cache.
   func videoToolsCaptureTime(completion: @escaping (Double?) -> Void) {
+    guard !hasPendingGenericPlaybackHandoff else { completion(nil); return }
     if isUsingNativePlayback { captureNativePreviewPosition(completion: completion) }
     else { completion(videoToolsCurrentTime) }
   }
@@ -214,7 +215,7 @@ extension PlayerCore {
   }
 
   func videoToolsCaptureSnapshot() -> VideoToolsPlayerSnapshot? {
-    guard !isUsingNativePlayback, info.state.loaded, let mediaURL = info.currentURL,
+    guard !hasPendingGenericPlaybackHandoff, !isUsingNativePlayback, info.state.loaded, let mediaURL = info.currentURL,
           let position = videoToolsCurrentTime else { return nil }
     return VideoToolsPlayerSnapshot(
       mediaURL: mediaURL,
@@ -231,7 +232,7 @@ extension PlayerCore {
   }
 
   func videoToolsPreviewRange(start: Double, end: Double) {
-    guard !isUsingNativePlayback, info.state.loaded,
+    guard !hasPendingGenericPlaybackHandoff, !isUsingNativePlayback, info.state.loaded,
           let range = VideoToolsLoopRange(start: start, end: end, duration: info.videoDuration?.second) else { return }
     videoToolsActivateLoop(range)
     seek(absoluteSecond: start)

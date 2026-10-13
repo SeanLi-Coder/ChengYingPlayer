@@ -22,6 +22,16 @@ an existing local commit; the runner does not fetch source or replace the rest
 of the playback implementation. Test apps are isolated and retired using
 `TestAppWorkspace`.
 
+`--preview-case handoff-busy --language en` keeps the production panel open while
+the explicit admission boundary reports a pending generic handoff with native
+playback absent and MPV loaded. It checks typed/manual previews, marker capture,
+and a timer scheduled before the busy transition, then admits the same preview
+after completion. Internal A-B and viewport restoration remain allowed.
+`--build-only` compiles the controls fixture without running any GUI or behavior
+test; it does not compile or execute the separate coordinator/task suites.
+The admission flag is controlled, not a fake implementation of the generic Core
+owner, media epoch, or START/seek completion protocol.
+
 The input fixture waits for a key, laid-out window and observes an actual
 playback refresh with invalid input before measuring debounce separately.
 It checks the production timer's 350 ms deadline, cancellation on new input,

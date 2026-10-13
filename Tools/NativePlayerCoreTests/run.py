@@ -46,6 +46,9 @@ def main():
     rotation_start = core.index("  private var permanentRotationIntent")
     rotation_end = core.index("\n  /// Both window shortcuts", rotation_start)
     generated += core[rotation_start:rotation_end] + "\n"
+    restore_start = core.index("  private var pendingRotationPlaybackRestore:")
+    restore_end = core.index("\n  }", restore_start) + len("\n  }")
+    generated += core[restore_start:restore_end] + "\n"
     generated += (ROOT / "Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt").read_text() + "\n"
     installation_start = core.index("  private final class NativeQueueInstallation {")
     installation_end = core.index("  var hasNativePlaybackQueue:", installation_start)
@@ -66,13 +69,12 @@ def main():
             raise RuntimeError("Precise capture negative-control boundary changed")
         bodies["requireMPVCompatibility"] = bodies["requireMPVCompatibility"].replace(guard, "          if false {", 1)
     opening = method(core, "openMainWindow")
-    boundary = '\n    advancePlaybackRoute(acceptsMPV: queueInstallationID == nil)\n    log("Opening '
+    boundary = '\n    log("Opening '
     if boundary not in opening:
         raise RuntimeError("Legacy open boundary changed")
     # Keep the production arbitration; the legacy UI/render/load side effects
     # are an explicit recording boundary, not a claim of full AppKit rendering.
     opening = opening[:opening.index(boundary)] + """
-    advancePlaybackRoute(acceptsMPV: true)
     completeLegacyOpen(url: url, allowNative: allowNative)
   }
 """

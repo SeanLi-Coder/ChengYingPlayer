@@ -73,6 +73,10 @@ final class MPVController {
 enum OSDMessage { case custom(String) }
 final class PlayerCore: NSObject {
   var isUsingNativePlayback = false
+  // A controlled admission boundary, not a simulated Core handoff state machine.
+  var hasPendingGenericPlaybackHandoff = false
+  // The separately extracted rotation request never owns a generic handoff here.
+  let genericHandoffOwner: Never? = nil
   // This legacy tools fixture never owns an explicit native queue.
   let nativeQueueInstallation: Never? = nil
   let hasPendingNativeQueueRestore = false

@@ -12,6 +12,10 @@ executable that can generate the synthetic fixture. The runner targets macOS 12;
 this is not a deployment-target or Intel compatibility test. It defaults to
 `/opt/homebrew/bin/ffmpeg` unless `FFMPEG_BIN` is set.
 
+`NATIVE_AB_BUILD_ONLY=1` stops after compilation without generating media or
+executing playback. It can be combined with a negative-control selector to
+check extraction/compilation, but does not prove the corresponding assertion.
+
 ```sh
 FFMPEG_BIN="$PWD/deps/executable/ffmpeg" bash Tools/NativeABLoopTests/run.sh
 

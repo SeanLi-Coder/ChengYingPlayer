@@ -43,6 +43,17 @@ let queueEnd = source.range(of: "  var hasNativePlaybackQueue:", range: queueSta
 let noQueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt"), encoding: .utf8)
   .replacingOccurrences(of: "__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__", with: String(source[queueStart..<queueEnd]))
 var compatibilityMethods = ["  func requireMPVCompatibility(", "  private func retireNativePlayback("].map(coreMethod).joined(separator: "\n")
+let opening = coreMethod("  private func openMainWindow(")
+let openBoundary = "\n    log(\"Opening "
+precondition(opening.components(separatedBy: openBoundary).count == 2,
+             "Compatibility open boundary changed")
+let compatibilityOpen = String(opening[..<opening.range(of: openBoundary)!.lowerBound]) + """
+
+    precondition(!allowNative && !isNetwork)
+    compatibilityLoads += 1
+    info.state = .loaded
+  }
+"""
 if ProcessInfo.processInfo.environment["NATIVE_PREVIEW_NEGATIVE_CONTROL"] == "stale-compatibility" {
   let original = ",\n              (!initiallyReady && self.nativeInitialPlaybackPending || self.nativePreviewIntentRevision == previewIntent),\n              !self.nativePreviewInProgress"
   let retry = ",\n                    (!initiallyReady && self.nativeInitialPlaybackPending || self.nativePreviewIntentRevision == previewIntent),\n                    !self.nativePreviewInProgress"
@@ -78,12 +89,22 @@ final class PlayerCore {
   var compatibilityPosition: Double? { nativeCompatibilityRestore?.position }
   var compatibilityPaused: Bool? { nativeCompatibilityRestore?.paused }
   var compatibilityLoop: (Double?, Double?) { (nativeCompatibilityRestore?.loopA, nativeCompatibilityRestore?.loopB) }
-  func completeCompatibilityBoundary() { nativeCompatibilityRestore?.completion(); nativeCompatibilityRestore = nil }
-  func openMainWindow(path: String, url: URL, isNetwork: Bool, allowNative: Bool) {
-    precondition(!allowNative && !isNetwork)
-    compatibilityLoads += 1
-    info.state = .loaded
+  func completeCompatibilityBoundary() {
+    guard let restore = nativeCompatibilityRestore else { preconditionFailure("Missing controlled compatibility receipt") }
+    // MPV START/restart are explicit service boundaries, not events observed by
+    // this native-preview suite. Ownership and completion consumption are real.
+    if let id = restore.genericOwnerID {
+      precondition(ownsGenericHandoff(id, phase: .awaitingStart(playbackEventRoute.revision)))
+      genericHandoffOwner?.phase = .restoring(playbackEventRoute.revision, videoToolsMediaGeneration)
+    }
+    guard let completion = consumeGenericHandoffCompletion(restore) else {
+      preconditionFailure("Controlled compatibility receipt lost its owner")
+    }
+    nativeCompatibilityRestore = nil
+    completion()
   }
+  func attemptNativeOpen(_ url: URL) -> Bool { preconditionFailure("Native admission is outside compatibility reloads") }
+\(compatibilityOpen)
   @discardableResult
   func advancePlaybackRoute(acceptsMPV: Bool) -> UInt64 {
     playbackEventRoute.revision &+= 1
@@ -108,6 +129,7 @@ final class PlayerCore {
   func syncAbLoop() { syncs += 1 }
   func cancelNativeLoopRequests() {}
   func open(_ url: URL) {
+    invalidateGenericHandoff()
     cancelNativePreview(restoreLoop: false)
     nativeTransport?.session.shutdown {}
     videoToolsMediaGeneration &+= 1
@@ -134,6 +156,7 @@ final class PlayerCore {
     transport.session.open(url, autoplay: false)
   }
   func close() {
+    invalidateGenericHandoff()
     cancelNativePreview(restoreLoop: false)
     playbackEventRoute.revision &+= 1
     nativeTransport?.session.shutdown {}

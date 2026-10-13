@@ -13,6 +13,8 @@ NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativeClipPreviewTests/run.sh
 
 默认使用 `/opt/homebrew/bin/ffmpeg`；可通过 `FFMPEG_BIN` 指定项目打包的 FFmpeg。
 Clang 与 Swift 同时启用所选 sanitizer，不删除或弱化原断言。
+`NATIVE_PREVIEW_BUILD_ONLY=1` 只抽取和编译，不生成媒体或运行播放；也可结合负控
+selector 检查其抽取与编译，但不能记作行为通过或负控成功。
 
 以下反向控制应以非零状态退出，不能计入通过数量：
 
@@ -38,6 +40,9 @@ NATIVE_PREVIEW_NEGATIVE_CONTROL=stale-compatibility bash Tools/NativeClipPreview
   永久停留在初始 loaded 阶段。首开 pending 与暂停 getter 从生产代码机械提取；准入本身仍是边界。
   兼容测试在真实 native shutdown 完成后记录待装载的 position/pause/A/B，
   **MPV 的装载、ready 和画面是边界，不代表真实主窗口跨内核交接通过**。
+  open 的生产仲裁与 generic phase 转换前缀按原样抽取；完成入口显式提供受控
+  START/restart 收据，再调用真实 ownership／completion-consumption helper。
+  此受控收据不冒充实际 MPV 事件；新 open/close 使用真实 generic invalidation helper。
 - 核实连续输入只保留最后请求、无效输入保留基线、同 URL 新 generation、采点取消与重入关闭、
   A=0/仅 A/未设置 A/B、恢复位置与暂停、预览期间音量/倍速及文件循环变更、真实 EOF 后一次播放重启。
 - 通过真实 Session worker 队列屏障，让旧兼容采点与同代次的新预览／暂停交错，核实旧交接不会夺走新操作。

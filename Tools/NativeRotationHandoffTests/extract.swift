@@ -38,9 +38,9 @@ members += signatures.map { method(core, $0) }.joined(separator: "\n")
 // Keep all arbitration from the production open method; renderer creation and
 // mpv load are explicitly controlled boundaries after that arbitration.
 let opening = method(core, "  private func openMainWindow(")
-let legacy = "\n    advancePlaybackRoute(acceptsMPV: queueInstallationID == nil)\n    log(\"Opening "
+let legacy = "\n    log(\"Opening "
 precondition(opening.components(separatedBy: legacy).count == 2)
-members += "\n" + String(opening[..<opening.range(of: legacy)!.lowerBound]) + "\n    advancePlaybackRoute(acceptsMPV: true)\n    completeLegacyOpen(url: url, allowNative: allowNative)\n  }\n"
+members += "\n" + String(opening[..<opening.range(of: legacy)!.lowerBound]) + "\n    completeLegacyOpen(url: url, allowNative: allowNative)\n  }\n"
 // Keep exact lifecycle sub-blocks. Unrelated file history, metadata loading,
 // actual mpv events and UI synchronization are not emulated as full App tests.
 members += "\n  func fileStartedBoundary() {\n" + span(core,

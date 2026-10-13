@@ -13,6 +13,8 @@ final class MPVBoundary {
 final class PlayerBoundary {
   var isUsingNativePlayback = false
   let hasNativePlaybackQueue = false
+  var hasPendingGenericPlaybackHandoff = false
+  var compatibilityRequests = 0
   var pending: (() -> Void)?
   let mpv = MPVBoundary()
   var aspects: [String] = []
@@ -20,13 +22,19 @@ final class PlayerBoundary {
   var volumes: [Double] = []
   var currentPlaybackSpeed = 1.5
   var playbackVolume = 30.0
-  func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) { pending = completion }
+  func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
+    compatibilityRequests += 1
+    // This records routing only. Real Core ownership is tested separately.
+    guard !hasPendingGenericPlaybackHandoff else { return }
+    pending = completion
+  }
   func setVideoAspect(_ aspect: String) { aspects.append(aspect) }
   func sendOSD(_ message: OSD) {}
   func setSpeed(_ rate: Double) { rates.append(rate); currentPlaybackSpeed = rate }
   func setVolume(_ volume: Double, unmute: Bool) { volumes.append(volume); playbackVolume = volume }
   func finishHandoff() {
     isUsingNativePlayback = false
+    hasPendingGenericPlaybackHandoff = false
     let callback = pending
     pending = nil
     callback?()
@@ -74,4 +82,26 @@ handler.menuChangeVolume(item)
 handler.menuChangeVolume(item)
 check(player.volumes == [35, 40], "Repeated menu volume deltas use accepted transport intent")
 check(player.pending == nil, "Supported menu transport actions do not request compatibility")
+
+player.isUsingNativePlayback = true
+item.representedObject = "21:9"
+handler.menuChangeAspect(item)
+check(player.pending != nil, "The original generic action is retained before native retirement")
+player.isUsingNativePlayback = false
+player.hasPendingGenericPlaybackHandoff = true
+let requestsBefore = player.compatibilityRequests
+item.representedObject = "1:1"
+handler.menuChangeAspect(item)
+check(player.compatibilityRequests == requestsBefore + 1 && player.aspects == ["16:9"],
+      "A second menu action reaches the busy gate after the native transport is gone")
+item.tag = 2
+handler.menuCycleTrack(item)
+check(player.compatibilityRequests == requestsBefore + 2 && player.mpv.commands == [["audio"]],
+      "Track menus cannot issue raw commands during a pending generic load")
+player.finishHandoff()
+check(player.aspects == ["16:9", "21:9"] && player.pending == nil,
+      "The pending generic action survives rejected menu actions without replacement")
+handler.menuChangeAspect(item)
+check(player.aspects == ["16:9", "21:9", "1:1"],
+      "Normal MPV menu actions resume after the generic busy state ends")
 print("Menu routing checks: \(checks) passed")

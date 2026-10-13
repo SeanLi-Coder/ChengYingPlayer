@@ -5,6 +5,10 @@ or `thread` for the same checks and negative controls under the sanitizer.
 Each run retains its generated Swift, input hashes, logs and exit/source-check
 results under an owned `build/url-enqueue-tests.*` directory.
 
+`URL_ENQUEUE_BUILD_ONLY=1` compiles the positive fixture and all eight negative
+variants without executing them. It verifies extraction/compilation only; it
+does not count as passing behavior or successful negative-control rejection.
+
 The fixture mechanically extracts production `PlayerCore` enqueue ownership,
 compatibility capture/retirement, restore, navigation, pause/seek, stop/shutdown
 and file-ended methods. It also compiles the actual AppDelegate enqueue/open

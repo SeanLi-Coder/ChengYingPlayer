@@ -30,10 +30,10 @@ for signature in ["  func requireMPVCompatibility(", "  private func retireNativ
   members += "\n" + method(signature)
 }
 let opening = method("  private func openMainWindow(")
-let boundary = "\n    advancePlaybackRoute(acceptsMPV: queueInstallationID == nil)\n    log(\"Opening "
+let boundary = "\n    log(\"Opening "
 precondition(opening.components(separatedBy: boundary).count == 2)
 members += "\n" + String(opening[..<opening.range(of: boundary)!.lowerBound]) +
-  "\n    advancePlaybackRoute(acceptsMPV: true)\n    completeLegacyOpen(url: url, allowNative: allowNative)\n  }\n"
+  "\n    completeLegacyOpen(url: url, allowNative: allowNative)\n  }\n"
 members += "\n  func fileLoadedBoundary() {\n" + span(
   "    if var restore = nativeCompatibilityRestore, restore.url == info.currentURL {", "\n  func fileEnded(")
 members += "\n  func restartBoundary() {\n" + span(
@@ -68,8 +68,8 @@ case "drop-owner":
   replaceOnce("    cancelURLPlaylistEnqueue()\n    urlPlaylistMediaEpoch = UUID()",
               "    /* negative: abandon reset ownership */\n    urlPlaylistMediaEpoch = UUID()")
 case "drop-pause-restore":
-  replaceOnce("           hasPendingURLPlaylistRestore || hasPendingNativeQueueRestore)",
-              "           false || hasPendingNativeQueueRestore)")
+  replaceOnce("           hasPendingURLPlaylistRestore || hasPendingNativeQueueRestore || hasPendingGenericPlaybackRestore)",
+              "           false || hasPendingNativeQueueRestore || hasPendingGenericPlaybackRestore)")
 case "ignore-result":
   replaceOnce("        if $0 >= 0 { count += 1 }", "        _ = $0; count += 1")
 case "empty-playlist":

@@ -634,6 +634,30 @@ withFixture { controller in
         "An auto-hidden tools panel is not dismissed by a picture click either")
 }
 
+withFixture { controller in
+  controller.player.hasPendingGenericPlaybackHandoff = true
+  controller.showSettingsSidebar(tab: .video, force: true)
+  check(controller.sideBarStatus == .hidden && ChromeAnimations.pending.isEmpty,
+        "A generic handoff blocks a direct settings-toolbar request before showing UI")
+  controller.showPlaylistSidebar(force: true)
+  check(controller.sideBarStatus == .hidden && ChromeAnimations.pending.isEmpty,
+        "A generic handoff blocks a direct playlist-toolbar request before showing UI")
+  controller.player.hasPendingGenericPlaybackHandoff = false
+  controller.showSettingsSidebar(tab: .video)
+  ChromeAnimations.drain()
+  check(controller.sideBarStatus == .settings && controller.isSidebarVisible,
+        "Settings remain usable when the generic handoff is finished")
+  controller.player.hasPendingGenericPlaybackHandoff = true
+  controller.showPlaylistSidebar(force: true)
+  check(controller.sideBarStatus == .settings && controller.quickSettingView.closes == 0,
+        "A busy generic switch cannot replace or close an existing settings panel")
+  controller.player.hasPendingGenericPlaybackHandoff = false
+  controller.showPlaylistSidebar(force: true)
+  ChromeAnimations.drain()
+  check(controller.sideBarStatus == .playlist && controller.isSidebarVisible,
+        "Playlist presentation resumes after the generic handoff is finished")
+}
+
 for value in [Double.nan, .infinity, -.infinity] {
   check(PlayerChromePolicy.hideDelay(value) == 2.5, "Non-finite auto-hide delay uses the safe default")
 }

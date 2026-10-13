@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--controller-ref", help="Use controller source from this local Git commit without fetching")
     parser.add_argument("--language", choices=("en", "zh-Hans", "zh-Hant"), help="Run one language instead of all three")
     parser.add_argument("--preview-case", action="append",
-                        choices=("opening", "input", "markers", "rounding", "invalid", "lifecycle", "navigation", "waiting"),
+                        choices=("opening", "input", "markers", "rounding", "invalid", "lifecycle", "navigation", "waiting", "handoff-busy"),
                         help="Run an isolated automatic-preview case; repeat to select multiple cases")
     parser.add_argument("--preview-wait-mode", choices=("observed", "fixed"), default="observed",
                         help="Compare observed-state waiting with the legacy fixed wait in the waiting case")
@@ -31,6 +31,7 @@ def main():
                         help="Maximum native preview fixture content height, also capped to the visible screen")
     parser.add_argument("--preview-run-loop-stall", type=float, default=0,
                         help="Block preview fixture timer delivery for this many seconds to test late dispatch")
+    parser.add_argument("--build-only", action="store_true", help="Compile controls without running GUI or behavior tests")
     arguments = parser.parse_args()
     if arguments.preview_wait_mode == "fixed" and arguments.preview_case != ["waiting"]:
         parser.error("--preview-wait-mode fixed requires only --preview-case waiting")
@@ -106,6 +107,9 @@ extension VideoToolsViewController {
             "iina/VideoTools/VideoToolsLoopPolicy.swift", "iina/VideoTools/VideoToolsPlayerBridge.swift",
             actual_controller, "Tools/VideoToolsTests/ShortcutTests.swift", "Tools/VideoToolsTests/LoopPolicyTests.swift",
             "Tools/VideoToolsTests/main.swift"])
+        if arguments.build_only:
+            print("Compiled controls fixture only; no GUI or behavior test was executed.", flush=True)
+            return
         environment = os.environ.copy()
         environment.pop("CHENGYING_PREVIEW_REGRESSION_CASE", None)
         environment["CHENGYING_PREVIEW_WAIT_MODE"] = arguments.preview_wait_mode

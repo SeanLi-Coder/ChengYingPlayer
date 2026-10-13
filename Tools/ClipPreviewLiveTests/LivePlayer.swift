@@ -217,6 +217,8 @@ final class MPVController {
 
 final class PlayerCore: NSObject {
   var isUsingNativePlayback = false
+  // A controlled admission boundary, not a simulated Core handoff state machine.
+  var hasPendingGenericPlaybackHandoff = false
   let hasPendingPermanentRotation = false
   // This live fixture only exercises preview and seek, never rotation handoff.
   struct RotationIntentBoundary { let hasPending = false; let pendingTicket: RotationTicketBoundary? = nil }
@@ -255,6 +257,7 @@ final class PlayerCore: NSObject {
   // The actual MPV path remains under test; native preview is not simulated here.
   enum NativePreviewResult { case applied, unavailable, superseded }
   let nativePreviewInProgress = false
+  let nativePreviewBaseline: Never? = nil
   let nativePreviewIntentRevision: UInt64 = 0
   var nativeReady: Bool { preconditionFailure("Unexpected native readiness in live MPV clip tests") }
   var nativeInitialPlaybackPending: Bool { preconditionFailure("Unexpected native opening state in live MPV clip tests") }

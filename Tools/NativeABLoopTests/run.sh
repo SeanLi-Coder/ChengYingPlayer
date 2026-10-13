@@ -30,6 +30,10 @@ xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm6
   -Xlinker -rpath -Xlinker "$repo_root/deps/lib" \
   -framework AppKit -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework AudioToolbox \
   -o "$test_dir/ab-tests"
+if [[ "${NATIVE_AB_BUILD_ONLY:-0}" == 1 ]]; then
+  printf 'Compiled native A/B fixture only; playback was not executed. Artifacts: %s\n' "$test_dir"
+  exit 0
+fi
 "$ffmpeg_bin" -hide_banner -loglevel error -nostdin -f lavfi -i testsrc2=s=160x96:r=30:d=4 \
   -f lavfi -i anullsrc=r=48000:cl=stereo -t 4 -c:v ffv1 -pix_fmt yuv420p \
   -color_range tv -color_primaries bt709 -color_trc bt709 -colorspace bt709 -c:a pcm_f32le "$test_dir/synthetic.mkv"

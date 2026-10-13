@@ -39,6 +39,7 @@ final class MainWindowBoundary {
 }
 class CoreBoundary {
   let hasPendingPermanentRotation = false
+  let hasPendingGenericPlaybackHandoff = false
   func requestPermanentRotation(clockwiseQuarterTurns: Int) -> Bool {
     preconditionFailure("Rotation is outside the focused viewport boundary")
   }

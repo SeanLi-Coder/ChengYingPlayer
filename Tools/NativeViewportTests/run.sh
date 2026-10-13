@@ -20,4 +20,8 @@ xcrun swiftc -swift-version 5 -target x86_64-apple-macos10.15 -typecheck "${sour
 shasum -a 256 iina/PlayerCore.swift iina/PlayerWindowController.swift iina/VideoView.swift \
   iina/VideoTools/VideoToolsPlayerBridge.swift iina/NativePlayback/NativePlaybackSurface.swift \
   > "$test_dir/sources.sha256"
+if [ "${NATIVE_VIEWPORT_BUILD_ONLY:-}" = 1 ]; then
+  printf 'BUILD-ONLY: native viewport fixtures compiled; window checks were not run\n'
+  exit 0
+fi
 /usr/bin/perl -e 'alarm 30; exec @ARGV' "$test_dir/viewport-tests" 2>&1 | tee "$test_dir/results.log"

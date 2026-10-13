@@ -119,6 +119,7 @@ class CoreBoundary: NSObject {
   var nativeRetiring = false
   var nativeTerminationRequested = false
   var nativeInitialPauseIntent: Bool?
+  var nativePreferredRate = 1.0
   var nativeRetirementCompletion: (() -> Void)?
   var nativeLoopA: Double?
   var nativeLoopB: Double?

@@ -229,6 +229,46 @@ func runAutomaticPreviewRegression(_ scenario: String) {
   }
 
   switch scenario {
+  case "handoff-busy":
+    testPlayer.hasPendingGenericPlaybackHandoff = true
+    defer { testPlayer.hasPendingGenericPlaybackHandoff = false }
+    check(!testPlayer.isUsingNativePlayback && testPlayer.info.state.loaded,
+          "Busy tools admission uses the native-nil loaded boundary")
+    check(testPlayer.videoToolsCaptureSnapshot() == nil, "Busy tools bridge refuses a preview snapshot")
+    var captured: Double? = 99
+    testPlayer.videoToolsCaptureTime { captured = $0 }
+    check(captured == nil, "Busy tools bridge refuses the partial media clock")
+    type("23.5", into: last)
+    check(field("previewTimer", as: Timer?.self) == nil, "Busy tools input creates no debounce timer")
+    action(field("rangePreviewButton", as: NSButton.self))
+    let firstValue = first.stringValue
+    let lastValue = last.stringValue
+    action(firstMarker)
+    action(lastMarker)
+    check(first.stringValue == firstValue && last.stringValue == lastValue,
+          "Busy tools marker actions preserve both fields")
+    testPlayer.videoToolsPreviewRange(start: 10, end: 23.5)
+    pump(0.5)
+    check(field("previewSnapshot", as: VideoToolsPlayerSnapshot?.self) == nil &&
+          testPlayer.videoToolsLoopRange == nil && testPlayer.mpv.getFlag("pause"),
+          "Busy tools requests leave partial MPV playback untouched")
+    testPlayer.hasPendingGenericPlaybackHandoff = false
+    type("24.5", into: last)
+    check(field("previewTimer", as: Timer?.self) != nil, "Idle tools input still schedules a preview")
+    testPlayer.hasPendingGenericPlaybackHandoff = true
+    pump(0.5)
+    check(field("previewTimer", as: Timer?.self) == nil &&
+          field("previewSnapshot", as: VideoToolsPlayerSnapshot?.self) == nil && testPlayer.videoToolsLoopRange == nil,
+          "A pre-handoff timer cannot start a busy tools preview")
+    testPlayer.restoreNativeLoopToMPV(start: 1, end: 2)
+    testPlayer.videoToolsRestoreViewportToMPV(VideoToolsViewport(zoom: 0.25, panX: 0, panY: 0))
+    check(testPlayer.videoToolsLoopRange == VideoToolsLoopRange(start: 1, end: 2) &&
+          near(testPlayer.mpv.getDouble("video-zoom"), 0.25),
+          "Internal A-B and viewport restore remain admitted while tools are busy")
+    testPlayer.videoToolsClearLoop()
+    testPlayer.hasPendingGenericPlaybackHandoff = false
+    action(field("rangePreviewButton", as: NSButton.self))
+    expectsRange(10, 24.5, "The same tools preview entry succeeds once handoff completes")
   case "waiting":
     let inputStarted = Date()
     type("23.5", into: last)

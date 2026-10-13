@@ -20,10 +20,14 @@ def main():
     parser.add_argument("--parent-ref", help="Compare an existing git revision of the production settings parent")
     parser.add_argument("--core-ref", help="Compare an existing git revision of the production playback methods")
     parser.add_argument("--build-only", action="store_true", help="Check compilation without opening any test windows")
+    parser.add_argument("--busy-negative-control", choices=["controller", "bridge"],
+                        help="Remove only generic preview admission guards from one production surface")
     parser.add_argument("--case", choices=["all", "opening", "editing", "markers", "navigation", "boundary", "precision",
                                            "invalid", "restore", "chrome-autohide", "media-reload", "fullwidth",
-                                           "landing", "anchor"], default="all")
+                                           "landing", "anchor", "handoff-busy"], default="all")
     args = parser.parse_args()
+    if args.busy_negative_control and (args.case != "handoff-busy" or args.controller_ref or args.parent_ref or args.core_ref):
+        parser.error("Busy negative controls require only --case handoff-busy with current production sources")
     if args.media and not args.media.is_file():
         parser.error("The media argument must be an existing local file")
     def resolve(reference, description):
@@ -74,6 +78,24 @@ def main():
             controller.write_bytes(subprocess.check_output([
                 "git", "show", f"{controller_ref}:iina/VideoTools/VideoToolsViewController.swift"
             ], cwd=ROOT))
+        bridge = ROOT / "iina/VideoTools/VideoToolsPlayerBridge.swift"
+        if args.busy_negative_control:
+            original = controller if args.busy_negative_control == "controller" else bridge
+            source = original.read_text()
+            replacements = [("player?.hasPendingGenericPlaybackHandoff != true", 6),
+                            ("!player.hasPendingGenericPlaybackHandoff", 1)] if args.busy_negative_control == "controller" else [
+                                ("!hasPendingGenericPlaybackHandoff", 3)]
+            for predicate, expected in replacements:
+                if source.count(predicate) != expected:
+                    raise RuntimeError(f"Busy admission mutation landmark changed: {predicate}")
+                source = source.replace(predicate, "true")
+            mutated = work / original.name
+            mutated.write_text(source)
+            if args.busy_negative_control == "controller":
+                controller = mutated
+            else:
+                bridge = mutated
+            print(f"NEGATIVE CONTROL: {args.busy_negative_control} generic preview admission only", flush=True)
         media = args.media.resolve() if args.media else work / "generated-motion.mp4"
         if not args.media:
             # A high-resolution timescale preserves a fractional final duration.
@@ -91,10 +113,10 @@ def main():
             "iina/MPVCommand.swift", "iina/MPVHook.swift", "iina/ChengYingStyle.swift",
             "iina/MediaInfo/MediaInfoModels.swift", "iina/VideoTools/VideoToolsModels.swift",
             "iina/VideoTools/VideoToolsShortcuts.swift", "iina/VideoTools/VideoToolsLoopPolicy.swift",
-            "iina/VideoTools/VideoToolsRotationCoordinator.swift", "iina/VideoTools/VideoToolsPlayerBridge.swift",
+            "iina/VideoTools/VideoToolsRotationCoordinator.swift",
         ]
         subprocess.run(["xcrun", "swiftc", "-o", str(executable), *[str(ROOT / item) for item in sources],
-                        str(tests / "LivePlayer.swift"), str(work / "PlayerMethods.swift"),
+                        str(bridge), str(tests / "LivePlayer.swift"), str(work / "PlayerMethods.swift"),
                         str(work / "ExportBoundary.swift"), str(controller), str(work / "QuickSettingLifecycle.swift"), str(tests / "main.swift"),
                         str(renderer), "-import-objc-header", str(tests / "Renderer.h"),
                         "-I", str(ROOT / "deps/include"), str(ROOT / "deps/lib/libmpv.2.dylib"),
