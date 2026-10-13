@@ -39,9 +39,12 @@ ClipPreviewLiveTests 缺 `nativePreviewBaseline` 的旧边界编译处失败。�
 这是实际 Session／MPV 与抽取 Core 的服务边界测试，不是完整 App 通过。
 后续普通单文件 generic compatibility 已补独立 action／媒体 epoch／route／阶段 owner，
 修复旧回调覆盖新音量／速度，以及捕获取消丢失支持范围内的新意图；冻结 Core
-`bbd871b4` 专项普通／ASan／TSan 各 218 项通过，十一精确负控仍在执行。
+`bbd871b4` 专项普通／ASan／TSan 各 218 项通过，十一精确负控全部产生准确失败；
+主代理独立复核 13 份 sanitizer／负控源码清单与普通运行一致，生成物 hash 有效。
 菜单、侧栏、typed／原始快捷键与既有剪辑面板均增加交接中保护；真实预览 admission
-专项 42/0 和两个精确负控、工具 UI 17/0 通过。完整 App／新同源 CI 尚待验证，
+专项 42/0 和两个精确负控、工具 UI 17/0 通过。冻结 `35d992488d9872c0e18ee780f1c9dc90f34f6d9b`
+已推送，开发 CI `38361506765` 于 2026-10-13 07:15 UTC 派发，当前运行中，
+`upload_development_build=false`；尚无完整 App／新同源 CI 通过结论。
 不得把受控事件服务、忙状态 fixture 或旧 Core 测试当作所有换核场景验收。
 以下按时间保留旧候选结果；它们不替代本段的最新状态。
 内部路径只有从未加载过 MPV 的 core 才准入；原孤立本地 SDR 单视频边界保留，新增显式

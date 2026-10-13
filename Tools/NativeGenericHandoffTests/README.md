@@ -85,3 +85,28 @@ accepted negative control. No production guard is disabled by the runner.
 | `drop-capture-native-volume`, `drop-capture-native-speed` | Keep supported capture-time input only in cancellable staging. |
 | `accept-duplicate-start` | Treat another same-path start as the first expected start. |
 | `drop-typed-seek`, `drop-typed-speed` | Lose standard keyboard input in the busy handoff gate. |
+
+All eleven final negative runs completed normally with exit code 1 and exactly
+the expected failed-assertion multiset, then the verifier accepted each run.
+Their source manifests equal `DDXugx`; each generated mutation's own hash was
+verified unchanged after execution. These are deliberate failures, not failed
+production tests.
+
+| Control | Artifact suffix | Expected failures / total |
+| --- | --- | --- |
+| `forget-volume` | `GpwkAR` | 7 / 218 |
+| `forget-speed` | `nuBjE0` | 7 / 218 |
+| `allow-busy-action` | `CCgtrD` | 1 / 218 |
+| `old-volume-completion` | `Zfrb94` | 2 / 218 |
+| `old-speed-completion` | `RzEi0e` | 1 / 218 |
+| `reject-retiring-volume` | `0GUfIr` | 2 / 218 |
+| `drop-capture-native-volume` | `8VO3jc` | 2 / 218 |
+| `drop-capture-native-speed` | `qTvSuj` | 2 / 218 |
+| `accept-duplicate-start` | `YYe337` | 1 / 218 |
+| `drop-typed-seek` | `3KAJba` | 3 / 218 |
+| `drop-typed-speed` | `2gJxiQ` | 3 / 218 |
+
+The final production/runner inputs are included in commit `35d99248`.
+This evidence table was added after that commit and does not change which
+source a separately dispatched CI run contains. No app was installed or
+published by this regression work; the default playback route remains MPV.

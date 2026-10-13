@@ -33,6 +33,10 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 没有发行或开发 App 上传。下文保留的失败
 `38337569102` 不被本次准备结果覆盖。
 
+后续冻结 `35d992488d9872c0e18ee780f1c9dc90f34f6d9b` 已推送，开发 CI
+`38361506765` 于 2026-10-13 07:15 UTC 派发，当前运行中；开发 App 上传仍关闭。
+本地最终负控证据在派发后补入文档，不改变该次 CI 的冻结内容。
+
 显式有界列表已接实际 Core、native Session 与 MPV 命令；周围 App 服务边界见
 `Tools/NativeCoreQueueTests/README.md`。生产 controller 的停止协议单独测试：
 当前条目真正卸载后才能清理精确 owner 的列表，reader 事件排空后才能确认 idle。
@@ -56,7 +60,9 @@ lifecycle 76 也在该 Core 上通过；Rotation/URL 本轮仅类型检查，不
 冻结 Core `bbd871b4` 的新专项普通 `DDXugx`、ASan `rpmA43`、TSan `oUxbJF` 各
 218/0，实际 setter 已复现并修补旧回调覆盖新音量／速度，以及捕获取消后支持范围内
 的新意图丢失。完整发现历史与测试边界见 `Tools/NativeGenericHandoffTests/README.md`；
-十一项精确负控仍在执行，不把正向结果当作负控通过。
+十一项精确负控全部准确触发预定失败，完整表见 README。主代理另外复核 13 份
+sanitizer／负控源码清单均与普通运行一致，exit-status 为 wrapper 成功、
+source-comparison 为空且生成物 hash 有效；不把故意失败当生产测试失败。
 
 菜单／既有侧栏／原始和 typed 快捷键已保护半加载窗口；既有剪辑面板的预览、
 自动 debounce 与采点也受门禁保护，内部 A/B／viewport 恢复仍可执行。实际 libmpv
@@ -66,7 +72,7 @@ lifecycle 76 也在该 Core 上通过；Rotation/URL 本轮仅类型检查，不
 侧栏 lifecycle 190 加 4 source 检查均过。受控 Core 41 加两负控本轮亦通过；
 CoreQueue 普通加 18 负控仅重新生成和核对唯一替换点，不能继承旧 Core 的运行结论。
 旧 Rotation／URL／AB／NativeClipPreview／NativeViewport 仅补接口并编译，
-完整 App 与新同源 CI 尚待执行。当前仍不切默认或发布，能力门禁与发行身份均不变。
+完整 App 与新同源 CI 结果尚待确认。当前仍不切默认或发布，能力门禁与发行身份均不变。
 以下历史候选与失败保留各自源码身份，不当作后续 Core 变更的验收。
 
 ### AV1 与队列后续切片（2026-10-13，未切默认）
