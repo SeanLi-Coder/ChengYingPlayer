@@ -57,8 +57,23 @@ sanitizer／故障注入、保留的历史失败、补丁来源与 M4 命令见
 真实 `vo=null`／`ao=null` 结果不证明窗口、图像、可听输出或位置恢复；见
 [安装器说明](../../Tools/MPVQueueInstallerTests/README.md)。
 
+随后实际 `MPVController` 新增安装专用的带 owner 事件桥接与真实 MPV node 读回。
+reader 立即复制 START／END entry ID，FILE_LOADED 绑定前一 START；异步交付再次核对
+owner，新安装不继承旧 START。安装期间抑制普通 UI／媒体事件，但保留 hook 继续、
+shutdown 清理及显式 overflow 失败。缺 handle、返回码／属性读回失败不会当成成功。
+Xcode 同时登记模型／安装器；最初新增 Queue ID 与 Surface 重复，提交前改为独立
+ID 并核对 1,979 个对象唯一性，`plutil` 语法检查不能单独发现这一重复问题。
+
+桥接最终普通 115/0、ASan 116/0、TSan 117/0；四个撤销门禁的精确负控通过。
+冻结 SHA、全部证据目录、首轮脚本编译失败和真实测试范围见
+[桥接说明](../../Tools/PlaybackBackendRoutingTests/README.md)。同名 URL 的真实
+两项列表完整安装到第二项；不能把它写成尚在实现的 Core 导航或整窗交接通过。
+CI 新增两项 owner／START 负控和失败证据留存，旧 gate 负控保留。
+
 开发 CI `38329363769` 冻结于 `7f7e4bcc`，已失败，既不包含上述 AV1 代码，也不包含
 独立队列模型。当前没有新增版本、发行包、签名变化或更新源变化。
+后续开发 CI `38337569102` 冻结于 `e4369f41`，纳入新 AV1、独立模型／安装器和
+关闭 layer 修补，仍在运行；不包含后续 controller 桥接或 Core 队列接线。
 
 ### 最新整窗阻挡（2026-10-13）
 

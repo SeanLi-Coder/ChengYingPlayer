@@ -23,7 +23,8 @@ enum OSDMessage {
 }
 enum UIUpdate { case time, volume, loop }
 enum TestNotification { case iinaPlaylistChanged }
-enum LoopMode { case file, playlist, none }
+enum LoopMode { case file, playlist, none, off }
+enum IINAError: Error { case unsupportedMPVNodeFormat(UInt32) }
 struct TestTime { let stringRepresentation = "0" }
 func / (_ left: TestTime?, _ right: TestTime?) -> Double? { 0 }
 final class TestInfo {
@@ -123,6 +124,7 @@ class RoutingControllerFixture {
   @Atomic var cancellations = 0
   var seekTimingToken: UInt64 = 0
   var seekTimingReadyToken: UInt64?
+  var realPropertyReadback = false
   init(_ player: PlayerCore) {
     self.player = player
     mpv = mpv_create()
@@ -142,7 +144,12 @@ class RoutingControllerFixture {
   func observeSeekTiming(token: UInt64, at time: Double) { player.record("seekTiming") }
   func finishSeekTiming(token: UInt64, at time: Double) { player.record("finishTiming") }
   func markSeekTimingPlaybackReady(token: UInt64) { player.record("readyTiming") }
-  func getString(_ name: String) -> String? { "/synthetic.mp4" }
+  func getString(_ name: String) -> String? {
+    guard realPropertyReadback else { return "/synthetic.mp4" }
+    guard let value = mpv_get_property_string(mpv, name) else { return nil }
+    defer { mpv_free(value) }
+    return String(cString: value)
+  }
   func chkErr(_ result: Int32) { if result < 0 { log("command error") } }
   func log(_ value: String, level: Logger.Level = .debug) { $logs.withLock { $0.append(value) } }
   func logPropertyValueError(_ name: String, _ format: mpv_format) { log("property error") }

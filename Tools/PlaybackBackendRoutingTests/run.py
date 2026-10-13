@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
 """Compile production event dispatch and inject delayed events without user media."""
 import argparse
+import contextlib
+import hashlib
+import json
 from pathlib import Path
 import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+COMPILED_SOURCES = ["iina/Atomic.swift", "iina/Lock.swift", "iina/MPVOption.swift",
+    "iina/MPVProperty.swift", "iina/MPVCommand.swift", "iina/MPVHook.swift", "iina/MPVNode.swift",
+    "iina/PlaybackBackend/NativePlaybackQueue.swift", "iina/PlaybackBackend/MPVQueueInstaller.swift",
+    "Tools/PlaybackBackendRoutingTests/Boundary.swift", "Tools/PlaybackBackendRoutingTests/main.swift"]
+
+
+def generated_digests(work):
+    return {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in work.iterdir()
+            if path.suffix in {".swift", ".wav", ".mp4"}}
 
 
 def section(text, start, end):
@@ -15,11 +27,29 @@ def section(text, start, end):
     return text[begin:text.index(end, begin)]
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--sanitize", choices=["address", "thread"])
-    parser.add_argument("--negative-control", choices=["epoch", "first-start"])
-    args = parser.parse_args()
+@contextlib.contextmanager
+def evidence_directory(sources):
+    work = Path(tempfile.mkdtemp(prefix="native-mpv-event-bridge.", dir=ROOT / "build"))
+    before = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources}
+    (work / "source-before.json").write_text(json.dumps(before, indent=2) + "\n")
+    print("Artifacts: " + str(work), flush=True)
+    completed = False
+    try:
+        yield work
+        completed = True
+    finally:
+        after = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources}
+        (work / "source-after.json").write_text(json.dumps(after, indent=2) + "\n")
+        generated = generated_digests(work)
+        (work / "generated-after.json").write_text(json.dumps(generated, indent=2) + "\n")
+        if completed and before != after:
+            raise RuntimeError("Production input changed during event bridge verification")
+        manifest = work / "generated-before.json"
+        if completed and (not manifest.is_file() or json.loads(manifest.read_text()) != generated):
+            raise RuntimeError("Generated input changed during event bridge verification")
+
+
+def extract_production(args):
     source = (ROOT / "iina/MPVController.swift").read_text()
     core = (ROOT / "iina/PlayerCore.swift").read_text()
     route = section(source, "  // MARK: - Playback route event ownership", "  // MARK: - End playback route event ownership")
@@ -46,7 +76,7 @@ def main():
         raise RuntimeError("Raw commands must invalidate fresh-core eligibility")
     if "noteMediaProperty(name)" not in section(source, "  func setNode(", "\n  }\n"):
         raise RuntimeError("Node-based playlist writes must invalidate fresh-core eligibility")
-    generated = "import Cocoa\nimport QuartzCore\n" + "final class MPVController: RoutingControllerFixture {\n"
+    generated = "import Cocoa\nimport QuartzCore\n" + "final class MPVController: RoutingControllerFixture, MPVQueueInstallationBackend {\n"
     generated += route + properties + commands + setters + hook + events + "\n}\n"
     generated = generated.replace("private ", "")
     player = "import Foundation\nfinal class PlayerCore: RoutingPlayerFixture {\n" + gate.replace("private ", "") + "\n}\n"
@@ -59,33 +89,72 @@ def main():
         if "awaitingFirstRoutedStart = true" not in generated:
             raise RuntimeError("First-start negative-control boundary changed")
         generated = generated.replace("awaitingFirstRoutedStart = true", "awaitingFirstRoutedStart = false")
-    with tempfile.TemporaryDirectory(prefix="chengying-routing-") as directory:
-        work = Path(directory)
+    elif args.negative_control == "queue-owner":
+        original = "guard let self, self.nativeQueueEventOwner == owner else { return }"
+        if generated.count(original) != 1:
+            raise RuntimeError("Queue owner negative-control boundary changed")
+        generated = generated.replace(original, "guard let self else { return }")
+    elif args.negative_control == "queue-start-context":
+        original = "nativeQueueReaderOwner = owner\n      nativeQueueStartedEntry = nil"
+        if generated.count(original) != 1:
+            raise RuntimeError("Queue START negative-control boundary changed")
+        generated = generated.replace(original, "nativeQueueReaderOwner = owner")
+    return generated, player
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--sanitize", choices=["address", "thread"])
+    parser.add_argument("--negative-control", choices=["epoch", "first-start", "queue-owner", "queue-start-context"])
+    args = parser.parse_args()
+    sources = [ROOT / name for name in COMPILED_SOURCES + ["iina/MPVController.swift", "iina/PlayerCore.swift",
+        "Tools/PlaybackBackendRoutingTests/run.py", "deps/include/mpv/client.h"]]
+    sources += sorted((ROOT / "deps/lib").glob("*.dylib"))
+    with evidence_directory(sources) as work:
+        generated, player = extract_production(args)
         media = work / "synthetic.wav"
         subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
                         "-i", "anullsrc=r=8000:cl=mono", "-t", "0.05", str(media)], check=True, timeout=20)
+        video = work / "queue.mp4"
+        subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+                        "-i", "color=c=blue:s=160x96:r=20:d=3", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                        str(video)], check=True, timeout=20)
         (work / "Production.swift").write_text(generated)
         (work / "Player.swift").write_text(player)
+        (work / "generated-before.json").write_text(json.dumps(generated_digests(work), indent=2) + "\n")
         executable = work / "RoutingTests"
         command = ["xcrun", "swiftc", "-warnings-as-errors", "-o", str(executable),
                    "-import-objc-header", str(ROOT / "deps/include/mpv/client.h")]
         if args.sanitize:
             command += ["-sanitize=" + args.sanitize]
-        command += [str(ROOT / path) for path in ["iina/Atomic.swift", "iina/Lock.swift", "iina/MPVOption.swift",
-                    "iina/MPVProperty.swift", "iina/MPVCommand.swift", "iina/MPVHook.swift",
-                    "Tools/PlaybackBackendRoutingTests/Boundary.swift", "Tools/PlaybackBackendRoutingTests/main.swift"]]
+        command += [str(ROOT / path) for path in COMPILED_SOURCES]
         command += [str(work / "Production.swift"), str(work / "Player.swift"),
                     str(ROOT / "deps/lib/libmpv.2.dylib"), "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "deps/lib")]
-        subprocess.run(command, check=True, timeout=90)
+        compilation = subprocess.run(command, capture_output=True, text=True, timeout=90)
+        (work / "compile-stdout.log").write_text(compilation.stdout)
+        (work / "compile-stderr.log").write_text(compilation.stderr)
+        (work / "compile-exit-status.txt").write_text(str(compilation.returncode) + "\n")
+        if compilation.returncode:
+            print(compilation.stderr, end="")
+        compilation.check_returncode()
+        result = subprocess.run([str(executable), str(media), str(video)], capture_output=True, text=True, timeout=35)
+        (work / "stdout.log").write_text(result.stdout)
+        (work / "stderr.log").write_text(result.stderr)
+        (work / "exit-status.txt").write_text(str(result.returncode) + "\n")
+        print(result.stdout, end="")
+        print(result.stderr, end="")
+        if "WARNING: ThreadSanitizer" in result.stderr or "ERROR: AddressSanitizer" in result.stderr:
+            raise RuntimeError("Event bridge emitted a sanitizer diagnostic")
         if args.negative_control:
-            result = subprocess.run([str(executable), str(media)], capture_output=True, text=True, timeout=35)
             expected = {"epoch": "Old queued callbacks cannot alias a new MPV epoch",
-                        "first-start": "First-load barrier rejects startup properties before START_FILE"}[args.negative_control]
+                        "first-start": "First-load barrier rejects startup properties before START_FILE",
+                        "queue-owner": "Queued old envelopes cannot borrow a new installation owner",
+                        "queue-start-context": "A new owner cannot inherit the previous START context"}[args.negative_control]
             if result.returncode != 1 or "FAIL: " + expected not in result.stderr:
                 raise RuntimeError("Negative control did not fail at the intended invariant: " + result.stderr)
             print("PASS: Negative control rejected: " + expected)
         else:
-            subprocess.run([str(executable), str(media)], check=True, timeout=35)
+            result.check_returncode()
 
 
 if __name__ == "__main__":

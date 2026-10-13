@@ -108,6 +108,14 @@ playlist 环绕首项；保留与实际窗口恢复偏好之间的验证边界�
 失败 14／2／1／2／2／1 项；主代理普通复跑于 `mpv-queue-installer-tests.2QRfgj`。
 它验证全列表、选中真实 entry ID、命令结果和加载事件，不是 Core 已接入的证明；窗口
 接线仍在进行。所有结果和限制见 `Tools/MPVQueueInstallerTests/README.md`。
+真实 `MPVController` 整表事件桥接已接入：reader 立即复制 entry ID，主线程按安装
+owner 校验，普通 UI 事件隔离但 hook／shutdown 保留；实际命令失败不转成成功。
+桥接专项最终普通 115／ASan 116／TSan 117 项及四个精确负控通过，源码和素材身份
+前后校验一致；计数差来自主队列等待轮次，不是测试覆盖差。证据和首轮脚本编译失败
+保留于 `Tools/PlaybackBackendRoutingTests/README.md`。Core 多文件接线仍未验收。
+开发 CI `38337569102` 冻结于 `e4369f41`，包含关闭 layer 修补、新 AV1 及独立队列
+模型／安装器，当前仍在运行；不含上述 controller 桥接和正在实施的 Core 队列接线。
+没有生成新的稳定更新，不以运行中的流水线或局部测试宣称换核完成。
 
 ## 2026-10-12 REA 播放内核函数体研究（未换核、未新增发行）
 

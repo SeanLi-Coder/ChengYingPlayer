@@ -128,7 +128,7 @@ struct MPVHookValue {
 
 // Global functions
 
-class MPVController: NSObject {
+class MPVController: NSObject, MPVQueueInstallationBackend {
   struct UserData {
     static let screenshot: UInt64 = 1000000
   }
@@ -158,6 +158,117 @@ class MPVController: NSObject {
 
   @Atomic private var awaitingFirstRoutedStart = false
   @Atomic private var hasReceivedShutdown = false
+  @Atomic private var nativeQueueEventOwner: UUID? = nil
+  // The sink is main-owned; the preceding START identity is event-reader-owned.
+  private var nativeQueueEventSink: ((MPVQueueInstaller.Event) -> Void)?
+  private var nativeQueueReaderOwner: UUID?
+  private var nativeQueueStartedEntry: Int64?
+
+  /// Reserve events while the caller has disabled normal MPV presentation.
+  /// The caller must separately prove this client has never loaded media.
+  func beginNativeQueueInstallation(owner: UUID,
+                                    receive: @escaping (MPVQueueInstaller.Event) -> Void) -> Bool {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard mpv != nil, !hasReceivedShutdown, nativeQueueEventOwner == nil,
+          player.captureMPVEventRevision() == nil else { return false }
+    nativeQueueEventSink = receive
+    nativeQueueEventOwner = owner
+    prepareForFirstMPVMediaLoad()
+    return true
+  }
+
+  func endNativeQueueInstallation(owner: UUID) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard nativeQueueEventOwner == owner else { return }
+    nativeQueueEventOwner = nil
+    nativeQueueEventSink = nil
+  }
+
+  /// Copy entry identity before querying properties or dispatching callbacks.
+  /// Return true only for media events consumed by the installation route.
+  private func routeNativeQueueEvent(_ event: UnsafePointer<mpv_event>) -> Bool {
+    guard let owner = nativeQueueEventOwner else {
+      nativeQueueReaderOwner = nil
+      nativeQueueStartedEntry = nil
+      return false
+    }
+    if nativeQueueReaderOwner != owner {
+      nativeQueueReaderOwner = owner
+      nativeQueueStartedEntry = nil
+    }
+    let eventID = event.pointee.event_id
+    let forwarded: MPVQueueInstaller.Event?
+    switch eventID {
+    case MPV_EVENT_START_FILE:
+      if let data = event.pointee.data {
+        let entryID = data.load(as: mpv_event_start_file.self).playlist_entry_id
+        nativeQueueStartedEntry = entryID
+        awaitingFirstRoutedStart = false
+        forwarded = .startFile(entryID: entryID)
+      } else { forwarded = .queueOverflow }
+    case MPV_EVENT_FILE_LOADED:
+      if let entryID = nativeQueueStartedEntry { forwarded = .fileLoaded(entryID: entryID) }
+      else { forwarded = .queueOverflow }
+    case MPV_EVENT_END_FILE:
+      if let data = event.pointee.data {
+        let entryID = data.load(as: mpv_event_end_file.self).playlist_entry_id
+        if nativeQueueStartedEntry == entryID { nativeQueueStartedEntry = nil }
+        forwarded = .endFile(entryID: entryID)
+      } else { forwarded = .queueOverflow }
+    case MPV_EVENT_SHUTDOWN: forwarded = .shutdown
+    case MPV_EVENT_QUEUE_OVERFLOW: forwarded = .queueOverflow
+    default: forwarded = nil
+    }
+    if let forwarded {
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.nativeQueueEventOwner == owner else { return }
+        self.nativeQueueEventSink?(forwarded)
+      }
+    }
+    // Control processing still releases hooks, acknowledges shutdown and reports
+    // overflow. Ordinary metadata and property notifications cannot start UI work.
+    return ![MPV_EVENT_SHUTDOWN, MPV_EVENT_LOG_MESSAGE, MPV_EVENT_HOOK,
+             MPV_EVENT_COMMAND_REPLY, MPV_EVENT_QUEUE_OVERFLOW].contains(eventID)
+  }
+
+  func queueCommand(_ arguments: [String]) -> Int32? {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard mpv != nil, !hasReceivedShutdown, let name = arguments.first else { return nil }
+    var result: Int32?
+    command(MPVCommand(name), args: arguments.dropFirst().map { Optional($0) },
+            checkError: false, returnValueCallback: { result = $0 })
+    return result
+  }
+
+  func queueSetPaused() -> Int32? {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard mpv != nil, !hasReceivedShutdown else { return nil }
+    return setString(MPVOption.PlaybackControl.pause, "yes")
+  }
+
+  func queueSnapshot() -> MPVQueueInstallationSnapshot? {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard let handle = mpv, !hasReceivedShutdown else { return nil }
+    var node = mpv_node()
+    guard mpv_get_property(handle, "playlist", MPV_FORMAT_NODE, &node) >= 0 else { return nil }
+    defer { mpv_free_node_contents(&node) }
+    guard node.format == MPV_FORMAT_NODE_ARRAY, let list = node.u.list,
+          (0...Int32(NativeQueuePlan.maximumItems)).contains(list.pointee.num),
+          let rows = try? MPVNode.parse(node) as? [[String: Any?]] else { return nil }
+    var idle: Int32 = 0, paused: Int32 = 0
+    guard mpv_get_property(handle, "idle-active", MPV_FORMAT_FLAG, &idle) >= 0,
+          mpv_get_property(handle, "pause", MPV_FORMAT_FLAG, &paused) >= 0 else { return nil }
+    var entries: [MPVQueueInstallationSnapshot.Entry] = []
+    for row in rows {
+      guard let id = row["id"] as? Int64, let path = row["filename"] as? String else { return nil }
+      let current = row["current"] ?? nil, playing = row["playing"] ?? nil
+      guard current == nil || current is Bool, playing == nil || playing is Bool else { return nil }
+      entries.append(.init(id: id, path: path, current: current as? Bool ?? false,
+                           playing: playing as? Bool ?? false))
+    }
+    return .init(entries: entries, idle: idle != 0, paused: paused != 0,
+                 activePath: getString(MPVProperty.path))
+  }
 
   /// A native-only core has no OpenGL renderer whose teardown would destroy
   /// mpv. Only a genuine SHUTDOWN event permits retiring that idle handle.
@@ -1218,6 +1329,7 @@ class MPVController: NSObject {
 
   // Handle the event
   private func handleEvent(_ event: UnsafePointer<mpv_event>) {
+    if routeNativeQueueEvent(event) { return }
     let eventId = event.pointee.event_id
     let routeRevision = player.captureMPVEventRevision()
     let isControlEvent = eventId == MPV_EVENT_SHUTDOWN || eventId == MPV_EVENT_LOG_MESSAGE ||
