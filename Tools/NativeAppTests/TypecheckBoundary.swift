@@ -101,7 +101,7 @@ final class PlayerCore {
   static var playerCores: [PlayerCore] = []
   let mpv = MPVController()
   let info = PlaybackInfo()
-  let mainWindow = MainWindowController()
+  var mainWindow: MainWindowController! = MainWindowController()
   var nativePlaybackSession: NativePlaybackSession?
   var nativePlaybackOutput: NativeSampleBufferOutput?
   var nativeViewport = VideoToolsViewport()

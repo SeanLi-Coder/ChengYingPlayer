@@ -59,5 +59,5 @@ for mutation in positive loaded-only resurrect-restore unowned-restore drop-play
     drop-playback-state) expected='FAIL: Cancelling export retains same-media volume speed viewport and A/B' ;;
     *) expected='' ;;
   esac
-  if [[ -n "$expected" ]]; then rg -Fq "$expected" "$test_dir/$mutation.log"; fi
+  if [[ -n "$expected" ]]; then /usr/bin/grep -Fq -- "$expected" "$test_dir/$mutation.log"; fi
 done

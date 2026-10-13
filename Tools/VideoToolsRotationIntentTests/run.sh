@@ -62,6 +62,6 @@ for mutation in repeated-consumption stale-request; do
   else
     expected_failure='FAIL: A stale completion must not consume a newer request'
   fi
-  rg -Fq "$expected_failure" "$test_dir/$mutation.log"
+  /usr/bin/grep -Fq -- "$expected_failure" "$test_dir/$mutation.log"
   printf 'PASS: The %s negative control was rejected\n' "$mutation"
 done

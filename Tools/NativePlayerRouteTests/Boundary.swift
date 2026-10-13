@@ -198,7 +198,7 @@ enum Preference {
   enum Key { case videoViewAcceptsFirstMouse, enableDisplayIdle, loadIccProfile, enableToneMapping, toneMappingTargetPeak,
     toneMappingAlgorithm, enableAdvancedSettings, useUserDefinedConfDir, currentInputConfigName, savedVideoFilters,
     savedAudioFilters, subAutoLoadSearchPath, subAutoLoadIINA, resumeLastPosition, scaleRemainingTime, pauseWhenOpen,
-    fullScreenWhenOpen, enableHdrSupport, alwaysFloatOnTop, keepOpenOnFileEnd, playlistAutoPlayNext }
+    fullScreenWhenOpen, enableHdrSupport, alwaysFloatOnTop, keepOpenOnFileEnd, playlistAutoPlayNext, playlistAutoAdd }
   static var pauseWhenOpen = false
   static var alwaysFloatOnTop = false
   static var keepOpenOnFileEnd = true
@@ -210,6 +210,7 @@ enum Preference {
     case .alwaysFloatOnTop: return alwaysFloatOnTop
     case .keepOpenOnFileEnd: return keepOpenOnFileEnd
     case .playlistAutoPlayNext: return playlistAutoPlayNext
+    case .playlistAutoAdd: return true
     default: return false
     }
   }

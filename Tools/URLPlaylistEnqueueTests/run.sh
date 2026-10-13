@@ -42,7 +42,7 @@ for mutation in positive early-append drop-owner drop-pause-restore ignore-resul
   set -e
   if [[ "$mutation" == positive ]]; then expected_status=0; else expected_status=1; fi
   [[ "${statuses[0]}" -eq "$expected_status" && "${statuses[1]}" -eq 0 ]]
-  if rg -q 'ERROR: AddressSanitizer|WARNING: ThreadSanitizer|SUMMARY: (AddressSanitizer|ThreadSanitizer)|Sanitizer:DEADLYSIGNAL|runtime error:' "$test_dir/$mutation.log"; then
+  if /usr/bin/grep -Eq 'ERROR: AddressSanitizer|WARNING: ThreadSanitizer|SUMMARY: (AddressSanitizer|ThreadSanitizer)|Sanitizer:DEADLYSIGNAL|runtime error:' "$test_dir/$mutation.log"; then
     printf 'Unexpected sanitizer diagnostic in %s\n' "$mutation" >&2
     exit 1
   fi
@@ -57,5 +57,5 @@ for mutation in positive early-append drop-owner drop-pause-restore ignore-resul
     stale-file-start) expected='FAIL: A non-owned MPV file-start invalidates queued success OSD' ;;
     *) expected='' ;;
   esac
-  if [[ -n "$expected" ]]; then rg -Fq "$expected" "$test_dir/$mutation.log"; fi
+  if [[ -n "$expected" ]]; then /usr/bin/grep -Fq "$expected" "$test_dir/$mutation.log"; fi
 done

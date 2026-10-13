@@ -599,6 +599,41 @@ Route 首轮 287 项虽通过，但 CYN 同时开发使 source-check 失败（`S
 151 全部通过且输入 hash 稳定；这是该时点 decoder 的旧功能回归，不能替代尚在实现中的
 最终 AV1 decoder 验收。上述所有检查也不替代整窗 URL 事件交接。
 
+## 后续 CI 工具修复与准入偏好一致性
+
+冻结 `f36429bf` 的开发 CI `38324899462` 已完成且失败：media-helper job 和正式 App 构建
+通过，但 rotation runner 在首个有效负控后调用 runner 未安装的 `rg`，以 **127** 退出。
+这是检查脚本错误，不是负控验收通过。完整 App 测试随后尝试构建，但新增预览诊断把
+生产的 `MainWindowController!` 存成推断的 optional 局部变量并直接访问成员，编译失败。
+该 run **没有启动 92 项测试 App**，不能报 92 项通过；测试 workspace 清理已完成。
+原产物保留在 `build/native-app-ci-38324899462.M8y7Ko/` 和
+`build/native-rotation-ci-38324899462.mBveLA/`。
+
+两 rotation runner 和后续 URL runner 改用系统 `/usr/bin/grep`，断言和期限不变。
+无 `rg` 的系统 PATH 下，rotation intent 普通／TSan 各 50,051、77、ownership 4 通过，
+两个负控各一项失败；handoff 普通／TSan 各 176 通过，四负控仍为 4／10／2／48 项失败。
+证据 `SlYYLF`／`MB3EFx` 与 `ghQd26`／`gP68Dw`。同一原 CI 负控 log 的 matcher 检查
+`build/rotation-ci-path-diagnostics.RIVy9z/` 中，旧 matcher 127、新 matcher 0、缺少目标
+断言时新 matcher 1；没有把任意非零都当合格负控。URL 最终系统 PATH 复跑 `cYhHsG`
+保持 118 项与八负控，通过 source-check。
+
+诊断代码现在显式 unwrap，准备测试的声明边界改为与生产一致的 IUO，并加入只撤销
+unwrap 的编译负控。`python3 -B Tools/NativeAppTests/test_runner.py` **32 项通过**，
+macOS 12 typecheck 必须拒绝旧 optional 访问；原 92 项 runtime 标签和 110／150 秒期限
+未改。证据 `build/native-app-preparation-optional.6WpcvU/`，driver SHA-256 为
+`6b6bb5c54573c36bb4f4e5091efb98e053b073f421611086ea5de7c85f0812a4`。
+这是测试构建准备，不是整窗通过。
+
+另确认关闭“自动加入同目录文件”仍被 sibling gate 过度回退。生产只改一行：目录枚举
+取 `shouldAutoLoadFiles && playlistAutoAdd` 的开始时快照，与原 AutoFileMatcher 行为一致。
+字幕、HDR、多文件及 used-MPV 门禁仍保留。冻结 Core `e1cd71918d1f5c0f3aa0954ab9e0130bbd35ab23068a9db8fcb9741db4b193d5`；
+`Tools/NativePlaybackAdmissionTests` 抽取完整准入函数，在真实合成 MP4／字幕／子目录运行
+生产枚举，startup 和 transport 是明确 recording boundary。普通／ASan／TSan 各 **64/0**，
+只移除此偏好条件的负控各 **64/3**，精确失败集合与退出码均符合要求；系统 PATH 下无
+`rg` 依赖。证据 `b6ZTTu`／`cqCUw2`／`p5KHQ4`，主代理最终独立复跑 `xacTpY` 同样通过。
+原 Route 287 项仅补偏好声明，未改断言；`dylqWt` 同源通过。新切片是准入偏好修补，
+不是原生队列实现，也未放开默认路径。
+
 ## 实现文件
 
 - `iina/NativePlayback/CYNMediaDecoder.{h,m}`：只读本地文件、FFmpeg 收帧／drain、

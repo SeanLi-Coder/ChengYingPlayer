@@ -94,3 +94,9 @@ required check, typecheck against macOS 12, exercise the real numeric/geometry
 comparators with wrong-state inputs, and retain the AppKit termination scheduling
 positive/negative probe. These preparation checks are not a substitute for the
 full application run.
+
+The preparation boundary retains the production `MainWindowController!` type
+instead of silently strengthening it to a nonoptional value. A diagnostic must
+unwrap this property before storing a local alias. The preparation suite also
+compiles the exact unguarded alias as a negative control; the macOS 12 typecheck
+must reject it. This protects test-driver compilation, not window behavior.

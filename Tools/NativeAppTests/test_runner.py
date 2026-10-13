@@ -258,6 +258,29 @@ class RunnerTests(unittest.TestCase):
             self.assertIn("'displayedPixelBuffer()' is only available in macOS 14.4 or newer", result.stderr)
         print("PASS: macOS 12 driver typecheck rejects the exact legacy availability guard")
 
+    def test_driver_diagnostic_preserves_production_optional_window_type(self):
+        driver = SOURCE.with_name("NativeAppTestDriver.swift")
+        boundary = SOURCE.with_name("TypecheckBoundary.swift")
+        declaration = "var mainWindow: MainWindowController!"
+        self.assertIn(declaration, (runner.ROOT / "iina/PlayerCore.swift").read_text())
+        self.assertIn(declaration, boundary.read_text())
+        source = driver.read_text()
+        guard = ('    guard let main = player.mainWindow else { '
+                 'print("NATIVE_APP_PREVIEW_STATE: window=unavailable"); return }')
+        self.assertEqual(source.count(guard), 1)
+        with tempfile.TemporaryDirectory(prefix="native-driver-optional-window-") as directory:
+            old = Path(directory) / "LegacyOptionalWindow.swift"
+            old.write_text(source.replace(guard, "    let main = player.mainWindow", 1))
+            command = ["xcrun", "swiftc", "-swift-version", "5", "-warnings-as-errors",
+                       "-target", "arm64-apple-macos12", "-typecheck", "-D", "CHENGYING_NATIVE_APP_TESTS",
+                       str(old), str(boundary),
+                       str(runner.ROOT / "iina/NativePlayback/NativePlaybackSurface.swift"),
+                       str(runner.ROOT / "iina/VideoTools/VideoToolsShortcuts.swift")]
+            result = subprocess.run(command, capture_output=True, text=True, timeout=90)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("optional type 'MainWindowController?' must be unwrapped", result.stderr)
+        print("PASS: The production IUO window type rejects the unguarded diagnostic")
+
     def test_pixel_readback_is_paused_and_autoplay_uses_real_worker_clock(self):
         source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
 

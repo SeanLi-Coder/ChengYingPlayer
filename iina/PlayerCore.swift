@@ -978,7 +978,7 @@ class PlayerCore: NSObject {
       return false
     }
     let request = advancePlaybackRoute(acceptsMPV: false)
-    let loadSiblings = info.shouldAutoLoadFiles
+    let loadSiblings = info.shouldAutoLoadFiles && Preference.bool(for: .playlistAutoAdd)
     let loadSubs = Preference.integer(for: .subAutoLoadIINA) != 0
     let watchLater = Utility.watchLaterURL.appendingPathComponent(Utility.mpvWatchLaterMd5(url.path))
     let honorWatchLater = Preference.bool(for: .resumeLastPosition)
