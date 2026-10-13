@@ -22,11 +22,13 @@ source_files=(
   iina/PlayerState.swift iina/VideoTools/VideoToolsLoopPolicy.swift iina/VideoTools/VideoToolsShortcuts.swift
   iina/VideoTools/VideoToolsRotationIntent.swift
   iina/PlaybackBackend/PlaybackTransport.swift iina/PlaybackBackend/NativePlaybackTransport.swift
+  iina/PlaybackBackend/NativePlaybackQueue.swift iina/PlaybackBackend/MPVQueueInstaller.swift
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift
   iina/NativePlayback/NativePlaybackSession.swift iina/NativePlayback/NativePlaybackSurface.swift
   iina/VideoView.swift iina/NativePlayback/CYNMediaDecoder.h iina/NativePlayback/CYNMediaDecoder.m
   Tools/NativePlayerRouteTests/Boundary.swift Tools/NativePlayerRouteTests/PlayerBoundary.txt
   Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt
+  Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt
   Tools/NativePlayerRouteTests/extract.swift Tools/NativePlayerRouteTests/main.swift Tools/NativePlayerRouteTests/run.sh
   deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib
   deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib
@@ -43,6 +45,7 @@ xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm6
   iina/VideoTools/VideoToolsLoopPolicy.swift iina/VideoTools/VideoToolsShortcuts.swift \
   iina/VideoTools/VideoToolsRotationIntent.swift \
   iina/PlaybackBackend/PlaybackTransport.swift iina/PlaybackBackend/NativePlaybackTransport.swift \
+  iina/PlaybackBackend/NativePlaybackQueue.swift iina/PlaybackBackend/MPVQueueInstaller.swift \
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift \
   iina/NativePlayback/NativePlaybackSession.swift iina/NativePlayback/NativePlaybackSurface.swift \
   iina/VideoView.swift "$test_dir/ExtractedPlayer.swift" \
@@ -52,6 +55,11 @@ xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm6
   -Xlinker -rpath -Xlinker "$repo_root/deps/lib" \
   -framework AppKit -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework AudioToolbox \
   -o "$test_dir/route-tests"
+if [ "${NATIVE_ROUTE_BUILD_ONLY:-0}" = 1 ]; then
+  shasum -a 256 -c "$test_dir/source-before.sha256" > "$test_dir/source-check.log"
+  printf 'Compiled route fixture only; playback was not executed. Artifacts: %s\n' "$test_dir"
+  exit 0
+fi
 for color in red blue; do
   "$ffmpeg_bin" -hide_banner -loglevel error -f lavfi -i "color=c=$color:s=160x96:r=20:d=8" \
     -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=8' \

@@ -1,4 +1,5 @@
 import Foundation
+enum LoopMode { case off, file, playlist }
 
 // Only OS/player boundaries are doubled. The production task registration,
 // completion, stop, shutdown, and filter pointer operations are extracted verbatim.
@@ -93,6 +94,9 @@ extension Data {
 }
 
 class PlayerFixture {
+  // The legacy lifecycle has neither an explicit queue nor an installation.
+  let nativeQueue: NativeQueueState? = nil
+  func resetNativeQueue() { precondition(nativeQueue == nil) }
   // This suite exercises the unchanged MPV lifecycle. Native handoff has its
   // own real-session and controlled-route regression suites.
   var nativeTransport: AnyObject?
@@ -103,6 +107,7 @@ class PlayerFixture {
     var rotationRequestID: UUID?
     let rotationMediaEpoch: UUID?
     let enqueueMediaEpoch: UUID? = nil
+    let queueMedia: NativeQueueState.MediaToken? = nil
     var completion: () -> Void
   }
   var nativeCompatibilityRestore: RotationRestoreBoundary?

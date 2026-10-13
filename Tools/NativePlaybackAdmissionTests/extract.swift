@@ -11,9 +11,9 @@ guard source.components(separatedBy: signature).count == 2,
 }
 var method = String(source[start..<end])
 if ProcessInfo.processInfo.environment["NATIVE_ADMISSION_NEGATIVE_CONTROL"] == "1" {
-  let current = "let loadSiblings = info.shouldAutoLoadFiles && Preference.bool(for: .playlistAutoAdd)"
+  let current = "let loadSiblings = nativeQueue == nil && info.shouldAutoLoadFiles && Preference.bool(for: .playlistAutoAdd)"
   precondition(method.components(separatedBy: current).count == 2, "Admission negative-control landmark changed")
-  method = method.replacingOccurrences(of: current, with: "let loadSiblings = info.shouldAutoLoadFiles")
+  method = method.replacingOccurrences(of: current, with: "let loadSiblings = nativeQueue == nil && info.shouldAutoLoadFiles")
 }
 let boundary = try String(contentsOf: root.appendingPathComponent("Tools/NativePlaybackAdmissionTests/Boundary.swift"), encoding: .utf8)
 let generated = "import Foundation\n" + boundary + "\nfinal class PlayerCore: AdmissionBoundary {\n" + method + "\n  func testOpen(_ url: URL) -> Bool { attemptNativeOpen(url) }\n}\n"

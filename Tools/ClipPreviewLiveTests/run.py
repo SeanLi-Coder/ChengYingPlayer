@@ -86,6 +86,7 @@ def main():
                         "-I", str(ROOT / "deps/include"), "-o", str(renderer)], check=True)
         sources = [
             "iina/PlaybackBackend/PlaybackTransport.swift", "iina/PlaybackBackend/MPVPlaybackTransport.swift",
+            "iina/PlaybackBackend/NativePlaybackQueue.swift", "iina/PlaylistPlaybackPolicy.swift",
             "iina/Updates/UpdateWorkAdmission.swift", "iina/MPVOption.swift", "iina/MPVProperty.swift",
             "iina/MPVCommand.swift", "iina/MPVHook.swift", "iina/ChengYingStyle.swift",
             "iina/MediaInfo/MediaInfoModels.swift", "iina/VideoTools/VideoToolsModels.swift",

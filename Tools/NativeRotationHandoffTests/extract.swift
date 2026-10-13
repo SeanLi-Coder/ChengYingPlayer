@@ -26,6 +26,9 @@ members += span(core, "  private struct NativeCompatibilityRestore", "  private 
 // Keep enqueue ownership real even though this suite submits only rotations.
 // The focused URL suite supplies the controlled append service boundary.
 members += span(core, "  private struct URLPlaylistRequest", "  func appendToPlaylist(")
+members += try read("Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt")
+  .replacingOccurrences(of: "__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__",
+    with: span(core, "  private final class NativeQueueInstallation {", "  var hasNativePlaybackQueue:"))
 let signatures = ["  func requireMPVCompatibility(", "  private func retireNativePlayback(",
                   "  private func open(_ url:", "  func stop()", "  func shutdown()",
                   "  func seek(absoluteSecond:", "  func seek(relativeSecond:", "  func seek(percent:",
@@ -35,7 +38,7 @@ members += signatures.map { method(core, $0) }.joined(separator: "\n")
 // Keep all arbitration from the production open method; renderer creation and
 // mpv load are explicitly controlled boundaries after that arbitration.
 let opening = method(core, "  private func openMainWindow(")
-let legacy = "\n    advancePlaybackRoute(acceptsMPV: true)\n    log(\"Opening "
+let legacy = "\n    advancePlaybackRoute(acceptsMPV: queueInstallationID == nil)\n    log(\"Opening "
 precondition(opening.components(separatedBy: legacy).count == 2)
 members += "\n" + String(opening[..<opening.range(of: legacy)!.lowerBound]) + "\n    advancePlaybackRoute(acceptsMPV: true)\n    completeLegacyOpen(url: url, allowNative: allowNative)\n  }\n"
 // Keep exact lifecycle sub-blocks. Unrelated file history, metadata loading,

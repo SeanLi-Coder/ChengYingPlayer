@@ -1,0 +1,42 @@
+  // These legacy/single-media fixtures never create an explicit native queue.
+  // Compile the real queue/installer types, but reject accidental queue work.
+  private var nativeQueue: NativeQueueState? {
+    get { nil }
+    set { precondition(newValue == nil, "Explicit queues require NativeCoreQueueTests") }
+  }
+__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__
+  var nativeQueueOwnsPlaylist: Bool { false }
+  var hasNativePlaybackQueue: Bool { false }
+  private var nativeQueueLoadPending: Bool { false }
+  private var hasPendingNativeQueueRestore: Bool {
+    precondition(nativeCompatibilityRestore?.queueMedia == nil,
+                 "Whole-queue restoration requires NativeCoreQueueTests")
+    return false
+  }
+  private func resetNativeQueue() {
+    precondition(nativeQueue == nil && nativeQueueInstallation == nil && !hasPendingNativeQueueRestore,
+                 "Queue retirement requires NativeCoreQueueTests")
+  }
+  private func recordNativeQueueSeek(_ result: PlaybackTransportResult) {
+    precondition(nativeQueue == nil, "Queue seek ownership requires NativeCoreQueueTests")
+  }
+  private func nativeExplicitQueuePlan(_ urls: [URL], playableFiles: [URL]) -> NativeQueuePlan? {
+    precondition(nativeQueue == nil, "Queue admission requires NativeCoreQueueTests")
+    return nil
+  }
+  private func attemptNativeQueue(_ plan: NativeQueuePlan) -> Bool {
+    preconditionFailure("Unexpected explicit queue admission in a single-media fixture")
+  }
+  private func publishNativeQueue() {
+    // Production calls this during every open and returns for a nil queue.
+    precondition(nativeQueue == nil, "Queue publication requires NativeCoreQueueTests")
+  }
+  private func applyNativeQueueDecision(_ decision: NativeQueueState.Decision, manual: Bool) {
+    preconditionFailure("Unexpected queue decision in a single-media fixture")
+  }
+  private func handoffUnopenedNativeQueue() {
+    preconditionFailure("Unexpected queue admission handoff in a single-media fixture")
+  }
+  private func beginNativeQueueHandoff(_ restore: NativeCompatibilityRestore) {
+    preconditionFailure("Unexpected whole-queue installation in a single-media fixture")
+  }

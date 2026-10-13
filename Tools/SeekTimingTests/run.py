@@ -45,6 +45,9 @@ final class TimingController {
 """ + members + "\n}\n" + """
 final class SeekCore {
   let isUsingNativePlayback = false
+  func recordNativeQueueSeek(_ result: PlaybackTransportResult) {
+    precondition(!isUsingNativePlayback, "No native queue in MPV timing tests")
+  }
   let hasPendingPermanentRotation = false
   struct RotationRestoreBoundary { let position: Double }
   var pendingRotationPlaybackRestore: RotationRestoreBoundary? {

@@ -17,6 +17,7 @@ final class PlaylistAdmissionMPV {
 }
 
 class PlaylistAdmissionBoundary {
+  let nativeQueueOwnsPlaylist = false
   let playlistMutationLock = NSRecursiveLock()
   let mpv = PlaylistAdmissionMPV()
   private(set) var notifications = 0

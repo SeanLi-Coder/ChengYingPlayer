@@ -73,6 +73,9 @@ final class MPVController {
 enum OSDMessage { case custom(String) }
 final class PlayerCore: NSObject {
   var isUsingNativePlayback = false
+  // This legacy tools fixture never owns an explicit native queue.
+  let nativeQueueInstallation: Never? = nil
+  let hasPendingNativeQueueRestore = false
   let nativeTerminationRequested = false
   let isInMiniPlayer = false
   var permanentRotationIntent = VideoToolsRotationIntent()

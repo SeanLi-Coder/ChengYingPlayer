@@ -4,6 +4,7 @@ repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo_root"
 test_dir="$(mktemp -d "$repo_root/build/native-admission-tests.XXXXXX")"
 sources=(iina/PlayerCore.swift Tools/NativePlaybackAdmissionTests/extract.swift
+  iina/PlaybackBackend/NativePlaybackQueue.swift
   Tools/NativePlaybackAdmissionTests/Boundary.swift Tools/NativePlaybackAdmissionTests/main.swift
   Tools/NativePlaybackAdmissionTests/run.sh)
 shasum -a 256 "${sources[@]}" > "$test_dir/source-before.sha256"
@@ -25,6 +26,7 @@ for control in positive negative; do
   NATIVE_ADMISSION_NEGATIVE_CONTROL="$negative" xcrun swift Tools/NativePlaybackAdmissionTests/extract.swift \
     "$repo_root" "$work/Extracted.swift"
   xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -warnings-as-errors \
+    iina/PlaybackBackend/NativePlaybackQueue.swift \
     "$work/Extracted.swift" Tools/NativePlaybackAdmissionTests/main.swift -o "$work/tests"
   set +e
   CHENGYING_NATIVE_PLAYBACK=1 /usr/bin/perl -e 'alarm 20; exec @ARGV' "$work/tests" "$work" \

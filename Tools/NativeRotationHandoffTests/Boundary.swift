@@ -1,4 +1,5 @@
 import Cocoa
+enum LoopMode { case off, file, playlist }
 
 // Only external services are controlled. Production rotation arbitration,
 // asynchronous retirement, seek cancellation, key handling and coordinator run.
@@ -53,7 +54,11 @@ class CommandTransport {
   var paused = true
   var volume = 0.0
   var rate = 1.0
-  func seek(_ value: Seek, context: Context? = nil) { seeks.append(value) }
+  @discardableResult
+  func seek(_ value: Seek, context: Context? = nil) -> PlaybackTransportResult {
+    seeks.append(value)
+    return .accepted
+  }
   var isPaused: Bool { paused }
   func setPaused(_ value: Bool, context: Context? = nil) { paused = value }
   func setVolumePercent(_ value: Double) { volume = value }

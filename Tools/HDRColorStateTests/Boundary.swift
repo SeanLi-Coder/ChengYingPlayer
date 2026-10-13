@@ -88,6 +88,7 @@ final class PlaybackWindowBoundary {
 enum PlaybackUI { case time, volume, playButton }
 
 struct NativeRestoreBoundary {
+  let queueMedia: Never? = nil
   let url: URL
   let position: Double
   let volume: Double
@@ -111,6 +112,9 @@ class PlaybackBoundary {
   // The suite retains the MPV color-state branch; native handoff has its own
   // real-session and controlled PlayerCore regression suites.
   var nativeCompatibilityRestore: NativeRestoreBoundary?
+  func resetNativeQueue() {
+    preconditionFailure("Native queue restore is outside MPV color-state tests")
+  }
   var playbackPosition: Double? { nil }
   let playbackTransport = PlaybackTransportBoundary()
   let info = PlaybackInfoBoundary()

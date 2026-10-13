@@ -52,6 +52,10 @@ final class PlayerCore {
   let mpv = MPVFixture()
   let info = InfoFixture()
   let isUsingNativePlayback = false
+  var nativeQueue: NativeQueueState? {
+    get { nil }
+    set { precondition(newValue == nil, "Explicit queues are outside legacy repeat tests") }
+  }
   var nativeLoopMode: LoopMode = .off
   var nativeTransport: NativeSessionFixture? { nil }
   func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {

@@ -5,11 +5,14 @@ cd "$repo_root"
 test_dir="$(mktemp -d "$repo_root/build/url-enqueue-tests.XXXXXX")"
 printf 'Artifacts: %s\n' "$test_dir"
 sources=(iina/Atomic.swift iina/Lock.swift iina/PlayerState.swift iina/MPVCommand.swift iina/MPVOption.swift
+  iina/PlaybackBackend/PlaybackTransport.swift iina/PlaybackBackend/NativePlaybackQueue.swift
+  iina/PlaybackBackend/MPVQueueInstaller.swift
   iina/Updates/UpdateWorkAdmission.swift iina/VideoTools/VideoToolsModels.swift
   iina/VideoTools/VideoToolsLoopPolicy.swift iina/VideoTools/VideoToolsRotationIntent.swift
   iina/VideoTools/VideoToolsRotationCoordinator.swift iina/VideoTools/VideoToolsShortcuts.swift)
 shasum -a 256 "${sources[@]}" iina/PlayerCore.swift iina/AppDelegate.swift iina/VideoTools/VideoToolsPlayerBridge.swift \
   Tools/NativeRotationHandoffTests/Boundary.swift Tools/URLPlaylistEnqueueTests/*.swift \
+  Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt \
   Tools/URLPlaylistEnqueueTests/run.sh > "$test_dir/inputs.sha256"
 finish_evidence() {
   status=$?

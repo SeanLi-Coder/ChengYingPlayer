@@ -47,6 +47,10 @@ def main():
     rotation_end = core.index("\n  /// Both window shortcuts", rotation_start)
     generated += core[rotation_start:rotation_end] + "\n"
     generated += (ROOT / "Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt").read_text() + "\n"
+    installation_start = core.index("  private final class NativeQueueInstallation {")
+    installation_end = core.index("  var hasNativePlaybackQueue:", installation_start)
+    generated += (ROOT / "Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt").read_text().replace(
+        "__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__", core[installation_start:installation_end]) + "\n"
     pending_start = core.index("  var nativeInitialPlaybackPending: Bool {")
     pending_end = core.index("\n  }", pending_start) + len("\n  }")
     generated += "\n" + core[pending_start:pending_end] + "\n"
@@ -62,7 +66,7 @@ def main():
             raise RuntimeError("Precise capture negative-control boundary changed")
         bodies["requireMPVCompatibility"] = bodies["requireMPVCompatibility"].replace(guard, "          if false {", 1)
     opening = method(core, "openMainWindow")
-    boundary = '\n    advancePlaybackRoute(acceptsMPV: true)\n    log("Opening '
+    boundary = '\n    advancePlaybackRoute(acceptsMPV: queueInstallationID == nil)\n    log("Opening '
     if boundary not in opening:
         raise RuntimeError("Legacy open boundary changed")
     # Keep the production arbitration; the legacy UI/render/load side effects
@@ -86,7 +90,9 @@ def main():
         if args.sanitize:
             command.append("-sanitize=" + args.sanitize)
         command += [str(ROOT / path) for path in ["iina/Atomic.swift", "iina/Lock.swift", "iina/PlayerState.swift",
-                    "iina/MPVCommand.swift", "iina/MPVOption.swift", "iina/VideoTools/VideoToolsShortcuts.swift", "iina/VideoTools/VideoToolsRotationIntent.swift", "Tools/NativePlayerCoreTests/Boundary.swift",
+                    "iina/MPVCommand.swift", "iina/MPVOption.swift", "iina/PlaybackBackend/PlaybackTransport.swift",
+                    "iina/PlaybackBackend/NativePlaybackQueue.swift", "iina/PlaybackBackend/MPVQueueInstaller.swift",
+                    "iina/VideoTools/VideoToolsShortcuts.swift", "iina/VideoTools/VideoToolsRotationIntent.swift", "Tools/NativePlayerCoreTests/Boundary.swift",
                     "Tools/NativePlayerCoreTests/main.swift"]]
         subprocess.run(command + [str(production)], check=True, timeout=90)
         if args.negative_control or args.capture_negative_control:

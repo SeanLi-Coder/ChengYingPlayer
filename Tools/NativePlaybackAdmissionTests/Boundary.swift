@@ -20,6 +20,10 @@ final class MPVBoundary {
   func prepareForFirstMPVMediaLoad() { precondition(Thread.isMainThread); prepareCalls += 1 }
 }
 class AdmissionBoundary {
+  let nativeQueue: NativeQueueState? = nil
+  func handoffUnopenedNativeQueue() {
+    preconditionFailure("Explicit queue admission is outside this single-source fixture")
+  }
   var nativeTerminationRequested = false
   var hasIssuedMPVMediaCommand = false
   var nativeSingleInput = true

@@ -9,10 +9,12 @@ source_files=(
   iina/VideoTools/VideoToolsRotationIntent.swift
   iina/VideoTools/VideoToolsPlayerBridge.swift iina/VideoTools/VideoToolsViewController.swift iina/VideoTools/VideoToolsLoopPolicy.swift
   iina/PlaybackBackend/PlaybackTransport.swift iina/PlaybackBackend/NativePlaybackTransport.swift
+  iina/PlaybackBackend/NativePlaybackQueue.swift iina/PlaybackBackend/MPVQueueInstaller.swift
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift
   iina/NativePlayback/NativePlaybackSession.swift iina/NativePlayback/CYNMediaDecoder.h iina/NativePlayback/CYNMediaDecoder.m
   Tools/NativeClipPreviewTests/extract.swift Tools/NativeClipPreviewTests/main.swift Tools/NativeClipPreviewTests/run.sh
   Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt
+  Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt
 )
 shasum -a 256 "${source_files[@]}" > "$test_dir/source-before.sha256"
 ffmpeg_bin="${FFMPEG_BIN:-/opt/homebrew/bin/ffmpeg}"
@@ -33,6 +35,7 @@ xcrun clang ${clang_flags[@]+"${clang_flags[@]}"} -target arm64-apple-macos12 -f
 xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm64-apple-macos12 \
   -import-objc-header iina/NativePlayback/CYNMediaDecoder.h \
   iina/PlaybackBackend/PlaybackTransport.swift iina/PlaybackBackend/NativePlaybackTransport.swift \
+  iina/PlaybackBackend/NativePlaybackQueue.swift iina/PlaybackBackend/MPVQueueInstaller.swift \
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift \
   iina/NativePlayback/NativePlaybackSession.swift iina/VideoTools/VideoToolsLoopPolicy.swift iina/PlayerState.swift \
   iina/VideoTools/VideoToolsRotationIntent.swift \

@@ -11,6 +11,7 @@ sources=(
   "$project_root/Tools/PlaybackLifecycleTests/Stubs.swift"
   "$project_root/iina/PlayerState.swift"
   "$project_root/iina/VideoTools/VideoToolsRotationIntent.swift"
+  "$project_root/iina/PlaybackBackend/NativePlaybackQueue.swift"
   "$project_root/iina/MediaInfo/MediaInfoModels.swift"
   "$test_dir/Player.swift"
   "$test_dir/Controller.swift"

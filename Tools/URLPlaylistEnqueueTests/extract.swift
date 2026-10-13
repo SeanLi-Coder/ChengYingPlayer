@@ -19,6 +19,9 @@ func method(_ signature: String) -> String {
 var members = span("  private var permanentRotationIntent", "  var touchBarSupport:")
 members += span("  private struct NativeCompatibilityRestore", "  private var playbackTransport:")
 members += span("  private struct URLPlaylistRequest", "  func appendToPlaylist(")
+members += try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt"), encoding: .utf8)
+  .replacingOccurrences(of: "__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__",
+    with: span("  private final class NativeQueueInstallation {", "  var hasNativePlaybackQueue:"))
 for signature in ["  func requireMPVCompatibility(", "  private func retireNativePlayback(",
                   "  private func open(_ url:", "  func stop()", "  func shutdown()",
                   "  func seek(absoluteSecond:", "  func seek(relativeSecond:", "  func seek(percent:",
@@ -27,7 +30,7 @@ for signature in ["  func requireMPVCompatibility(", "  private func retireNativ
   members += "\n" + method(signature)
 }
 let opening = method("  private func openMainWindow(")
-let boundary = "\n    advancePlaybackRoute(acceptsMPV: true)\n    log(\"Opening "
+let boundary = "\n    advancePlaybackRoute(acceptsMPV: queueInstallationID == nil)\n    log(\"Opening "
 precondition(opening.components(separatedBy: boundary).count == 2)
 members += "\n" + String(opening[..<opening.range(of: boundary)!.lowerBound]) +
   "\n    advancePlaybackRoute(acceptsMPV: true)\n    completeLegacyOpen(url: url, allowNative: allowNative)\n  }\n"
@@ -65,7 +68,8 @@ case "drop-owner":
   replaceOnce("    cancelURLPlaylistEnqueue()\n    urlPlaylistMediaEpoch = UUID()",
               "    /* negative: abandon reset ownership */\n    urlPlaylistMediaEpoch = UUID()")
 case "drop-pause-restore":
-  replaceOnce("           hasPendingURLPlaylistRestore)", "           false)")
+  replaceOnce("           hasPendingURLPlaylistRestore || hasPendingNativeQueueRestore)",
+              "           false || hasPendingNativeQueueRestore)")
 case "ignore-result":
   replaceOnce("        if $0 >= 0 { count += 1 }", "        _ = $0; count += 1")
 case "empty-playlist":

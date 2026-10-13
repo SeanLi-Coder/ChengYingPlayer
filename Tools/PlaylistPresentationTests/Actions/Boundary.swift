@@ -21,6 +21,7 @@ final class ProbeMPV {
 }
 enum MPVProperty { static let playlistPos = "playlist-pos" }
 final class PlayerCore {
+  let nativeQueueOwnsPlaylist = false
   static var newPlayerCore = PlayerCore()
   let info = PlaybackInfo()
   let mpv = ProbeMPV()

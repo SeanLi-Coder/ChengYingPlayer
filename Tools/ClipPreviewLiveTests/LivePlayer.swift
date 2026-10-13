@@ -238,6 +238,17 @@ final class PlayerCore: NSObject {
     precondition(!hasPendingPermanentRotation && !permanentRotationIntent.hasPending && nativeCompatibilityRestore == nil)
     return false
   }
+  func recordNativeQueueSeek(_ result: PlaybackTransportResult) {
+    precondition(!isUsingNativePlayback, "No native queue in live MPV clip tests")
+  }
+  var nativeQueue: NativeQueueState? {
+    get { nil }
+    set { precondition(newValue == nil, "No native queue in live MPV clip tests") }
+  }
+  let nativeQueueLoadPending = false
+  func applyNativeQueueDecision(_ decision: NativeQueueState.Decision, manual: Bool) {
+    preconditionFailure("Unexpected native queue decision in live MPV clip tests")
+  }
   func requestPermanentRotation(clockwiseQuarterTurns: Int) -> Bool {
     preconditionFailure("Rotation is outside the live MPV clip test boundary")
   }

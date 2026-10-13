@@ -7,6 +7,8 @@ printf 'Artifacts: %s\n' "$test_dir"
 git rev-parse HEAD > "$test_dir/base-commit.txt"
 printf '%s\n' "${ROTATION_HANDOFF_SANITIZER:-normal}" > "$test_dir/mode.txt"
 sources=(iina/Atomic.swift iina/Lock.swift iina/PlayerState.swift iina/MPVCommand.swift iina/MPVOption.swift
+  iina/PlaybackBackend/PlaybackTransport.swift iina/PlaybackBackend/NativePlaybackQueue.swift
+  iina/PlaybackBackend/MPVQueueInstaller.swift
   iina/Updates/UpdateWorkAdmission.swift iina/VideoTools/VideoToolsModels.swift
   iina/VideoTools/VideoToolsLoopPolicy.swift iina/VideoTools/VideoToolsRotationIntent.swift
   iina/VideoTools/VideoToolsRotationCoordinator.swift iina/VideoTools/VideoToolsShortcuts.swift)
@@ -14,6 +16,7 @@ shasum -a 256 "${sources[@]}" iina/PlayerCore.swift iina/PlayerWindowController.
   iina/QuickSettingViewController.swift iina/VideoTools/VideoToolsViewController.swift \
   iina/VideoTools/VideoToolsPlayerBridge.swift Tools/NativeRotationHandoffTests/*.swift \
   Tools/URLPlaylistEnqueueTests/EnqueueServices.swift \
+  Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt \
   Tools/NativeRotationHandoffTests/run.sh > "$test_dir/inputs.sha256"
 finish_evidence() {
   original_status=$?

@@ -13,6 +13,7 @@ trap cleanup EXIT
 xcrun swift "$project_root/Tools/PlaybackModeTests/extract.swift" "$project_root" "$test_dir"
 sources=(
   "$project_root/iina/PlaylistPlaybackPolicy.swift"
+  "$project_root/iina/PlaybackBackend/NativePlaybackQueue.swift"
   "$project_root/iina/PlayerState.swift"
   "$project_root/iina/MPVHook.swift"
   "$project_root/Tools/PlaybackModeTests/Boundary.swift"

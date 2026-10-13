@@ -65,6 +65,9 @@ if negative == "ignore-opening-getter" {
 }
 let boundary = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerRouteTests/PlayerBoundary.txt"), encoding: .utf8)
 let noEnqueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt"), encoding: .utf8)
+let noQueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt"), encoding: .utf8)
+  .replacingOccurrences(of: "__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__",
+    with: section("  private final class NativeQueueInstallation {", "  var hasNativePlaybackQueue:"))
 let bridge = try String(contentsOf: root.appendingPathComponent("iina/VideoTools/VideoToolsPlayerBridge.swift"), encoding: .utf8)
 guard let modelStart = bridge.range(of: "struct VideoToolsViewport:")?.lowerBound,
       let modelEnd = bridge.range(of: "struct VideoToolsPlayerSnapshot")?.lowerBound else {
@@ -91,6 +94,7 @@ final class PlayerCore {
 \(boundary)
 \(declarations)
 \(noEnqueue)
+\(noQueue)
 \(methods)
 }
 final class PlaybackInfoDouble: PlaybackInfoFields {

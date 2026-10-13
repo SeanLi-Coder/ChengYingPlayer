@@ -39,6 +39,9 @@ let methods = ["  func abLoop()", "  func syncAbLoop()", "  func seek(absoluteSe
 let markerProperties = section(core, "  /// The A loop point established", "\n  var isABLoopActive:")
 let boundary = try String(contentsOf: root.appendingPathComponent("Tools/NativeABLoopTests/PlayerBoundary.txt"), encoding: .utf8)
 let noEnqueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt"), encoding: .utf8)
+let noQueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt"), encoding: .utf8)
+  .replacingOccurrences(of: "__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__",
+    with: section(core, "  private final class NativeQueueInstallation {", "  var hasNativePlaybackQueue:"))
 let generated = """
 import AppKit
 import AVFoundation
@@ -47,6 +50,7 @@ final class PlayerCore {
 \(rotationFields)
 \(compatibilityFields)
 \(noEnqueue)
+\(noQueue)
 \(members)
 \(controls)
 \(markerProperties)

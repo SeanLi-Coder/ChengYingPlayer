@@ -38,6 +38,10 @@ let rotationMethods = ["  @discardableResult\n  func cancelPendingPermanentRotat
 let compatibilityMembersEnd = source.range(of: "  private var playbackTransport:", range: end..<source.endIndex)!.lowerBound
 let compatibilityMembers = String(source[end..<compatibilityMembersEnd])
 let noEnqueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt"), encoding: .utf8)
+let queueStart = source.range(of: "  private final class NativeQueueInstallation {")!.lowerBound
+let queueEnd = source.range(of: "  var hasNativePlaybackQueue:", range: queueStart..<source.endIndex)!.lowerBound
+let noQueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt"), encoding: .utf8)
+  .replacingOccurrences(of: "__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__", with: String(source[queueStart..<queueEnd]))
 var compatibilityMethods = ["  func requireMPVCompatibility(", "  private func retireNativePlayback("].map(coreMethod).joined(separator: "\n")
 if ProcessInfo.processInfo.environment["NATIVE_PREVIEW_NEGATIVE_CONTROL"] == "stale-compatibility" {
   let original = ",\n              (!initiallyReady && self.nativeInitialPlaybackPending || self.nativePreviewIntentRevision == previewIntent),\n              !self.nativePreviewInProgress"
@@ -49,10 +53,12 @@ if ProcessInfo.processInfo.environment["NATIVE_PREVIEW_NEGATIVE_CONTROL"] == "st
 let generated = """
 import Foundation
 import AVFoundation
+enum LoopMode { case off, file, playlist }
 final class PlayerCore {
 \(rotationFields)
 \(rotationMethods)
 \(noEnqueue)
+\(noQueue)
   struct Info { var videoDuration: VideoTime?; var state = PlayerState.idle; var currentURL: URL? }
   var info = Info()
   var nativeTransport: NativePlaybackTransport?

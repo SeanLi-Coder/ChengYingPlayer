@@ -12,6 +12,7 @@ final class MPVBoundary {
 }
 final class PlayerBoundary {
   var isUsingNativePlayback = false
+  let hasNativePlaybackQueue = false
   var pending: (() -> Void)?
   let mpv = MPVBoundary()
   var aspects: [String] = []
