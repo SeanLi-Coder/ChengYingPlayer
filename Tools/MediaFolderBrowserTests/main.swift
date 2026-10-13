@@ -148,8 +148,8 @@ waitFor("An unchanged directory refresh finishes") { !browser.isLoading }
 expect(browser.mediaFilesRevision != revisionBeforeFilter && browser.mediaFiles == orderBeforeFilter,
        "Even unchanged refreshes publish a new revision for host identity revalidation")
 try setTags(["Review\n4"], at: file2)
-browser.refresh()
-waitFor("Refresh finishes") { !browser.isLoading }
+NotificationCenter.default.post(name: .playbackFileTagsChanged, object: nil, userInfo: ["url": file2])
+waitFor("A tag-change notification refreshes the matching folder") { !browser.isLoading }
 expect(browser.mediaFiles.first(where: { $0.url == file2 })?.tags == [PlaylistFileTag(name: "Review", colorIndex: 4)],
        "Refresh rereads changed Finder tags")
 
@@ -206,6 +206,26 @@ browser.tableView.selectRowIndexes(copiedRows, byExtendingSelection: false)
 browser.refresh()
 waitFor("Multi-selection refresh completes") { !browser.isLoading }
 expect(browser.tableView.selectedRowIndexes == copiedRows, "Refresh preserves multi-selection by file identity")
+let unrelatedRevision = browser.mediaFilesRevision
+NotificationCenter.default.post(name: .playbackFileTagsChanged, object: nil, userInfo: ["url": nestedFile])
+expect(browser.mediaFilesRevision == unrelatedRevision && !browser.isLoading,
+       "A tag change in an unrelated folder does not trigger a scan")
+try setTags(["New red tag\n6"], at: file10)
+NotificationCenter.default.post(name: .playbackFileTagsChanged, object: nil, userInfo: ["url": file10])
+waitFor("The matching tag notification preserves a multi-selection") { !browser.isLoading }
+expect(browser.tableView.selectedRowIndexes == copiedRows, "Tag metadata refresh preserves selected files")
+browser.tagFilterControls.filterPopup.selectItem(at: 1)
+send(browser.tagFilterControls.filterPopup)
+expect(browser.visibleEntries.filter { !$0.isDirectory }.map(\.url) == [file10],
+       "The color filter sees the newly applied Finder tag")
+try setTags(["Review red\n6"], at: file2)
+NotificationCenter.default.post(name: .playbackFileTagsChanged, object: nil, userInfo: ["url": file2])
+waitFor("An active color filter updates immediately after a tag notification") { !browser.isLoading }
+expect(Set(browser.visibleEntries.filter { !$0.isDirectory }.map(\.url)) == Set([file2, file10]),
+       "A matching tag edit updates the visible filtered files")
+browser.tagFilterControls.filterPopup.selectItem(at: 0)
+send(browser.tagFilterControls.filterPopup)
+browser.tableView.selectRowIndexes(copiedRows, byExtendingSelection: false)
 window.makeFirstResponder(browser.tableView)
 browser.tableView.copy(nil)
 let destinationBrowser = MediaFolderBrowserView(extensions: ["png", "mp4"], pasteboard: filePasteboard)

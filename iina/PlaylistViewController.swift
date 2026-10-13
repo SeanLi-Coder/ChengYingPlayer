@@ -213,6 +213,14 @@ class PlaylistViewController: NSViewController, NSTableViewDataSource, NSTableVi
       self.refreshFileMetadata(force: true)
       if !self.folderBrowser.isHidden { self.folderBrowser.refresh() }
     }
+    lifecycleObservers.append(NotificationCenter.default.addObserver(forName: .playbackFileTagsChanged,
+      object: nil, queue: .main) { [weak self] notification in
+      guard let self, let url = notification.userInfo?["url"] as? URL,
+            self.player.info.playlist.contains(where: {
+              !$0.isNetworkResource && URL(fileURLWithPath: $0.filename).standardizedFileURL == url.standardizedFileURL
+            }) else { return }
+      self.refreshFileMetadata(force: true)
+    })
     lifecycleObservers.append(NotificationCenter.default.addObserver(forName: .iinaFileLoaded, object: player,
                                                                      queue: .main) { [weak self] _ in
       self?.syncFolderBrowser()

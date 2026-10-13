@@ -166,8 +166,13 @@ for size in [NSSize(width: 285, height: 120), NSSize(width: 320, height: 240), N
         check(controller.fragToolbarView.frame.height >= 24 && controller.fragToolbarView.detachedViews.isEmpty &&
               buttons.allSatisfy { controller.fragToolbarView.bounds.contains($0.alignmentRect(forFrame: $0.frame)) },
               "\(label): rebuilt icons remain inside a nonzero toolbar instead of clipping outside an empty stack")
-        check(buttons.count == 4 && buttons.suffix(2).map(\.tag) == [Preference.ToolBarButton.settings.rawValue, Preference.ToolBarButton.playlist.rawValue],
-              "\(label): toolbar has one information entry and settings/file-list at the right")
+        check(buttons.count == 5 && buttons.suffix(2).map(\.tag) == [Preference.ToolBarButton.settings.rawValue, Preference.ToolBarButton.playlist.rawValue],
+              "\(label): toolbar has information/tags entries and settings/file-list at the right")
+        let tagButtons = buttons.filter { $0.identifier?.rawValue == "playback.finder-tags" }
+        check(tagButtons.count == 1 && tagButtons[0].target === controller &&
+              tagButtons[0].action == #selector(LayoutController.showEdgeFileTags(_:)) &&
+              tagButtons[0].accessibilityLabel() == PlaybackFileTagController.title,
+              "\(label): Finder tags retain a unique accessible native action")
         check(controller.sideBarView.frame.height <= controller.preferredPlaylistHeight + 0.6 && controller.sideBarView.frame.height >= 251.4,
               "\(label): sidebar height stays within its intended bounds")
         check(controller.sideBarView.frame.minY >= footer.frame.maxY + 5.4,
@@ -252,12 +257,12 @@ Preference.toolbarButtons = [1, 0, 7, 4, 2, 1, 0]
 controller.setupOSCToolbarButtons(Preference.toolbarButtons.compactMap(Preference.ToolBarButton.init(rawValue:)))
 content.layoutSubtreeIfNeeded()
 let essentialButtons = controller.fragToolbarView.views.compactMap { $0 as? NSButton }
-check(essentialButtons.count == 4 && essentialButtons.suffix(2).map(\.tag) == [0, 1],
+check(essentialButtons.count == 5 && essentialButtons.suffix(2).map(\.tag) == [0, 1],
       "Repeated settings/file-list preferences and retired features cannot duplicate essential corner entries")
 Preference.toolbarButtons = [2, 3, 5, 6, 0, 1]
 controller.setupOSCToolbarButtons(Preference.toolbarButtons.compactMap(Preference.ToolBarButton.init(rawValue:)))
 content.layoutSubtreeIfNeeded()
-check(controller.fragToolbarView.views.count == 7 && controller.cornerControls!.frame.width < 220,
+check(controller.fragToolbarView.views.count == 8 && controller.cornerControls!.frame.width < 250,
       "The complete supported toolbar remains compact with real production icon sizing")
 controller.fsState.isFullscreen = false
 for type in [LayoutController.SidebarStatus.playlist, .settings, .plugins] {

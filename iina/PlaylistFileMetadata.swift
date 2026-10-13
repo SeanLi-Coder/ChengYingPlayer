@@ -1,6 +1,10 @@
 import Foundation
 import Darwin
 
+extension Notification.Name {
+  static let playbackFileTagsChanged = Notification.Name("io.chengying.playback-file-tags-changed")
+}
+
 /// Finder color indices are 0 (none), 1 (gray), 2 (green), 3 (purple),
 /// 4 (blue), 5 (yellow), 6 (red), and 7 (orange).
 struct PlaylistFileTag: Equatable {

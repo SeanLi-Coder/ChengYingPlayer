@@ -187,6 +187,14 @@ class MainWindowController: PlayerWindowController {
   var fadeableViews: [NSView] = []
   private var edgeControls: PlayerEdgeControlsView?
   private var cornerControls: PlayerCornerControlsView?
+  private lazy var fileTagController = PlaybackFileTagController(
+    currentOwner: { [weak self] in
+      guard let self, self.window?.isVisible == true, self.player.info.state.active,
+            !self.player.info.isNetworkResource, let url = self.player.info.currentURL,
+            url.isFileURL else { return nil }
+      return PlaybackFileTagController.Owner(url: url, generation: self.player.videoToolsMediaGeneration)
+    }, beginInteraction: { [weak self] in self?.beginFileTagInteraction() ?? {} },
+    present: { [weak self] in self?.displayOSD(.custom($0)) })
   private var cornerTopConstraint: NSLayoutConstraint?
   private var originalSidebarVerticalConstraints: [NSLayoutConstraint] = []
   private var edgeSidebarConstraints: [NSLayoutConstraint] = []
@@ -201,6 +209,7 @@ class MainWindowController: PlayerWindowController {
   /// The sidebar faded out with the player chrome and will return on pointer movement.
   private(set) var sidebarAutoHidden = false
   private var controlInteractionDepth = 0
+  private var fileTagInteractionGeneration: UInt64 = 0
 
   private var isUsingEdgeControls: Bool { oscPosition == .bottom }
 
@@ -318,7 +327,19 @@ class MainWindowController: PlayerWindowController {
     if controlInteractionDepth == 0, window?.isVisible == true { updateTimer() }
   }
 
+  private func beginFileTagInteraction() -> () -> Void {
+    beginControlInteraction()
+    let generation = fileTagInteractionGeneration
+    var finished = false
+    return { [weak self] in
+      guard let self, !finished, self.fileTagInteractionGeneration == generation else { return }
+      finished = true
+      self.endControlInteraction()
+    }
+  }
+
   private func invalidateChromeOnClose() {
+    fileTagInteractionGeneration &+= 1
     sidebarResizeHandle?.cancelResize()
     destroyTimer()
     chromeAnimationGeneration &+= 1
@@ -923,6 +944,17 @@ class MainWindowController: PlayerWindowController {
       NSLayoutConstraint.activate([info.widthAnchor.constraint(equalToConstant: 24),
                                    info.heightAnchor.constraint(equalToConstant: 24)])
       fragToolbarView.addView(info, in: .trailing)
+      let tags = NSButton(image: ChengYingStyle.symbol("tag"), target: self,
+                          action: #selector(showEdgeFileTags(_:)))
+      tags.identifier = NSUserInterfaceItemIdentifier("playback.finder-tags")
+      tags.isBordered = false
+      tags.refusesFirstResponder = true
+      tags.toolTip = PlaybackFileTagController.title
+      tags.setAccessibilityLabel(tags.toolTip)
+      tags.translatesAutoresizingMaskIntoConstraints = false
+      NSLayoutConstraint.activate([tags.widthAnchor.constraint(equalToConstant: 24),
+                                   tags.heightAnchor.constraint(equalToConstant: 24)])
+      fragToolbarView.addView(tags, in: .trailing)
     }
     for buttonType in buttons {
       let button = NSButton()
@@ -936,6 +968,10 @@ class MainWindowController: PlayerWindowController {
 
   @objc private func showEdgeMediaInformation(_ sender: NSButton) {
     MediaInfoCoordinator.shared.showMediaInfo(sender)
+  }
+
+  @objc private func showEdgeFileTags(_ sender: NSButton) {
+    fileTagController.showMenu(from: sender)
   }
 
   private func setupOnScreenController(withPosition newPosition: Preference.OSCPosition) {

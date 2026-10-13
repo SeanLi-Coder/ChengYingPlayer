@@ -66,6 +66,7 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
   private var selectedURL: URL?
   private var selectionURLs = Set<URL>()
   private var transferObserver: NSObjectProtocol?
+  private var tagObserver: NSObjectProtocol?
   private var hasLoadedDirectory = false
   private var loadGeneration: UInt64 = 0
   private var pendingLoad: MediaFolderLoadCancellation?
@@ -81,6 +82,14 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
     _ = fileActions
     transferObserver = NotificationCenter.default.addObserver(forName: .mediaFilesTransferred,
       object: nil, queue: .main) { [weak self] notification in self?.filesTransferred(notification) }
+    tagObserver = NotificationCenter.default.addObserver(forName: .playbackFileTagsChanged,
+      object: nil, queue: .main) { [weak self] notification in
+      guard let self, let directory = self.directoryURL,
+            let url = notification.userInfo?["url"] as? URL, url.isFileURL,
+            directory.standardizedFileURL.resolvingSymlinksInPath() ==
+              url.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath() else { return }
+      self.refresh()
+    }
     updateControls()
   }
 
@@ -89,6 +98,7 @@ final class MediaFolderBrowserView: NSView, NSTableViewDataSource, NSTableViewDe
   deinit {
     pendingLoad?.cancel()
     if let transferObserver { NotificationCenter.default.removeObserver(transferObserver) }
+    if let tagObserver { NotificationCenter.default.removeObserver(tagObserver) }
   }
 
   func showDirectory(_ url: URL, selectedURL: URL? = nil, force: Bool = false) {

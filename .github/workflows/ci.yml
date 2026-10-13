@@ -129,6 +129,9 @@ jobs:
       - name: Test folder playlists and Finder tags
         run: |
           bash Tools/PlaylistMetadataTests/run.sh
+          bash Tools/PlaybackFileTagTests/run.sh
+          bash Tools/PlaybackFileTagUITests/run.sh
+          python3 -B Tools/PlaybackFileTagTests/test_integration.py
           bash Tools/PlaylistPlaybackTests/run.sh
           bash Tools/PlaylistPresentationTests/run.sh
           bash Tools/PlaylistFilterTests/run.sh

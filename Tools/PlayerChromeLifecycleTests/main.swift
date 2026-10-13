@@ -427,6 +427,25 @@ withFixture { controller in
 }
 
 withFixture { controller in
+  let oldTagCompletion = controller.beginFileTagInteraction()
+  check(controller.controlInteractionDepth == 1, "Reading tags reserves one chrome interaction")
+  controller.invalidateChromeOnClose()
+  controller.beginControlInteraction()
+  let currentDepth = controller.controlInteractionDepth
+  oldTagCompletion()
+  check(controller.controlInteractionDepth == currentDepth && controller.hideControlTimer == nil,
+        "A tag read from a closed window cannot release a new window interaction")
+  controller.endControlInteraction()
+  let currentTagCompletion = controller.beginFileTagInteraction()
+  currentTagCompletion()
+  controller.beginControlInteraction()
+  currentTagCompletion()
+  check(controller.controlInteractionDepth == 1 && controller.hideControlTimer == nil,
+        "A tag interaction completion is idempotent within the same window generation")
+  controller.endControlInteraction()
+}
+
+withFixture { controller in
   controller.showPlaylistSidebar()
   ChromeAnimations.drain()
   controller.beginControlInteraction()

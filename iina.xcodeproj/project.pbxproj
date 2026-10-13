@@ -46,6 +46,8 @@
 		D4E100010000000000000001 /* PlayerEdgeControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E100020000000000000001 /* PlayerEdgeControlsView.swift */; };
 		D4E100010000000000000002 /* PlayerChromePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E100020000000000000002 /* PlayerChromePolicy.swift */; };
 		D4CA00012F6A000100000001 /* PlaylistFileMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00112F6A000100000001 /* PlaylistFileMetadata.swift */; };
+		D4F100012F70000100000001 /* PlaybackFileTags.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F100112F70000100000001 /* PlaybackFileTags.swift */; };
+		D4F100022F70000100000002 /* PlaybackFileTagController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F100122F70000100000002 /* PlaybackFileTagController.swift */; };
 		D4CA00022F6A000100000002 /* PlaylistPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00122F6A000100000002 /* PlaylistPresentation.swift */; };
 		D4CA00052F6A000100000005 /* MediaFolderBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00152F6A000100000005 /* MediaFolderBrowserView.swift */; };
 		D4CA00062F6A000100000006 /* MediaFileTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CA00162F6A000100000006 /* MediaFileTransfer.swift */; };
@@ -487,6 +489,8 @@
 		D4E100020000000000000001 /* PlayerEdgeControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerEdgeControlsView.swift; sourceTree = "<group>"; };
 		D4E100020000000000000002 /* PlayerChromePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerChromePolicy.swift; sourceTree = "<group>"; };
 		D4CA00112F6A000100000001 /* PlaylistFileMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistFileMetadata.swift; sourceTree = "<group>"; };
+		D4F100112F70000100000001 /* PlaybackFileTags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackFileTags.swift; sourceTree = "<group>"; };
+		D4F100122F70000100000002 /* PlaybackFileTagController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackFileTagController.swift; sourceTree = "<group>"; };
 		D4CA00122F6A000100000002 /* PlaylistPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPresentation.swift; sourceTree = "<group>"; };
 		D4CA00152F6A000100000005 /* MediaFolderBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaFolderBrowserView.swift; sourceTree = "<group>"; };
 		D4CA00162F6A000100000006 /* MediaFileTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaFileTransfer.swift; sourceTree = "<group>"; };
@@ -2283,6 +2287,8 @@
 				D4E100020000000000000001 /* PlayerEdgeControlsView.swift */,
 				D4E100020000000000000002 /* PlayerChromePolicy.swift */,
 				D4CA00112F6A000100000001 /* PlaylistFileMetadata.swift */,
+				D4F100112F70000100000001 /* PlaybackFileTags.swift */,
+				D4F100122F70000100000002 /* PlaybackFileTagController.swift */,
 				D4CA00122F6A000100000002 /* PlaylistPresentation.swift */,
 				D4CA00152F6A000100000005 /* MediaFolderBrowserView.swift */,
 				D4CA00162F6A000100000006 /* MediaFileTransfer.swift */,
@@ -3066,6 +3072,8 @@
 				D4D100010000000000000005 /* VideoMediaInfoReader.swift in Sources */,
 				D4D100010000000000000006 /* ImageMediaInfoReader.swift in Sources */,
 				D4CA00012F6A000100000001 /* PlaylistFileMetadata.swift in Sources */,
+				D4F100012F70000100000001 /* PlaybackFileTags.swift in Sources */,
+				D4F100022F70000100000002 /* PlaybackFileTagController.swift in Sources */,
 				D4CA00022F6A000100000002 /* PlaylistPresentation.swift in Sources */,
 				D4CA00052F6A000100000005 /* MediaFolderBrowserView.swift in Sources */,
 				D4CA00062F6A000100000006 /* MediaFileTransfer.swift in Sources */,

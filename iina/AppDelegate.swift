@@ -462,6 +462,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   ///     terminate the application.
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     guard MediaFileActions.pendingOperationCount == 0 else { return false }
+    guard PlaybackFileTags.pendingWriteCount == 0 else { return false }
     guard !ImageViewerCoordinator.shared.isBusy else { return false }
     guard SubtitleToolsService.shared.task?.isActive != true else { return false }
     // A download task is independent of player-window lifetime.
@@ -477,6 +478,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard PlaybackFileTags.pendingWriteCount == 0 else {
+      let alert = NSAlert()
+      alert.messageText = playlistBrowserString("file-tags.quit.title")
+      alert.informativeText = playlistBrowserString("file-tags.quit.detail")
+      alert.runModal()
+      return .terminateCancel
+    }
     guard MediaFileActions.pendingOperationCount == 0 else {
       let alert = NSAlert()
       alert.messageText = playlistBrowserString("file-actions.quit.title")

@@ -209,6 +209,7 @@ final class LayoutController: NSWindowController {
   func removeTitlebarViewFromFadeableViews() { fadeableViews.removeAll { $0 === titleBarView } }
   @objc func toolBarButtonAction(_ sender: NSButton) {}
   @objc func showEdgeMediaInformation(_ sender: NSButton) {}
+  @objc func showEdgeFileTags(_ sender: NSButton) {}
 }
 
 final class PlaylistLayoutController: NSViewController, NSTableViewDataSource {
