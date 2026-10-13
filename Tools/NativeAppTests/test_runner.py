@@ -17,6 +17,255 @@ SPEC.loader.exec_module(runner)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_queue_report_requires_its_own_exact_set_and_identity(self):
+        labels = runner.QUEUE_REQUIRED_CHECKS
+        self.assertEqual(len(labels), 46)
+        self.assertFalse(labels & runner.REQUIRED_CHECKS)
+        result = {"format": 1, "run_id": "queue-run", "complete": True, "passed": True,
+                  "checks": [{"label": label, "passed": True} for label in sorted(labels)]}
+        runner.validate_result(result, run_id="queue-run", exit_code=0, required_checks=labels)
+        for label in labels:
+            broken = dict(result, checks=[item for item in result["checks"] if item["label"] != label])
+            with self.subTest(missing=label), self.assertRaises(RuntimeError):
+                runner.validate_result(broken, run_id="queue-run", exit_code=0, required_checks=labels)
+        for broken, identifier, code in ((result, "baseline-run", 0), (result, "queue-run", 1),
+                (dict(result, checks=result["checks"] + result["checks"][:1]), "queue-run", 0)):
+            with self.assertRaises(RuntimeError):
+                runner.validate_result(broken, run_id=identifier, exit_code=code, required_checks=labels)
+        with self.assertRaises(RuntimeError):
+            runner.validate_result(result, run_id="queue-run", exit_code=0)
+
+    def test_queue_fixture_copy_excludes_previous_results_and_uses_new_id(self):
+        with tempfile.TemporaryDirectory(prefix="native-queue-fixture-") as directory:
+            root = Path(directory)
+            source = root / "fixtures"
+            source.mkdir()
+            names = ["red/red.mp4", "blue/blue.mp4", "compat/compat.mp4", "delayed/delayed.mp4"]
+            for index, name in enumerate(names):
+                path = source / name
+                path.parent.mkdir()
+                path.write_bytes(bytes([index + 1]))
+            (source / "native-app-fixture.json").write_text(json.dumps({"format": 1, "run_id": "baseline",
+                "fixtures": names, "pixel_references": {"red": [1] * 27}}))
+            (source / "result.json").write_text("private previous report")
+            target = root / "queue-fixtures"
+            runner.make_queue_fixtures(source, target, "queue")
+            marker = json.loads((target / "native-app-fixture.json").read_text())
+            self.assertEqual(marker["run_id"], "queue")
+            self.assertEqual(marker["scenario"], "queue")
+            self.assertFalse((target / "result.json").exists())
+            for name in names:
+                self.assertEqual((target / name).read_bytes(), (source / name).read_bytes())
+            self.assertEqual(json.loads((source / "native-app-fixture.json").read_text())["run_id"], "baseline")
+
+    def test_queue_process_has_separate_evidence_and_does_not_build_again(self):
+        with tempfile.TemporaryDirectory(prefix="native-queue-process-") as directory:
+            root = Path(directory)
+            report = root / "report"
+            report.mkdir()
+            (report / "result.json").write_text("baseline evidence")
+            calls = []
+            def execute(command, **kwargs):
+                calls.append((command, kwargs))
+                identity = kwargs["run_id"]
+                data = {"format": 1, "run_id": identity, "complete": True, "passed": True,
+                        "checks": [{"label": value, "passed": True} for value in sorted(runner.QUEUE_REQUIRED_CHECKS)]}
+                return subprocess.CompletedProcess(command, 0), data
+            with patch.object(runner, "make_queue_fixtures") as copied, \
+                    patch.object(runner, "snapshot_identity", return_value={"fixtures": {"fixture": "sha"}}), \
+                    patch.object(runner, "run_application", side_effect=execute):
+                result = runner.run_queue_scenario(root / "App", workspace=root, environment={"BASE": "value"},
+                    fixtures=root / "fixtures", report=report, build_id="baseline-id")
+            self.assertTrue(result["passed"])
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][0], [str(root / "App"), "--no-stdin"])
+            options = calls[0][1]
+            self.assertEqual(options["report"], report / "queue")
+            self.assertNotEqual(options["run_id"], "baseline-id")
+            self.assertEqual(options["environment"]["CHENGYING_NATIVE_APP_TEST_BUILD_ID"], "baseline-id")
+            self.assertEqual(options["environment"]["CHENGYING_NATIVE_APP_TEST_RUN_ID"], options["run_id"])
+            self.assertEqual(options["environment"]["CHENGYING_NATIVE_APP_TEST_SCENARIO"], "queue")
+            self.assertEqual(options["required_checks"], runner.QUEUE_REQUIRED_CHECKS)
+            self.assertNotIn("timeout", options)
+            self.assertEqual((report / "result.json").read_text(), "baseline evidence")
+            copied.assert_called_once()
+
+    def test_queue_failure_cannot_pass_or_overwrite_baseline(self):
+        for failure in (RuntimeError("queue failure"), subprocess.TimeoutExpired(["test"], 150)):
+            with tempfile.TemporaryDirectory(prefix="native-queue-failure-") as directory:
+                root = Path(directory)
+                report = root / "report"
+                report.mkdir()
+                (report / "result.json").write_text("baseline evidence")
+                with patch.object(runner, "make_queue_fixtures"), \
+                        patch.object(runner, "snapshot_identity", return_value={"fixtures": {"fixture": "sha"}}), \
+                        patch.object(runner, "run_application", side_effect=failure):
+                    with self.assertRaises(type(failure)):
+                        runner.run_queue_scenario(root / "App", workspace=root, environment={},
+                            fixtures=root / "fixtures", report=report, build_id="baseline")
+                summary = json.loads((report / "queue/summary.json").read_text())
+                self.assertFalse(summary["passed"])
+                self.assertEqual((report / "result.json").read_text(), "baseline evidence")
+        source = SOURCE.read_text()
+        self.assertIn('parser.add_argument("--include-queue", action="store_true"', source)
+        self.assertLess(source.index('summary["checks"] = validate_result'), source.index("if args.include_queue:"))
+        self.assertLess(source.index("if args.include_queue:"), source.index('summary["passed"] = True\n        print'))
+
+    def test_identity_detects_content_added_and_removed_build_inputs(self):
+        for change in ("content", "added", "removed"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory(prefix="native-app-identity-") as directory:
+                root = Path(directory)
+                inputs, report = root / "inputs", root / "report"
+                inputs.mkdir(); report.mkdir()
+                source = inputs / "source.swift"
+                source.write_text("original")
+                groups = {"source": [inputs]}
+                expected = runner.snapshot_identity(groups, report)
+                runner.verify_identity(groups, expected, report, stage="before-process")
+                if change == "content":
+                    source.write_text("changed")
+                elif change == "added":
+                    (inputs / "added.swift").write_text("new")
+                else:
+                    source.unlink()
+                    (inputs / "other.swift").write_text("replacement")
+                with self.assertRaises(RuntimeError):
+                    runner.verify_identity(groups, expected, report, stage="after-process")
+                self.assertFalse(json.loads((report / "after-process-identity-validation.json").read_text())["passed"])
+                self.assertEqual(json.loads((report / "source-sha256.json").read_text()), expected["source"])
+
+    def test_failed_process_still_preserves_partial_and_checks_final_identity(self):
+        with tempfile.TemporaryDirectory(prefix="native-app-identity-timeout-") as directory:
+            root = Path(directory).resolve()
+            fixtures, report = root / "fixtures", root / "report"
+            fixtures.mkdir(); report.mkdir()
+            source = root / "source.swift"
+            source.write_text("original")
+            groups = {"source": [source]}
+            expected = runner.snapshot_identity(groups, report)
+            def timeout(*args, **kwargs):
+                source.write_text("changed during timeout")
+                (fixtures / "result.json").write_text(json.dumps({"format": 1, "run_id": "identity-run",
+                    "complete": False, "passed": False, "checks": [{"label": "partial", "passed": True}]}))
+                raise subprocess.TimeoutExpired(["test"], 150)
+            with patch.object(runner.subprocess, "run", side_effect=timeout), self.assertRaises(RuntimeError):
+                runner.run_application(["test"], workspace=root, environment={}, log=io.BytesIO(),
+                    fixtures=fixtures, report=report, run_id="identity-run", identity_groups=groups, identity_expected=expected)
+            self.assertFalse(json.loads((report / "result.json").read_text())["complete"])
+            self.assertFalse(json.loads((report / "after-process-identity-validation.json").read_text())["passed"])
+            self.assertTrue(json.loads((report / "process-status.json").read_text())["timed_out"])
+
+    def test_queue_rejects_a_different_build_before_launching(self):
+        with tempfile.TemporaryDirectory(prefix="native-app-queue-identity-") as directory:
+            root = Path(directory)
+            report = root / "report"
+            report.mkdir()
+            with patch.object(runner, "make_queue_fixtures"), \
+                    patch.object(runner, "snapshot_identity", return_value={"source": {"source": "changed"}}), \
+                    patch.object(runner, "run_application") as execute, self.assertRaises(RuntimeError):
+                runner.run_queue_scenario(root / "App", workspace=root, environment={}, fixtures=root / "fixtures",
+                    report=report, build_id="original", shared_identity_groups={"source": [root / "source"]},
+                    shared_identity_expected={"source": {"source": "original"}})
+            execute.assert_not_called()
+            self.assertFalse(json.loads((report / "queue/summary.json").read_text())["passed"])
+
+    def test_queue_driver_commands_pixels_handoff_and_cleanup_are_real(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private func startQueueScenario(")
+        end = source.index("  private func prepareActiveQuit(")
+        stages = source[start:end]
+        for proof in ("player.openMediaURLs(self.queueNames.map(self.fixture), shouldAutoLoad: false)",
+                      "player.navigateInPlaylist(nextMedia: true)", "player.navigateInPlaylist(nextMedia: false)",
+                      "player.playFileInPlaylist(2)", "player.togglePause()", "player.pause()", "player.resume()",
+                      "player.setLoopMode(.off)", "player.setLoopMode(.file)", "player.setLoopMode(.playlist)",
+                      "snapshot.phase == .ended", "snapshot.position >= 8.95", "snapshot.position < 2",
+                      'self.verifyClock(player, advancing: true, label: "queue_eof_seek_actual_clock_advances")',
+                      "player.mpv.getNode(MPVProperty.playlist)", "self.handoffMPVTransportMatches(player)",
+                      "self.handoffMPVViewportAndRangeMatch(player)", "self.markersMatch(player, start: 0, end: 5.5)",
+                      "MainMenuActionHandler.menuChangeAudioDelay", "second.info.subTracks.isEmpty",
+                      "selected: 2", "selected: 1", "layer.superlayer == nil", "window.performClose(nil)",
+                      "player.shutdown()", "registered.allSatisfy({ $0.info.state == .shutDown })"):
+            self.assertIn(proof, stages)
+        self.assertIn("NSApp.activate(ignoringOtherApps: true)", stages)
+        self.assertIn("window.makeFirstResponder(nil)", stages)
+        self.assertNotIn("requireMPVCompatibility", stages)
+        self.assertNotIn("NativeQueueState", stages)
+        self.assertNotIn(".nativeQueue", stages)
+        self.assertNotIn("getMirror", stages)
+        self.assertIn("waitForNativePaused(player, position: 0", stages)
+        for label in runner.QUEUE_REQUIRED_CHECKS - {"queue_first_core_close", "queue_first_core_shutdown",
+                "queue_second_core_close", "queue_second_core_shutdown"}:
+            self.assertIn('"' + label + '"', stages)
+        self.assertEqual(source.count("deadline: .now() + 110"), 1)
+        self.assertEqual(runner.run_application.__kwdefaults__["timeout"], 150)
+
+    def test_actual_queue_node_comparator_rejects_wrong_duplicate_and_playing_entry(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private static func matchesMPVQueue(")
+        end = source.index("\n  }", start) + len("\n  }")
+        method = source[start:end].replace("private ", "")
+        harness = r'''
+import Foundation
+struct Comparator {
+METHOD
+}
+let paths = ["/generated/red.mp4", "/generated/blue.mp4", "/generated/red.mp4"]
+let ids: [Int64] = [42, 81, 107]
+func entries(_ selected: Int) -> [[String: Any?]] {
+  paths.indices.map { ["filename": paths[$0], "id": ids[$0], "current": $0 == selected, "playing": $0 == selected] }
+}
+var checks = 0
+func expect(_ value: Bool) { checks += 1; precondition(value, "Queue comparator assertion failed") }
+for index in paths.indices {
+  expect(Comparator.matchesMPVQueue(entries(index), paths: paths, selected: index))
+  expect(!Comparator.matchesMPVQueue(entries(index), paths: paths, selected: (index + 1) % 3))
+}
+expect(!Comparator.matchesMPVQueue(nil, paths: paths, selected: 2))
+expect(!Comparator.matchesMPVQueue(entries(2), paths: paths, selected: -1))
+expect(!Comparator.matchesMPVQueue(entries(2), paths: paths, selected: 3))
+expect(!Comparator.matchesMPVQueue(entries(2).dropLast(), paths: paths, selected: 2))
+for index in paths.indices {
+  for field in ["filename", "id"] {
+    var bad = entries(2); bad[index].removeValue(forKey: field)
+    expect(!Comparator.matchesMPVQueue(bad, paths: paths, selected: 2))
+  }
+  var bad = entries(2); bad[index]["id"] = Int64(-1)
+  expect(!Comparator.matchesMPVQueue(bad, paths: paths, selected: 2))
+  bad = entries(2); bad[index]["filename"] = "/wrong"
+  expect(!Comparator.matchesMPVQueue(bad, paths: paths, selected: 2))
+  bad = entries(2); bad[index]["current"] = index != 2
+  expect(!Comparator.matchesMPVQueue(bad, paths: paths, selected: 2))
+  bad = entries(2); bad[index]["playing"] = index != 2
+  expect(!Comparator.matchesMPVQueue(bad, paths: paths, selected: 2))
+}
+var duplicate = entries(2); duplicate[2]["id"] = ids[0]
+expect(!Comparator.matchesMPVQueue(duplicate, paths: paths, selected: 2))
+var wrong = entries(2); wrong[2]["playing"] = false; wrong[0]["playing"] = true
+expect(!Comparator.matchesMPVQueue(wrong, paths: paths, selected: 2))
+print("Queue node comparator checks: \(checks)")
+'''
+        with tempfile.TemporaryDirectory(prefix="native-queue-comparator-") as directory:
+            root = Path(directory)
+            main = root / "main.swift"
+            main.write_text(harness.replace("METHOD", method))
+            subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-warnings-as-errors", str(main),
+                            "-o", str(root / "comparator")], check=True, timeout=90)
+            subprocess.run([str(root / "comparator")], check=True, timeout=10)
+
+    def test_paused_wait_acquires_late_session_without_resetting_deadline_or_owner(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        start = source.index("  private func waitForNativePaused(")
+        end = source.index("\n  }", start) + len("\n  }")
+        method = source[start:end]
+        self.assertIn("var observedSession = player.nativePlaybackSession", method)
+        self.assertEqual(method.count("let deadline = ProcessInfo.processInfo.systemUptime + 12"), 1)
+        self.assertLess(method.index("let deadline ="), method.index("func poll()"))
+        self.assertIn("if observedSession == nil, let available = player.nativePlaybackSession", method)
+        self.assertEqual(method.count("player.nativePlaybackSession === session"), 2)
+        self.assertEqual(method.count("player.videoToolsMediaGeneration == observedGeneration"), 2)
+        self.assertIn("snapshot.phase == .paused", method)
+        self.assertIn("self.pixel(player, is: color)", method)
+
     def test_real_appkit_termination_context_and_old_gcd_negative_control(self):
         driver = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
         anchor = "  private static func performTerminationFromRunLoop("

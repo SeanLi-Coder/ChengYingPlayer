@@ -8,20 +8,20 @@ extension Notification.Name {
   static let iinaPlayerShutdown = Notification.Name("fixture.player-shutdown")
 }
 
-enum MPVProperty { static let idleActive = "idle-active", path = "path", timePos = "time-pos" }
+enum MPVProperty { static let idleActive = "idle-active", path = "path", timePos = "time-pos", playlist = "playlist" }
 enum MPVOption {
   enum PlaybackControl { static let pause = "pause", speed = "speed", abLoopA = "ab-loop-a", abLoopB = "ab-loop-b", abLoopCount = "ab-loop-count" }
   enum Audio { static let volume = "volume", audioDelay = "audio-delay" }
   enum Video { static let videoZoom = "video-zoom", videoPanX = "video-pan-x", videoPanY = "video-pan-y" }
 }
 enum PlayerState { case idle, playing, paused, shutDown }
-enum LoopMode { case off, file }
+enum LoopMode { case off, file, playlist }
 enum Preference {
   enum SeekOption { case exact }
   static func savedLoopMode(in defaults: UserDefaults, domain: String?) -> LoopMode? { nil }
 }
 struct VideoTime { var second: Double }
-enum NativePlaybackPhase { case paused, playing }
+enum NativePlaybackPhase { case paused, playing, ended }
 struct NativePlaybackSnapshot {
   var phase: NativePlaybackPhase
   var volume: Float
@@ -42,6 +42,12 @@ final class MPVController {
   func getFlag(_ property: String) -> Bool { false }
   func getDouble(_ property: String) -> Double { 0 }
   func getString(_ property: String) -> String? { nil }
+  func getNode(_ property: String) -> Any? { nil }
+}
+final class MPVPlaylistItem: NSObject {
+  var filename = ""
+  var isCurrent = false
+  var isPlaying = false
 }
 final class PlaybackInfo {
   enum LoopStatus { case cleared, aSet, bSet }
@@ -51,6 +57,7 @@ final class PlaybackInfo {
   var subTracks: [String] = []
   var videoDuration: VideoTime?
   var abLoopStatus = LoopStatus.cleared
+  var playlist: [MPVPlaylistItem] = []
 }
 struct VideoToolsViewport { var scale = 1.0; var panX = 0.0; var panY = 0.0 }
 struct VideoToolsLoopRange { var start: Double; var end: Double }
@@ -107,6 +114,9 @@ final class PlayerCore {
   var nativePlaybackOutput: NativeSampleBufferOutput?
   var nativeViewport = VideoToolsViewport()
   var isUsingNativePlayback = false
+  var hasNativePlaybackQueue = false
+  var playbackAtEOF = false
+  var videoToolsMediaGeneration: UInt64 = 0
   var playbackIsPaused = false
   var playbackVolume = 0.0
   var playbackPosition: Double?
@@ -115,6 +125,12 @@ final class PlayerCore {
   var nativePreviewInProgress = false
   var videoToolsLoopRange: VideoToolsLoopRange?
   func openURL(_ url: URL, shouldAutoLoad: Bool) {}
+  func openMediaURLs(_ urls: [URL], shouldAutoLoad: Bool) -> Int? { nil }
+  func navigateInPlaylist(nextMedia: Bool) {}
+  func playFileInPlaylist(_ index: Int) {}
+  func pause() {}
+  func resume() {}
+  func togglePause(_ set: Bool? = nil) {}
   func seek(absoluteSecond: Double) {}
   func seek(relativeSecond: Double, option: Preference.SeekOption) {}
   func getLoopMode() -> LoopMode { .off }

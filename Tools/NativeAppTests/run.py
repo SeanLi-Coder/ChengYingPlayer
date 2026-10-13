@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import hashlib
 import json
 import os
 from pathlib import Path
 import plistlib
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -61,6 +63,23 @@ REQUIRED_CHECKS = {
     "handoff_deferred_menu_action_applied", "handoff_paused_mpv_stays_still", "handoff_real_close_stops_mpv",
     "handoff_extra_core_shutdown",
 }
+QUEUE_REQUIRED_CHECKS = {
+    "queue_pristine_service", "queue_explicit_duplicate_urls_accepted", "queue_first_actual_red_frame",
+    "queue_distinct_duplicate_identities", "queue_volume_before_next", "queue_next_blue_resets_volume",
+    "queue_volume_before_previous", "queue_previous_red_resets_volume", "queue_volume_before_duplicate",
+    "queue_selected_duplicate_resets_volume", "queue_loading_latest_pause_intent", "queue_loading_pause_clock_stable",
+    "queue_last_item_ready_for_eof", "queue_off_last_seek_near_eof", "queue_off_last_reaches_real_eof",
+    "queue_eof_seek_preserves_target", "queue_eof_seek_resume_not_rewound", "queue_eof_seek_actual_clock_advances",
+    "queue_eof_resume_paused", "queue_file_seek_near_eof", "queue_file_wraps_same_duplicate",
+    "queue_list_seek_near_eof", "queue_list_wraps_to_first_duplicate", "queue_new_open_cancels_pending_selection",
+    "queue_cancelled_selection_stays_cancelled", "queue_reopen_for_loaded_handoff", "queue_handoff_duplicate_selected",
+    "queue_handoff_key_window", "queue_handoff_zero_a", "queue_handoff_b_capture", "queue_handoff_ab_ready",
+    "queue_handoff_green_target", "queue_handoff_state_ready", "queue_real_menu_handoff",
+    "queue_loaded_whole_plan_mpv_restored", "queue_loaded_handoff_same_window_detached", "queue_loaded_handoff_remains_paused",
+    "queue_first_core_close", "queue_first_core_shutdown", "queue_second_pristine_service",
+    "queue_unsupported_plan_initial_red", "queue_unsupported_whole_plan_fallback", "queue_unsupported_old_layer_detached",
+    "queue_second_core_close", "queue_second_core_shutdown", "queue_all_registered_cores_shutdown",
+}
 PIXEL_POINTS = [(x, y) for y in (8, 48, 86) for x in (8, 80, 150)]
 MAX_REPORT_BYTES = 1024 * 1024
 
@@ -73,19 +92,19 @@ def validate_environment(environment):
         raise ValueError("Inherited dynamic loader overrides are not allowed.")
 
 
-def validate_result(result, *, run_id, exit_code):
+def validate_result(result, *, run_id, exit_code, required_checks=REQUIRED_CHECKS):
     if (exit_code != 0 or result.get("format") != 1 or result.get("run_id") != run_id or
             result.get("complete") is not True or result.get("passed") is not True):
         raise RuntimeError("Complete App execution or shutdown verification failed.")
     checks = result.get("checks")
-    if (not isinstance(checks, list) or len(checks) != len(REQUIRED_CHECKS) or
+    if (not isinstance(checks, list) or len(checks) != len(required_checks) or
             any(not isinstance(item, dict) or item.get("passed") is not True for item in checks) or
-            {item.get("label") for item in checks} != REQUIRED_CHECKS):
+            {item.get("label") for item in checks} != required_checks):
         raise RuntimeError("Complete App checks are missing, repeated or unsuccessful.")
     return checks
 
 
-def preserve_result(fixture_root, report, run_id):
+def preserve_result(fixture_root, report, run_id, *, required_checks=REQUIRED_CHECKS):
     """Retain bounded, run-owned evidence before workspace cleanup, even on timeout."""
     output = fixture_root / "result.json"
     try:
@@ -108,7 +127,7 @@ def preserve_result(fixture_root, report, run_id):
     if (not isinstance(result, dict) or set(result) != {"format", "run_id", "complete", "passed", "checks"} or
             type(result.get("format")) is not int or result.get("format") != 1 or result.get("run_id") != run_id or
             type(result.get("complete")) is not bool or type(result.get("passed")) is not bool or
-            not isinstance(result.get("checks"), list) or len(result["checks"]) > len(REQUIRED_CHECKS) + 1 or
+            not isinstance(result.get("checks"), list) or len(result["checks"]) > len(required_checks) + 1 or
             any(not isinstance(item, dict) or set(item) != {"label", "passed"} or
                 not isinstance(item["label"], str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,127}", item["label"]) or
                 type(item["passed"]) is not bool for item in result["checks"])):
@@ -117,15 +136,70 @@ def preserve_result(fixture_root, report, run_id):
     return result
 
 
-def run_application(command, *, workspace, environment, log, fixtures, report, run_id, timeout=150):
-    result_data = None
+def fingerprint_inputs(inputs):
+    files = []
+    for path in inputs:
+        files.extend(sorted(p for p in path.rglob("*") if p.is_file()) if path.is_dir() else [path])
+    result = {}
+    for path in files:
+        if not path.is_file():
+            raise RuntimeError("An identity input is missing.")
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        result[str(path)] = digest.hexdigest()
+    if not result:
+        raise RuntimeError("Identity input inventory is empty.")
+    return result
+
+
+def snapshot_identity(groups, report):
+    expected = {name: fingerprint_inputs(inputs) for name, inputs in groups.items()}
+    for name, manifest in expected.items():
+        (report / (name + "-sha256.json")).write_text(json.dumps(manifest, indent=2) + "\n")
+    return expected
+
+
+def verify_identity(groups, expected, report, *, stage):
+    validation = {"stage": stage, "passed": False, "groups": {}}
     try:
+        for name, inputs in groups.items():
+            current = fingerprint_inputs(inputs)
+            (report / (name + "-sha256-after.json")).write_text(json.dumps(current, indent=2) + "\n")
+            previous = expected[name]
+            changed = sorted(path for path in previous.keys() | current.keys() if previous.get(path) != current.get(path))
+            validation["groups"][name] = {"passed": not changed, "files": len(current), "changed": changed}
+        if not all(item["passed"] for item in validation["groups"].values()):
+            raise RuntimeError("Native App source, product or fixture identity changed during execution.")
+        validation["passed"] = True
+    finally:
+        (report / (stage + "-identity-validation.json")).write_text(json.dumps(validation, indent=2) + "\n")
+
+
+def run_application(command, *, workspace, environment, log, fixtures, report, run_id, timeout=150,
+                    required_checks=REQUIRED_CHECKS, identity_groups=None, identity_expected=None):
+    result_data = None
+    execution = {"run_id": run_id, "started": False, "exit_code": None, "timed_out": False}
+    try:
+        if identity_groups is not None:
+            verify_identity(identity_groups, identity_expected, report, stage="before-process")
+        execution["started"] = True
         result = subprocess.run(command, cwd=workspace, env=environment, stdin=subprocess.DEVNULL,
                                 stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+        execution["exit_code"] = result.returncode
+    except subprocess.TimeoutExpired:
+        execution["timed_out"] = True
+        raise
     finally:
+        (report / "process-status.json").write_text(json.dumps(execution, indent=2) + "\n")
         # A partial report is diagnostic evidence only. validate_result still
         # requires clean process exit, all checks and the final shutdown record.
-        result_data = preserve_result(fixtures, report, run_id)
+        try:
+            result_data = preserve_result(fixtures, report, run_id, required_checks=required_checks)
+        finally:
+            if identity_groups is not None:
+                verify_identity(identity_groups, identity_expected, report, stage="after-process")
     return result, result_data
 
 
@@ -179,6 +253,60 @@ def make_fixtures(root, run_id):
     }) + "\n", encoding="utf-8")
 
 
+def make_queue_fixtures(source, destination, run_id):
+    """Copy only known synthetic fixtures, never a preceding result or logs."""
+    marker = json.loads((source / "native-app-fixture.json").read_text())
+    destination.mkdir()
+    for name in marker["fixtures"]:
+        path = Path(name)
+        if path.parts not in (("red", "red.mp4"), ("blue", "blue.mp4"),
+                              ("compat", "compat.mp4"), ("delayed", "delayed.mp4")):
+            raise RuntimeError("Unexpected generated fixture name.")
+        original = source / path
+        if original.is_symlink() or not original.is_file():
+            raise RuntimeError("A generated fixture is no longer regular.")
+        target = destination / path
+        target.parent.mkdir(exist_ok=True)
+        shutil.copyfile(original, target)
+    marker.update(run_id=run_id, scenario="queue")
+    (destination / "native-app-fixture.json").write_text(json.dumps(marker) + "\n", encoding="utf-8")
+
+
+def run_queue_scenario(executable, *, workspace, environment, fixtures, report, build_id,
+                       shared_identity_groups=None, shared_identity_expected=None):
+    queue_id = str(uuid.uuid4())
+    queue_report = report / "queue"
+    queue_report.mkdir(exist_ok=False)
+    queue_fixtures = workspace / "queue-fixtures"
+    summary = {"format": 1, "run_id": queue_id, "scenario": "queue", "passed": False}
+    try:
+        make_queue_fixtures(fixtures, queue_fixtures, queue_id)
+        groups = dict(shared_identity_groups or {}, fixtures=[queue_fixtures / name for name in
+            ("red/red.mp4", "blue/blue.mp4", "compat/compat.mp4", "delayed/delayed.mp4", "native-app-fixture.json")])
+        expected = snapshot_identity(groups, queue_report)
+        if shared_identity_groups:
+            for name in shared_identity_groups:
+                if expected[name] != shared_identity_expected[name]:
+                    raise RuntimeError("The queue process would use a different source or application build.")
+        queue_environment = dict(environment, CHENGYING_NATIVE_APP_TEST_ROOT=str(queue_fixtures),
+            CHENGYING_NATIVE_APP_TEST_RUN_ID=queue_id, CHENGYING_NATIVE_APP_TEST_BUILD_ID=build_id,
+            CHENGYING_NATIVE_APP_TEST_SCENARIO="queue")
+        with (queue_report / "app.log").open("wb") as log:
+            result, data = run_application([str(executable), "--no-stdin"], workspace=workspace,
+                environment=queue_environment, log=log, fixtures=queue_fixtures, report=queue_report,
+                run_id=queue_id, required_checks=QUEUE_REQUIRED_CHECKS,
+                identity_groups=groups, identity_expected=expected)
+        summary["app_exit_code"] = result.returncode
+        if data is None:
+            raise RuntimeError("The queue App process produced no test result.")
+        summary["checks"] = validate_result(data, run_id=queue_id, exit_code=result.returncode,
+                                            required_checks=QUEUE_REQUIRED_CHECKS)
+        summary["passed"] = True
+        return summary
+    finally:
+        (queue_report / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+
+
 def build_command(workspace, source_packages, bundle_id):
     return ["xcodebuild", "-project", str(ROOT / "iina.xcodeproj"), "-scheme", "iina",
             "-configuration", "Release", "-derivedDataPath", str(workspace / "DerivedData"),
@@ -208,6 +336,7 @@ def main():
     parser.add_argument("--source-packages", type=Path, required=True)
     parser.add_argument("--report-directory", type=Path, required=True)
     parser.add_argument("--production-app", type=Path, required=True)
+    parser.add_argument("--include-queue", action="store_true", help="Also run the independent native queue process.")
     args = parser.parse_args()
     environment = dict(os.environ)
     validate_environment(environment)
@@ -218,6 +347,11 @@ def main():
     bundle_id = "io.chengying.tests.native-app." + run_id.replace("-", "")
     summary = {"format": 1, "run_id": run_id, "passed": False, "cleanup": "not_started"}
     try:
+        source_groups = {"source": [ROOT / "iina", ROOT / "Configs", ROOT / "deps/include",
+            ROOT / "iina.xcodeproj/project.pbxproj", ROOT / "iina.xcodeproj/xcshareddata",
+            Path(__file__).resolve(), ROOT / "Tools/NativeAppTests/NativeAppTestDriver.swift",
+            ROOT / "other/test_app_workspace.py", ROOT / "other/embed_download_center.sh"]}
+        source_expected = snapshot_identity(source_groups, report)
         production = args.production_app.resolve(strict=True)
         production_info = plistlib.loads((production / "Contents/Info.plist").read_bytes())
         if production_info.get("CFBundleIdentifier") != "io.github.SeanLi-Coder.ChengYingPlayer":
@@ -234,6 +368,7 @@ def main():
             with (report / "build.log").open("wb") as log:
                 subprocess.run(build_command(workspace, source_packages, bundle_id), cwd=ROOT,
                                env=environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=900)
+            verify_identity(source_groups, source_expected, report, stage="after-build")
             app = workspace / "DerivedData/Build/Products/Release/ChengYing.app"
             info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
             if info.get("CFBundleIdentifier") != bundle_id:
@@ -241,15 +376,27 @@ def main():
             executable = app / "Contents/MacOS/ChengYing"
             if not executable.is_file() or executable.is_symlink():
                 raise RuntimeError("The expected test executable is missing.")
+            shared_groups = dict(source_groups, product=[app])
+            shared_expected = dict(source_expected, **snapshot_identity({"product": [app]}, report))
+            fixture_groups = {"fixtures": [fixtures / name for name in
+                ("red/red.mp4", "blue/blue.mp4", "compat/compat.mp4", "delayed/delayed.mp4", "native-app-fixture.json")]}
+            groups = dict(shared_groups, **fixture_groups)
+            expected = dict(shared_expected, **snapshot_identity(fixture_groups, report))
             environment.update({"CHENGYING_NATIVE_PLAYBACK": "1", "NSUnbufferedIO": "YES",
-                "CHENGYING_NATIVE_APP_TEST_ROOT": str(fixtures), "CHENGYING_NATIVE_APP_TEST_RUN_ID": run_id})
+                "CHENGYING_NATIVE_APP_TEST_ROOT": str(fixtures), "CHENGYING_NATIVE_APP_TEST_RUN_ID": run_id,
+                "CHENGYING_NATIVE_APP_TEST_BUILD_ID": run_id, "CHENGYING_NATIVE_APP_TEST_SCENARIO": "baseline"})
             with (report / "app.log").open("wb") as log:
                 result, result_data = run_application([str(executable), "--no-stdin"], workspace=workspace,
-                    environment=environment, log=log, fixtures=fixtures, report=report, run_id=run_id)
+                    environment=environment, log=log, fixtures=fixtures, report=report, run_id=run_id,
+                    identity_groups=groups, identity_expected=expected)
             if result_data is None:
                 raise RuntimeError("The complete App produced no test result.")
             summary["app_exit_code"] = result.returncode
             summary["checks"] = validate_result(result_data, run_id=run_id, exit_code=result.returncode)
+            if args.include_queue:
+                summary["queue"] = run_queue_scenario(executable, workspace=workspace, environment=environment,
+                    fixtures=fixtures, report=report, build_id=run_id,
+                    shared_identity_groups=shared_groups, shared_identity_expected=shared_expected)
         if summary["cleanup"] != "completed":
             raise RuntimeError("Owned application workspace cleanup was not confirmed.")
         summary["passed"] = True

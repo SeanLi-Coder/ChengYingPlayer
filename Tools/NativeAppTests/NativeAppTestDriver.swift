@@ -8,8 +8,10 @@ import CoreVideo
 final class NativeAppTestDriver {
   private static var instance: NativeAppTestDriver?
   private static let fixtureNames = ["red/red.mp4", "blue/blue.mp4", "compat/compat.mp4", "delayed/delayed.mp4"]
+  private enum Scenario: String { case baseline, queue }
   private let root: URL
   private let runID: String
+  private let scenario: Scenario
   private let pixelReferences: [String: [Int]]
   private var checks: [[String: Any]] = []
   private var observer: NSObjectProtocol?
@@ -24,22 +26,29 @@ final class NativeAppTestDriver {
   private var shutdownNotifications: [ObjectIdentifier: Int] = [:]
   private var handoffStartedAt: TimeInterval?
   private var startedAt: TimeInterval?
+  private var queueItemIdentities: [ObjectIdentifier] = []
+  private let queueNames = ["red/red.mp4", "blue/blue.mp4", "red/red.mp4"]
 
-  private init(root: URL, runID: String, pixelReferences: [String: [Int]]) {
+  private init(root: URL, runID: String, scenario: Scenario, pixelReferences: [String: [Int]]) {
     self.root = root
     self.runID = runID
+    self.scenario = scenario
     self.pixelReferences = pixelReferences
   }
 
   static func prepareForLaunch() {
     dispatchPrecondition(condition: .onQueue(.main))
     let environment = ProcessInfo.processInfo.environment
+    guard let scenario = Scenario(rawValue: environment["CHENGYING_NATIVE_APP_TEST_SCENARIO"] ?? "baseline") else {
+      preflightFailure()
+    }
     guard environment["CI"] == "true",
           environment["GITHUB_ACTIONS"] == "true",
           environment["RUNNER_ENVIRONMENT"] == "github-hosted",
           environment["CHENGYING_NATIVE_PLAYBACK"] == "1",
           let runID = environment["CHENGYING_NATIVE_APP_TEST_RUN_ID"],
-          let uuid = UUID(uuidString: runID),
+          UUID(uuidString: runID) != nil,
+          let uuid = UUID(uuidString: environment["CHENGYING_NATIVE_APP_TEST_BUILD_ID"] ?? runID),
           let directory = environment["CHENGYING_NATIVE_APP_TEST_ROOT"],
           directory.hasPrefix("/"),
           Bundle.main.bundleIdentifier == "io.chengying.tests.native-app." + uuid.uuidString.lowercased().replacingOccurrences(of: "-", with: "") else {
@@ -58,6 +67,7 @@ final class NativeAppTestDriver {
           let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           payload["format"] as? Int == 1,
           payload["run_id"] as? String == runID,
+          (payload["scenario"] as? String ?? "baseline") == scenario.rawValue,
           payload["fixtures"] as? [String] == fixtureNames,
           let references = payload["pixel_references"] as? [String: [Int]],
           Set(references.keys) == Set(["red", "green", "blue", "delayed_red"]),
@@ -70,7 +80,7 @@ final class NativeAppTestDriver {
             values.isRegularFile == true, values.isSymbolicLink != true,
             let size = values.fileSize, size > 0, size <= 16 * 1024 * 1024 else { preflightFailure() }
     }
-    instance = NativeAppTestDriver(root: root, runID: runID, pixelReferences: references)
+    instance = NativeAppTestDriver(root: root, runID: runID, scenario: scenario, pixelReferences: references)
     // The argument domain wins over registration and persistence without changing
     // the release domain. The unique test bundle ID also isolates caches/support.
     var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
@@ -88,6 +98,11 @@ final class NativeAppTestDriver {
       "enableControlBarAutoHide": true, "oscPosition": 2,
     ]
     arguments.merge(overrides) { _, value in value }
+    if scenario == .queue {
+      arguments["pauseWhenOpen"] = true
+      arguments["playlistAutoPlayNext"] = true
+      arguments["keepOpenOnFileEnd"] = true
+    }
     UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
   }
 
@@ -137,6 +152,10 @@ final class NativeAppTestDriver {
       guard let self, !self.terminal else { return }
       guard self.awaitingQuit else { self.fail("unexpected_application_termination"); return }
       self.reportShutdownState(stage: "will_terminate")
+      if self.scenario == .queue {
+        self.completeQueueTermination()
+        return
+      }
       let registered = PlayerCore.playerCores
       guard self.quitPlayers.count == 2, self.quitPlayers[0] !== self.quitPlayers[1],
             registered.count >= 2,
@@ -158,6 +177,10 @@ final class NativeAppTestDriver {
     DispatchQueue.main.asyncAfter(deadline: .now() + 110) { [weak self] in
       guard let self, !self.terminal else { return }
       self.fail("overall_deadline")
+    }
+    if scenario == .queue {
+      startQueueScenario()
+      return
     }
     let player = PlayerCore.first
     self.player = player
@@ -641,13 +664,26 @@ final class NativeAppTestDriver {
                                    extra: @escaping () -> Bool = { true },
                                    snapshotCheck: @escaping (NativePlaybackSnapshot) -> Bool = { _ in true },
                                    then continuation: @escaping () -> Void) {
-    guard let session = player.nativePlaybackSession else { fail(label); return }
+    // Local inventory is asynchronous even on a pristine core. Pin ownership
+    // only after its real session exists, within the original single deadline.
+    var observedSession = player.nativePlaybackSession
+    var observedGeneration = observedSession == nil ? nil : player.videoToolsMediaGeneration
     pollRevision += 1
     let request = pollRevision
     let deadline = ProcessInfo.processInfo.systemUptime + 12
     func poll() {
       guard !self.terminal, request == self.pollRevision else { return }
-      guard player.nativePlaybackSession === session else { self.fail(label); return }
+      if observedSession == nil, let available = player.nativePlaybackSession {
+        observedSession = available
+        observedGeneration = player.videoToolsMediaGeneration
+      }
+      guard let session = observedSession else {
+        if ProcessInfo.processInfo.systemUptime >= deadline { self.fail(label) }
+        else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: poll) }
+        return
+      }
+      guard player.nativePlaybackSession === session,
+            player.videoToolsMediaGeneration == observedGeneration else { self.fail(label); return }
       // Marker captures first return to main, where they enqueue a loop refill.
       // Do not queue this query until the expected marker state is visible;
       // otherwise an older paused snapshot can arrive after that new UI state.
@@ -658,6 +694,8 @@ final class NativeAppTestDriver {
       }
       session.captureCurrentState { result in
         guard !self.terminal, request == self.pollRevision else { return }
+        guard player.nativePlaybackSession === session,
+              player.videoToolsMediaGeneration == observedGeneration else { self.fail(label); return }
         if case .ready(let snapshot) = result, snapshot.phase == .paused, snapshot.volume == 0,
            snapshot.position.isFinite, abs(snapshot.position - position) < 0.0000001,
            snapshotCheck(snapshot), player.isUsingNativePlayback, player.playbackIsPaused,
@@ -1178,6 +1216,412 @@ final class NativeAppTestDriver {
         self.prepareActiveQuit()
       }
     }
+  }
+
+  // This independent process retains the baseline process's exact checks and
+  // deadlines. Only public production commands construct or navigate its queue.
+  private func startQueueScenario() {
+    let player = PlayerCore.first
+    self.player = player
+    player.setLoopMode(.off)
+    wait("queue_pristine_service", until: {
+      player.mpv.getFlag(MPVProperty.idleActive) && player.mpv.getString(MPVProperty.path) == nil &&
+        player.mpv.mpvRenderContext == nil
+    }) {
+      guard player.openMediaURLs(self.queueNames.map(self.fixture), shouldAutoLoad: false) == 3 else {
+        self.fail("queue_explicit_duplicate_urls_accepted"); return
+      }
+      self.record("queue_explicit_duplicate_urls_accepted")
+      self.waitQueueFrame(player, index: 0, color: .red, label: "queue_first_actual_red_frame") {
+        self.queueItemIdentities = player.info.playlist.map(ObjectIdentifier.init)
+        guard Set(self.queueItemIdentities).count == 3 else { self.fail("queue_distinct_duplicate_identities"); return }
+        self.record("queue_distinct_duplicate_identities")
+        self.queueNavigate(player)
+      }
+    }
+  }
+
+  private func queueProjectionMatches(_ player: PlayerCore, index: Int, names: [String]? = nil) -> Bool {
+    let paths = (names ?? queueNames).map { fixture($0).path }
+    let items = player.info.playlist
+    return player.hasNativePlaybackQueue && player.isUsingNativePlayback &&
+      items.map(\.filename) == paths && items.indices.contains(index) &&
+      items.indices.allSatisfy { items[$0].isCurrent == ($0 == index) && items[$0].isPlaying == ($0 == index) } &&
+      (queueItemIdentities.isEmpty || items.map(ObjectIdentifier.init) == queueItemIdentities) &&
+      player.info.currentURL?.path == paths[index] && player.mpv.mpvRenderContext == nil &&
+      !player.mainWindow.videoView.hasInitializedOpenGL
+  }
+
+  private func waitQueueFrame(_ player: PlayerCore, index: Int, color: Color, label: String,
+                              names: [String]? = nil, then continuation: @escaping () -> Void) {
+    // Wait for the real new session, then query its worker and read its paused
+    // display buffer. A selection marker alone cannot satisfy this assertion.
+    wait(label, recordSuccess: false, until: {
+      self.queueProjectionMatches(player, index: index, names: names) && player.info.state == .paused &&
+        player.playbackIsPaused && player.playbackVolume == 0 &&
+        player.mainWindow.volumeSlider?.doubleValue == 0 && self.pixel(player, is: color)
+    }) {
+      self.waitForNativePaused(player, position: 0, color: color, label: label,
+        extra: { self.queueProjectionMatches(player, index: index, names: names) }) { continuation() }
+    }
+  }
+
+  private func setQueueVolume(_ player: PlayerCore) -> Bool {
+    guard let slider = player.mainWindow.volumeSlider, let action = slider.action else { return false }
+    slider.doubleValue = 37
+    return NSApp.sendAction(action, to: slider.target, from: slider) && player.playbackVolume == 37
+  }
+
+  private func queueNavigate(_ player: PlayerCore) {
+    guard setQueueVolume(player) else { fail("queue_volume_before_next"); return }
+    record("queue_volume_before_next")
+    player.navigateInPlaylist(nextMedia: true)
+    waitQueueFrame(player, index: 1, color: .blue, label: "queue_next_blue_resets_volume") {
+      guard self.setQueueVolume(player) else { self.fail("queue_volume_before_previous"); return }
+      self.record("queue_volume_before_previous")
+      player.navigateInPlaylist(nextMedia: false)
+      self.waitQueueFrame(player, index: 0, color: .red, label: "queue_previous_red_resets_volume") {
+        guard self.setQueueVolume(player) else { self.fail("queue_volume_before_duplicate"); return }
+        self.record("queue_volume_before_duplicate")
+        player.playFileInPlaylist(2)
+        self.waitQueueFrame(player, index: 2, color: .red, label: "queue_selected_duplicate_resets_volume") {
+          player.playFileInPlaylist(1)
+          // These commands occur in one main turn, while the old session is
+          // retiring. The final accepted pause must survive the new item probe.
+          player.resume()
+          player.togglePause()
+          player.togglePause()
+          player.pause()
+          self.waitQueueFrame(player, index: 1, color: .blue, label: "queue_loading_latest_pause_intent") {
+            self.verifyClock(player, advancing: false, label: "queue_loading_pause_clock_stable") {
+              player.playFileInPlaylist(2)
+              self.waitQueueFrame(player, index: 2, color: .red, label: "queue_last_item_ready_for_eof") {
+                self.queueOffEOF(player)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func queueOffEOF(_ player: PlayerCore) {
+    player.setLoopMode(.off)
+    player.seek(absoluteSecond: 8.8)
+    waitForNativePaused(player, position: 8.8, color: .blue, label: "queue_off_last_seek_near_eof") {
+      player.resume()
+      self.wait("queue_off_last_reaches_real_eof", recordSuccess: false, until: {
+        self.queueProjectionMatches(player, index: 2) && player.playbackAtEOF && player.playbackIsPaused
+      }) {
+        guard let session = player.nativePlaybackSession else { self.fail("queue_off_last_reaches_real_eof"); return }
+        session.captureCurrentState { result in
+          guard case .ready(let snapshot) = result, snapshot.phase == .ended,
+                snapshot.position >= 8.95, !snapshot.wantsPlayback,
+                self.queueProjectionMatches(player, index: 2) else {
+            self.fail("queue_off_last_reaches_real_eof"); return
+          }
+          self.record("queue_off_last_reaches_real_eof")
+          player.seek(absoluteSecond: 4.2)
+          self.waitForNativePaused(player, position: 4.2, color: .green, label: "queue_eof_seek_preserves_target") {
+            player.resume()
+            self.waitQueuePlayingPosition(player, index: 2, range: 4.2..<5.5,
+              label: "queue_eof_seek_resume_not_rewound", recordSuccess: true) {
+              self.verifyClock(player, advancing: true, label: "queue_eof_seek_actual_clock_advances") {
+                player.pause()
+                self.wait("queue_eof_resume_paused", until: { player.info.state == .paused && player.playbackIsPaused }) {
+                  self.queueFileEOF(player)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func queueFileEOF(_ player: PlayerCore) {
+    player.setLoopMode(.file)
+    player.seek(absoluteSecond: 8.8)
+    waitForNativePaused(player, position: 8.8, color: .blue, label: "queue_file_seek_near_eof") {
+      player.resume()
+      self.waitQueuePlayingPosition(player, index: 2, range: 0..<1,
+        label: "queue_file_wraps_same_duplicate") {
+        player.pause()
+        self.waitQueueWrappedFrame(player, index: 2, label: "queue_file_wraps_same_duplicate") {
+          player.setLoopMode(.playlist)
+          player.seek(absoluteSecond: 8.8)
+          self.waitForNativePaused(player, position: 8.8, color: .blue, label: "queue_list_seek_near_eof") {
+            player.resume()
+            self.wait("queue_list_wraps_to_first_duplicate", recordSuccess: false, until: {
+              self.queueProjectionMatches(player, index: 0) && player.info.state == .playing
+            }) {
+              player.pause()
+              self.waitQueueWrappedFrame(player, index: 0, label: "queue_list_wraps_to_first_duplicate") {
+                self.queueCancelWithNewOpen(player)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func waitQueuePlayingPosition(_ player: PlayerCore, index: Int, range: Range<Double>, label: String,
+                                        recordSuccess: Bool = false, then continuation: @escaping () -> Void) {
+    guard let session = player.nativePlaybackSession else { fail(label); return }
+    let generation = player.videoToolsMediaGeneration
+    pollRevision += 1
+    let request = pollRevision
+    let deadline = ProcessInfo.processInfo.systemUptime + 12
+    func retry() {
+      if ProcessInfo.processInfo.systemUptime >= deadline { self.fail(label) }
+      else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.025, execute: poll) }
+    }
+    func poll() {
+      guard !self.terminal, self.pollRevision == request else { return }
+      guard player.nativePlaybackSession === session, player.videoToolsMediaGeneration == generation else {
+        self.fail(label); return
+      }
+      session.captureCurrentState { result in
+        guard !self.terminal, self.pollRevision == request else { return }
+        guard player.nativePlaybackSession === session, player.videoToolsMediaGeneration == generation else {
+          self.fail(label); return
+        }
+        if case .ready(let snapshot) = result, snapshot.phase == .playing, snapshot.wantsPlayback,
+           snapshot.volume == 0, range.contains(snapshot.position), self.queueProjectionMatches(player, index: index) {
+          if recordSuccess { self.record(label) }
+          continuation()
+        } else { retry() }
+      }
+    }
+    poll()
+  }
+
+  private func waitQueueWrappedFrame(_ player: PlayerCore, index: Int, label: String,
+                                     then continuation: @escaping () -> Void) {
+    wait(label, recordSuccess: false, until: {
+      self.queueProjectionMatches(player, index: index) && player.info.state == .paused &&
+        player.playbackIsPaused && self.pixel(player, is: .red)
+    }) {
+      guard let session = player.nativePlaybackSession else { self.fail(label); return }
+      session.captureCurrentState { result in
+        guard case .ready(let snapshot) = result, snapshot.phase == .paused, !snapshot.wantsPlayback,
+              snapshot.position >= 0, snapshot.position < 2, snapshot.volume == 0,
+              player.nativePlaybackSession === session, self.queueProjectionMatches(player, index: index),
+              player.mainWindow.volumeSlider.doubleValue == 0 else { self.fail(label); return }
+        self.record(label)
+        continuation()
+      }
+    }
+  }
+
+  private func queueCancelWithNewOpen(_ player: PlayerCore) {
+    player.setLoopMode(.off)
+    guard let layer = player.nativePlaybackOutput?.displayLayer else { fail("queue_new_open_cancels_pending_selection"); return }
+    player.playFileInPlaylist(2)
+    player.openURL(fixture("blue/blue.mp4"), shouldAutoLoad: false)
+    queueItemIdentities = []
+    wait("queue_new_open_cancels_pending_selection", recordSuccess: false, until: {
+      !player.hasNativePlaybackQueue && player.info.currentURL == self.fixture("blue/blue.mp4") &&
+        player.isUsingNativePlayback && player.info.state == .paused && layer.superlayer == nil
+    }) {
+      self.waitForNativePaused(player, position: 0, color: .blue, label: "queue_new_open_cancels_pending_selection") {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+          guard !player.hasNativePlaybackQueue, player.info.currentURL == self.fixture("blue/blue.mp4"),
+                player.playbackIsPaused, player.playbackVolume == 0, self.pixel(player, is: .blue) else {
+            self.fail("queue_cancelled_selection_stays_cancelled"); return
+          }
+          self.record("queue_cancelled_selection_stays_cancelled")
+          guard player.openMediaURLs(self.queueNames.map(self.fixture), shouldAutoLoad: false) == 3 else {
+            self.fail("queue_reopen_for_loaded_handoff"); return
+          }
+          self.waitQueueFrame(player, index: 0, color: .red, label: "queue_reopen_for_loaded_handoff") {
+            self.queueItemIdentities = player.info.playlist.map(ObjectIdentifier.init)
+            player.playFileInPlaylist(2)
+            self.waitQueueFrame(player, index: 2, color: .red, label: "queue_handoff_duplicate_selected") {
+              self.configureQueueHandoff(player)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func configureQueueHandoff(_ player: PlayerCore) {
+    guard let window = player.mainWindow.window else { fail("queue_handoff_key_window"); return }
+    NSApp.activate(ignoringOtherApps: true)
+    window.makeKeyAndOrderFront(nil)
+    window.makeFirstResponder(nil)
+    player.mainWindow.beginControlInteraction()
+    wait("queue_handoff_key_window", until: { window.isKeyWindow }) {
+      guard self.sendMarkerKey(player, start: true) else { self.fail("queue_handoff_zero_a"); return }
+      self.wait("queue_handoff_zero_a", until: { player.playbackLoopA == 0 && player.playbackLoopB == nil }) {
+        player.seek(absoluteSecond: 5.5)
+        self.waitForNativePaused(player, position: 5.5, color: .green, label: "queue_handoff_b_capture") {
+          guard self.sendMarkerKey(player, start: false) else { self.fail("queue_handoff_ab_ready"); return }
+          self.waitForNativePaused(player, position: 0, color: .red, label: "queue_handoff_ab_ready",
+            extra: { self.markersMatch(player, start: 0, end: 5.5) }) {
+            player.seek(absoluteSecond: 4.2)
+            self.waitForNativePaused(player, position: 4.2, color: .green, label: "queue_handoff_green_target") {
+              for _ in 0..<5 {
+                guard self.sendViewportKey(player, action: .zoomIn) else { self.fail("queue_handoff_state_ready"); return }
+              }
+              let speed = NSMenuItem()
+              speed.representedObject = 1.25
+              guard self.sendViewportKey(player, action: .panRight), self.sendViewportKey(player, action: .panUp),
+                    self.setQueueVolume(player),
+                    NSApp.sendAction(#selector(MainMenuActionHandler.menuChangeSpeed(_:)),
+                                     to: player.mainWindow.menuActionHandler, from: speed),
+                    let session = player.nativePlaybackSession, let layer = player.nativePlaybackOutput?.displayLayer else {
+                self.fail("queue_handoff_state_ready"); return
+              }
+              session.captureCurrentState { result in
+                guard case .ready(let snapshot) = result, snapshot.phase == .paused, !snapshot.wantsPlayback,
+                      abs(snapshot.position - 4.2) < 0.0000001,
+                      abs(Double(snapshot.volume) - 0.37) < 0.000001, abs(Double(snapshot.rate) - 1.25) < 0.000001,
+                      self.queueProjectionMatches(player, index: 2), self.pixel(player, is: .green),
+                      self.viewportMatches(player, scale: 1.5, panX: 0.05 / 1.5, panY: -0.05 / 1.5) else {
+                  self.fail("queue_handoff_state_ready"); return
+                }
+                self.record("queue_handoff_state_ready")
+                let delay = NSMenuItem()
+                delay.representedObject = 0.25
+                guard NSApp.sendAction(#selector(MainMenuActionHandler.menuChangeAudioDelay(_:)),
+                                       to: player.mainWindow.menuActionHandler, from: delay) else {
+                  self.fail("queue_real_menu_handoff"); return
+                }
+                self.record("queue_real_menu_handoff")
+                self.verifyQueueHandoff(player, window: window, layer: layer)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func actualMPVQueueMatches(_ player: PlayerCore, names: [String], selected: Int) -> Bool {
+    // Read one real MPV_NODE snapshot. Duplicate paths must have distinct MPV
+    // IDs; neither the native projection nor a requested index is evidence.
+    Self.matchesMPVQueue(player.mpv.getNode(MPVProperty.playlist),
+                         paths: names.map { fixture($0).path }, selected: selected)
+  }
+
+  private static func matchesMPVQueue(_ node: Any?, paths: [String], selected: Int) -> Bool {
+    guard let entries = node as? [[String: Any?]], entries.count == paths.count,
+          entries.indices.contains(selected) else { return false }
+    let ids = entries.compactMap { $0["id"] as? Int64 }
+    guard ids.count == paths.count, ids.allSatisfy({ $0 >= 0 }), Set(ids).count == ids.count else { return false }
+    return entries.indices.allSatisfy { index in
+      entries[index]["filename"] as? String == paths[index] &&
+        (entries[index]["current"] as? Bool ?? false) == (index == selected) &&
+        (entries[index]["playing"] as? Bool ?? false) == (index == selected)
+    }
+  }
+
+  private func verifyQueueHandoff(_ player: PlayerCore, window: NSWindow, layer: AVSampleBufferDisplayLayer) {
+    wait("queue_loaded_whole_plan_mpv_restored", until: {
+      !player.hasNativePlaybackQueue && self.handoffMPVTransportMatches(player) &&
+        self.handoffMPVViewportAndRangeMatch(player) && self.markersMatch(player, start: 0, end: 5.5) &&
+        self.actualMPVQueueMatches(player, names: self.queueNames, selected: 2) &&
+        abs(player.mpv.getDouble(MPVOption.Audio.audioDelay) - 0.25) < 0.000001
+    }) {
+      guard player.mainWindow.window === window, window.isVisible,
+            player.mainWindow.videoView.hasInitializedOpenGL, player.mpv.mpvRenderContext != nil,
+            player.nativePlaybackSession == nil, player.nativePlaybackOutput == nil,
+            player.mainWindow.videoView.nativeSurface == nil, layer.superlayer == nil else {
+        self.fail("queue_loaded_handoff_same_window_detached"); return
+      }
+      self.record("queue_loaded_handoff_same_window_detached")
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        guard self.handoffMPVTransportMatches(player), self.handoffMPVViewportAndRangeMatch(player),
+              self.actualMPVQueueMatches(player, names: self.queueNames, selected: 2) else {
+          self.fail("queue_loaded_handoff_remains_paused"); return
+        }
+        self.record("queue_loaded_handoff_remains_paused")
+        self.closeQueueCore(player, label: "queue_first_core", then: { self.startUnsupportedQueue(player) })
+      }
+    }
+  }
+
+  private func startUnsupportedQueue(_ first: PlayerCore) {
+    let second = PlayerCore.newPlayerCore
+    guard second !== first else { fail("queue_second_pristine_service"); return }
+    quitPlayers = [first, second]
+    queueItemIdentities = []
+    let names = ["red/red.mp4", "compat/compat.mp4", "blue/blue.mp4", "red/red.mp4"]
+    second.setLoopMode(.off)
+    wait("queue_second_pristine_service", until: {
+      second.mpv.getFlag(MPVProperty.idleActive) && second.mpv.getString(MPVProperty.path) == nil &&
+        second.mpv.mpvRenderContext == nil
+    }) {
+      guard second.openMediaURLs(names.map(self.fixture), shouldAutoLoad: false) == 4 else {
+        self.fail("queue_unsupported_plan_initial_red"); return
+      }
+      self.waitQueueFrame(second, index: 0, color: .red, label: "queue_unsupported_plan_initial_red", names: names) {
+        guard let layer = second.nativePlaybackOutput?.displayLayer, let window = second.mainWindow.window else {
+          self.fail("queue_unsupported_whole_plan_fallback"); return
+        }
+        second.playFileInPlaylist(1)
+        self.wait("queue_unsupported_whole_plan_fallback", until: {
+          !second.hasNativePlaybackQueue && !second.isUsingNativePlayback && second.info.state == .paused &&
+            second.info.currentURL == self.fixture("compat/compat.mp4") &&
+            second.mpv.getString(MPVProperty.path) == self.fixture("compat/compat.mp4").path &&
+            !second.info.subTracks.isEmpty && self.actualMPVQueueMatches(second, names: names, selected: 1) &&
+            second.mpv.getFlag(MPVOption.PlaybackControl.pause) &&
+            abs(second.mpv.getDouble(MPVProperty.timePos)) < 0.05 &&
+            second.mpv.getDouble(MPVOption.Audio.volume) == 0 && second.mainWindow.volumeSlider.doubleValue == 0
+        }) {
+          guard second.mainWindow.window === window, window.isVisible,
+                second.mainWindow.videoView.hasInitializedOpenGL, second.mpv.mpvRenderContext != nil,
+                second.nativePlaybackSession == nil, second.nativePlaybackOutput == nil,
+                second.mainWindow.videoView.nativeSurface == nil, layer.superlayer == nil else {
+            self.fail("queue_unsupported_old_layer_detached"); return
+          }
+          self.record("queue_unsupported_old_layer_detached")
+          self.closeQueueCore(second, label: "queue_second_core") {
+            self.awaitingQuit = true
+            self.quitRequestedAt = ProcessInfo.processInfo.systemUptime
+            self.writeReport(complete: false, passed: false)
+            Self.performTerminationFromRunLoop {
+              guard !self.terminal, self.awaitingQuit else { return }
+              NSApp.terminate(nil)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func closeQueueCore(_ player: PlayerCore, label: String, then continuation: @escaping () -> Void) {
+    guard let window = player.mainWindow.window else { fail(label + "_close"); return }
+    player.mainWindow.endControlInteraction()
+    window.performClose(nil)
+    wait(label + "_close", until: {
+      player.info.state == .idle && !window.isVisible && player.mpv.getFlag(MPVProperty.idleActive) &&
+        !player.hasNativePlaybackQueue && player.nativePlaybackSession == nil && player.nativePlaybackOutput == nil
+    }) {
+      player.shutdown()
+      self.wait(label + "_shutdown", until: {
+        player.info.state == .shutDown && player.mpv.mpvRenderContext == nil && player.mainWindow.videoView.isUninited
+      }, then: continuation)
+    }
+  }
+
+  private func completeQueueTermination() {
+    let registered = PlayerCore.playerCores
+    guard quitPlayers.count == 2, quitPlayers[0] !== quitPlayers[1], registered.count >= 2,
+          quitPlayers.allSatisfy({ expected in registered.contains { $0 === expected } }),
+          registered.allSatisfy({ $0.info.state == .shutDown }),
+          quitPlayers.allSatisfy({ $0.nativePlaybackSession == nil && $0.nativePlaybackOutput == nil &&
+            !$0.hasNativePlaybackQueue && $0.mpv.mpvRenderContext == nil &&
+            $0.mainWindow.loaded && $0.mainWindow.videoView.isUninited }) else {
+      fail("queue_all_registered_cores_shutdown"); return
+    }
+    record("queue_all_registered_cores_shutdown")
+    terminal = true
+    writeReport(complete: true, passed: true)
+    print("NATIVE_APP_TEST_COMPLETE")
   }
 
   private func prepareActiveQuit() {
