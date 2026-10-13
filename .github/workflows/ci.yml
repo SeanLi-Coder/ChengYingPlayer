@@ -443,6 +443,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+      - name: Test portable AV1 acceptance launcher offline boundaries
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
+        timeout-minutes: 2
+        run: python3 -B -m unittest discover -s Tools/NativeAV1Tests/Portable -v
+
       - name: Test native AV1 bootstrap and failure boundaries
         if: ${{ !cancelled() && steps.native_build.outcome == 'success' && (success() || github.event_name == 'workflow_dispatch') }}
         timeout-minutes: 6

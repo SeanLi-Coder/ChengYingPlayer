@@ -1,0 +1,211 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Cwd qw(abs_path);
+use Digest::SHA qw(sha256_hex);
+use File::Temp qw(tempdir);
+use IO::Select;
+use JSON::PP;
+use POSIX qw(WNOHANG);
+use Time::HiRes qw(time sleep);
+
+my $policy = decode_json(<<'POLICY');
+@@POLICY@@
+POLICY
+my $root = abs_path('.');
+my $mode = @ARGV == 0 ? 'run' : @ARGV == 1 && $ARGV[0] eq '--verify-only' ? 'verify-only' : '';
+die "Usage: Run-M4-AV1-Check.command [--verify-only]\n" unless $mode;
+my $report = {schema => 1, mode => $mode, status => 'FAIL', hardware_acceptance => JSON::PP::false,
+              architecture => 'unknown', os_version => 'unknown', os_build => 'unknown',
+              pre_hashes_verified => JSON::PP::false, post_hashes_verified => JSON::PP::false};
+
+sub digest {
+    my ($relative) = @_;
+    die "integrity_invalid_path\n" unless $relative =~ m{\A[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\z}
+        && !grep { $_ eq '.' || $_ eq '..' } split '/', $relative;
+    my $path = $root;
+    for my $part (split '/', $relative) {
+        $path .= '/' . $part;
+        die "integrity_symlink\n" if -l $path;
+    }
+    die "integrity_missing_file\n" unless -f $path;
+    open my $file, '<:raw', $path or die "integrity_unreadable_file\n";
+    my $sha = Digest::SHA->new(256)->addfile($file)->hexdigest;
+    close $file or die "integrity_read_failed\n";
+    return $sha;
+}
+
+sub snapshot {
+    die "integrity_bad_directory\n" if -l "$root/manifest.json";
+    open my $file, '<:raw', "$root/manifest.json" or die "integrity_missing_manifest\n";
+    local $/;
+    my $manifest = eval { decode_json(<$file>) };
+    close $file;
+    die "integrity_bad_manifest\n" unless ref($manifest) eq 'HASH' && ref($manifest->{files}) eq 'HASH';
+    my %expected = (%{$policy->{files}}, 'verify-and-run.pl' => digest('verify-and-run.pl'));
+    die "integrity_unexpected_manifest_entries\n"
+        unless join("\n", sort keys %expected) eq join("\n", sort keys %{$manifest->{files}});
+    my %actual;
+    for my $relative (sort keys %expected) {
+        die "integrity_manifest_disagrees\n" unless $manifest->{files}{$relative} eq $expected{$relative};
+        $actual{$relative} = digest($relative);
+        die "integrity_changed_file\n" unless $actual{$relative} eq $expected{$relative};
+    }
+    for my $dir ('bin', 'lib', 'fixtures') {
+        die "integrity_bad_directory\n" unless -d "$root/$dir" && !-l "$root/$dir";
+        opendir my $dh, "$root/$dir" or die "integrity_unreadable_directory\n";
+        my @entries = sort grep { $_ ne '.' && $_ ne '..' } readdir $dh;
+        closedir $dh;
+        my @expected = sort map { substr($_, length($dir) + 1) } grep { index($_, "$dir/") == 0 } keys %expected;
+        die "integrity_unexpected_asset\n" unless join("\n", @entries) eq join("\n", @expected);
+    }
+    $actual{'manifest.json'} = digest('manifest.json');
+    return \%actual;
+}
+
+sub fixed_command {
+    my (@command) = @_;
+    open my $pipe, '-|', @command or die "platform_probe_failed\n";
+    local $/;
+    my $value = <$pipe> // '';
+    close $pipe or die "platform_probe_failed\n";
+    $value =~ s/\s+\z//;
+    return $value;
+}
+
+sub capture {
+    my ($executable, $seconds) = @_;
+    pipe(my $read, my $write) or die "pipe_failed\n";
+    my $pid = fork();
+    die "fork_failed\n" unless defined $pid;
+    if ($pid == 0) {
+        close $read;
+        open STDOUT, '>&', $write or POSIX::_exit(125);
+        open STDERR, '>&', $write or POSIX::_exit(125);
+        close $write;
+        %ENV = (PATH => '/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL => 'C',
+                DYLD_LIBRARY_PATH => "$root/lib", DYLD_FALLBACK_LIBRARY_PATH => '', DYLD_PRINT_LIBRARIES => '1');
+        exec {$executable} $executable, "$root/fixtures", 'hardware' or POSIX::_exit(126);
+    }
+    close $write;
+    my $select = IO::Select->new($read);
+    my $deadline = time() + $seconds;
+    my ($output, $stopped, $status) = ('', '', undef);
+    my $cancelled = 0;
+    local $SIG{INT} = sub { $cancelled = 1; };
+    local $SIG{TERM} = sub { $cancelled = 1; };
+    while ($select->count || !defined $status) {
+        if ($cancelled || time() >= $deadline || length($output) > 4 * 1024 * 1024) {
+            $stopped = $cancelled ? 'cancelled' : time() >= $deadline ? 'timeout' : 'output_limit';
+            if (!defined $status) {
+                kill 'KILL', $pid;
+                waitpid($pid, 0);
+                $status = $?;
+            }
+            last;
+        }
+        for my $handle ($select->can_read(0.1)) {
+            my $count = sysread($handle, my $chunk, 65536);
+            if (defined $count && $count > 0) { $output .= $chunk; }
+            else { $select->remove($handle); close $handle; }
+        }
+        if (!defined $status && waitpid($pid, WNOHANG) == $pid) { $status = $?; }
+    }
+    close $read if fileno($read);
+    return ($output, $status >> 8, $status & 127, $stopped);
+}
+
+sub classify {
+    my ($output, $exit, $signal, $stopped) = @_;
+    my @lines = split /\n/, $output;
+    my @summaries = grep { /^Native AV1 checks=/ } @lines;
+    my @actual = grep { /^ACTUAL AV1 / } @lines;
+    my $failure_lines = scalar grep { /^FAIL:/ } @lines;
+    my (%depths, %loaded);
+    $report->{child_exit_code} = $exit;
+    $report->{child_signal} = $signal;
+    $report->{failure_lines} = $failure_lines;
+    $report->{termination} = $stopped || 'normal';
+    my $valid = @summaries == 1 && $summaries[0] =~ /^Native AV1 checks=(\d+) failures=(\d+) strict_hardware=(\d+)$/;
+    if ($valid) {
+        @{$report}{qw(checks failures strict_hardware)} = (0 + $1, 0 + $2, 0 + $3);
+        $valid &&= $report->{checks} == $policy->{expected_checks} && $report->{strict_hardware} == 1
+            && $report->{failures} == 0 && $failure_lines == 0;
+    }
+    $valid &&= @actual == 2;
+    for my $line (@actual) {
+        if ($line =~ /^ACTUAL AV1 depth=(8|10) native_opens=(\d+) software_opens=(\d+) fallback=(\d+) frames=(\d+) vt=(\d+) hardware=(\d+)$/) {
+            my ($depth, @numbers) = ($1, $2, $3, $4, $5, $6, $7);
+            $valid = 0 if exists $depths{$depth};
+            $depths{$depth} = [map { 0 + $_ } @numbers];
+            $valid &&= join(',', @numbers) eq '1,0,0,24,24,24';
+        } else { $valid = 0; }
+    }
+    $valid &&= exists $depths{8} && exists $depths{10};
+    $report->{actual} = \%depths;
+    my %allowed = map { ("$root/lib/$_" => $_) } @{$policy->{libraries}};
+    my $library_valid = 1;
+    for my $line (@lines) {
+        next unless $line =~ /^dyld\[\d+\]: /;
+        # macOS 26 also lists delayed system images without a load path.
+        # These messages are not load evidence; every actual path is still checked.
+        next if $line =~ /^dyld\[\d+\]: move loaded to delayed: [A-Za-z0-9_.+-]+$/;
+        if ($line =~ m{^dyld\[\d+\]: (?:<[^>]+> )?(/.+)$}) {
+            my $path = $1;
+            if (exists $allowed{$path}) { $loaded{$allowed{$path}}++; }
+            elsif ($path ne "$root/bin/native-av1-tests" && $path !~ m{^/(?:System/Library|usr/lib)/}) {
+                $library_valid = 0;
+            }
+        } else { $library_valid = 0; }
+    }
+    $library_valid &&= join(',', sort keys %loaded) eq join(',', sort @{$policy->{libraries}});
+    $library_valid &&= !grep { $_ != 1 } values %loaded;
+    $report->{loaded_libraries_verified} = $library_valid ? JSON::PP::true : JSON::PP::false;
+    $report->{loaded_library_names} = [sort keys %loaded];
+    $valid &&= $library_valid && $exit == 0 && !$signal && !$stopped;
+    return $valid;
+}
+
+my ($before, $result, $error);
+eval {
+    $before = snapshot();
+    $report->{pre_hashes_verified} = JSON::PP::true;
+    my $arch = fixed_command('/usr/bin/uname', '-m');
+    my $os = fixed_command('/usr/bin/sw_vers', '-productVersion');
+    my $build = fixed_command('/usr/bin/sw_vers', '-buildVersion');
+    die "platform_invalid_response\n" unless $arch =~ /\A[a-zA-Z0-9_]+\z/ && $os =~ /\A\d+(?:\.\d+){0,2}\z/
+        && $build =~ /\A[A-Za-z0-9.]+\z/;
+    @{$report}{qw(architecture os_version os_build)} = ($arch, $os, $build);
+    die "platform_requires_arm64_macos26\n" unless $arch eq $policy->{architecture} && (split /\./, $os)[0] >= $policy->{minimum_macos};
+    if ($mode eq 'verify-only') { $result = 1; }
+    else { $result = classify(capture("$root/bin/native-av1-tests", $policy->{timeout_seconds})); }
+    $error = "strict_hardware_checks_failed\n" unless $result;
+    1;
+} or $error = $@ || "unknown_failure\n";
+if ($before) {
+    eval {
+        my $after = snapshot();
+        die "integrity_changed_during_run\n" unless JSON::PP->new->canonical->encode($before) eq JSON::PP->new->canonical->encode($after);
+        $report->{post_hashes_verified} = JSON::PP::true;
+        1;
+    } or $error = $@ || "integrity_postcheck_failed\n";
+}
+if ($error) {
+    # Never include OS errors, local paths or third-party raw output in the report.
+    $report->{error_category} = $error =~ /\A([a-z0-9_]+)\n\z/ ? $1 : 'unclassified_failure';
+}
+if ($result && !$error && $report->{post_hashes_verified}) {
+    $report->{status} = $mode eq 'verify-only' ? 'VERIFIED_NOT_RUN' : 'PASS';
+    $report->{hardware_acceptance} = $mode eq 'run' ? JSON::PP::true : JSON::PP::false;
+}
+die "Cannot write reports: reports must be a regular directory.\n" if -l "$root/reports" || (-e "$root/reports" && !-d "$root/reports");
+mkdir "$root/reports", 0700 unless -d "$root/reports";
+my $report_dir = tempdir('run-XXXXXXXX', DIR => "$root/reports", CLEANUP => 0);
+open my $out, '>:raw', "$report_dir/report.json" or die "Cannot write local report.\n";
+print {$out} JSON::PP->new->canonical->pretty->encode($report);
+close $out or die "Cannot finish local report.\n";
+my ($relative_report) = $report_dir =~ m{/reports/([^/]+)$};
+print "$report->{status}\n";
+print "Local report: reports/$relative_report/report.json\n";
+print "This is a strict synthetic AV1 check, not full App or 4K endurance acceptance.\n";
+exit($report->{status} eq 'FAIL' ? 1 : 0);

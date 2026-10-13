@@ -23,7 +23,7 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 ### 当前整合检查点
 
 最新开发 CI `38381002473` 于 2026-10-13 10:05:47 UTC 派发，冻结
-`0455ab7c7dc207e3bc46349eda1ea6c148c1b891`，正在执行。
+`0455ab7c7dc207e3bc46349eda1ea6c148c1b891`，已结束且整体失败。
 `upload_development_build=false`；没有新发行或可交付 App 验收结论。
 该冻结版本的生产 App 与隔离测试 App 均编译通过，实际 baseline 92/92、独立队列
 54/54 全过，两进程 exit 0 且没有超时。五份 build/process identity-validation 均通过，
@@ -32,9 +32,19 @@ outer summary 确认清理完成、普通 App 不含测试驱动。原 nib／菜
 队列还验证真实重复项身份、循环／导航、整表恢复、半安装关窗后重开。原报告在
 `build/native-ci-38381002473-app.v4Pomn`，artifact ID `11804927964`。
 media-helper job 因旧 PlaylistFilterTests 边界编译失败，后续局部修补不能改写该次失败。
-随后两个独立队列／半安装取消 step 也失败，仍在等待对应最新日志，尚未归因。
+随后两个独立队列／半安装取消 step 也失败。artifact `11808626559` 已保存到
+`build/native-ci-38381002473-queue.pDioB2`：`jMKL1y` 安装器正向为 207 项中 1 项失败，
+`tw1TEx` 重复取消为 600 项中 4 项失败，均为实际正常编译后的运行失败。
+前者 activationFailed 的 cleanup 为 unverified；后者在 200 次实际取消中的四次未能
+验证空闲空列表。快照中 idle 为 true、无 path／playing，但列表仍保留 current 项。
+这是实际失败证据，不是负控；正在定位，不能用本地未复现覆盖它。
 本次整窗通过不包含之后的窗口全屏／置顶和字幕／LUT 交接修补；仍须新冻结 CI。
 本次包含以下较早失败之后的修补；不得把后续文档提交当成该 CI 的源码变更。
+
+`f142f270` 的新整窗候选保留全部原 92 项及独立队列 54 项，再增加三项：实际置顶菜单
+改变 NSWindow 而不提前写闲置 MPV，切核后真实窗口和 MPV 标志一致，并在稳定间隔后
+再次检查。当前 baseline 为 95 项，原时限不变；主代理独立重跑 47 项准备检查通过，
+尚未执行新冻结完整 App。该补测不模拟或证明 Spaces 全屏动画。
 
 最新整窗候选保留原 92 项，新增独立进程的 54 项队列检查，不能互相替代。
 两种开片暂停偏好、实际切换途中关窗并立即开片、替换后的 MPV 列表、静音、
@@ -96,6 +106,23 @@ DraggingDetect `bda1fc35092fdc3bf954fcda0a5c3309b2bc8808cf4c3a6803928a7a288b0306
 编译变体（非行为通过）；根代理在最终 `fbbc0af8` 上重跑受控生命周期 TSan 41/0 及
 两个原负控，不能当成真实 Session／完整窗口结果。新专项加入 CI，自动更新身份、
 默认后端和正式发行不变。
+
+### M4 AV1 独立验收包（待目标机运行）
+
+`Tools/NativeAV1Tests/Portable/` 生成不依赖目标机开发环境的离线包，复用已有精确身份的
+arm64 解码测试与五个播放库，不重签名、不安装 App。要求 macOS 26+；包内含合成素材、
+原许可证及 16 份锁定上游对应源码，既有项目构建材料仍完整保留。
+最终包位于 `build/m4-av1-acceptance.pc6dued3.noindex/M4-AV1-Acceptance.zip`，
+62,464,107 字节，SHA-256 为
+`394f60c480022355e86b46b8d9db923b782ea7242d1f868955edd99dcd4ac7d3`。
+主代理独立重跑 14 项离线测试及该包 `--verify-only` 通过；后者只记
+`VERIFIED_NOT_RUN`，不能作为硬件通过。原目录与 ZIP 移位检查通过，实际 M2 strict
+运行为 1738 项中 18 项失败：两种位深均软件回退，正确拒绝 PASS。
+运行前后 SHA 和五库实际加载位置验证通过，不把软件回退说成 M4 已验收。
+用户可将整包拷到 M4 Max、双击 `Run-M4-AV1-Check.command` 并回传单个脱敏
+`reports/run-*/report.json`；不会联网、读取私人媒体或自动修改权限。系统阻止运行时
+记录提示，不解除安全限制。SHA 用于检测传输损坏，不是发行者认证；无 Developer ID
+签名／公证。该包不证明完整 App、4K 长时性能、HDR 屏幕或真实音响验收。
 
 ### 音频设备菜单的实际换核入口
 
