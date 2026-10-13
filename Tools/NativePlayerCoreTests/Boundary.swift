@@ -79,6 +79,9 @@ final class MockMPV {
   var appended: [String] = []
   func getFlag(_ name: String) -> Bool { paused }
   func setFlag(_ name: String, _ value: Bool, level: Logger.Level) { paused = value }
+  func setFlag(_ name: String, _ value: Bool) {
+    preconditionFailure("Window projection requires a loaded presentation fixture")
+  }
   func command(_ command: MPVCommand, level: Logger.Level) { commands.append(command.rawValue) }
   func mpvQuit() { commands.append("quit") }
   func prepareForFirstMPVMediaLoad() { prepared += 1 }
@@ -92,6 +95,12 @@ final class MockMPV {
 }
 final class MockWindow {
   let loaded = false
+  // Keep the real projection guard without simulating a loaded presentation.
+  struct FullscreenState {
+    var isFullscreen: Bool { preconditionFailure("Window state requires a loaded presentation fixture") }
+  }
+  var fsState: FullscreenState { preconditionFailure("No loaded window in the lifecycle fixture") }
+  var isOntop: Bool { preconditionFailure("No loaded window in the lifecycle fixture") }
   enum PIPStatus { case none, inPIP }
   var pipStatus = PIPStatus.none
   let pip = MockPIP()

@@ -42,7 +42,8 @@ let queueStart = source.range(of: "  private final class NativeQueueInstallation
 let queueEnd = source.range(of: "  var hasNativePlaybackQueue:", range: queueStart..<source.endIndex)!.lowerBound
 let noQueue = try String(contentsOf: root.appendingPathComponent("Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt"), encoding: .utf8)
   .replacingOccurrences(of: "__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__", with: String(source[queueStart..<queueEnd]))
-var compatibilityMethods = ["  func requireMPVCompatibility(", "  private func retireNativePlayback("].map(coreMethod).joined(separator: "\n")
+var compatibilityMethods = ["  func requireMPVCompatibility(", "  private func retireNativePlayback(",
+  "  private func projectNativeWindowOptionsToMPV("].map(coreMethod).joined(separator: "\n")
 let opening = coreMethod("  private func openMainWindow(")
 let openBoundary = "\n    log(\"Opening "
 precondition(opening.components(separatedBy: openBoundary).count == 2,
@@ -175,8 +176,23 @@ final class PlayerCore {
 }
 enum Preference { enum Key { case pauseWhenOpen }; static func bool(for key: Key) -> Bool { false } }
 struct VideoToolsViewport { let zoom: Double; let panX: Double; let panY: Double }
-final class MPVBoundary { var preparations = 0; func prepareForFirstMPVMediaLoad() { preparations += 1 } }
-final class WindowBoundary { let loaded = false; let videoView = VideoViewBoundary() }
+final class MPVBoundary {
+  var preparations = 0
+  func prepareForFirstMPVMediaLoad() { preparations += 1 }
+  func setFlag(_ name: String, _ value: Bool) {
+    preconditionFailure("Window projection requires a loaded presentation fixture")
+  }
+}
+final class WindowBoundary {
+  let loaded = false
+  let videoView = VideoViewBoundary()
+  // Preview control owns no window; the actual projection guard must skip it.
+  struct FullscreenState {
+    var isFullscreen: Bool { preconditionFailure("Window state requires a loaded presentation fixture") }
+  }
+  var fsState: FullscreenState { preconditionFailure("No loaded window in the preview control fixture") }
+  var isOntop: Bool { preconditionFailure("No loaded window in the preview control fixture") }
+}
 final class VideoViewBoundary {
   func displayActive() {}
   @discardableResult

@@ -137,6 +137,20 @@ for result in [nil, 1, 2] as [Int?] {
   }
 }
 
+for native in [true, false] {
+  for path in ["/synthetic/busy.srt", "/synthetic/busy.cube"] {
+    pasteboard { board in
+      let player = PlayerCore()
+      player.isUsingNativePlayback = native
+      player.requireMPVCompatibility(reason: "owned transition") {}
+      files([path], on: board)
+      check(!player.openFromPasteboard(DragInfo(board)), "Busy attachment drop is explicitly rejected on either backend")
+      check(player.pending.count == 1 && player.subtitles.isEmpty && player.filters.isEmpty && player.messages.isEmpty,
+            "Busy attachment preserves the coordinator owner without a media mutation")
+    }
+  }
+}
+
 pasteboard { board in
   let player = PlayerCore()
   check(!player.openFromPasteboard(DragInfo(board)), "Empty pasteboard returns false")

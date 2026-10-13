@@ -23,7 +23,8 @@ precondition(["", "skip-initial-resume", "skip-native-title-update", "start-befo
 let methods = [
   "  func captureMPVEventRevision()", "  func acceptsMPVEventRevision(", "  func noteMPVMediaCommand()",
   "  private func attemptNativeOpen(", "  private func beginNativeOpen(", "  private func receiveNativeSnapshot(",
-  "  func requireMPVCompatibility(", "  private func retireNativePlayback(", "  private func open(_",
+  "  func requireMPVCompatibility(", "  private func retireNativePlayback(",
+  "  private func projectNativeWindowOptionsToMPV(", "  private func open(_",
   "  private func openMainWindow(", "  func initVideo()", "  func shutdown()", "  func stop()",
   "  func notifyWindowVideoSizeChanged()", "  func getMediaTitle(",
   "  func syncAbLoop()",

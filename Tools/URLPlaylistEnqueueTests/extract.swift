@@ -23,6 +23,7 @@ members += try String(contentsOf: root.appendingPathComponent("Tools/NativePlaye
   .replacingOccurrences(of: "__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__",
     with: span("  private final class NativeQueueInstallation {", "  var hasNativePlaybackQueue:"))
 for signature in ["  func requireMPVCompatibility(", "  private func retireNativePlayback(",
+                  "  private func projectNativeWindowOptionsToMPV(",
                   "  private func open(_ url:", "  func stop()", "  func shutdown()",
                   "  func seek(absoluteSecond:", "  func seek(relativeSecond:", "  func seek(percent:",
                   "  var nativeInitialPlaybackPending:", "  var playbackIsPaused:",

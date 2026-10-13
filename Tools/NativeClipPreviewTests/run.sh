@@ -5,7 +5,7 @@ cd "$repo_root"
 test_dir="$(mktemp -d "$repo_root/build/native-clip-preview-tests.XXXXXX")"
 source_files=(
   iina/PlayerCore.swift iina/PlayerWindowController.swift iina/MainWindowController.swift iina/QuickSettingViewController.swift
-  iina/PlayerState.swift
+  iina/PlayerState.swift iina/MPVOption.swift
   iina/VideoTools/VideoToolsRotationIntent.swift
   iina/VideoTools/VideoToolsPlayerBridge.swift iina/VideoTools/VideoToolsViewController.swift iina/VideoTools/VideoToolsLoopPolicy.swift
   iina/PlaybackBackend/PlaybackTransport.swift iina/PlaybackBackend/NativePlaybackTransport.swift
@@ -38,7 +38,7 @@ xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm6
   iina/PlaybackBackend/NativePlaybackQueue.swift iina/PlaybackBackend/MPVQueueInstaller.swift \
   iina/NativePlayback/NativeSampleBufferOutput.swift iina/NativePlayback/NativePlaybackSampleGate.swift \
   iina/NativePlayback/NativePlaybackSession.swift iina/VideoTools/VideoToolsLoopPolicy.swift iina/PlayerState.swift \
-  iina/VideoTools/VideoToolsRotationIntent.swift \
+  iina/VideoTools/VideoToolsRotationIntent.swift iina/MPVOption.swift \
   "$test_dir/Production.swift" "$test_dir/Panel.swift" Tools/NativeClipPreviewTests/main.swift \
   "$test_dir/decoder.o" deps/lib/libavcodec.61.dylib deps/lib/libavformat.61.dylib deps/lib/libavutil.59.dylib \
   deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib \

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise actual PlayerCore retirement with controlled asynchronous sessions."""
 import argparse
+import hashlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -26,7 +27,19 @@ def main():
     parser.add_argument("--sanitize", choices=["address", "thread"])
     parser.add_argument("--negative-control", action="store_true")
     parser.add_argument("--capture-negative-control", action="store_true")
+    parser.add_argument("--build-only", action="store_true",
+                        help="Compile only, verify source/generated hashes, and skip all behavioral assertions (including negative controls).")
     args = parser.parse_args()
+    compile_sources = ["iina/Atomic.swift", "iina/Lock.swift", "iina/PlayerState.swift",
+                       "iina/MPVCommand.swift", "iina/MPVOption.swift", "iina/PlaybackBackend/PlaybackTransport.swift",
+                       "iina/PlaybackBackend/NativePlaybackQueue.swift", "iina/PlaybackBackend/MPVQueueInstaller.swift",
+                       "iina/VideoTools/VideoToolsShortcuts.swift", "iina/VideoTools/VideoToolsRotationIntent.swift",
+                       "Tools/NativePlayerCoreTests/Boundary.swift", "Tools/NativePlayerCoreTests/main.swift"]
+    source_paths = [ROOT / path for path in compile_sources + [
+        "iina/PlayerCore.swift", "iina/PlaybackInfo.swift", "iina/VideoTools/VideoToolsPlayerBridge.swift",
+        "Tools/NativePlayerCoreTests/NoURLPlaylistBoundary.txt", "Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt",
+        "Tools/NativePlayerCoreTests/run.py"]]
+    source_before = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in source_paths}
     core = (ROOT / "iina/PlayerCore.swift").read_text()
     info = (ROOT / "iina/PlaybackInfo.swift").read_text()
     gate_start = core.index("  @Atomic private var playbackEventRoute")
@@ -37,7 +50,7 @@ def main():
     # route methods real without inventing preview behavior in its controlled transport.
     preview_start = core.index("  enum NativePreviewResult", fields_start, fields_end)
     preview_end = core.index("  private struct NativeCompatibilityRestore", preview_start, fields_end)
-    methods = ["advancePlaybackRoute", "applyNativeViewport", "cancelNativeLoopRequests", "requireMPVCompatibility", "retireNativePlayback", "stop", "shutdown", "open", "openMediaURLs",
+    methods = ["advancePlaybackRoute", "applyNativeViewport", "cancelNativeLoopRequests", "requireMPVCompatibility", "retireNativePlayback", "projectNativeWindowOptionsToMPV", "stop", "shutdown", "open", "openMediaURLs",
                "cancelPendingPermanentRotation", "resetPermanentRotationMedia", "ownsPermanentRotationRequest"]
     bridge = (ROOT / "iina/VideoTools/VideoToolsPlayerBridge.swift").read_text()
     model = bridge[bridge.index("struct VideoToolsViewport:"):bridge.index("struct VideoToolsPlayerSnapshot")]
@@ -87,25 +100,32 @@ def main():
         work = Path(directory)
         production = work / "Production.swift"
         production.write_text(generated)
+        generated_before = hashlib.sha256(production.read_bytes()).hexdigest()
         executable = work / "NativeCoreTests"
         command = ["xcrun", "swiftc", "-warnings-as-errors", "-o", str(executable)]
         if args.sanitize:
             command.append("-sanitize=" + args.sanitize)
-        command += [str(ROOT / path) for path in ["iina/Atomic.swift", "iina/Lock.swift", "iina/PlayerState.swift",
-                    "iina/MPVCommand.swift", "iina/MPVOption.swift", "iina/PlaybackBackend/PlaybackTransport.swift",
-                    "iina/PlaybackBackend/NativePlaybackQueue.swift", "iina/PlaybackBackend/MPVQueueInstaller.swift",
-                    "iina/VideoTools/VideoToolsShortcuts.swift", "iina/VideoTools/VideoToolsRotationIntent.swift", "Tools/NativePlayerCoreTests/Boundary.swift",
-                    "Tools/NativePlayerCoreTests/main.swift"]]
-        subprocess.run(command + [str(production)], check=True, timeout=90)
-        if args.negative_control or args.capture_negative_control:
-            result = subprocess.run([str(executable)], capture_output=True, text=True, timeout=25)
-            expected = ("FAIL: A ready preroll never silently restores the file at zero" if args.capture_negative_control else
-                        "FAIL: Shutdown intent cannot be replaced by a later window-close stop")
-            if result.returncode != 1 or expected not in result.stderr:
-                raise RuntimeError("Negative control missed the expected shutdown invariant: " + result.stderr)
-            print("PASS: Negative control reproduces the expected lifecycle invariant failure")
-        else:
-            subprocess.run([str(executable)], check=True, timeout=25)
+        command += [str(ROOT / path) for path in compile_sources]
+        try:
+            subprocess.run(command + [str(production)], check=True, timeout=90)
+            if args.build_only:
+                print("BUILD ONLY: Compiled lifecycle fixture; behavioral assertions and negative controls were not executed.")
+                print("PlayerCore SHA256:", source_before[ROOT / "iina/PlayerCore.swift"])
+                print("Generated SHA256:", generated_before)
+            elif args.negative_control or args.capture_negative_control:
+                result = subprocess.run([str(executable)], capture_output=True, text=True, timeout=25)
+                expected = ("FAIL: A ready preroll never silently restores the file at zero" if args.capture_negative_control else
+                            "FAIL: Shutdown intent cannot be replaced by a later window-close stop")
+                if result.returncode != 1 or expected not in result.stderr:
+                    raise RuntimeError("Negative control missed the expected shutdown invariant: " + result.stderr)
+                print("PASS: Negative control reproduces the expected lifecycle invariant failure")
+            else:
+                subprocess.run([str(executable)], check=True, timeout=25)
+        finally:
+            changed = [str(path.relative_to(ROOT)) for path, digest in source_before.items()
+                       if hashlib.sha256(path.read_bytes()).hexdigest() != digest]
+            if changed or hashlib.sha256(production.read_bytes()).hexdigest() != generated_before:
+                raise RuntimeError("Source/generated inputs changed during verification: " + ", ".join(changed))
 
 
 if __name__ == "__main__":

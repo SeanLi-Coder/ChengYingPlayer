@@ -30,6 +30,7 @@ members += try read("Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt")
   .replacingOccurrences(of: "__PRODUCTION_QUEUE_INSTALLATION_DECLARATIONS__",
     with: span(core, "  private final class NativeQueueInstallation {", "  var hasNativePlaybackQueue:"))
 let signatures = ["  func requireMPVCompatibility(", "  private func retireNativePlayback(",
+  "  private func projectNativeWindowOptionsToMPV(",
                   "  private func open(_ url:", "  func stop()", "  func shutdown()",
                   "  func seek(absoluteSecond:", "  func seek(relativeSecond:", "  func seek(percent:",
                   "  var nativeInitialPlaybackPending:", "  var playbackIsPaused:",

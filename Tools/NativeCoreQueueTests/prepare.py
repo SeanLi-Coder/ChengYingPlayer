@@ -22,7 +22,8 @@ queue = section("  // A fixed explicit selection", "  /// This opt-in route deli
 methods = [
     "  func captureMPVEventRevision()", "  func acceptsMPVEventRevision(", "  func noteMPVMediaCommand()",
     "  private func attemptNativeOpen(", "  private func beginNativeOpen(", "  private func receiveNativeSnapshot(",
-    "  func requireMPVCompatibility(", "  private func retireNativePlayback(", "  private func open(_",
+    "  func requireMPVCompatibility(", "  private func retireNativePlayback(",
+    "  private func projectNativeWindowOptionsToMPV(", "  private func open(_",
     "  private func openMainWindow(", "  func initVideo()", "  func shutdown()", "  func stop()", "  func idleActiveChanged()",
     "  func notifyWindowVideoSizeChanged()", "  func getMediaTitle(", "  func syncAbLoop()",
     "  func pause()", "  func resume()", "  func togglePause(", "  func setVolume(", "  func setSpeed(",

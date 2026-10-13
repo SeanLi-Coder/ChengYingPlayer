@@ -157,6 +157,7 @@ extension PlayerCore {
       paths = Utility.resolvePaths(paths)
       // check 3d lut files
       if paths.count == 1 && Utility.lut3dExt.contains(paths[0].lowercasedPathExtension) {
+        guard canAttachExternalPlaybackData else { return false }
         // Copy the resolved path now. A drag session and its pasteboard do not
         // belong to the asynchronous compatibility handoff.
         let path = paths[0]
@@ -190,6 +191,9 @@ extension PlayerCore {
           !$0.hasDirectoryPath && Utility.supportedFileExt[.sub]!.contains($0.pathExtension.lowercased())
         }
         guard !subtitleURLs.isEmpty else { return false }
+        // A partial compatibility backend cannot accept another attachment.
+        // Reject this drop without replacing the existing restore/action owner.
+        guard canAttachExternalPlaybackData else { return false }
         if isUsingNativePlayback {
           requireMPVCompatibility(reason: "dropped_subtitles") { [weak self] in
             guard let self else { return }

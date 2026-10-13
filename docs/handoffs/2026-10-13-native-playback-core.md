@@ -32,6 +32,7 @@ outer summary 确认清理完成、普通 App 不含测试驱动。原 nib／菜
 队列还验证真实重复项身份、循环／导航、整表恢复、半安装关窗后重开。原报告在
 `build/native-ci-38381002473-app.v4Pomn`，artifact ID `11804927964`。
 media-helper job 因旧 PlaylistFilterTests 边界编译失败，后续局部修补不能改写该次失败。
+随后两个独立队列／半安装取消 step 也失败，仍在等待对应最新日志，尚未归因。
 本次整窗通过不包含之后的窗口全屏／置顶和字幕／LUT 交接修补；仍须新冻结 CI。
 本次包含以下较早失败之后的修补；不得把后续文档提交当成该 CI 的源码变更。
 
@@ -58,6 +59,43 @@ PlaybackLifecycle fixture 编译处失败：它未声明 generic owner／receipt
 Core `14d8d140` 下 Intel 10.15 typecheck／ASan lifecycle 76/0 与真实 libmpv
 filters 18/0；修前失败及前后源码身份保留于
 `build/playback-lifecycle-generic-boundary.DbK9r3`。不能把本地修补写成原 CI 成功。
+
+### 后续窗口与附件交接修补（尚待新同源 App CI）
+
+真实 loaded native→MPV 交接发现旧 MPV 的 fullscreen／ontop 属性仍是初始值，
+`checkUnsyncedWindowOptions` 会退出全屏或降低窗口 level。现在只对已准入、已加载且
+owner 仍有效的 native 恢复记录，在 renderer 退场完成后、MPV 开片前投影最新窗口状态；
+普通 MPV 开片、未准入 fallback、取消／新媒体不继承该投影。旧源 `uYII5O` 为 24/14；
+最终 Core SHA-256 前缀 `fbbc0af8` 的普通 `WXqznn`、ASan `Jxis2K`、TSan `UZ5JTr`
+均 208/0，根代理独立普通 `1y8fVf` 亦 208/0。四精确负控 `3YdzqP`／`Rbxsiy`／
+`cE2PyS`／`LG8wi8` 分别准确失败 34／40／3／1 项。前三正向清单与最终负控仅
+非编译 validator 不同，生产／抽取器／测试断言未变；根代理最后普通与最终负控的
+完整清单相同。旧 swap 控 `p7r9fv` 40 项失败被错误先验 44 项拒绝，原证据保留，
+只修 validator 对已经进入全屏后不降低 window level 的预期；未弱化正向断言。
+AppKit Spaces 动画和完整 MPVController 属性事件不是该专项的验收范围。
+
+另发现字幕 drop 被 `openMediaURLs` 的提前 invalidation 当成新媒体，撤销正在退场的
+generic owner；旧源真实重现 `PJXTe1` 17/6。只把 invalidation 移到有效视频输入之后，
+并统一拒绝 capture／retire／load／seek／半建列表期间的字幕与 LUT 附件。真正新媒体
+仍能取消旧动作。独立复核还发现单片异步 inventory 期间 transport 未建立而旧 MPV
+路由已关闭，旧 gate 仍接受附件；`kuAD4p` 9/4 证实实际 sub-add／vf 写入闲置 MPV。
+现以 transport 存在或 MPV 事件路由可用为附加必要条件，正常 native／MPV 附件不受影响。
+
+最终 Core `fbbc0af832e9525d1ad96ede021bcf6000f28362499cb7f775906d074b6c5c46`、
+DraggingDetect `bda1fc35092fdc3bf954fcda0a5c3309b2bc8808cf4c3a6803928a7a288b0306`：
+字幕专项普通 `VizmOm`／ASan `xV8jC5`／TSan `mco2oW` 各 **408/0**。五精确负控
+`jnwQUb` 22/5、`08GtaI` 408/36、`AuafNg` 408/31、`Wf9MJ9` 408/5、`pTVk3Q` 9/4，
+子进程均正常退出 1，validator 接受确切失败集合；针对性 22／9 项不当成全套正向。
+根代理独立核对八份 source-before 完全相同、source-after／生成物匹配及五份 validator。
+真实 Session／libmpv、实际字幕 track／vf 和 queue 事件运行；周围 UI／事件服务是
+明确边界，不冒充完整 App、字幕像素或真实声卡验收。README 保留中途 fixture 崩溃，
+没有把它们算成负控成功。原 DropRouting 104 项保留，加十二项门禁检查后共 116/0。
+
+六套旧抽取器已明确抽取真实窗口 helper，MPV-only 边界误入窗口投影即失败；原断言
+不减。`window-extractor-audit.neSR8V/commands.txt` 记录 Core `f5a3df8a` 时的 21 个
+编译变体（非行为通过）；根代理在最终 `fbbc0af8` 上重跑受控生命周期 TSan 41/0 及
+两个原负控，不能当成真实 Session／完整窗口结果。新专项加入 CI，自动更新身份、
+默认后端和正式发行不变。
 
 ### 音频设备菜单的实际换核入口
 
@@ -1004,20 +1042,22 @@ macOS 12 typecheck 必须拒绝旧 optional 访问；原 92 项 runtime 标签�
   仍没有目标 M4 的实际硬件输出证据，不把新增源码或 M2 软退写成硬解验收。
 - 旋转、SAR 和画面缩放／平移已接入新 surface；完整 App 组合验收仍未完成。
   完整字幕／轨道选择、截图、帧进、HDR 用户开关及播放列表策略仍走兼容路径。
-  剪辑预览恢复已接入原生路径，但新完整 App 预览回归仍待运行。
+  剪辑预览恢复已接入原生路径，冻结 0455ab7c 的完整 App 自动预览／连续编辑／停止／
+  关窗取消已通过；后续交接修补仍需新的同源整窗回归。
 - 倍速当前只承诺 0.5–2.0；不能直接取代旧界面更广的速率范围而不给用户提示。
 - 暂未测得相对旧内核／Movist 的耗电、CPU、总内存、丢帧或启动速度优势。
 
 ## 下一阶段接入清单
 
-1. 已有 `PlayerCore` 开片、transport、音量、单文件循环、A/B 和异步关闭分派；继续完成
-   完整 App 验收并解决暂停图像偶发不可读，不把独立 core 通过当成整窗成功。
+1. 已有 `PlayerCore` 开片、transport、音量、单文件循环、A/B 和异步关闭分派；冻结
+   0455ab7c 的完整 App 92／54 首次通过。后续窗口与附件修补需再做同源回归，且不能
+   把一次短片整窗成功当作全部媒体或长时播放验收。
 2. 已隔离 `VideoView` 的 GL 假定并迁入图层几何与 viewport；继续验证全屏／跨屏／真实
    HDR 色彩，补已加载 native→MPV 的整窗状态交接，不直接放开现有准入保护。
 3. 快捷键已迁入速度、A/B、viewport；其余旧 mpv 透传仍明确兼容，继续补齐截图、帧进、
    音轨等能力。日常同文件夹多媒体／播放列表及已用 MPV core 的 native 再进入仍待设计验证。
 4. `VideoToolsPlayerBridge` 与预览 snapshot/restore/onUnload 已接入原生异步状态；
-   重复编辑 A/B、切片预览、快速换片和关闭的完整 App 回归仍需实际运行。
+   冻结 0455ab7c 已实际验证重复编辑 A/B、切片预览、快速换片和关闭，保留该组回归。
 5. 明确支持矩阵、功能补齐及兼容选择，保留已有音视频品质和每文件音量零策略。
 6. 完整 App 构建、真实窗口回归、目标 M4 验收通过后，才切默认路径并进行原有签名／
    增量更新／公开交付发行流程。当前不是发布候选，不给未验收换核包打稳定标签。

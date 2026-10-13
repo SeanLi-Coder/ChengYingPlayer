@@ -3,6 +3,11 @@
 Run `bash Tools/NativeCoreQueueTests/run.sh`. Optional modes:
 
 - `NATIVE_PLAYBACK_SANITIZER=address` or `thread`.
+- `NATIVE_CORE_QUEUE_BUILD_ONLY=1` compiles the extracted production fixture
+  without creating media or executing playback/behavioral assertions. It writes
+  `execution-mode.txt` as `build-only` and still verifies source/generated hashes
+  on exit; exit 0 in this mode is not a behavioral pass. The default run and CI
+  behavior are unchanged when this variable is absent.
 - `NATIVE_QUEUE_NEGATIVE_CONTROL=deduplicate-plan`, `forget-eof-seek`,
   `old-draining-toggle`, `wrong-reopen-count`, `forget-eof-marker-seek`,
   `preview-pause-persistent`, `preview-resume-persistent`,

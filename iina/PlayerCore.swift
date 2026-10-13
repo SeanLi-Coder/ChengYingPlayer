@@ -634,6 +634,7 @@ class PlayerCore: NSObject {
     var rate: Double
     var paused: Bool
     var unmuteRequested = false
+    var preservesWindowOptions = false
     var duration: Double? = nil
     var loopA: Double? = nil
     var loopB: Double? = nil
@@ -1651,6 +1652,7 @@ class PlayerCore: NSObject {
         restore?.loopA = self.nativeLoopA
         restore?.loopB = self.nativeLoopB
         restore?.viewport = self.nativeViewport
+        restore?.preservesWindowOptions = self.nativeReady && self.info.state.loaded && self.mainWindow.loaded
         restore?.rotationRequestID = rotationRequestID
         restore?.rotationMediaEpoch = rotationRequestID == nil ? nil : self.permanentRotationIntent.mediaEpoch
         restore?.enqueueRequestID = enqueueRequestID
@@ -1683,7 +1685,6 @@ class PlayerCore: NSObject {
           }
           if rotationRequestID == nil && enqueueRequestID == nil { self.nativeCompatibilityRestore = restore }
           self.mpv.prepareForFirstMPVMediaLoad()
-          self.advancePlaybackRoute(acceptsMPV: true)
           self.openMainWindow(path: url.path, url: url, isNetwork: false, allowNative: false)
         }
       }
@@ -1759,6 +1760,16 @@ class PlayerCore: NSObject {
     openMainWindow(path: url.path, url: url, isNetwork: false)
   }
 
+  /// Attachments must not replace an owner or write into a partially restored
+  /// compatibility backend. A new media request has separate cancellation rules.
+  var canAttachExternalPlaybackData: Bool {
+    !nativeTerminationRequested && info.state != .shuttingDown && info.state != .shutDown &&
+      (nativeTransport != nil || playbackEventRoute.acceptsMPV) &&
+      !nativeRetiring && nativeCompatibilityCaptureID == nil && nativeCompatibilityRestore == nil &&
+      !hasPendingGenericPlaybackHandoff && !hasPendingPermanentRotation && !hasPendingURLPlaylistEnqueue &&
+      !nativeQueueLoadPending && nativeQueueInstallation == nil && nativeQueue?.phase != .handoffFailed
+  }
+
   /**
    Open a list of urls. If there are more than one urls, add the remaining ones to
    playlist and disable auto loading.
@@ -1789,7 +1800,6 @@ class PlayerCore: NSObject {
       Utility.showAlert("local_media_only", style: .informational)
       return nil
     }
-    invalidateGenericHandoff()
     playlistMutationLock.lock()
     defer { playlistMutationLock.unlock() }
 
@@ -1815,6 +1825,9 @@ class PlayerCore: NSObject {
       return 0
     }
 
+    // Subtitle attachments and other non-playable inputs are not a new media
+    // request and must not revoke an in-flight compatibility restoration.
+    invalidateGenericHandoff()
     resetNativeQueue()
     resetURLPlaylistEnqueue()
     resetPermanentRotationMedia(to: playableFiles.first)
@@ -1891,6 +1904,16 @@ class PlayerCore: NSObject {
     }
   }
 
+  /// Only an admitted native media owner can project its live AppKit options.
+  /// Read them after retirement, not when the playback clock was captured: the
+  /// user may change fullscreen or on-top while the renderer is draining.
+  private func projectNativeWindowOptionsToMPV() {
+    guard nativeTransport == nil, mainWindow.loaded,
+          let restore = pendingRotationPlaybackRestore, restore.preservesWindowOptions else { return }
+    mpv.setFlag(MPVOption.Window.fullscreen, mainWindow.fsState.isFullscreen)
+    mpv.setFlag(MPVOption.Window.ontop, mainWindow.isOntop)
+  }
+
   /// Open the given media in the main window.
   /// - Important: This method will ensure playback is paused before running the load command. If playback is not paused, audio
   ///     can start playing before video is shown. This is most noticeable with high resolution videos encoded with newer high
@@ -1924,6 +1947,7 @@ class PlayerCore: NSObject {
     if let queueInstallationID {
       guard nativeQueueInstallation?.token.id == queueInstallationID else { return }
     }
+    projectNativeWindowOptionsToMPV()
     let loadRoute = advancePlaybackRoute(acceptsMPV: queueInstallationID == nil)
     if genericOwnerID != nil { genericHandoffOwner?.phase = .awaitingStart(loadRoute) }
     log("Opening \(Utility.mediaLogSummary(url)) in main window")

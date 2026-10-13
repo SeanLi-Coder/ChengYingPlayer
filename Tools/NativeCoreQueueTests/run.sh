@@ -39,6 +39,7 @@ finish() {
 }
 trap finish EXIT
 python3 Tools/NativeCoreQueueTests/prepare.py "$test_dir"
+shasum -a 256 "$test_dir/Core.swift" "$test_dir/Services.swift" "$test_dir/Transport.swift" > "$test_dir/generated.sha256"
 xcrun clang ${clang_flags[@]+"${clang_flags[@]}"} -target arm64-apple-macos12 -fobjc-arc -fmodules -std=gnu11 -I deps/include \
   -c iina/NativePlayback/CYNMediaDecoder.m -o "$test_dir/decoder.o"
 xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm64-apple-macos14.4 -suppress-warnings -I deps/include \
@@ -56,6 +57,11 @@ xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -swift-version 5 -target arm6
   deps/lib/libswresample.5.dylib deps/lib/libswscale.8.dylib \
   -Xlinker -rpath -Xlinker "$repo_root/deps/lib" -framework AppKit -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework AudioToolbox \
   -o "$test_dir/queue-tests" 2>&1 | tee "$test_dir/compile.log"
+if [ "${NATIVE_CORE_QUEUE_BUILD_ONLY:-0}" = 1 ]; then
+  printf 'build-only\n' > "$test_dir/execution-mode.txt"
+  printf 'Compiled Core queue fixture only; playback and behavioral assertions were not executed.\n'
+  exit 0
+fi
 for color in red blue; do
   "${FFMPEG_BIN:-/opt/homebrew/bin/ffmpeg}" -hide_banner -loglevel error -f lavfi -i "color=c=$color:s=160x96:r=20:d=5" \
     -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=5' -c:v libx264 -crf 18 -pix_fmt yuv420p \
@@ -63,7 +69,7 @@ for color in red blue; do
 done
 "${FFMPEG_BIN:-/opt/homebrew/bin/ffmpeg}" -hide_banner -loglevel error -i "$test_dir/red.mp4" \
   -map 0:v -map 0:a -map 0:a -c copy "$test_dir/multi-audio.mp4"
-shasum -a 256 "$test_dir/Core.swift" "$test_dir/Services.swift" "$test_dir/Transport.swift" "$test_dir/"*.mp4 > "$test_dir/generated.sha256"
+shasum -a 256 "$test_dir/"*.mp4 >> "$test_dir/generated.sha256"
 set +e
 CHENGYING_NATIVE_PLAYBACK=1 /usr/bin/perl -e 'alarm 120; exec @ARGV' "$test_dir/queue-tests" "$test_dir" 2>&1 | tee "$test_dir/results.log"
 pipeline_status=("${PIPESTATUS[@]}")

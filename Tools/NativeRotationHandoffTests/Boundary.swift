@@ -176,6 +176,12 @@ class CoreBoundary: NSObject {
 }
 final class MainWindowBoundary {
   let loaded = false
+  // This fixture owns no loaded player window; projection must remain gated.
+  struct FullscreenState {
+    var isFullscreen: Bool { preconditionFailure("Window state requires a loaded presentation fixture") }
+  }
+  var fsState: FullscreenState { preconditionFailure("No loaded window in the controlled handoff fixture") }
+  var isOntop: Bool { preconditionFailure("No loaded window in the controlled handoff fixture") }
   enum Tab { case tools }
   let quickSettingView: QuickSetting
   let videoView = VideoViewBoundary()

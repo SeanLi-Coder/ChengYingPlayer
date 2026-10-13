@@ -13,6 +13,9 @@ final class PlayerCore {
   var messages: [OSDMessage] = []
   var unsafeCommands = 0
   var pending: [(reason: String, action: () -> Void)] = []
+  // This coordinator boundary models only its explicitly submitted handoff.
+  // Native and MPV test cases remain attachable until that handoff is pending.
+  var canAttachExternalPlaybackData: Bool { pending.isEmpty }
 
   func requireMPVCompatibility(reason: String, completion: @escaping () -> Void) {
     pending.append((reason, completion))
