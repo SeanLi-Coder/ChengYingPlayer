@@ -879,3 +879,19 @@ fallback 的 sample 宣称为硬解。均匀色块素材便于精确像素比对
 三次 weak session 均释放，队列记账峰值 124,623,360 字节；RSS／footprint 峰值
 252,854,272／201,098,176 字节，第二至第三轮关闭后差值为 +4,128,768／−65,536 字节。
 这些是该次进程采样，不是内存上限或零泄漏结论。测试没有修改默认路由、安装或注册 App。
+
+### 新 AV1 backport 依赖的独立 4K 回归
+
+上述十分钟结果不能代替后续 decoder 变更验证。最新冻结 CYN `e3bcc18e`、session
+`5542c267`、隔离新库 `build/native-av1-playback.7FMHum`（avcodec `a183c820`）
+重新执行原 180 秒断言，292/0，实际 182.55 秒；证据 `native-playback-soak.iX9p53`。
+原错参考负控 `DOJ5cD` 准确在首次像素比较失败，16/1、退出 1，随后异步清理通过。
+两轮 14 个 source/tool 输入、156 条完整依赖记录、6 个生成物前后 SHA 全通过；
+runner `4ee0aaad` 可选 `NATIVE_PLAYBACK_DEPS`，不覆盖旧库，失败退出也校验身份。
+编译／实际运行／tee／校验的退出码和日志分开保留，不将负控失败写成正向通过。
+
+三轮颜色／尺寸／位深检查均通过，未知颜色为零，无图观察为 4／6／3；未测其持续时间。
+样本预算峰值 124,623,360 字节；RSS 260,276,224、footprint 166,462,400 字节，后两轮
+关闭后差值 −573,440／−40,615,960 字节。这是本次静音 CLI AppKit 测试，不是复杂
+电影、听觉／A-V drift、整 App、AV1、实体 HDR 或目标 M4 验收。完整说明见
+[压力验证 README](../../Tools/NativePlaybackSoakTests/README.md)。
