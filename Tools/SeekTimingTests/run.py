@@ -4,6 +4,7 @@ import argparse
 import hashlib
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +22,41 @@ def method(source, signature):
     return section(source, start, "\n  }") + "\n  }"
 
 
+def event_handler(source):
+    """Limit event assertions to the unique production presentation handler."""
+    start = "  private func handleEvent(_ event: UnsafePointer<mpv_event>) {"
+    if source.count(start) != 1:
+        raise RuntimeError(f"Production extraction boundary changed: {start}")
+    begin = source.index(start)
+    end = source.find("\n  }\n", begin)
+    if end < 0:
+        raise RuntimeError("Production event handler closing boundary changed")
+    body = source[begin:end + len("\n  }")]
+    # Match this repository's method indentation, not a later sibling method's end.
+    if "\n  private func " in body or "\n  func " in body:
+        raise RuntimeError("Production event handler contains an ambiguous method boundary")
+    return body
+
+
+def validate_event_wiring(source):
+    handler = event_handler(source)
+    # A separate native queue switch may use the same event names. It cannot
+    # satisfy or make ambiguous the presentation handler's timing assertions.
+    for event in ("SHUTDOWN", "START_FILE", "END_FILE", "QUEUE_OVERFLOW"):
+        if f"case MPV_EVENT_{event}:\n      cancelSeekTiming()" not in handler:
+            raise RuntimeError(f"Missing lifecycle invalidation: {event}")
+    for event, clock_name, action in [("SEEK", "seekTime", "observeSeekTiming"),
+                                      ("PLAYBACK_RESTART", "restartTime", "finishSeekTiming")]:
+        block = section(handler, f"    case MPV_EVENT_{event}:", "\n    case ")
+        if block.index(f"let {clock_name} = CACurrentMediaTime()") > block.index("DispatchQueue.main.async"):
+            raise RuntimeError("Seek timestamps must be captured before main-queue dispatch")
+        if f"{action}(token: timingToken, at: {clock_name})" not in block:
+            raise RuntimeError("The event must deliver its captured timing values unchanged")
+    restart = section(handler, "    case MPV_EVENT_PLAYBACK_RESTART:", "\n    case ")
+    if "markSeekTimingPlaybackReady(token: timingToken)" not in restart:
+        raise RuntimeError("Only the captured restart generation may restore readiness")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--parent-ref", help="Require the previous production relative-seek method to fail")
@@ -29,6 +65,8 @@ def main():
     args = parser.parse_args()
     if args.live and args.parent_ref:
         parser.error("The previous-method negative control and current live integration must run separately")
+    subprocess.run([sys.executable, "-B", str(ROOT / "Tools/SeekTimingTests/test_parser.py")],
+                   check=True, timeout=15)
     source = (ROOT / "iina/MPVController.swift").read_text()
     core = (ROOT / "iina/PlayerCore.swift").read_text()
     old_core = subprocess.check_output(["git", "show", f"{args.parent_ref}:iina/PlayerCore.swift"],
@@ -89,23 +127,11 @@ final class SeekCore {
   func seek(absoluteSecond: Double) { absoluteTarget = absoluteSecond }
 """ + method(old_core, "seek(relativeSecond: Double, option: Preference.SeekOption)") + "\n" + method(core, "resetAutoSeekForNewMedia()") + "\n}\n"
     # Fail if lifecycle wiring ceases to invalidate before dispatching UI work.
-    for event in ("SHUTDOWN", "START_FILE", "END_FILE", "QUEUE_OVERFLOW"):
-        if f"case MPV_EVENT_{event}:\n      cancelSeekTiming()" not in source:
-            raise RuntimeError(f"Missing lifecycle invalidation: {event}")
+    validate_event_wiring(source)
     if "resetAutoSeekForNewMedia()" not in section(core, "  func fileLoaded()", "  func fileEnded("):
         raise RuntimeError("New files must reset both automatic-seek flags")
     if "private(set) var videoToolsMediaGeneration: UInt64" not in core:
         raise RuntimeError("The test boundary must match the production media-generation type")
-    for event, clock_name, action in [("SEEK", "seekTime", "observeSeekTiming"),
-                                      ("PLAYBACK_RESTART", "restartTime", "finishSeekTiming")]:
-        block = section(source, f"    case MPV_EVENT_{event}:", "\n    case ")
-        if block.index(f"let {clock_name} = CACurrentMediaTime()") > block.index("DispatchQueue.main.async"):
-            raise RuntimeError("Seek timestamps must be captured before main-queue dispatch")
-        if f"{action}(token: timingToken, at: {clock_name})" not in block:
-            raise RuntimeError("The event must deliver its captured timing values unchanged")
-    restart = section(source, "    case MPV_EVENT_PLAYBACK_RESTART:", "\n    case ")
-    if "markSeekTimingPlaybackReady(token: timingToken)" not in restart:
-        raise RuntimeError("Only the captured restart generation may restore readiness")
     with tempfile.TemporaryDirectory(prefix="chengying-seek-timing-") as directory:
         work = Path(directory)
         extracted = work / "Production.swift"

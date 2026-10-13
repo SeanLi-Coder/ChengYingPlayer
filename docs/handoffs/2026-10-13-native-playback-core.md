@@ -150,7 +150,15 @@ DraggingDetect `bda1fc35092fdc3bf954fcda0a5c3309b2bc8808cf4c3a6803928a7a288b0306
 ### M4 AV1 独立验收包（目标报告异常退出，硬解未验收）
 
 续播候选另已冻结推送为 `8cb9f7f86e93207fd7b76f4502ffa9198fab21a8`，开发 CI
-`38410825481` 于 2026-10-13 14:08:37 UTC 启动，尚在运行且 App 上传关闭。
+`38410825481` 于 2026-10-13 14:08:37 UTC 启动，已失败且 App 上传关闭。
+两个 job 均在 SeekTiming runner 提取 `MPV_EVENT_PLAYBACK_RESTART` 时失败：新 native 队列
+路由和原 `handleEvent` 有同名 case，原 helper 要求全文件唯一。未进入该步真实 seek 断言，
+不是已经证实的 seek 行为退化。修补仅限定唯一 `handleEvent` 方法内提取，保留全部原时序、
+token、readiness 与生命周期断言；12 项 parser 正负控、普通行为 37 项和旧 exact-seek
+方法负控通过。`--live --deps-dir deps` 的 37＋38 项通过，使用本机旧双 ICC 补丁库
+（SHA `5a76b8188eecf781a22567f6902f67e8da82da99495e633da1aa2d3edd65e81e`），
+无窗口 `vo=null/ao=null`，不能替代候选库或完整 App CI。稳定基线只有一个同名 case，
+此失败不影响独立的 Finder 标签稳定分支。
 原 95／54 和新增续播 writer 44／reader 10 均须实际 CI 验证，不能以准备检查 59/0 代替。
 发布前两个 P2 见续播设计末节；此轮不改默认、不创建发行。
 
@@ -182,7 +190,16 @@ Gatekeeper 是唯一原因。原报告与第一版 ZIP 保留，不覆盖或重�
 主代理独立 19/19 离线测试通过；新包 verify-only 报告 `run-5DM5FkIL` 为
 VERIFIED_NOT_RUN，实际 M2 报告 `run-lK7UPcqj` 为 1738 项中 18 项失败、两位深各 24 帧
 软件输出，明确不是硬解 PASS。六个签名完整性检查通过，库加载和前后 SHA 正确；这些
-本机结果不能证明 M4 上的启动策略或硬件路径。新版目标机诊断仍待回传。
+本机结果不能证明 M4 上的启动策略或硬件路径。
+
+新版目标机诊断已回传：六文件 codesign strict 完整性验证均通过，六文件 quarantine
+均存在；仍 SIGKILL(9)、0 输出字节，无 dyld 及解码摘要。用户随后截图证实系统先后阻止
+`libswresample.5.dylib` 与 `libswscale.8.dylib`，需要放行后重新运行测试，旧进程不会恢复。
+用户已单独确认允许对已校验包定点移除隔离属性；提供的 M4 命令先用固定 SHA 验证
+`Run-M4-AV1-Check.command` 与 `verify-and-run.pl`，再以 clean environment 执行
+`--verify-only` 校验全部包内容，成功后仅对测试程序和五库逐项移除 `com.apple.quarantine`。
+没有递归处理目录、sudo、改全局 Gatekeeper、重签名或远程执行；原文件内容保持不变。
+这只是经授权的测试启动排障，不是安全性、公证或硬解成功声明，仍待新的报告确认。
 
 ### 音频设备菜单的实际换核入口
 
