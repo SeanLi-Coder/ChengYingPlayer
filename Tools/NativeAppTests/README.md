@@ -29,7 +29,7 @@ python3 -B Tools/NativeAppTests/run.py \
   --production-app /ci/assembled/ChengYing.app
 ```
 
-Add `--include-queue` to also execute the separate 46-check queue scenario using
+Add `--include-queue` to also execute the separate 47-check queue scenario using
 the same test build. The default still executes only the original 92-check
 scenario. Both processes must succeed when the flag is present. The queue run
 gets its own UUID, fixture marker and `queue/{app.log,result.json,summary.json}`;
@@ -173,7 +173,7 @@ process's separate two-active-Core quit scenario remains unchanged.
 Each process independently retains the original 110/150-second limits; the flag
 does not extend either. Every stage prints elapsed time. Actual complete-App
 execution is CI-only, and is still required to establish timings and outcomes
-for these new 46 assertions. No default backend, media export, download, user
+for these new 47 assertions. No default backend, media export, download, user
 file, installed App or permission configuration is changed by this harness.
 
 ## Focused asynchronous paused-wait probe
@@ -222,6 +222,17 @@ marker. Source/generated/dependency identities matched after both runs. Final
 preparation output and seven-file pre/post manifests are retained separately at
 `build/native-app-queue-final.trDWRE`. These local checks do not run the complete
 application or the 46 new queue assertions.
+
+The subsequent opening-preference correction retains the baseline 92 checks
+and adds one queue check (47 total). Playlist wrap now requires the new first
+item to remain paused at position zero without sending a test pause command,
+matching `pauseWhenOpen=true`. A separate natural EOF advance sets that
+preference false and requires the next item's actual blue frame and advancing
+worker clock, then restores the isolated argument-domain preference. A file
+loop remains a same-media operation and must keep playing. The preparation
+suite passed 43 tests for driver SHA-256
+`2749e03ee67293973092a7d8f04f528d97ef9e5e5c8634c8288da6c790df0516`;
+the complete 92/47 App scenarios remain unexecuted for this revision.
 
 The preview-close check captures a nonoptional real output layer before closing
 the window. Its bounded diagnostic records preview/session/output ownership,

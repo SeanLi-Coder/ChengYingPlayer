@@ -19,7 +19,7 @@ SPEC.loader.exec_module(runner)
 class RunnerTests(unittest.TestCase):
     def test_queue_report_requires_its_own_exact_set_and_identity(self):
         labels = runner.QUEUE_REQUIRED_CHECKS
-        self.assertEqual(len(labels), 46)
+        self.assertEqual(len(labels), 47)
         self.assertFalse(labels & runner.REQUIRED_CHECKS)
         result = {"format": 1, "run_id": "queue-run", "complete": True, "passed": True,
                   "checks": [{"label": label, "passed": True} for label in sorted(labels)]}
@@ -198,6 +198,22 @@ class RunnerTests(unittest.TestCase):
             self.assertIn('"' + label + '"', stages)
         self.assertEqual(source.count("deadline: .now() + 110"), 1)
         self.assertEqual(runner.run_application.__kwdefaults__["timeout"], 150)
+
+    def test_queue_new_entries_obey_both_opening_pause_preferences(self):
+        source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()
+        wrap = source[source.index('self.wait("queue_list_wraps_to_first_duplicate"'):
+                      source.index("  private func queueAutoAdvanceWithoutOpeningPause(")]
+        self.assertIn("player.info.state == .paused", wrap)
+        self.assertIn('self.waitQueueFrame(player, index: 0, color: .red', wrap)
+        self.assertNotIn("player.pause()", wrap)
+        advance = source[source.index("  private func queueAutoAdvanceWithoutOpeningPause("):
+                         source.index("  private func waitQueuePlayingPosition(")]
+        self.assertIn('arguments["pauseWhenOpen"] = false', advance)
+        self.assertIn('arguments["pauseWhenOpen"] = true', advance)
+        self.assertIn("self.queueProjectionMatches(player, index: 1)", advance)
+        self.assertIn("player.info.state == .playing", advance)
+        self.assertIn("self.verifyClock(player, advancing: true", advance)
+        self.assertNotIn("playFileInPlaylist", advance)
 
     def test_actual_queue_node_comparator_rejects_wrong_duplicate_and_playing_entry(self):
         source = SOURCE.with_name("NativeAppTestDriver.swift").read_text()

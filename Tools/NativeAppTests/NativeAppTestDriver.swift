@@ -1353,15 +1353,36 @@ final class NativeAppTestDriver {
           self.waitForNativePaused(player, position: 8.8, color: .blue, label: "queue_list_seek_near_eof") {
             player.resume()
             self.wait("queue_list_wraps_to_first_duplicate", recordSuccess: false, until: {
-              self.queueProjectionMatches(player, index: 0) && player.info.state == .playing
+              self.queueProjectionMatches(player, index: 0) && player.info.state == .paused
             }) {
-              player.pause()
-              self.waitQueueWrappedFrame(player, index: 0, label: "queue_list_wraps_to_first_duplicate") {
-                self.queueCancelWithNewOpen(player)
+              // A different queue entry obeys the saved opening preference;
+              // a same-media file loop above does not reopen or apply it.
+              self.waitQueueFrame(player, index: 0, color: .red, label: "queue_list_wraps_to_first_duplicate") {
+                self.queueAutoAdvanceWithoutOpeningPause(player)
               }
             }
           }
         }
+      }
+    }
+  }
+
+  private func queueAutoAdvanceWithoutOpeningPause(_ player: PlayerCore) {
+    var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+    arguments["pauseWhenOpen"] = false
+    UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+    player.seek(absoluteSecond: 8.8)
+    player.resume()
+    wait("queue_auto_advance_without_opening_pause", recordSuccess: false, until: {
+      self.queueProjectionMatches(player, index: 1) && player.info.state == .playing &&
+        !player.playbackIsPaused && self.pixel(player, is: .blue)
+    }) {
+      self.verifyClock(player, advancing: true, label: "queue_auto_advance_without_opening_pause") {
+        var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        arguments["pauseWhenOpen"] = true
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        player.pause()
+        self.queueCancelWithNewOpen(player)
       }
     }
   }
