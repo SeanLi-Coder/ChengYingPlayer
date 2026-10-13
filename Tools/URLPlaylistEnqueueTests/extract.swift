@@ -38,8 +38,19 @@ members += "\n  func fileLoadedBoundary() {\n" + span(
   "    if var restore = nativeCompatibilityRestore, restore.url == info.currentURL {", "\n  func fileEnded(")
 members += "\n  func restartBoundary() {\n" + span(
   "    if let restore = nativeCompatibilityRestore, restore.waitingForSeek,", "\n  func refreshEdrMode()")
-members += "\n  func fileStartedReceiptBoundary() {\n" + span(
-  "    let ownedURLPlaylistReload =", "    let ownedRotationReload =") + "  }\n"
+let started = method("  func fileStarted(path: String)")
+func startedSpan(_ start: String, _ end: String) -> String {
+  precondition(started.components(separatedBy: start).count == 2, "Ambiguous file-start receipt")
+  let a = started.range(of: start)!.lowerBound
+  let b = started.range(of: end, range: a..<started.endIndex)!.lowerBound
+  return String(started[a..<b])
+}
+// The URL/load service is controlled by the fixture. Preserve the production
+// media-generation and generic-owner receipt transition before the URL receipt.
+members += "\n  func fileStartedReceiptBoundary() {\n" +
+  startedSpan("    let genericReceipt =", "    log(") +
+  startedSpan("    videoToolsMediaGeneration &+= 1", "    videoToolsClearLoop()") +
+  startedSpan("    if let id = genericReceipt,", "    let ownedRotationReload =") + "  }\n"
 let mutation = ProcessInfo.processInfo.environment["URL_ENQUEUE_NEGATIVE"] ?? ""
 let enqueueBegin = app.range(of: "      // enqueue\n")!.upperBound
 let enqueueEnd = app.range(of: "      // presentation options", range: enqueueBegin..<app.endIndex)!.lowerBound
@@ -85,6 +96,9 @@ case "stale-tail-receipt":
 case "stale-file-start":
   replaceOnce("    if !ownedURLPlaylistReload { resetURLPlaylistEnqueue() }",
               "    _ = ownedURLPlaylistReload")
+case "missing-generic-start":
+  replaceOnce(startedSpan("    if let id = genericReceipt,", "    let ownedURLPlaylistReload ="),
+              "    _ = genericReceipt\n")
 default: fatalError("Unknown negative control")
 }
 let bridge = try String(contentsOf: root.appendingPathComponent("iina/VideoTools/VideoToolsPlayerBridge.swift"), encoding: .utf8)

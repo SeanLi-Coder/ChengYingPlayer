@@ -43,7 +43,7 @@ ClipPreviewLiveTests 缺 `nativePreviewBaseline` 的旧边界编译处失败。�
 主代理独立复核 13 份 sanitizer／负控源码清单与普通运行一致，生成物 hash 有效。
 菜单、侧栏、typed／原始快捷键与既有剪辑面板均增加交接中保护；真实预览 admission
 专项 42/0 和两个精确负控、工具 UI 17/0 通过。冻结 `35d992488d9872c0e18ee780f1c9dc90f34f6d9b`
-已推送，开发 CI `38361506765` 于 2026-10-13 07:15 UTC 派发，当前运行中，
+已推送，开发 CI `38361506765` 于 2026-10-13 07:15 UTC 派发，现已结束且失败，
 `upload_development_build=false`；尚无完整 App／新同源 CI 通过结论。
 截至 07:52 UTC，生产 App 已编译，实际剪辑预览与 4K 关窗重开／持续播放通过；
 新内核检查仍在执行。media-helper 已因旧 lifecycle fixture 缺 generic 接口而编译失败，
@@ -55,10 +55,19 @@ Core `14d8d140` 专项三模式各 90/0、三精确负控准确，主代理普�
 真实 EOF 后变速又已复现并修补首次重播立即结束的问题；Session `aab38cba`
 专项三模式各 64/0、精确撤回分支产生 8 项预期失败，新 AV1 库上主代理原 Session
 普通／TSan 各 209/0、真实画面 66/0；原 A/B 既有 deps 三模式各 151/0。
-下一 CI 将优先执行整窗检查，原检查与失败门禁不减少。当前 CI 的 surfaces／route
-step 已失败，具体日志待 job 完成；本机另确认 VideoView fixture 缺 generic 退场
-接口的编译失败。补 nil-only fail-fast 边界后普通／ASan／TSan 各 51/0，原两个
-负控失败集合准确，所有原断言与时限保留；不能据此认定该 CI 只有同一问题。
+下一 CI 将优先执行整窗检查，原检查与失败门禁不减少。完整日志已确认 surfaces／route
+step 在 Surface 106/0 后因 VideoView fixture 缺 generic 退场接口而编译失败；该步后续
+viewport／transport／bridge 正向未执行。补 nil-only fail-fast 边界后本地普通／ASan／
+TSan 各 51/0，原两个负控失败集合准确，所有原断言与时限保留。
+完整生产与隔离测试 App 均编译成功；整窗实际为 76 项通过、1 项失败，失败点为
+`handoff_native_nondefault_state`，实际兼容交接动作尚未发出，后续恢复、退出及独立
+54 项队列进程未执行。隔离 App 清理完成，证据 `native-ci-38361506765-app.7BTZsD`。
+该次 CI 的 URL enqueue step 虽显示 success，普通与 TSan 正向日志实际均为
+118 项中 1 项失败；旧 shell 门禁吞掉了子进程失败，不能记作通过。已补抽取边界漏掉的
+真实 fileStarted generic receipt 更新并改为明确退出；本地普通／ASan／TSan 各 118/0，
+原八负控逐条匹配旧失败列表，新增负控只复现该一项失败。源清单前后相同并由主代理
+独立复核；不改生产或原断言。完整原日志保留于 `native-ci-38361506765-final.nRD4ue`，
+不覆盖失败记录。rotation 同型门禁也修补，两套门禁九组合自测及旧门禁七精确反证通过。
 这些记录不代表新候选完整 App 已验收或已发布。
 不得把受控事件服务、忙状态 fixture 或旧 Core 测试当作所有换核场景验收。
 以下按时间保留旧候选结果；它们不替代本段的最新状态。

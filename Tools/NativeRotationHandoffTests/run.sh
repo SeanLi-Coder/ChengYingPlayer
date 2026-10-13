@@ -17,7 +17,7 @@ shasum -a 256 "${sources[@]}" iina/PlayerCore.swift iina/PlayerWindowController.
   iina/VideoTools/VideoToolsPlayerBridge.swift Tools/NativeRotationHandoffTests/*.swift \
   Tools/URLPlaylistEnqueueTests/EnqueueServices.swift \
   Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt \
-  Tools/NativeRotationHandoffTests/run.sh > "$test_dir/inputs.sha256"
+  Tools/NativeRotationHandoffTests/run.sh Tools/URLPlaylistEnqueueTests/test_runner.py > "$test_dir/inputs.sha256"
 finish_evidence() {
   original_status=$?
   trap - EXIT
@@ -35,6 +35,7 @@ finish_evidence() {
   exit "$original_status"
 }
 trap finish_evidence EXIT
+python3 -B Tools/URLPlaylistEnqueueTests/test_runner.py --runner Tools/NativeRotationHandoffTests/run.sh
 compiler=(xcrun swiftc -swift-version 5)
 case "${ROTATION_HANDOFF_SANITIZER:-}" in
   "") ;;
@@ -58,7 +59,12 @@ for mutation in positive loaded-only resurrect-restore unowned-restore drop-play
   statuses=("${PIPESTATUS[@]}")
   set -e
   if [[ "$mutation" == positive ]]; then expected_exit=0; else expected_exit=1; fi
-  [[ "${statuses[0]}" -eq "$expected_exit" && "${statuses[1]}" -eq 0 ]]
+  # Bash 3.2 does not reliably apply errexit to a compound [[ ... && ... ]].
+  if ! [[ "${statuses[0]}" -eq "$expected_exit" && "${statuses[1]}" -eq 0 ]]; then
+    printf 'Unexpected process status in %s: child=%s expected=%s writer=%s\n' \
+      "$mutation" "${statuses[0]}" "$expected_exit" "${statuses[1]}" >&2
+    exit 1
+  fi
   case "$mutation" in
     loaded-only) expected='FAIL: Rotation during stopping is accumulated' ;;
     resurrect-restore) expected='FAIL: Cancelled action is not resurrected by retirement completion' ;;

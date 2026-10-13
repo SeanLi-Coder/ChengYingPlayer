@@ -34,7 +34,7 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 `38337569102` 不被本次准备结果覆盖。
 
 后续冻结 `35d992488d9872c0e18ee780f1c9dc90f34f6d9b` 已推送，开发 CI
-`38361506765` 于 2026-10-13 07:15 UTC 派发，当前运行中；开发 App 上传仍关闭。
+`38361506765` 于 2026-10-13 07:15 UTC 派发，现已结束且失败；开发 App 上传仍关闭。
 本地最终负控证据在派发后补入文档，不改变该次 CI 的冻结内容。
 
 截至 07:52 UTC，该 CI 的生产 App 已编译通过，实际剪辑预览、4K 关窗重开与
@@ -60,7 +60,7 @@ ASan `8tUPGl`、TSan `2odrPO` 各 90/0，主代理独立普通 `JnTU9P` 亦 90/0
 同 URL 重开，不允许旧设备动作落到新媒体。发现过程及测试边界保留在专项 README。
 设备枚举、App 服务及事件转发是明确边界，音频为静音；不是物理外设、可闻声音或
 完整 MPVController／整窗验收。CI 已增加同源三模式、三负控及失败证据留存；
-运行中的 `38361506765` 不包含该后续修补，须另行验证。
+已结束的 `38361506765` 不包含该后续修补，须另行验证。
 
 ### 真实 EOF 后变速与首次重播
 
@@ -81,15 +81,45 @@ Session `aab38cba` 只在已结束且 decoder／媒体 revision 有效时发布�
 
 CI 增加该专项三模式、精确负控及证据保存；完整 App 检查前移到生产构建后，
 保留所有既有断言、超时和隔离清理。仅 workflow_dispatch 在失败后继续采集独立
-检查结果，稳定发布仍被失败拦截。正在运行的旧 CI 不受本地顺序改变影响，也不包含
-此 EOF 修补。它的 surfaces／route step 已失败，具体 CI 原因待完成日志；本机
-另确认 run-video-view 旧 fixture 缺 generic 退场接口而编译失败。
+检查结果，稳定发布仍被失败拦截。已结束的旧 CI 不受本地顺序改变影响，也不包含
+此 EOF 修补。完整日志确认其 surfaces／route step 在 Surface 106/0 后因
+run-video-view 旧 fixture 缺 generic 退场接口而编译失败。
 已补 nil-only、误入 generic owner 即失败的边界，保留完整生产退场方法；route
 返回实际递增 UInt64。普通／ASan／TSan 各 51/0；原两个负控精确为 48/3、47/4，
 无崩溃或编译错误。五轮源清单完全相同、source/generated 重验通过，证据与原样
-修前编译失败保留于 `build/video-view-generic-boundary.gtTwyX`。这不证明 CI
-仅有同一问题；完整日志仍须核对。独立 Surface 几何与真实源像素本机 106/0 于
+修前编译失败保留于 `build/video-view-generic-boundary.gtTwyX`。这只解释该步编译
+失败，不解释整窗失败。独立 Surface 几何与真实源像素本机 106/0 于
 `native-surface-tests.U2Frqy`，不等同物理屏幕合成或 HDR 验收。
+
+### 冻结 35d99248 的完整 CI 结果
+
+`38361506765` 的完整生产与隔离 App 均编译成功，但整窗为 **76 项通过、1 项失败**。
+先前异步 Session 获取、A/B 标记及暂停绿色目标均通过；
+`handoff_native_nondefault_state` 在总计 16.1096 秒失败，约在前一绿色目标检查后
+17ms。驱动尚未发出实际音频延迟菜单交接，不能把后续 MPV 恢复或退出记为通过。
+独立 54 项队列进程未启动，隔离 App 清理完成。原始报告、构建和运行日志保留于
+`build/native-ci-38361506765-app.7BTZsD`。当前正在区分异步重新预缓冲与真实状态问题，
+不根据时序猜测直接宣称根因或放宽检查。
+
+完整 job 日志还确认：URL enqueue 普通与 TSan 正向均为 **118 项中 1 项失败**，
+失败项是 `Rejected enqueue preserves the existing compatibility action`。虽然该 step
+被标为 success，旧 Bash 3.2 复合 `[[ ... && ... ]]` 裸门禁未可靠传播子进程失败；
+因此本次不认定 URL enqueue 通过。原日志与原 runner 保留于
+`build/native-ci-38361506765-final.nRD4ue`，fixture 和明确退出门禁正在修补。
+
+后续 fixture 修补只补入真实 `fileStarted` 的媒体 generation 和 generic owner
+receipt 更新，不修改生产或原 118 项断言。普通 `9q5VEW`、ASan `umevIF`、TSan
+`umbESL` 均 118/0；原八负控与历史失败列表逐行一致（27/9/7/2/3/4/2/2），新增
+`missing-generic-start` 只触发原失败一项。三个源清单相同、前后检查通过，主代理
+独立重验通过；保留只修门禁而尚未修 fixture 的 `emJEJZ` 实际 118/1、runner exit 1。
+URL 与 rotation 同型门禁均改为明确退出，实际 gate 在系统 Bash 的九种退出组合
+自测通过；只还原旧门禁则恰有七种错误被漏报。此为测试可靠性修补，不声称生产换核
+功能因此完成。工具证据见 `build/url-enqueue-generic-receipt.Ze2iQ2`。
+
+同一次 CI 的独立队列模型普通／TSan 各 155/0、实际整表安装器普通／TSan 各 207/0
+及七精确负控通过，半建列表取消 TSan 200 次共 600/0。CoreQueue 三模式各 206/0，
+generic handoff 三模式各 218/0 及十一精确负控通过。这些真实局部结果不能替代
+完整 App 失败，也不能解释或抹除此前 partial-cancellation 的偶发失败。
 
 显式有界列表已接实际 Core、native Session 与 MPV 命令；周围 App 服务边界见
 `Tools/NativeCoreQueueTests/README.md`。生产 controller 的停止协议单独测试：

@@ -62,3 +62,27 @@ Logs contain only synthetic numeric/state assertions, not media or credentials.
 This slice retains captured volume, rate and viewport; it does not add or verify
 new volume/rate/viewport edits during the transition. Default native admission,
 media decoding, app installation, signing and release behavior are unchanged.
+
+## Bash 3.2 exit-status gate
+
+The runner now explicitly exits when either the test process status differs from
+the expected status or the log writer fails. A bare compound `[[ ... && ... ]]`
+does not reliably propagate failure through `set -e` on macOS Bash 3.2. The URL
+enqueue suite exposed this runner defect; it does not justify relabeling an
+earlier failed test as passing.
+
+The shared `Tools/URLPlaylistEnqueueTests/test_runner.py --runner
+Tools/NativeRotationHandoffTests/run.sh` extracts this exact gate and tests nine
+status combinations on `/bin/bash`. Restoring only the old gate with
+`--negative-control` yields exactly seven failed subtests, including crashes,
+timeouts, ineffective negative controls and writer failures. The positive gate
+test runs before each invocation and is included in the source manifest. These
+shell checks do not execute the Swift behavior tests.
+
+The complete logs and artifacts of CI `38361506765` were independently audited:
+its ordinary `UcbneU` and TSan `Vv1OnX` positive runs each report 176 checks and
+zero failures. Each of the four negative failure lists (4/10/2/48 failures) is
+identical to the previously retained `23n4Py` baseline, including order and
+duplicates. This is the original frozen CI source, not a rerun of the newly
+guarded runner. Evidence remains in
+`build/native-ci-38361506765-final.nRD4ue/rotation-artifact`.

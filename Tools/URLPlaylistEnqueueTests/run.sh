@@ -13,7 +13,7 @@ sources=(iina/Atomic.swift iina/Lock.swift iina/PlayerState.swift iina/MPVComman
 shasum -a 256 "${sources[@]}" iina/PlayerCore.swift iina/AppDelegate.swift iina/VideoTools/VideoToolsPlayerBridge.swift \
   Tools/NativeRotationHandoffTests/Boundary.swift Tools/URLPlaylistEnqueueTests/*.swift \
   Tools/NativePlayerCoreTests/NoNativeQueueBoundary.txt \
-  Tools/URLPlaylistEnqueueTests/run.sh > "$test_dir/inputs.sha256"
+  Tools/URLPlaylistEnqueueTests/run.sh Tools/URLPlaylistEnqueueTests/test_runner.py > "$test_dir/inputs.sha256"
 finish_evidence() {
   status=$?
   trap - EXIT
@@ -25,13 +25,14 @@ finish_evidence() {
   exit "$status"
 }
 trap finish_evidence EXIT
+python3 -B Tools/URLPlaylistEnqueueTests/test_runner.py
 compiler=(xcrun swiftc -swift-version 5)
 case "${URL_ENQUEUE_SANITIZER:-}" in
   "") ;;
   address|thread) compiler+=("-sanitize=$URL_ENQUEUE_SANITIZER") ;;
   *) exit 2 ;;
 esac
-for mutation in positive early-append drop-owner drop-pause-restore ignore-result empty-playlist unguarded-osd stale-tail-receipt stale-file-start; do
+for mutation in positive early-append drop-owner drop-pause-restore ignore-result empty-playlist unguarded-osd stale-tail-receipt stale-file-start missing-generic-start; do
   mode="$mutation"
   if [[ "$mutation" == positive ]]; then mode=""; fi
   URL_ENQUEUE_NEGATIVE="$mode" xcrun swift Tools/URLPlaylistEnqueueTests/extract.swift "$repo_root" "$test_dir/$mutation.swift"
@@ -48,7 +49,12 @@ for mutation in positive early-append drop-owner drop-pause-restore ignore-resul
   statuses=("${PIPESTATUS[@]}")
   set -e
   if [[ "$mutation" == positive ]]; then expected_status=0; else expected_status=1; fi
-  [[ "${statuses[0]}" -eq "$expected_status" && "${statuses[1]}" -eq 0 ]]
+  # Bash 3.2 does not reliably apply errexit to a compound [[ ... && ... ]].
+  printf 'Runtime status: %s; test: %s; writer: %s; expected: %s\n' \
+    "$mutation" "${statuses[0]}" "${statuses[1]}" "$expected_status"
+  if [[ "${statuses[0]}" -ne "$expected_status" || "${statuses[1]}" -ne 0 ]]; then
+    exit 1
+  fi
   if /usr/bin/grep -Eq 'ERROR: AddressSanitizer|WARNING: ThreadSanitizer|SUMMARY: (AddressSanitizer|ThreadSanitizer)|Sanitizer:DEADLYSIGNAL|runtime error:' "$test_dir/$mutation.log"; then
     printf 'Unexpected sanitizer diagnostic in %s\n' "$mutation" >&2
     exit 1
@@ -62,6 +68,7 @@ for mutation in positive early-append drop-owner drop-pause-restore ignore-resul
     unguarded-osd) expected='FAIL: Final asynchronous OSD checks the receipt after notification reentry' ;;
     stale-tail-receipt) expected='FAIL: A callback opening media suppresses later stale success receipts' ;;
     stale-file-start) expected='FAIL: A non-owned MPV file-start invalidates queued success OSD' ;;
+    missing-generic-start) expected='FAIL: Rejected enqueue preserves the existing compatibility action' ;;
     *) expected='' ;;
   esac
   if [[ -n "$expected" ]]; then /usr/bin/grep -Fq "$expected" "$test_dir/$mutation.log"; fi
