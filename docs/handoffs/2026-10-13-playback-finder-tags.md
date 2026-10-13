@@ -1,9 +1,11 @@
 # 播放中设置 Finder 颜色标签
 
-## 范围与候选
+## 范围与发布状态
 
 - 稳定基线：`cc39a9dc`，功能分支 `codex/finder-color-tags`。
-- 候选：`v0.2.83` / build `94`；当前未发布，最终交付状态须核对完整 CI 与公开资产。
+- 已发布：`v0.2.83` / build `94`，北京时间 **2026-10-13 23:32:26**。
+  云端构建、真实安装与发布检查成功；本机公开验收的载荷、签名、增量和冻结 helper 已通过，
+  但最后测试卷正常卸载失败，整轮退出非零，不能表述为本机完整验收成功。
 - 不合入实验 native 播放内核，不改变播放依赖、更新身份、公钥或保存的偏好。
 - 不读取／修改用户真实媒体作为测试，不修改系统隐私权限，不替换本机正式安装。
 
@@ -62,13 +64,13 @@
 - 新组件 Swift 5 arm64 macOS 12、存储与 lifecycle 的 Intel macOS 10.15 typecheck 通过。
 - 独立 review 无剩余合入阻断项；全部 fixture 使用合成文件，没有读取真实用户视频。
 
-发行前还须完整云端构建、真实签名安装、增量全树一致、旧公钥及匿名公开交付核验。
-不将合成单元测试中的虚拟发布输出写成真实发布成功。
+上述本地测试不替代完整云端构建、真实签名安装、增量全树一致、旧公钥及匿名公开交付核验。
+后续真实发行结果见下文；不将合成单元测试中的虚拟发布输出写成真实发布成功。
 
 ## 发布基线准备（独立验证工具，未改变 v0.2.83 候选）
 
-功能提交 `ec55ffd0` 已推送主线和不可变标签 `v0.2.83`；标签流水线 `38415549034`
-仍在运行，不能据此报告正式发布。后续的验证工具修改不重打包或移动该标签。
+功能提交 `ec55ffd0` 已推送主线和不可变标签 `v0.2.83`；基线提取时标签流水线
+`38415549034` 尚未完成。后续的验证工具提交 `18f61b55` 不重打包或移动该标签。
 
 本机以原 `verify_public_release.py` 复核 v0.2.82 时，系统 CA 配置修正后，匿名 API、
 完整 DMG／增量实际下载以及旧公钥验签已完成，但旧 v0.2.81 测试卷仍挂载，
@@ -85,4 +87,59 @@
 完整 DMG SHA-256 为 `be01ef4e17b6bbce33d10a4ed0d68b7834139563b89e79d56979e241bd7a7b75`，
 原始可信 Info SHA-256 为 `f3d0afcb472ac00d67a664d4ed2fd7a219119455ae0903a7b7cce5a62d42e550`。
 此结果只是已认证的完整包基线，不把 v0.2.82 未完成的安装／增量／公开全流程改写为成功。
-v0.2.83 发布后仍使用原 `verify_public_release.py` 完成匿名交付、增量还原与冻结 helper 检查。
+v0.2.83 发布后仍使用原 `verify_public_release.py` 进行匿名交付、增量还原与冻结 helper 检查。
+
+## 正式发行与本机公开验收
+
+- 发行地址：[v0.2.83](https://github.com/SeanLi-Coder/ChengYingPlayer/releases/tag/v0.2.83)。
+  不可变标签仍为 `ec55ffd07892535afa84f6a91ce6386c55bedcaf`，没有重复发布或覆盖资产。
+- 标签流水线 [38415549034](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/38415549034)
+  的媒体测试、完整 Apple Silicon 构建和发布三个 job 全部成功，包括六个真实签名更新安装场景、
+  打包后媒体回归、增量还原全树一致、旧公钥验签，以及发布后的匿名交付检查。
+- 原主线候选流水线 [38415547873](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/38415547873)
+  两个验证 job 成功，发布 job 按分支设计跳过。等该流水线结束后，工具提交 `18f61b55`
+  经远端祖先检查 fast-forward 到主线，未合入 native 内核实验。
+- 后续工具主线流水线 [38422286763](https://github.com/SeanLi-Coder/ChengYingPlayer/actions/runs/38422286763)
+  在本记录时仍运行；它不是上述已发布 tag 的构建，不将尚未结束的检查写成通过。
+
+本机使用 Python 3.13、系统 CA、直连公开 GitHub 域名运行原验证器，命令参数为：
+
+```sh
+SSL_CERT_FILE=/etc/ssl/cert.pem \
+NO_PROXY=api.github.com,github.com,release-assets.githubusercontent.com \
+no_proxy=api.github.com,github.com,release-assets.githubusercontent.com \
+/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -B \
+  other/verify_public_release.py --tag v0.2.83 --build 94 \
+  --previous-directory build/ReleaseVerification.noindex/release-v0.2.82-base.sin5b761 \
+  --delta-tool ../chengying_player/build/sparkle-local-updater.tmslcJ/sdk/bin/BinaryDelta \
+  --helper-build-id 48af0bac450b48b5ba58ae0efc6b333ea9b7480e593bdf73ffc24b06ec7ec517
+```
+
+命令从 `chengying_player-finder-tags` 仓库根目录运行，`--delta-tool` 为本轮现有 Sparkle SDK
+工具的相对路径，不是新下载脚本；在其他机器复验时需提供各自可信 SDK 的对应路径。
+真实报告目录为 `build/ReleaseVerification.noindex/release-v0.2.83-public.kg0qq3e3/`。
+匿名 latest API、客户端实际 feed 与固定标签 feed 一致、完整 DMG 与全部增量的实际字节数／
+SHA-256、上一版本可信公钥认证均通过。两个认证后的 DMG 只读挂载成功，真实 Info／ARM64／
+严格代码签名通过；build 93 → 94 增量还原的完整签名应用与完整 DMG 的文件树一致。
+
+| 公开载荷 | 实际大小 | SHA-256 |
+| --- | ---: | --- |
+| 完整 DMG | 169,058,237 字节 | `f1ecc14a653cfdd887a7086e00f341d662a49cc09c450e39d984a5ebc3981d17` |
+| build 93 → 94 增量 | 1,397,678 字节 | `65eb96ca54a43f1585b92e4080a29ca11d51498c97cc8098875cdd64bddc3a23` |
+| appcast.xml | 1,982 字节 | `d32f4b1ff35112a6260e11cb47c8fff57469fecfb67c2e2c2eb7105d2ece3151` |
+
+隔离的冻结 helper `--self-test`、本地诊断 API smoke、精确 Dolby Vision 8.1／8.4 与 HDR10+
+剪辑合成用例全部通过；实际诊断身份为播放器 `0.2.83` / `94`，helper build ID 与上方一致。
+没有执行完整播放器、读取浏览器账户或真实用户媒体，也没有替换本机正式安装。
+认证后导出的原始 `trusted-app-info.plist` SHA-256 为
+`2bd39e8e87bf6da2690a5b0d532162ad2831684af110aa5d601ca9c69603b8fc`。
+
+**未完成的清理边界：**所有载荷、文件树和 helper 检查之后，原验证器正常卸载本轮
+`old-volume`（v0.2.82）和 `new-volume`（v0.2.83）均返回 exit `16`；各自额外正常重试一次
+仍明确返回 `Resource busy`。普通 `lsof` 在这两个精确卷上没有显示可见占用，不能据此断言
+某个具体进程负责。`TestAppWorkspace` 正确拒绝删除仍挂载的目录，保留失败标记和证据，
+本轮总退出码 `1`，**没有 `verification.json` 成功报告**。
+不强制卸载、不终止安全／系统进程、不改系统权限；旧 v0.2.81 忙碌卷完全未碰。
+下载归档、校验文件、原始可信 Info 和 helper 日志均在 disposable App 目录之外保留。
+后续应在本轮卷可正常卸载后按受控工作区流程收尾，再重新运行原严格验证；
+不可通过伪造报告、删除失败标记或放宽清理断言改写此次结果。
