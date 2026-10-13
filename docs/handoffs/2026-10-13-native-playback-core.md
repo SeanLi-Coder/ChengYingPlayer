@@ -37,6 +37,31 @@ macOS 14 及以后统一操作 display layer 的 `sampleBufferRenderer`，不混
 `38361506765` 于 2026-10-13 07:15 UTC 派发，当前运行中；开发 App 上传仍关闭。
 本地最终负控证据在派发后补入文档，不改变该次 CI 的冻结内容。
 
+截至 07:52 UTC，该 CI 的生产 App 已编译通过，实际剪辑预览、4K 关窗重开与
+持续播放回归通过，独立新内核检查仍在执行。media-helper job 已在旧
+PlaybackLifecycle fixture 编译处失败：它未声明 generic owner／receipt 接口，
+没有运行到对应行为断言。现已补明确 MPV-only、误入 native 即失败的边界，
+Core `14d8d140` 下 Intel 10.15 typecheck／ASan lifecycle 76/0 与真实 libmpv
+filters 18/0；修前失败及前后源码身份保留于
+`build/playback-lifecycle-generic-boundary.DbK9r3`。不能把本地修补写成原 CI 成功。
+
+### 音频设备菜单的实际换核入口
+
+新发现原生播放时选择输出设备仍直接写闲置 MPV，菜单也错误显示该闲置配置。
+已改为经过现有 owned compatibility，并在交接期间拒绝重复选择、禁用菜单和
+取消未确认的勾选；原生输出仍使用系统默认设备，idle 启动 fallback 仍同步执行。
+冻结 Core `14d8d140`／Menu `4193310d`；没有新增物理声卡选择实现或改变默认后端。
+
+`Tools/NativeAudioDeviceTests/` 复用实际 Session／libmpv／整表安装器，抽取真实
+Core、AppDelegate 和菜单入口。原实现 `t9BVrJ` 31/16；最终普通 `D5ogVc`、
+ASan `8tUPGl`、TSan `2odrPO` 各 90/0，主代理独立普通 `JnTU9P` 亦 90/0。
+三种精确负控分别只产生预期 35/84、10/90、5/90 失败；主代理复核源码清单相同、
+前后不变及生成物 hash。覆盖单片／队列在采点、真实加载事件及精确 seek 中停止后
+同 URL 重开，不允许旧设备动作落到新媒体。发现过程及测试边界保留在专项 README。
+设备枚举、App 服务及事件转发是明确边界，音频为静音；不是物理外设、可闻声音或
+完整 MPVController／整窗验收。CI 已增加同源三模式、三负控及失败证据留存；
+运行中的 `38361506765` 不包含该后续修补，须另行验证。
+
 显式有界列表已接实际 Core、native Session 与 MPV 命令；周围 App 服务边界见
 `Tools/NativeCoreQueueTests/README.md`。生产 controller 的停止协议单独测试：
 当前条目真正卸载后才能清理精确 owner 的列表，reader 事件排空后才能确认 idle。

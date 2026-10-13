@@ -3717,7 +3717,30 @@ class PlayerCore: NSObject {
     return result
   }
 
+  /// Do not accept another output change while a native owner is restoring MPV.
+  var canSelectAudioDevice: Bool {
+    !nativeTerminationRequested && info.state != .shuttingDown && info.state != .shutDown &&
+      !nativeRetiring && nativeCompatibilityCaptureID == nil && nativeCompatibilityRestore == nil &&
+      !hasPendingGenericPlaybackHandoff && !hasPendingPermanentRotation && !hasPendingURLPlaylistEnqueue &&
+      !nativeQueueLoadPending && nativeQueueInstallation == nil && nativeQueue?.phase != .handoffFailed
+  }
+
+  /// The native renderer follows the system output; idle MPV is not its device.
+  /// A pending handoff has no committed MPV selection to advertise yet.
+  var currentAudioDeviceName: String? {
+    guard canSelectAudioDevice else { return nil }
+    return isUsingNativePlayback ? "auto" : mpv.getString(MPVProperty.audioDevice)
+  }
+
   func setAudioDevice(_ name: String) {
+    guard canSelectAudioDevice else { return }
+    if isUsingNativePlayback || hasNativePlaybackQueue {
+      requireMPVCompatibility(reason: "audio device selection") { [weak self] in
+        self?.mpv.setString(MPVProperty.audioDevice, name)
+      }
+      return
+    }
+    // Preserve the synchronous idle initialization fallback without a handoff.
     mpv.setString(MPVProperty.audioDevice, name)
   }
 

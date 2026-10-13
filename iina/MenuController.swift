@@ -562,6 +562,7 @@ class MenuController: NSObject, NSMenuDelegate {
 
   private func updateAudioDevice() {
     audioDeviceMenu.removeAllItems()
+    audioDeviceMenu.autoenablesItems = false
     guard !ImageViewerCoordinator.blocksPlaybackMenu else {
       let item = NSMenuItem(title: NSLocalizedString("menu.audio_device.image_disabled", comment: "Audio device selection requires a video window"),
                             action: nil, keyEquivalent: "")
@@ -569,13 +570,15 @@ class MenuController: NSObject, NSMenuDelegate {
       audioDeviceMenu.addItem(item)
       return
     }
-    let devices = PlayerCore.active.getAudioDevices()
-    let currAudioDevice = PlayerCore.active.mpv.getString(MPVProperty.audioDevice)
+    let player = PlayerCore.active
+    let devices = player.getAudioDevices()
+    let currAudioDevice = player.currentAudioDeviceName
     devices.forEach { device in
       audioDeviceMenu.addItem(withTitle: String(describing: device),
                               action: #selector(AppDelegate.menuSelectAudioDevice(_:)), tag: nil,
                               obj: device.name, stateOn: device.name == currAudioDevice)
     }
+    audioDeviceMenu.items.forEach { $0.isEnabled = player.canSelectAudioDevice }
   }
 
   private func updateFlipAndMirror() {

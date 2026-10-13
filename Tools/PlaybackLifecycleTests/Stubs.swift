@@ -110,6 +110,7 @@ class PlayerFixture {
   var nativeTerminationRequested = false
   struct RotationRestoreBoundary {
     let url: URL
+    let genericOwnerID: UUID? = nil
     var rotationRequestID: UUID?
     let rotationMediaEpoch: UUID?
     let enqueueMediaEpoch: UUID? = nil
@@ -118,6 +119,44 @@ class PlayerFixture {
   }
   var nativeCompatibilityRestore: RotationRestoreBoundary?
   var nativeCompatibilityCaptureID: UUID?
+  // This MPV-only fixture cannot construct a generic owner or phase. Keep the
+  // production lifecycle bodies intact and fail if they enter a native branch.
+  struct GenericHandoffPhaseBoundary {
+    private init() {}
+    static func awaitingStart(_ revision: UInt64) -> Self {
+      preconditionFailure("Generic handoff phases require the native handoff tests")
+    }
+    static func restoring(_ revision: UInt64, _ generation: UInt64) -> Self {
+      preconditionFailure("Generic handoff phases require the native handoff tests")
+    }
+  }
+  struct GenericHandoffOwnerBoundary {
+    private init() {}
+    var phase: GenericHandoffPhaseBoundary {
+      get { preconditionFailure("No generic owner in MPV lifecycle tests") }
+      set { preconditionFailure("No generic owner in MPV lifecycle tests") }
+    }
+  }
+  var genericHandoffOwner: GenericHandoffOwnerBoundary? = nil
+  var playbackEventRoute: (revision: UInt64, acceptsMPV: Bool) {
+    preconditionFailure("Generic route receipts require the native handoff tests")
+  }
+  var hasPendingGenericPlaybackRestore: Bool {
+    preconditionFailure("Generic restore ownership requires the native handoff tests")
+  }
+  func ownsGenericHandoff(_ id: UUID?, phase: GenericHandoffPhaseBoundary? = nil) -> Bool {
+    precondition(id == nil && phase == nil, "No owned generic handoff in MPV lifecycle tests")
+    return true
+  }
+  func ownsGenericRestoreReceipt(_ id: UUID?) -> Bool {
+    precondition(id == nil, "No generic restore receipt in MPV lifecycle tests")
+    return true
+  }
+  func invalidateGenericHandoff() {
+    precondition(nativeTransport == nil && genericHandoffOwner == nil &&
+      nativeCompatibilityCaptureID == nil && nativeCompatibilityRestore?.genericOwnerID == nil,
+      "Generic invalidation requires an empty MPV-only boundary")
+  }
   var pendingUrl: URL?
   var pendingAutoLoad = false
   @discardableResult func advancePlaybackRoute(acceptsMPV: Bool) -> UInt64 { 0 }

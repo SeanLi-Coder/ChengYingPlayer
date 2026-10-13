@@ -45,6 +45,13 @@ ClipPreviewLiveTests 缺 `nativePreviewBaseline` 的旧边界编译处失败。�
 专项 42/0 和两个精确负控、工具 UI 17/0 通过。冻结 `35d992488d9872c0e18ee780f1c9dc90f34f6d9b`
 已推送，开发 CI `38361506765` 于 2026-10-13 07:15 UTC 派发，当前运行中，
 `upload_development_build=false`；尚无完整 App／新同源 CI 通过结论。
+截至 07:52 UTC，生产 App 已编译，实际剪辑预览与 4K 关窗重开／持续播放通过；
+新内核检查仍在执行。media-helper 已因旧 lifecycle fixture 缺 generic 接口而编译失败，
+明确 MPV-only 边界补齐后本地 ASan 76/0、真实 libmpv filters 18/0，不改写该 CI 失败。
+后续音频设备菜单已修复直接写闲置 MPV 和错误勾选的问题，走已拥有身份的兼容交接；
+Core `14d8d140` 专项三模式各 90/0、三精确负控准确，主代理普通独立复跑 90/0。
+只是实际 Session／libmpv 与明确 App 服务边界，不是物理声卡或完整窗口验收；
+当前 CI 冻结源码不含该修补，详见迁移交接和 NativeAudioDeviceTests README。
 不得把受控事件服务、忙状态 fixture 或旧 Core 测试当作所有换核场景验收。
 以下按时间保留旧候选结果；它们不替代本段的最新状态。
 内部路径只有从未加载过 MPV 的 core 才准入；原孤立本地 SDR 单视频边界保留，新增显式
