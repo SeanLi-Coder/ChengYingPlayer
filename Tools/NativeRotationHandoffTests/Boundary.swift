@@ -77,7 +77,7 @@ final class MockMPV {
   func mpvQuit() { commands.append("quit") }
   func command(_ value: MPVCommand, level: Logger.Level) { commands.append(value.rawValue) }
   func getFlag(_ name: String) -> Bool { true }
-  func setFlag(_ name: String, _ value: Bool, level: Logger.Level) {}
+  func setFlag(_ name: String, _ value: Bool, level: Logger.Level = .debug) {}
 }
 final class CoreInfo {
   var state = PlayerState.paused
@@ -85,6 +85,8 @@ final class CoreInfo {
   var shouldAutoLoadFiles = false
   var hdrEnabled = false
   var volume = 0.0
+  var isMuted = false
+  var playSpeed = 1.0
   var videoDuration: VideoTime? = VideoTime(second: 10)
   var abLoopStatus = 0
   @Atomic var matchedSubs: [String: String] = [:]
@@ -178,8 +180,10 @@ final class MainWindowBoundary {
   let videoView = VideoViewBoundary()
   var isInInteractiveMode = false
   var shows = 0
+  var speedLabelValue = 1.0
   init(_ core: PlayerCore) { quickSettingView = QuickSetting(core) }
   func showSettingsSidebar(tab: Tab, hideIfAlreadyShown: Bool) { shows += 1 }
+  func updateSpeedLabel(speed: Double) { speedLabelValue = speed }
 }
 struct PresentationOutputBoundary {}
 final class VideoViewBoundary {
