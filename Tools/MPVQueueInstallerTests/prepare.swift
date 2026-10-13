@@ -12,7 +12,9 @@ let changes: [String: (String, String)] = [
   "owner": ("guard isCurrent(value.token) else { finish(value, .superseded); return false }",
             "guard isCurrent(value.token) || operation === value else { finish(value, .superseded); return false }"),
   "old-end-event": ("case .endFile(let entryID):\n      guard value.entryIDs.contains(entryID) else { return }",
-                    "case .endFile:\n      // Negative control: accept an old entry's END_FILE.")
+                    "case .endFile:\n      // Negative control: accept an old entry's END_FILE."),
+  "cleanup-unload": ("guard snapshot.idle, snapshot.activePath == nil,\n          snapshot.entries.allSatisfy({ !$0.current && !$0.playing }) else {",
+                      "guard snapshot.idle, snapshot.activePath == nil else {")
 ]
 var result = source
 if mode == "prefix" {

@@ -33,7 +33,13 @@ let expected: [String: [String]] = [
     "Old event backlog cannot cancel or acknowledge the new installation",
     "Old cleanup events preserve the newly loaded selected file"
   ],
-  "prefix": ["Foreign appended entry invalidates the installation prefix"]
+  "prefix": ["Foreign appended entry invalidates the installation prefix"],
+  "cleanup-unload": [
+    "on_before_start_file: cleanup cannot clear or acknowledge while the real hook is held",
+    "on_before_start_file: cleanup verifies empty only after the actual hook retires",
+    "on_after_end_file: cleanup cannot clear or acknowledge while the real hook is held",
+    "on_after_end_file: cleanup verifies empty only after the actual hook retires"
+  ]
 ]
 guard let names = expected[mode], failures.count == names.count,
       failures.sorted() == names.map({ "FAIL: " + $0 }).sorted() else {

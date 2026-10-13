@@ -246,7 +246,10 @@ final class MPVQueueInstaller {
     }
     guard owns(value) else { return }
     guard beforeDeadline(value) else { finishCleanup(value, .unverified); return }
-    guard snapshot.idle, snapshot.activePath == nil else {
+    // stop sets idle-active before unload hooks finish; keep-playlist retains
+    // current until the worker has actually left the old playback operation.
+    guard snapshot.idle, snapshot.activePath == nil,
+          snapshot.entries.allSatisfy({ !$0.current && !$0.playing }) else {
       if !beforeDeadline(value) { finishCleanup(value, .unverified) }
       return
     }

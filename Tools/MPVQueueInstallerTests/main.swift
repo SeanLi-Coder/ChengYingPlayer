@@ -44,6 +44,50 @@ final class InstallationRig {
   }
 }
 
+func checkHeldHookCleanup() {
+  for hookName in ["on_before_start_file", "on_after_end_file"] {
+    let rig = InstallationRig()
+    rig.client.heldHookName = hookName
+    rig.client.dropLoadedEvents = true
+    check(mpv_hook_add(rig.client.handle, 101, hookName, 100) == 0,
+          "\(hookName): register an actual MPV lifecycle hook")
+    let token = rig.begin([red])
+    rig.installer.advance()
+    let readyDeadline = ProcessInfo.processInfo.systemUptime + 2
+    while (hookName == "on_before_start_file" ? rig.client.heldHookID == nil : rig.client.actualLoaded == 0) &&
+          ProcessInfo.processInfo.systemUptime < readyDeadline {
+      rig.client.pump(rig.installer)
+    }
+    check(hookName == "on_before_start_file" ?
+            rig.client.heldHookID != nil && rig.client.actualStarts.isEmpty :
+            rig.client.actualLoaded == 1 && rig.outcomes.isEmpty,
+          "\(hookName): cancellation reaches the actual lifecycle boundary")
+    rig.installer.cancel(token)
+    let hookDeadline = ProcessInfo.processInfo.systemUptime + 2
+    while rig.client.heldHookID == nil && ProcessInfo.processInfo.systemUptime < hookDeadline {
+      rig.client.pump(rig.installer)
+    }
+    let heldSnapshot = rig.client.queueSnapshot()
+    check(rig.client.heldHookID != nil && heldSnapshot?.idle == true && heldSnapshot?.activePath == nil &&
+          heldSnapshot?.entries.contains(where: { $0.current }) == true &&
+          (hookName != "on_after_end_file" || rig.client.actualEnds.count == 1),
+          "\(hookName): real idle and missing path precede current-entry retirement")
+    rig.installer.advance()
+    check(rig.installer.isBusy && rig.outcomes.isEmpty && !rig.client.commandNames.contains("playlist-clear"),
+          "\(hookName): cleanup cannot clear or acknowledge while the real hook is held")
+    check(rig.client.releaseHeldHook() == 0, "\(hookName): release the actual held MPV hook")
+    rig.run()
+    check(rig.outcomes == [.cancelled(.verifiedEmpty)] && rig.isEmpty,
+          "\(hookName): cleanup verifies empty only after the actual hook retires")
+  }
+}
+
+if CommandLine.arguments.count == 3, CommandLine.arguments[2] == "cleanup-hooks" {
+  checkHeldHookCleanup()
+  print("Queue installer: \(passed + failed) checks, \(failed) failures")
+  exit(failed == 0 ? 0 : 1)
+}
+
 if CommandLine.arguments.count == 3 {
   guard let repetitions = Int(CommandLine.arguments[2]), (1...500).contains(repetitions) else {
     fatalError("Invalid partial-cancellation repetition count")
@@ -110,6 +154,9 @@ do {
 do {
   let rig = InstallationRig(); rig.client.rejectActivation = true
   rig.begin([red, blue]); rig.run()
+  if rig.outcomes != [.failed(.activationFailed, .verifiedEmpty)] || !rig.isEmpty {
+    print("ACTIVATION_CLEANUP_DIAGNOSTIC: outcomes=\(rig.outcomes) trace=\(rig.client.diagnostics)")
+  }
   check(rig.outcomes == [.failed(.activationFailed, .verifiedEmpty)] && rig.isEmpty,
         "Actual activation command error is not reported as loaded")
 }
@@ -135,6 +182,7 @@ for point in ["before", "partial", "started"] {
   }
   check(rig.outcomes == [.cancelled(.verifiedEmpty)] && empty, "\(point): current-owner cancellation verifies empty idle cleanup")
 }
+checkHeldHookCleanup()
 for operation in ["stop", "clear"] {
   let rig = InstallationRig()
   rig.client.rejectedAppend = 1

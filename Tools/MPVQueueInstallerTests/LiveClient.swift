@@ -30,6 +30,8 @@ final class LiveQueueClient: MPVQueueInstallationBackend {
   var eventEntryID: Int64?
   var loadedReadback: MPVQueueInstallationSnapshot?
   var dropLoadedEvents = false
+  var heldHookName: String?
+  private(set) var heldHookID: UInt64?
   private(set) var diagnostics: [String] = []
 
   private func record(_ value: String) {
@@ -48,7 +50,17 @@ final class LiveQueueClient: MPVQueueInstallationBackend {
     }
     guard mpv_initialize(handle) >= 0 else { fatalError("Cannot initialize real MPV") }
   }
-  deinit { mpv_terminate_destroy(handle) }
+  deinit {
+    if let heldHookID { _ = mpv_hook_continue(handle, heldHookID) }
+    mpv_terminate_destroy(handle)
+  }
+
+  func releaseHeldHook() -> Int32? {
+    guard let id = heldHookID else { return nil }
+    heldHookID = nil
+    heldHookName = nil
+    return mpv_hook_continue(handle, id)
+  }
 
   func rawCommand(_ arguments: [String]) -> Int32 {
     let pointers = arguments.map { strdup($0) }
@@ -129,6 +141,13 @@ final class LiveQueueClient: MPVQueueInstallationBackend {
       let id = event.pointee.data.assumingMemoryBound(to: mpv_event_end_file.self).pointee.playlist_entry_id
       actualEnds.append(id)
       installer.receive(.endFile(entryID: id))
+    case MPV_EVENT_HOOK:
+      let hook = event.pointee.data.assumingMemoryBound(to: mpv_event_hook.self).pointee
+      if String(cString: hook.name) == heldHookName {
+        heldHookID = hook.id
+      } else {
+        _ = mpv_hook_continue(handle, hook.id)
+      }
     case MPV_EVENT_SHUTDOWN: installer.receive(.shutdown)
     case MPV_EVENT_QUEUE_OVERFLOW: installer.receive(.queueOverflow)
     default: break

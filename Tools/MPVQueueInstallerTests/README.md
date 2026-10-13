@@ -38,8 +38,10 @@ source hash cannot produce a successful runner exit.
   current path, and paused state. Acceptance or a command return alone is not a
   successful installation.
 - Failure/cancellation uses `stop keep-playlist` and clears only a verified owned
-  prefix. Foreign contents, lost ownership, missing statuses, shutdown, or expired
-  cleanup remain explicitly unverified; they are never reported as cleaned.
+  prefix after every current/playing entry has retired. Idle and missing path
+  alone cannot acknowledge cancellation while a lifecycle hook still holds the
+  playback worker. Foreign contents, lost ownership, missing statuses, shutdown,
+  or expired cleanup remain explicitly unverified; they are never reported as cleaned.
 - Each completion is consumed before invocation. Reentrant reads/commands cannot
   replace an existing operation or publish a cancelled/stale success.
 - Actual old START/END events retained in the real MPV event queue cannot be
@@ -67,6 +69,7 @@ merely a nonzero exit:
 | Current-owner gate | 2 |
 | Old END entry-ID gate | 2 |
 | Full-prefix validation | 1 |
+| Cleanup unload barrier | 4 |
 
 The frozen installer `17a555f5db5e5654019ff8e2ad0ddabd423ce15d824b2e8d62cbb4c1a9ef10be`
 passed 191 positive checks in ordinary, AddressSanitizer, and ThreadSanitizer
@@ -114,6 +117,38 @@ files and verified dependency identities remained unchanged. The production
 installer itself was not changed to obtain these results. CI now collects the
 bounded trace and a separate 200-cancellation run rather than hiding the prior
 failure or treating a successful rerun as a fix.
+
+## Lifecycle-hook cleanup barrier
+
+Installer `ed5d25f9bfbbc534bf643d0fa0f91ce6c40f348c2248526b396c774a262cb5a4`
+adds a current/playing retirement check before `playlist-clear`. Real
+`on_before_start_file` and `on_after_end_file` hooks demonstrate that MPV can
+already report idle with no path while its current entry and worker remain
+inside a lifecycle hook. Each test holds the actual MPV hook, confirms no clear
+or terminal acknowledgement occurs, releases the hook, and then verifies empty
+cleanup. The original 191 assertions remain; these tests add 16 assertions.
+
+Final ordinary (`NBPC1S`), ASan (`fGBBdQ`) and TSan (`NIgukp`) runners each passed
+207/0 against the isolated `build/native-av1-playback.7FMHum` dependency tree.
+The original six negative controls still run the full 207 checks and retain
+their exact 14/2/1/2/2/1 failure sets. The new `cleanup-unload` control removes
+only the retirement predicate and runs the focused 16-check hook suite; exactly
+four named failures are required. It is not a claim that this new control runs
+all 207 checks. All three final runners exited 0, with no sanitizer diagnostic
+and unchanged source, generated-artifact and verified dependency identities.
+Evidence directories share the `build/mpv-queue-installer-tests.` prefix.
+
+An earlier ASan run (`etaauG`) passed its positive 207 checks and original six
+controls, but the initial full-suite `cleanup-unload` control also failed
+`Actual activation command error is not reported as loaded`, in addition to the
+four expected hook failures. The exact verifier rejected the extra failure and
+the runner exited 133. This evidence remains intact. The new control was then
+limited to its hook scenarios; no original assertion or deadline was relaxed.
+Activation-cleanup failures now include the existing bounded command/snapshot
+trace. The extra ASan failure is not attributed to a unique cause, and this
+hook-specific fix does not establish the cause or resolution of CI's earlier
+191/1 partial-cancellation failure. These tests do not exercise complete-window
+integration or establish the Controller's separate event-drain guarantee.
 
 ## Required production integration boundaries
 
