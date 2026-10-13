@@ -30,8 +30,14 @@ func checkPresentedPixel(_ player: PlayerCore, red: Bool) -> Bool {
   return red ? chroma[1] > 210 && chroma[0] < 130 : chroma[0] > 210 && chroma[1] < 140
 }
 func retire(_ player: PlayerCore) {
+  let layer = player.nativePlaybackOutput?.displayLayer
   player.stop()
   check(awaitCondition { !player.isUsingNativePlayback && player.info.state == .idle }, "Native stop completes asynchronously")
+  check(layer?.superlayer == nil && player.mainWindow.videoView.nativeSurface?.displayLayer == nil,
+    "Real session stop detaches presentation before terminal view uninit")
+  check(player.mainWindow.videoView.isUsingNativeSurface && !player.mainWindow.videoView.isUninited &&
+        !player.mainWindow.videoView.hasInitializedOpenGL,
+    "Stopped real native route retains a reusable non-GL surface")
   player.mainWindow.videoView.uninit()
   player.mainWindow.close()
 }

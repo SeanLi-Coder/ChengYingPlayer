@@ -62,3 +62,36 @@ The native output is attached before playback initialization. Existing MPV
 players cannot switch back into native mode in this first integration slice;
 this keeps stale GL callbacks out of the new renderer. The full application
 still requires its independent route/transport and real UI verification.
+
+### Stop/close presentation retirement
+
+The VideoView runner also mechanically extracts the current
+`PlayerCore.retireNativePlayback` method. Its controlled shutdown boundary delays
+only the worker completion; actual output layers, surface and VideoView remain
+production code. Retirement must detach the captured output before completion,
+keep the empty native surface reusable, and never initialize OpenGL during idle
+resize/redraw. An old output cannot detach a newer output, including after a
+reopen. A never-loaded window must not create a view during retirement. The
+worker ownership and last retirement continuation stay unchanged.
+
+```bash
+bash Tools/NativePlaybackSurfaceTests/run-video-view.sh
+NATIVE_PLAYBACK_SANITIZER=address bash Tools/NativePlaybackSurfaceTests/run-video-view.sh
+NATIVE_PLAYBACK_SANITIZER=thread bash Tools/NativePlaybackSurfaceTests/run-video-view.sh
+# Each negative must exit 1 with its specific failed invariant, not a crash.
+NATIVE_VIEW_NEGATIVE_CONTROL=skip-retirement-detach bash Tools/NativePlaybackSurfaceTests/run-video-view.sh
+NATIVE_VIEW_NEGATIVE_CONTROL=ignore-output-owner bash Tools/NativePlaybackSurfaceTests/run-video-view.sh
+```
+
+The first local run using unchanged retirement reproduced the real App's stale
+layer: `build/native-video-view-tests.mfRCIP/results.log`, 42 passed / 2 failed.
+The expanded positive suite contains 51 assertions. The runner preserves source
+and generated-code SHA-256 manifests, validates them after execution, and checks
+both test and log-writer exit statuses. Sanitizers instrument the Swift code;
+system frameworks are not re-instrumented.
+
+This remains a presentation/control boundary, not complete nib/window-close
+acceptance. `Tools/NativePlayerRouteTests` additionally uses the real native
+session and now checks detached output before calling terminal view `uninit`.
+Full App CI must independently retain its original close/cancellation assertions
+and deadline; a local boundary pass does not rewrite that prior CI failure.

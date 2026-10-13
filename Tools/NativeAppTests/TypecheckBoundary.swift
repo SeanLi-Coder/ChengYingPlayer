@@ -60,6 +60,7 @@ final class QuickSettingViewController: NSViewController {
   var currentTab = TabViewType.tools
 }
 final class VideoView: NSView {
+  var isUsingNativeSurface = false
   var hasInitializedOpenGL = false
   var isUninited = false
   var nativeSurface: NativePlaybackSurface?

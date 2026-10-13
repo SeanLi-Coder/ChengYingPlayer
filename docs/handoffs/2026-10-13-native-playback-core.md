@@ -7,7 +7,7 @@
 
 **换核尚未完成，不是已发布版本。** 新后端已加入 Xcode 编译工程，能独立解码、同步播放
 音视频和呈现实际画面。`PlayerCore` 与主窗口正在接入严格受限的内部 native 路由；
-正式默认及字幕仍使用 libmpv；内部 native 路由已接入剪辑预览，完整 App 回归仍待运行。
+正式默认及字幕仍使用 libmpv；内部 native 路由已接入剪辑预览，完整 App 回归尚未全部通过。
 没有改变默认播放路径、版本号、用户偏好、已安装 App、更新源或签名身份。
 不要仅因新文件进入编译工程，或下述测试通过，就宣布正式播放器已经换核。
 
@@ -51,12 +51,35 @@ sanitizer／故障注入、保留的历史失败、补丁来源与 M4 命令见
 负控分别产生准确的 4／7／1 项失败，主代理独立复跑于 `native-queue-model-tests.QuuVBv`。
 真实 libmpv 导航探针纠正了“末尾 next 总是 no-op”的错误假设：off/file 保持末项但
 生产入口会暂停；playlist 实际回到首项。探针没有执行后续 AppKit 自动恢复。
-完整队列的真实 MPV 安装和 Core 接入仍待实现，不能把模型 `verified` 字段当外部安装证据。
+独立完整队列的真实 MPV 安装器已实现，Core 接入仍在进行；不能把模型 `verified`
+字段当外部安装证据。安装器普通／ASan／TSan 各 191 项，六精确负控分别失败
+14／2／1／2／2／1 项；主代理实际复跑于 `build/mpv-queue-installer-tests.2QRfgj`。
+真实 `vo=null`／`ao=null` 结果不证明窗口、图像、可听输出或位置恢复；见
+[安装器说明](../../Tools/MPVQueueInstallerTests/README.md)。
 
-开发 CI `38329363769` 冻结于 `7f7e4bcc`，正在运行，既不包含上述 AV1 代码，也不包含
+开发 CI `38329363769` 冻结于 `7f7e4bcc`，已失败，既不包含上述 AV1 代码，也不包含
 独立队列模型。当前没有新增版本、发行包、签名变化或更新源变化。
 
 ### 最新整窗阻挡（2026-10-13）
+
+后续开发 CI `38329363769` 的完整生产／测试 App 编译及 media-helper job 通过。
+92 项驱动实际完成 **66 项通过、1 项失败**：菜单入口、实际自动预览、连续输入、隐藏后
+循环、停止恢复、延迟首帧、连续换片和音量归零通过；第 67 项
+`preview_window_close_cancels_and_detaches` 失败，后续兼容交接和退出检查未运行。
+关窗时 native session 和预览已结束、状态为 idle，但旧 display layer 仍挂在 surface；
+`retireNativePlayback` 没有明确释放画面挂载，原有 detach 只发生在下次切换 surface 或
+最终 `uninit`。修补在主线程 retire 开始时仅解除该会话的精确 output 挂载；不调用
+`uninit` 或切换到 GL，空闲原生视图仍可复用。Core SHA 为 `0efaa1e6`、VideoView 为
+`2448918a`。原实现的实际 View／抽取 retire 复现为 42 通过／2 失败；修后普通／ASan／
+TSan 各 51／0（`xyjCHb`／`LMXztz`／`aa17TG`），撤掉 Core detach 为 48／3
+（`4JRujK`），撤输出身份保护为 47／4（`7Ssxh6`）；皆有完整摘要与输入后验 hash。
+这些目录共用 `build/native-video-view-tests.` 前缀，实际目录以前述测试输出为准。
+真实 Session＋VideoView＋抽取 Core Route 为 335／0（`Xvff9o`），每次 stop 都在
+`uninit` 前检查旧 layer 脱离。旧 Core 41 项、预览 235 项、旋转 176 项、URL 118 项及
+各自负控通过。没有修改 App 的原断言或时限；新诊断强制先捕获实际非 nil layer，仍须
+后续完整 App 独立验收，不把局部测试称为整窗通过。
+隔离测试 App 清理完成，原始证据为 `build/native-app-ci-38329363769.h5slWi/`。
+以下保留前轮菜单失败历史，不能当作最新仍未通过菜单。
 
 开发 CI `38319384831` 冻结于 `82b40531`，完整生产 App 与测试 App 编译成功，
 media-helper job 和之前的独立 native 检查通过；完整 App **43 项通过、1 项失败**，

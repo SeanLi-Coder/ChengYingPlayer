@@ -37,8 +37,10 @@ local macOS 12 typechecking, never linked into the complete application.
 ## Loaded native-to-MPV handoff addition
 
 The candidate requires 92 distinct successful checks: all previous 75 labels
-remain required, plus 17 loaded-handoff checks. This is a prepared test candidate,
-not evidence that the complete 92-check App has already passed.
+remain required, plus 17 loaded-handoff checks. CI run `38329363769` at `7f7e4bcc`
+executed the candidate: 66 checks passed and the close/detach check failed.
+The later compatibility and quit stages were not executed. Test App cleanup
+completed. This is not evidence that the complete 92-check App has passed.
 
 After the original core has loaded the embedded-subtitle compatibility fixture,
 the driver obtains another pristine core. It confirms that this core is not the
@@ -94,6 +96,12 @@ required check, typecheck against macOS 12, exercise the real numeric/geometry
 comparators with wrong-state inputs, and retain the AppKit termination scheduling
 positive/negative probe. These preparation checks are not a substitute for the
 full application run.
+
+The preview-close check captures a nonoptional real output layer before closing
+the window. Its bounded diagnostic records preview/session/output ownership,
+whether that captured layer still has a parent, native surface mode and GL
+initialization. An absent output cannot accidentally satisfy a detach check.
+No filename, user path or media data is included in that diagnostic.
 
 The preparation boundary retains the production `MainWindowController!` type
 instead of silently strengthening it to a nonoptional value. A diagnostic must

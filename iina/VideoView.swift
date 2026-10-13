@@ -141,6 +141,20 @@ class VideoView: NSView {
     return true
   }
 
+  /// Retire only the captured session's presentation. Keep the empty native
+  /// surface reusable: changing its mode here would let idle resize/redraw
+  /// callbacks lazily construct OpenGL before another backend is selected.
+  @discardableResult
+  func detachNativePlaybackOutput(_ output: NativeSampleBufferOutput) -> Bool {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard isUsingNativeSurface, let surface = nativeSurface,
+          surface.displayLayer === output.displayLayer else { return false }
+    surface.detach()
+    surface.clearVideoGeometry()
+    surface.resetViewport()
+    return true
+  }
+
   @discardableResult
   func updateNativeGeometry(_ media: CYNMediaInfo) -> Bool {
     dispatchPrecondition(condition: .onQueue(.main))

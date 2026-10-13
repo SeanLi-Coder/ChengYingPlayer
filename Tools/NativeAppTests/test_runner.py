@@ -433,7 +433,8 @@ class RunnerTests(unittest.TestCase):
         close = source[start:end]
         self.assertLess(close.index("self.previewActive(player, start: 0, end: 5)"),
                         close.index("player.mainWindow.window?.performClose(nil)"))
-        for proof in ("!player.nativePreviewInProgress", "layer?.superlayer == nil",
+        for proof in ("!player.nativePreviewInProgress", "layer.superlayer == nil",
+                      "guard let layer = player.nativePlaybackOutput?.displayLayer",
                       "player.nativePlaybackSession == nil", '"real_window_close_retires_native_session"',
                       "self.exerciseCompatibility(player)"):
             self.assertIn(proof, close)

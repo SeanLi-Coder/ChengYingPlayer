@@ -933,13 +933,16 @@ final class NativeAppTestDriver {
       player.mainWindow.sideBarStatus == .settings && self.previewControls(player) != nil &&
         self.previewActive(player, start: 0, end: 5)
     }) {
-      let layer = player.nativePlaybackOutput?.displayLayer
+      guard let layer = player.nativePlaybackOutput?.displayLayer else {
+        self.fail("preview_window_close_cancels_and_detaches"); return
+      }
       player.mainWindow.window?.performClose(nil)
       self.wait("real_window_close_retires_native_session", until: {
         player.info.state == .idle && !player.isUsingNativePlayback &&
           player.mainWindow.window?.isVisible == false
       }) {
-        guard !player.nativePreviewInProgress, layer?.superlayer == nil,
+        print("NATIVE_APP_CLOSE_STATE: preview=\(player.nativePreviewInProgress) session=\(player.nativePlaybackSession != nil) output=\(player.nativePlaybackOutput != nil) capturedLayerAttached=\(layer.superlayer != nil) nativeSurface=\(player.mainWindow.videoView.isUsingNativeSurface) gl=\(player.mainWindow.videoView.hasInitializedOpenGL)")
+        guard !player.nativePreviewInProgress, layer.superlayer == nil,
               player.nativePlaybackSession == nil else {
           self.fail("preview_window_close_cancels_and_detaches"); return
         }

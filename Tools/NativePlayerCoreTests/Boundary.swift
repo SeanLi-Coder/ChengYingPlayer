@@ -42,6 +42,8 @@ struct NativePlaybackSnapshot {
 }
 enum CaptureResult { case ready(NativePlaybackSnapshot), unavailable, superseded }
 final class NativePlaybackSession {
+  // This fixture has no loaded presentation; output access must remain absent.
+  let output = PresentationOutputBoundary()
   var completions: [() -> Void] = []
   var shutdownCalls = 0
   func shutdown(completion: @escaping () -> Void) { shutdownCalls += 1; completions.append(completion) }
@@ -83,6 +85,7 @@ final class MockMPV {
   func playlistAppend(_ path: String) { appended.append(path) }
 }
 final class MockWindow {
+  let loaded = false
   enum PIPStatus { case none, inPIP }
   var pipStatus = PIPStatus.none
   let pip = MockPIP()
@@ -92,11 +95,16 @@ final class MockPIP { var playing = false }
 final class MockVideoView {
   var viewport: (Double, CGPoint)?
   func stopDisplayLink() {}
+  @discardableResult
+  func detachNativePlaybackOutput(_ output: PresentationOutputBoundary) -> Bool {
+    preconditionFailure("No presentation in this lifecycle fixture")
+  }
   func updateNativeViewport(scale: Double, normalizedPan: CGPoint) -> Bool {
     viewport = (scale, normalizedPan)
     return true
   }
 }
+struct PresentationOutputBoundary {}
 class CoreInfoBoundary {
   unowned let player: CoreBoundary
   init(_ player: CoreBoundary) { self.player = player }

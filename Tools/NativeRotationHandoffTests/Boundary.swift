@@ -22,6 +22,7 @@ struct NativePlaybackSnapshot {
 }
 enum CaptureResult { case ready(NativePlaybackSnapshot), unavailable, superseded }
 final class NativePlaybackSession {
+  let output = PresentationOutputBoundary()
   var shutdowns: [() -> Void] = []
   var shutdownCalls = 0
   func shutdown(completion: @escaping () -> Void) { shutdownCalls += 1; shutdowns.append(completion) }
@@ -157,6 +158,7 @@ class CoreBoundary: NSObject {
   func setSpeed(_ speed: Double) { fatalError("Unrelated shortcut was misrouted") }
 }
 final class MainWindowBoundary {
+  let loaded = false
   enum Tab { case tools }
   let quickSettingView: QuickSetting
   let videoView = VideoViewBoundary()
@@ -165,7 +167,15 @@ final class MainWindowBoundary {
   init(_ core: PlayerCore) { quickSettingView = QuickSetting(core) }
   func showSettingsSidebar(tab: Tab, hideIfAlreadyShown: Bool) { shows += 1 }
 }
-final class VideoViewBoundary { func stopDisplayLink() {}; func displayActive() {} }
+struct PresentationOutputBoundary {}
+final class VideoViewBoundary {
+  func stopDisplayLink() {}
+  func displayActive() {}
+  @discardableResult
+  func detachNativePlaybackOutput(_ output: PresentationOutputBoundary) -> Bool {
+    preconditionFailure("No presentation in the rotation service fixture")
+  }
+}
 class WindowBoundary: NSObject {
   let player: PlayerCore
   var window: NSWindow?

@@ -147,8 +147,14 @@ final class PlayerCore {
 enum Preference { enum Key { case pauseWhenOpen }; static func bool(for key: Key) -> Bool { false } }
 struct VideoToolsViewport { let zoom: Double; let panX: Double; let panY: Double }
 final class MPVBoundary { var preparations = 0; func prepareForFirstMPVMediaLoad() { preparations += 1 } }
-final class WindowBoundary { let videoView = VideoViewBoundary() }
-final class VideoViewBoundary { func displayActive() {} }
+final class WindowBoundary { let loaded = false; let videoView = VideoViewBoundary() }
+final class VideoViewBoundary {
+  func displayActive() {}
+  @discardableResult
+  func detachNativePlaybackOutput(_ output: NativeSampleBufferOutput) -> Bool {
+    preconditionFailure("No presentation in the preview control fixture")
+  }
+}
 struct VideoTime { let second: Double; init(_ second: Double) { self.second = second } }
 """
 try generated.write(to: output, atomically: true, encoding: .utf8)

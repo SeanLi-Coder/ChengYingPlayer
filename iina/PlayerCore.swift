@@ -1287,6 +1287,11 @@ class PlayerCore: NSObject {
     nativeRetiring = true
     if info.state != .shuttingDown && info.state != .shutDown { info.state = .stopping }
     transport.onSnapshot = nil
+    // Presentation is main-thread owned and must detach before the asynchronous
+    // session disappears, including stop/close with no subsequent file open.
+    if mainWindow.loaded {
+      mainWindow.videoView.detachNativePlaybackOutput(transport.session.output)
+    }
     transport.session.shutdown { [weak self] in
       guard let self else { return }
       self.nativeTransport = nil

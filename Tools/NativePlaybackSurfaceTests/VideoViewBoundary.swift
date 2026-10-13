@@ -12,12 +12,31 @@ final class PlayerCore {
   let playerNumber = 1
   let subsystem = Logger.Subsystem(rawValue: "test")
   var isInMiniPlayer = false
+  var nativeTransport: RetirementTransportBoundary?
+  var nativeInitialPauseIntent: Bool?
+  var nativeLoopA: Double?, nativeLoopB: Double?
+  var nativeRetirementCompletion: (() -> Void)?
+  var nativeRetiring = false
+  var nativeReady = true
+  var retirementRouteRevision = 0
+  var previewCancellations = 0
+  var loopCancellations = 0
+  func cancelNativePreview(restoreLoop: Bool) {
+    precondition(!restoreLoop)
+    previewCancellations += 1
+  }
+  func cancelNativeLoopRequests() { loopCancellations += 1 }
+  func advancePlaybackRoute(acceptsMPV: Bool) {
+    precondition(!acceptsMPV)
+    retirementRouteRevision += 1
+  }
   func acceptFromPasteboard(_ sender: NSDraggingInfo, isPlaylist: Bool = false) -> NSDragOperation { [] }
   func openFromPasteboard(_ sender: NSDraggingInfo) -> Bool { false }
 }
 
 final class MainWindowDouble: NSResponder {
   var window: NSWindow?
+  var videoView: VideoView!
   var loaded = true
   let quickSettingView = QuickSettingDouble()
   func menuShowPlaylistPanel(_ sender: NSButton) {}
@@ -25,10 +44,32 @@ final class MainWindowDouble: NSResponder {
 }
 final class QuickSettingDouble { func setHdrAvailability(to: Bool) {} }
 final class PlaybackInfoDouble {
-  struct State { var loaded = true }
-  var state = State()
+  var state = PlayerState.paused
   var hdrAvailable = false
   var hdrEnabled = true
+}
+
+// The decoder/shutdown scheduling is controlled only in the retirement slice.
+// The output, CALayer, surface, VideoView and extracted Core method are real.
+final class RetirementTransportBoundary {
+  let session: RetirementSessionBoundary
+  var onSnapshot: (() -> Void)? = {}
+  init(output: NativeSampleBufferOutput) { session = RetirementSessionBoundary(output: output) }
+}
+final class RetirementSessionBoundary {
+  let output: NativeSampleBufferOutput
+  var shutdownCalls = 0
+  private var completions: [() -> Void] = []
+  init(output: NativeSampleBufferOutput) { self.output = output }
+  func shutdown(completion: @escaping () -> Void) {
+    shutdownCalls += 1
+    completions.append(completion)
+  }
+  func finish() {
+    let pending = completions
+    completions.removeAll()
+    pending.forEach { $0() }
+  }
 }
 
 final class MPVController {
