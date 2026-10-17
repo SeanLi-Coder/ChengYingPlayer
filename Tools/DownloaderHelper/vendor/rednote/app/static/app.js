@@ -1841,7 +1841,20 @@
       return `小红书已明确显示登录或验证码。请在 Chrome 打开${verificationTarget(job)}完成验证后重试。`;
     }
     if (text.includes("Highest-available image dimensions could not be verified") || text.includes("image below its declared")) {
-      return "小红书图片的实际分辨率低于作品声明值或无法验证。程序已拒绝保存低清占位图，并会尝试下一条原图地址；全部候选失败时请稍后重试。";
+      const labels = {
+        bilibili: "B站", douyin: "抖音", instagram: "Instagram",
+        kuaishou: "快手", xiaohongshu: "小红书", youtube: "YouTube"
+      };
+      const platform = typeof job?.platform === "string" ? job.platform.trim().toLowerCase() : "";
+      const subject = Object.hasOwn(labels, platform) ? `${labels[platform]}图片` : "当前图片";
+      const unverified = text.includes("Highest-available image dimensions could not be verified");
+      const belowDeclared = text.includes("image below its declared");
+      const reason = unverified && belowDeclared
+        ? "候选同时报告了尺寸低于声明值和尺寸无法验证，不能只归因为低清。"
+        : unverified
+          ? "尺寸未能读取或验证，不能据此认定图片是低清。"
+          : "实测尺寸低于作品声明值，未通过尺寸校验。";
+      return `${subject}的${reason}未通过校验的候选不会作为成功文件保存；请查看任务状态，稍后重试仍失败时复制脱敏诊断反馈。`;
     }
     if (text.includes("FFprobe was found but could not be started")) {
       return "已找到 FFprobe，但程序无法启动它。请重新安装包含 FFprobe 的 FFmpeg，然后完全停止并重启程序。";

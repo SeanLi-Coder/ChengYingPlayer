@@ -25,6 +25,30 @@ and pytest caches are ignored; they are not source or redistribution assets.
 
 ## Deliberate patches
 
+### Douyin image headers and platform-specific validation messages (2026-10-18)
+
+The native Requests adapter can return a short `read1` fragment before a complete
+PNG, JPEG or WebP header has arrived. The Douyin image path now accumulates the
+same response up to one MiB before declaring dimensions unverifiable. Geometric
+parse checkpoints bound repeated work, and an absolute 120-second header budget,
+existing idle budget and cancellation checks remain active. A currently blocked
+socket read still obeys its existing network timeout. The exact accumulated bytes
+join the unchanged transfer, length checks and exclusive publication path; no
+image is resized or recompressed. Unsupported, truncated or below-declared
+dimensions still fail, and other platforms keep their existing read behavior.
+
+The interface selects the image-error platform label from a fixed allowlist and
+distinguishes unreadable dimensions from measured insufficient dimensions. It
+does not incorrectly label a Douyin item as Xiaohongshu or claim every parser miss
+is a low-quality placeholder. It never echoes raw media URLs or credentials.
+
+These patches do not relax the mandatory default-quality probe. The user
+explicitly requires that probe to pass even when an author-feed candidate has
+independently passed validation. Unknown CDN families and nonstandard HTTPS
+ports remain blocked; no site-only quality policy or automatic downgrade is
+introduced. Offline synthetic transfer tests are not evidence that the two
+reported real-site items have completed downloading.
+
 ### Unfinished download filters (2026-10-18)
 
 The recent-task sidebar and per-task item list provide independent unfinished

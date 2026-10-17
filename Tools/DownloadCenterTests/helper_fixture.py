@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from socketserver import TCPServer
@@ -35,6 +36,12 @@ PROFILE_OPTIONS = [{"directory": "Profile 1", "has_cookie_database": True},
                    {"directory": "Profile 2", "has_cookie_database": True},
                    {"directory": "Profile 4", "has_cookie_database": False}]
 DIAGNOSTICS = {"reads": 0, "mutations": 0, "error": "", "revision": 1}
+READ_GATES = {
+    name: {"released": threading.Event(), "entered": threading.Event(), "timed_out": False}
+    for name in ("config", "job_detail")
+}
+for read_gate in READ_GATES.values():
+    read_gate["released"].set()
 FRONTEND_SAFETY_PROBES = """<script>
 window.fixtureErrors = [];
 addEventListener('error', event => fixtureErrors.push(event.message));
@@ -128,6 +135,43 @@ def profile_snapshot():
             "config_writes": PROXY["config_writes"]}
 
 
+def read_gate_snapshot():
+    return {
+        name: {"held": not gate["released"].is_set(), "entered": gate["entered"].is_set(),
+               "timed_out": gate["timed_out"]}
+        for name, gate in READ_GATES.items()
+    }
+
+
+def hold_read_response(name):
+    """Hold only a selected synthetic response, bounded by EOF and a deadline."""
+    gate = READ_GATES[name]
+    if gate["released"].is_set():
+        return True
+    gate["entered"].set()
+    deadline = time.monotonic() + 15
+    while not gate["released"].wait(0.05):
+        if STOP.is_set():
+            return False
+        if time.monotonic() >= deadline:
+            with PROXY_LOCK:
+                gate["timed_out"] = True
+            return False
+    return not STOP.is_set()
+
+
+def add_readiness_probe(content):
+    """Expose booleans from the real closure without changing its control flow."""
+    marker = b"  initialize();\n})();\n"
+    if content.count(marker) != 1:
+        raise ValueError("The fixture readiness probe requires one exact initialization marker")
+    probe = (
+        b"  window.fixtureVendorReadiness = () => ({backendReady: Boolean(state.backendReady), "
+        b"initialized: Boolean(state.initialized)});\n"
+    )
+    return content.replace(marker, probe + marker)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
@@ -194,7 +238,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         with PROXY_LOCK:
-            if path == "/api/fixture/profile-mode" and self.command == "POST":
+            if path == "/api/fixture/read-gates" and self.command == "POST":
+                name = payload.get("gate")
+                hold = payload.get("hold")
+                if not isinstance(name, str) or name not in READ_GATES or not isinstance(hold, bool):
+                    self.json_response({}, 400)
+                    return
+                gate = READ_GATES[name]
+                if hold:
+                    gate["entered"].clear()
+                    gate["timed_out"] = False
+                    gate["released"].clear()
+                else:
+                    gate["released"].set()
+                self.json_response(read_gate_snapshot())
+            elif path == "/api/fixture/profile-mode" and self.command == "POST":
                 if payload.get("status") in {"ok", "cookie_permission_denied"}:
                     PROFILE_STATE["status"] = payload["status"]
                 self.json_response(profile_snapshot())
@@ -272,7 +330,21 @@ class Handler(BaseHTTPRequestHandler):
             mime = "application/json"
         elif MODE == "frontend":
             path = urlsplit(self.path).path
-            if path == "/api/native/chrome-profiles":
+            if path == "/api/fixture/read-gates":
+                name = parse_qs(urlsplit(self.path).query).get("await", [""])[0]
+                if name and name not in READ_GATES:
+                    self.json_response({}, 400)
+                    return
+                if name:
+                    deadline = time.monotonic() + 5
+                    while not READ_GATES[name]["entered"].wait(0.05):
+                        if STOP.is_set() or time.monotonic() >= deadline:
+                            self.json_response({}, 503)
+                            return
+                with PROXY_LOCK:
+                    self.json_response(read_gate_snapshot())
+                return
+            elif path == "/api/native/chrome-profiles":
                 with PROXY_LOCK:
                     PROFILE_STATE["reads"] += 1
                     self.json_response(profile_inventory())
@@ -334,16 +406,28 @@ class Handler(BaseHTTPRequestHandler):
             elif path in {"/static/app.js", "/static/styles.css", "/static/favicon.svg", "/native/desktop.js", "/native/desktop.css", "/native/chrome_profiles.js", "/native/chrome_profiles.css", "/native/diagnostics.js", "/native/diagnostics.css"}:
                 asset = (DESKTOP_ASSETS if path.startswith("/native/") else VENDORED_ASSETS) / path.rsplit("/", 1)[1]
                 content = asset.read_bytes()
+                if path == "/static/app.js":
+                    try:
+                        content = add_readiness_probe(content)
+                    except ValueError:
+                        self.json_response({}, 500)
+                        return
                 mime = "application/javascript" if path.endswith(".js") else "text/css" if path.endswith(".css") else "image/svg+xml"
             elif path == "/api/health":
                 content = json.dumps({"status": "ok", "app_id": "native-fixture", "version": "1", "build_id": "fixture-build",
                                       "source_build_id": "fixture-build", "restart_required": False}).encode()
                 mime = "application/json"
             elif path == "/api/config":
+                if not hold_read_response("config"):
+                    self.json_response({}, 503)
+                    return
                 with PROXY_LOCK:
                     content = json.dumps(CONFIG).encode()
                 mime = "application/json"
             elif path in {"/api/jobs", "/api/jobs/job"}:
+                if path == "/api/jobs/job" and not hold_read_response("job_detail"):
+                    self.json_response({}, 503)
+                    return
                 content = json.dumps([fixture_job()] if path == "/api/jobs" else fixture_job()).encode()
                 mime = "application/json"
             elif path == "/api/events":

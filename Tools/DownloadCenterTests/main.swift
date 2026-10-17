@@ -787,6 +787,21 @@ if DownloadCenterService.supportsRuntime {
       """)
     waitForPage("The authenticated synthetic profile fixture request completes", "window.fixtureProfileDone === true")
   }
+  func readGateFixture(_ gate: String, hold: Bool? = nil, waitForEntry: Bool = false) {
+    let path = "/api/fixture/read-gates" + (waitForEntry ? "?await=\(gate)" : "")
+    let options = hold.map {
+      "{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({gate:'\(gate)',hold:\($0)})}"
+    } ?? "{cache:'no-store'}"
+    _ = fullPageValue("""
+      window.fixtureReadGateDone = false;
+      fetch('\(path)', \(options)).then(response => {
+        if (!response.ok) throw new Error('Fixture read gate failed');
+        return response.json();
+      }).then(data => { window.fixtureReadGateSnapshot = data; window.fixtureReadGateDone = true; });
+      undefined
+      """)
+    waitForPage("The authenticated bounded read-gate fixture request completes", "window.fixtureReadGateDone === true")
+  }
   func submitProfileJob() {
     _ = fullPageValue("""
       document.querySelector('#url-input').value = 'https://www.douyin.com/video/1234567890123456789';
@@ -966,6 +981,7 @@ if DownloadCenterService.supportsRuntime {
 
   // A fresh document must not resurrect the removed login window, even when
   // settings and tasks have survived a previous version. Keep all probes local.
+  readGateFixture("config", hold: true)
   _ = fullPageValue("window.fixtureChromeReloadMarker = true; undefined")
   fullController.webView.reload()
   waitForPage("Reload restores Chrome controls without a dedicated login panel", """
@@ -996,6 +1012,71 @@ if DownloadCenterService.supportsRuntime {
   waitForPage("Removed login endpoints finish without launching a fixture browser", "window.fixtureRemovedLoginDone === true")
   check(fullPageValue("window.fixtureRemovedLoginStatuses.every(status => status === 404)") as? Bool == true,
         "A stale page cannot use removed login APIs or reload obsolete static resources")
+  readGateFixture("config", waitForEntry: true)
+  check(fullPageValue("""
+    window.fixtureReadGateSnapshot.config.held && window.fixtureReadGateSnapshot.config.entered
+      && !window.fixtureReadGateSnapshot.config.timed_out
+      && document.querySelector('#download-dir').value === ''
+      && !window.fixtureVendorReadiness().initialized
+    """) as? Bool == true,
+        "Profile inventory can be ready while the preserved frontend still awaits its configuration")
+  _ = fullPageValue("""
+    document.querySelector('#desktop-chrome-cookies').checked=false;
+    document.querySelector('#desktop-chrome-cookies').dispatchEvent(new Event('change',{bubbles:true}));
+    document.querySelector('#save-settings-button').click(); undefined
+    """)
+  waitForPage("The original pre-configuration click is rejected rather than silently saving empty settings", """
+    document.querySelector('#toast-region').textContent.includes('请填写下载目录')
+      && !document.querySelector('#save-settings-button').disabled
+    """)
+  profileFixture()
+  check(fullPageValue("""
+    window.fixtureProfileSnapshot.config_writes === 4 && window.fixtureProfileSnapshot.use_chrome_cookies
+      && window.fixtureRequests.every(request => request.path !== '/api/config' || request.method !== 'PUT')
+    """) as? Bool == true,
+        "The premature Cookie-off attempt performs no configuration write")
+  readGateFixture("config", hold: false)
+  waitForPage("The released configuration and initial job load reach actual vendor readiness", """
+    window.fixtureVendorReadiness().backendReady && window.fixtureVendorReadiness().initialized
+      && document.querySelector('#download-dir').value === '/tmp/Fixture proxy settings'
+    """)
+
+  // A populated directory is not sufficient either: initialization awaits both
+  // configuration and the initial task/detail load before allowing mutations.
+  readGateFixture("job_detail", hold: true)
+  _ = fullPageValue("window.fixtureChromeReloadMarker = true; undefined")
+  fullController.webView.reload()
+  waitForPage("A new document can load configuration while its initial task detail remains pending", """
+    !window.fixtureChromeReloadMarker && document.querySelector('#desktop-chrome-profile')
+      && !document.querySelector('#desktop-chrome-profile').disabled
+      && document.querySelector('#desktop-chrome-cookies').checked
+      && document.querySelector('#download-dir').value === '/tmp/Fixture proxy settings'
+      && window.fixtureVendorReadiness().backendReady && !window.fixtureVendorReadiness().initialized
+    """)
+  readGateFixture("job_detail", waitForEntry: true)
+  _ = fullPageValue("""
+    document.querySelector('#desktop-chrome-cookies').checked=false;
+    document.querySelector('#desktop-chrome-cookies').dispatchEvent(new Event('change',{bubbles:true}));
+    document.querySelector('#save-settings-button').click(); undefined
+    """)
+  waitForPage("The mutation gate rejects saving before initial task loading finishes", """
+    document.querySelector('#toast-region').textContent.includes('正在读取后台设置')
+      && !document.querySelector('#desktop-chrome-profile-refresh').disabled
+    """)
+  profileFixture()
+  check(fullPageValue("""
+    window.fixtureProfileSnapshot.config_writes === 4 && window.fixtureProfileSnapshot.use_chrome_cookies
+      && window.fixtureReadGateSnapshot.job_detail.held && window.fixtureReadGateSnapshot.job_detail.entered
+      && !window.fixtureReadGateSnapshot.job_detail.timed_out
+      && window.fixtureRequests.every(request => request.path !== '/api/config' || request.method !== 'PUT')
+    """) as? Bool == true,
+        "A populated directory alone never authorizes a premature settings mutation")
+  readGateFixture("job_detail", hold: false)
+  waitForPage("The actual initialization barrier opens only after the held task response completes", """
+    window.fixtureVendorReadiness().backendReady && window.fixtureVendorReadiness().initialized
+      && !document.querySelector('#desktop-chrome-profile-refresh').disabled
+      && document.querySelector('#download-dir').value === '/tmp/Fixture proxy settings'
+    """)
   _ = fullPageValue("""
     document.querySelector('#desktop-chrome-cookies').checked=false;
     document.querySelector('#desktop-chrome-cookies').dispatchEvent(new Event('change',{bubbles:true}));
@@ -1008,6 +1089,9 @@ if DownloadCenterService.supportsRuntime {
   profileFixture()
   check(fullPageValue("!window.fixtureProfileSnapshot.use_chrome_cookies && window.fixtureProfileSnapshot.selected_profile === null && window.fixtureProfileSnapshot.config_writes === 5") as? Bool == true,
         "Explicit Cookie-off preserves the selected profile and unrelated settings")
+  readGateFixture("config")
+  check(fullPageValue("Object.values(window.fixtureReadGateSnapshot).every(gate => !gate.held && !gate.timed_out)") as? Bool == true,
+        "Both synthetic read gates were explicitly released without a deadline fallback")
   _ = fullPageValue("window.fixtureChromeReloadMarker = true; undefined")
   fullController.webView.reload()
   waitForPage("Cookie-off survives a new native document while Chrome controls remain accessible", """

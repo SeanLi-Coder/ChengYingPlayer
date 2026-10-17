@@ -103,6 +103,8 @@ RESERVED_EXTENSION_BYTES = 16
 DOUYIN_PROBE_RATIOS = ("default", "4k", "2k", "1080p", "720p")
 DOUYIN_PROBE_BYTES = 256 * 1024
 DOUYIN_STREAM_CHUNK_BYTES = 64 * 1024
+DOUYIN_IMAGE_HEADER_MAX_BYTES = 1024 * 1024
+DOUYIN_IMAGE_HEADER_TIMEOUT_SECONDS = 120.0
 DOUYIN_PROGRESS_INTERVAL_SECONDS = 0.5
 DOUYIN_LOCK_STATUS_INTERVAL_SECONDS = 5.0
 DOUYIN_DEFAULT_PROBE_HOST = "api-play-hl.amemv.com"
@@ -4160,6 +4162,63 @@ class MediaDownloader:
                     raise TransportError(cause=exc) from exc
         return response.read(size)
 
+    def _read_douyin_image_header(
+        self,
+        response: Any,
+        first_chunk: bytes,
+        *,
+        started_at: float,
+        transfer_budget: _DouyinNoProgressBudget | None,
+        should_cancel: CancelCallback,
+    ) -> tuple[bytes, tuple[int, int] | None]:
+        """Accumulate a bounded header without requiring a full socket read."""
+        prefix = bytearray(first_chunk)
+        deadline = started_at + DOUYIN_IMAGE_HEADER_TIMEOUT_SECONDS
+        next_parse_at = len(prefix)
+        reached_eof = False
+        while True:
+            if should_cancel():
+                raise DownloadCancelledError("Task cancelled")
+            if time.monotonic() >= deadline:
+                raise TemporaryAccessError(
+                    "Douyin image header could not be verified within "
+                    f"{int(DOUYIN_IMAGE_HEADER_TIMEOUT_SECONDS)} seconds. "
+                    "The partial transfer was not published; completed files "
+                    "were preserved.",
+                    issue_code=SiteIssueCode.NETWORK_ERROR,
+                )
+            if transfer_budget is not None:
+                transfer_budget.remaining()
+            if len(prefix) >= next_parse_at or reached_eof:
+                header = bytes(prefix)
+                dimensions = self._image_dimensions(header)
+                if (
+                    dimensions is not None
+                    or reached_eof
+                    or len(prefix) >= DOUYIN_IMAGE_HEADER_MAX_BYTES
+                ):
+                    return header, dimensions
+                # Geometric checkpoints avoid repeatedly parsing/copying a
+                # growing JPEG header when read1 returns only a few bytes.
+                next_parse_at = min(
+                    DOUYIN_IMAGE_HEADER_MAX_BYTES,
+                    max(32, len(prefix) * 2),
+                )
+            chunk = self._read_douyin_stream_chunk(
+                response,
+                min(DOUYIN_STREAM_CHUNK_BYTES, next_parse_at - len(prefix)),
+            )
+            if should_cancel():
+                raise DownloadCancelledError("Task cancelled")
+            if transfer_budget is not None:
+                transfer_budget.remaining()
+            if chunk:
+                prefix.extend(chunk)
+                if transfer_budget is not None:
+                    transfer_budget.refresh()
+            else:
+                reached_eof = True
+
     def _ffprobe_douyin_media(
         self,
         initial_bytes: bytes,
@@ -6980,7 +7039,18 @@ class MediaDownloader:
                         transfer_budget.refresh()
                     chosen = asset
                     if verify_declared_dimensions and media_type == MediaType.IMAGE:
-                        actual_dimensions = self._image_dimensions(first_chunk)
+                        if is_douyin_source:
+                            first_chunk, actual_dimensions = (
+                                self._read_douyin_image_header(
+                                    response,
+                                    first_chunk,
+                                    started_at=transfer_started_at,
+                                    transfer_budget=transfer_budget,
+                                    should_cancel=should_cancel,
+                                )
+                            )
+                        else:
+                            actual_dimensions = self._image_dimensions(first_chunk)
                         if not actual_dimensions:
                             raise MediaDownloadError(
                                 "Highest-available image dimensions could not be verified"
