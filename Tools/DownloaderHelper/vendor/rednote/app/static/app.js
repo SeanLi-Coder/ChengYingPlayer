@@ -22,7 +22,9 @@
     buildInfo: document.querySelector("#build-info"),
     filterTabs: document.querySelector("#filter-tabs"),
     formError: document.querySelector("#form-error"),
+    historyFilterTabs: document.querySelector("#history-filter-tabs"),
     historyList: document.querySelector("#history-list"),
+    historySummary: document.querySelector("#history-summary"),
     itemTemplate: document.querySelector("#item-template"),
     itemsList: document.querySelector("#items-list"),
     itemsSummary: document.querySelector("#items-summary"),
@@ -60,6 +62,7 @@
     chromeProfile: null,
     eventSource: null,
     filter: "all",
+    historyFilter: "all",
     initialized: false,
     jobs: new Map(),
     polling: false,
@@ -69,6 +72,8 @@
     settingsSaving: false,
     versionBlocked: false
   };
+
+  const unfinishedJobCache = new WeakMap();
 
   const statusLabels = {
     cancelled: "已取消",
@@ -550,6 +555,27 @@
     if (Array.isArray(items)) return items;
     if (items && typeof items === "object") return Object.values(items);
     return [];
+  }
+
+  function isUnfinishedItem(item) {
+    // Display categories include partial/skipped, but neither confirms a saved work.
+    return !["complete", "completed", "done", "downloaded", "success", "succeeded"].includes(rawStatus(item));
+  }
+
+  function isUnfinishedJob(job) {
+    if (!job || typeof job !== "object") return isUnfinishedItem(job);
+    const cached = unfinishedJobCache.get(job);
+    if (cached !== undefined) return cached;
+
+    // upsertJob replaces read-only snapshots, so updates invalidate this cache naturally.
+    let unfinished = isUnfinishedItem(job) || job.discovery_complete === false || job.cancel_requested === true;
+    if (!unfinished) unfinished = getItems(job).some(isUnfinishedItem);
+    if (!unfinished) {
+      const counts = getCounts(job);
+      unfinished = counts.failed > 0 || counts.active > 0 || (counts.total !== null && counts.total > counts.success);
+    }
+    unfinishedJobCache.set(job, unfinished);
+    return unfinished;
   }
 
   function getActiveItem(job) {
@@ -2346,18 +2372,30 @@
     const matchingItems = items
       .map((item, index) => ({ item, index }))
       .filter(({ item }) => {
+        if (state.filter === "unfinished") return isUnfinishedItem(item);
         if (state.filter === "success") return canonicalStatus(item) === "completed";
         if (state.filter === "failed") return isFailed(item);
         return true;
       });
 
     elements.itemsList.replaceChildren();
-    elements.itemsSummary.textContent = items.length ? `共 ${items.length} 个作品，可展开查看每个已保存文件` : "任务开始后会显示每个作品的状态";
+    elements.itemsSummary.textContent = state.filter === "unfinished"
+      ? `共 ${items.length} 个作品，显示 ${matchingItems.length} 个未完成作品（含等待、失败、中断或跳过）`
+      : items.length ? `共 ${items.length} 个作品，可展开查看每个已保存文件` : "任务开始后会显示每个作品的状态";
 
     if (!matchingItems.length) {
       const empty = document.createElement("p");
       empty.className = "items-empty";
       empty.textContent = items.length ? "这个筛选条件下还没有作品" : "正在等待解析结果…";
+      if (state.filter === "unfinished") {
+        if (job?.discovery_complete === false) {
+          empty.textContent = "当前未列出未完成作品，但作品列表尚未读取完整；请查看任务提示或继续发现。";
+        } else if (isUnfinishedJob(job)) {
+          empty.textContent = "当前未列出未完成作品，任务仍未完成；请查看上方进度或异常提示。";
+        } else {
+          empty.textContent = "当前任务没有未完成作品。";
+        }
+      }
       elements.itemsList.append(empty);
       return;
     }
@@ -2409,17 +2447,24 @@
   }
 
   function renderHistory() {
-    const jobs = [...state.jobs.values()].sort((a, b) => {
+    const allJobs = [...state.jobs.values()].sort((a, b) => {
       const right = toDate(getCreatedAt(b))?.getTime() || 0;
       const left = toDate(getCreatedAt(a))?.getTime() || 0;
       return right - left;
     });
+    const jobs = state.historyFilter === "unfinished" ? allJobs.filter(isUnfinishedJob) : allJobs;
+    if (elements.historySummary) {
+      const selectionHidden = state.selectedJobId && state.jobs.has(state.selectedJobId)
+        && !jobs.some((job) => job._id === state.selectedJobId);
+      elements.historySummary.textContent = `显示 ${jobs.length} / ${allJobs.length} 个任务`
+        + (selectionHidden ? "；当前查看的任务不在此筛选中" : "");
+    }
     elements.historyList.replaceChildren();
 
     if (!jobs.length) {
       const empty = document.createElement("p");
       empty.className = "history-empty";
-      empty.textContent = "还没有下载任务";
+      empty.textContent = allJobs.length ? "没有未完成任务，已完成任务可在“全部”中查看。" : "还没有下载任务";
       elements.historyList.append(empty);
       return;
     }
@@ -2887,7 +2932,7 @@
     });
     elements.filterTabs.addEventListener("click", (event) => {
       const button = event.target.closest("[data-filter]");
-      if (!button) return;
+      if (!button || !["all", "unfinished", "success", "failed"].includes(button.dataset.filter)) return;
       state.filter = button.dataset.filter;
       elements.filterTabs.querySelectorAll("[data-filter]").forEach((tab) => {
         const active = tab === button;
@@ -2895,6 +2940,17 @@
         tab.setAttribute("aria-pressed", String(active));
       });
       renderSelectedJob();
+    });
+    elements.historyFilterTabs?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-history-filter]");
+      if (!button || !["all", "unfinished"].includes(button.dataset.historyFilter)) return;
+      state.historyFilter = button.dataset.historyFilter;
+      elements.historyFilterTabs.querySelectorAll("[data-history-filter]").forEach((tab) => {
+        const active = tab === button;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-pressed", String(active));
+      });
+      renderHistory();
     });
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) poll();

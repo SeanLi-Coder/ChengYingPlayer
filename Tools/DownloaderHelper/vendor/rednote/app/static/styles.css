@@ -844,6 +844,7 @@ svg {
 
 .filter-tabs {
   display: flex;
+  flex-shrink: 0;
   gap: 2px;
   padding: 3px;
   background: rgba(255, 255, 255, 0.035);
@@ -856,6 +857,22 @@ svg {
   color: var(--muted);
   background: transparent;
   font-size: 10px;
+  white-space: nowrap;
+}
+
+.history-filter-tabs {
+  margin-top: 15px;
+}
+
+.history-filter-tabs .filter-tab {
+  flex: 1;
+}
+
+.history-summary {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
 }
 
 .filter-tab.active {

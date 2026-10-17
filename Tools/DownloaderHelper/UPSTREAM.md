@@ -25,6 +25,21 @@ and pytest caches are ignored; they are not source or redistribution assets.
 
 ## Deliberate patches
 
+### Unfinished download filters (2026-10-18)
+
+The recent-task sidebar and per-task item list provide independent unfinished
+filters. Filtering is a local presentation operation: it does not select a
+different task, start transfers, change retry eligibility or discard history.
+The current filter survives event-driven list refreshes. Incomplete discovery,
+partial results and unresolved items remain visible even when a legacy status
+looks completed; terminal skipped items are not reclassified as retryable.
+Unfinished classification is weakly cached by immutable job snapshot identity;
+the existing merge path creates a new snapshot for every accepted update, so
+unchanged history avoids repeated item scans without hiding count-only updates.
+Existing all/success/failed item views and explicit continuation are preserved.
+Synthetic browser tests cover classification, live updates and empty states
+without reading accounts or contacting media sites.
+
 ### End-of-batch retry and per-item source links (2026-10-18)
 
 The native helper explicitly enables this policy; standalone construction keeps
