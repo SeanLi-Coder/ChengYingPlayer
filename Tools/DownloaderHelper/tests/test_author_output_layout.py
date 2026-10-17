@@ -82,7 +82,9 @@ def test_native_helper_changes_only_new_job_policy(tmp_path):
     manager = DownloadManager(state_dir=tmp_path / "state", default_output_root=tmp_path / "selected")
     try:
         old = manager.create_job(SOURCES[5][2], cookie_browser=None, auto_start=False)
+        assert manager.auto_retry_failed_items is False
         helper.configure_download_layout(SimpleNamespace(manager=manager))
+        assert manager.auto_retry_failed_items is True
         new = manager.create_job(SOURCES[5][2], cookie_browser=None, auto_start=False)
         assert manager.get_job(old.id).output_layout == OutputLayout.PLATFORM_AUTHOR
         assert manager.get_job(new.id).output_layout == OutputLayout.AUTHOR

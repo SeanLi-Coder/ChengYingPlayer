@@ -103,6 +103,8 @@ def configure_download_layout(engine):
     # New native jobs use the selected root directly. Persisted jobs retain
     # their own layout and output directory; no existing files are migrated.
     engine.manager.new_job_output_layout = OutputLayout.AUTHOR
+    # Enable the player's bounded retry policy without changing standalone defaults.
+    engine.manager.auto_retry_failed_items = True
 
 
 class ShutdownController:

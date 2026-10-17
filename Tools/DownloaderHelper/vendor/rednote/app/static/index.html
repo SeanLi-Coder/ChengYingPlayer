@@ -154,6 +154,8 @@
               </div>
             </div>
 
+            <p class="batch-status" id="batch-status" role="status" hidden></p>
+
             <div class="progress-block">
               <div class="progress-copy">
                 <span>总进度</span>
@@ -200,7 +202,7 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M20 7v5h-5M4 17v-5h5m10.2-2A8 8 0 0 0 6.1 6.1L4 8m16 8-2.1 1.9A8 8 0 0 1 4.8 14" />
                 </svg>
-                <span id="retry-all-label">重试全部失败项</span>
+                <span id="retry-all-label">继续下载</span>
               </button>
               <button class="danger-button" id="cancel-button" type="button" hidden>
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -315,12 +317,15 @@
             <ul></ul>
           </details>
         </div>
-        <button class="item-retry-button" type="button" hidden>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M20 7v5h-5M5.3 8A8 8 0 1 1 4 14" />
-          </svg>
-          重试
-        </button>
+        <div class="item-actions">
+          <button class="item-copy-button secondary-button" type="button">复制作品链接</button>
+          <button class="item-retry-button" type="button" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 7v5h-5M5.3 8A8 8 0 1 1 4 14" />
+            </svg>
+            重试
+          </button>
+        </div>
       </article>
     </template>
   </body>

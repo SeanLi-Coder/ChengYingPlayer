@@ -1050,6 +1050,58 @@ svg {
   height: 13px;
 }
 
+.item-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.item-copy-button {
+  padding: 7px 9px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.batch-status {
+  margin: 16px 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.link-copy-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(520px, calc(100% - 40px));
+  box-sizing: border-box;
+  margin: auto;
+  padding: 24px;
+  color: var(--text);
+  background: #171d27;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+}
+
+.link-copy-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.link-copy-dialog h3 { margin-top: 0; }
+.link-copy-dialog p { color: var(--text-soft); line-height: 1.6; }
+.link-copy-dialog textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 16px 0;
+  padding: 12px;
+  color: var(--text);
+  background: #0f141d;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font: inherit;
+  resize: vertical;
+}
+
 .items-empty {
   padding: 28px 16px;
   color: var(--muted);
@@ -1531,9 +1583,11 @@ svg {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .item-retry-button {
+  .item-actions {
     grid-column: 2;
     justify-self: start;
+    flex-direction: row;
+    flex-wrap: wrap;
   }
 
   .side-column {

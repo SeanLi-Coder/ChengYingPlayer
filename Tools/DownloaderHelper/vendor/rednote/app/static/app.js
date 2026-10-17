@@ -7,6 +7,7 @@
     authTitle: document.querySelector("#auth-title"),
     authOpenButton: document.querySelector("#auth-open-button"),
     authRetryButton: document.querySelector("#auth-retry-button"),
+    batchStatus: document.querySelector("#batch-status"),
     cancelButton: document.querySelector("#cancel-button"),
     chromeCookies: document.querySelector("#chrome-cookies"),
     chromeProfile: document.querySelector("#chrome-profile"),
@@ -129,7 +130,7 @@
     region_restricted: "网站表示该作品在当前地区不可用。程序没有尝试绕过地区限制。",
     site_response_changed: "网站返回了空数据、非媒体内容、字段变化或与目标不一致的数据。程序已拦截异常响应，没有下载串号或低清替代文件。",
     media_link_expired: "网站之前签发的媒体地址已经失效。程序没有继续使用旧地址。",
-    site_unavailable: "网站服务器返回了 5xx 或暂时不可用。程序已暂停后续请求。",
+    site_unavailable: "网站服务器返回了 5xx 或暂时不可用，本次作品请求未能完成。",
     network_error: "网络连接、DNS、TLS 或媒体读取过程失败。程序已停止等待并保留此前完成的文件。",
     cookie_unavailable: "程序无法读取任务绑定的 Chrome Cookie，因此不能可靠确认当前登录权限或最高画质。",
     security_blocked: "媒体地址出现了未通过安全校验的跳转或响应变化。程序在读取或保存未知响应前已经拦截。",
@@ -965,6 +966,134 @@
     return parts.join(" · ");
   }
 
+  function itemSourceLink(item, job) {
+    // Copy only a canonical work page, never a signed media URL or task profile.
+    if (typeof item?.source_url !== "string" || item.source_url.length > 8192 || /[\u0000-\u0020\u007f]/.test(item.source_url)) return "";
+    let source;
+    try {
+      source = new URL(item.source_url);
+    } catch {
+      return "";
+    }
+    if (source.protocol !== "https:" || source.username || source.password || source.port) return "";
+    const host = source.hostname.toLowerCase();
+    const path = source.pathname;
+    const platform = getPlatform(job);
+    let match;
+    if (platform === "douyin" && ["douyin.com", "www.douyin.com", "www.iesdouyin.com"].includes(host)) {
+      match = path.match(/^\/(?:video|note|share\/video)\/(\d{1,24})\/?$/);
+      return match ? `https://www.douyin.com/${path.startsWith("/note/") ? "note" : "video"}/${match[1]}` : "";
+    }
+    if (platform === "kuaishou" && ["kuaishou.com", "www.kuaishou.com", "m.gifshow.com"].includes(host)) {
+      match = path.match(/^\/(?:short-video|fw\/photo)\/([A-Za-z0-9_-]{1,80})\/?$/);
+      return match ? `https://www.kuaishou.com/short-video/${match[1]}` : "";
+    }
+    if (platform === "xiaohongshu" && ["xiaohongshu.com", "www.xiaohongshu.com"].includes(host)) {
+      match = path.match(/^\/(?:explore|discovery\/item)\/([0-9a-f]{24})\/?$/i);
+      return match ? `https://www.xiaohongshu.com/explore/${match[1]}` : "";
+    }
+    if (platform === "instagram" && ["instagram.com", "www.instagram.com"].includes(host)) {
+      match = path.match(/^\/(?:p|reel|tv)\/([A-Za-z0-9_-]{1,64})(?:\/media)?\/?$/);
+      return match ? `https://www.instagram.com/p/${match[1]}/` : "";
+    }
+    if (platform === "youtube" && ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"].includes(host)) {
+      const id = host === "youtu.be"
+        ? path.match(/^\/([A-Za-z0-9_-]{11})\/?$/)?.[1]
+        : path === "/watch"
+          ? source.searchParams.getAll("v").length === 1 && source.searchParams.get("v")
+          : path.match(/^\/(?:shorts|live|embed)\/([A-Za-z0-9_-]{11})\/?$/)?.[1];
+      return typeof id === "string" && /^[A-Za-z0-9_-]{11}$/.test(id)
+        ? `https://www.youtube.com/watch?v=${id}` : "";
+    }
+    if (platform === "bilibili" && ["bilibili.com", "www.bilibili.com", "m.bilibili.com"].includes(host)) {
+      match = path.match(/^\/video\/(BV[A-Za-z0-9]{10}|av\d{1,20})\/?$/);
+      if (!match) return "";
+      const parts = source.searchParams.getAll("p");
+      if (parts.length > 1 || (parts.length && !/^[1-9]\d{0,5}$/.test(parts[0]))) return "";
+      return `https://www.bilibili.com/video/${match[1]}${parts.length ? `?p=${parts[0]}` : ""}`;
+    }
+    return "";
+  }
+
+  function presentManualLinkCopy(link, trigger) {
+    const previous = document.activeElement;
+    const dialog = document.createElement("dialog");
+    dialog.className = "link-copy-dialog";
+    dialog.setAttribute("aria-label", "复制作品链接");
+    const heading = document.createElement("h3");
+    heading.textContent = "手动复制作品链接";
+    const hint = document.createElement("p");
+    hint.textContent = "当前窗口不允许直接写入剪贴板。链接已选中，请按 ⌘C（Windows：Ctrl+C）。这是作品网页链接，不包含临时下载签名；网站可能需要登录。";
+    const input = document.createElement("textarea");
+    input.readOnly = true;
+    input.rows = 3;
+    input.value = link;
+    input.setAttribute("aria-label", "作品网页链接");
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "secondary-button";
+    close.textContent = "完成";
+    const finish = () => {
+      dialog.remove();
+      if (trigger?.isConnected) trigger.focus();
+      else if (previous?.isConnected) previous.focus();
+    };
+    close.addEventListener("click", finish);
+    dialog.addEventListener("cancel", (event) => { event.preventDefault(); finish(); });
+    dialog.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); finish(); }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        if (document.activeElement === input) close.focus();
+        else input.focus();
+      }
+    });
+    dialog.append(heading, hint, input, close);
+    document.body.append(dialog);
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+    input.focus();
+    input.select();
+  }
+
+  async function copyItemLink(item, job, button) {
+    if (state.versionBlocked || button?.disabled) return;
+    const link = itemSourceLink(item, job);
+    if (!link) {
+      showToast("这个作品还没有可确认的网页链接，暂时无法复制。", "error");
+      return;
+    }
+    if (button) button.disabled = true;
+    try {
+      if (typeof navigator.clipboard?.writeText !== "function") throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(link);
+      if (!state.versionBlocked) showToast("作品链接已复制（网页链接，非临时媒体地址）");
+    } catch {
+      if (!state.versionBlocked) presentManualLinkCopy(link, button);
+    } finally {
+      if (button) button.disabled = state.versionBlocked;
+    }
+  }
+
+  function batchStatusMessage(job) {
+    const items = getItems(job);
+    if (!items.length || job?.cancel_requested) return "";
+    const failed = items.filter(isFailed).length;
+    const tailRetry = job?.auto_retry_round === 1;
+    if (job?.auto_retry_enabled !== true && !tailRetry) return "";
+    if (isRunning(job)) {
+      if (tailRetry) return `首轮已结束，正在补试 ${asNumber(job.auto_retry_total) || 0} 个暂时失败的作品（仅自动补试一轮）。已完成作品不会重复下载。`;
+      if (failed) return `${failed} 个作品暂未完成，原因已列在下方；其余作品继续下载。首轮结束后会自动补试符合条件的失败项一次。`;
+      return "单项下载失败会显示原因并继续其余作品，最后自动补试一次；登录、验证码、限流或安全问题仍会暂停任务。";
+    }
+    if (!failed) return "";
+    if (canonicalStatus(job) === "cancelled") return `任务已取消；${failed} 个失败作品及已完成文件均已保留，可稍后继续下载。`;
+    const canContinue = job?.retryable !== false && items.some(isRetryableItem);
+    const paused = rawStatus(job) === "interrupted" || canonicalStatus(job) === "needs_auth";
+    const phase = tailRetry ? (paused ? "自动补试已暂停，" : "自动补试已结束，") : "本轮已停止，";
+    return `${phase}仍有 ${failed} 个作品未下载成功。${canContinue ? "失败原因和已完成文件已保留，可稍后点击“继续下载”。" : "请查看每项原因，处理后再创建新任务；已完成文件保留。"}`;
+  }
+
   function itemError(item, job) {
     const status = canonicalStatus(item);
     if (!isFailed(item) && status !== "cancelled" && rawStatus(item) !== "skipped") return "";
@@ -1397,6 +1526,9 @@
 
   function localizeRuntimeMessage(value, job = null) {
     let text = asText(value);
+    if (text === "This item remains unavailable after its bounded transfer retries.") {
+      return "这个作品经过本次有限重试后仍未下载成功，已记录失败；请查看上方任务状态及错误类别。";
+    }
     if (diagnosticFromText(text) === "dedicated_login_unavailable") {
       const detail = cookieDiagnosticMessages.dedicated_login_unavailable;
       return `${detail.description}${detail.solution}诊断类别：dedicated_login_unavailable。`;
@@ -1605,11 +1737,11 @@
       text.includes("Douyin authoritative default quality source was temporarily unavailable")
     ) {
       const details = localizedProbeDetails(text);
-      return `抖音视频的作者直连或原始档遇到临时网络、限流或未知 CDN。程序已暂停后续队列，避免把全部作品连续标失败，也没有改下低清版本；请稍等后点击继续任务${details ? `。本次原因：${details}` : ""}。`;
+      return `抖音视频的作者直连或原始档遇到临时网络、限流或未知 CDN。当前作品未完成，也没有改下低清版本；请查看上方任务状态，网络类单项错误会留待补试，限流和安全问题仍会暂停${details ? `。本次原因：${details}` : ""}。`;
     }
     if (text.includes("Douyin Live Photo authoritative quality source was temporarily unavailable")) {
       const details = localizedProbeDetails(text);
-      return `抖音 Live Photo 的作者直连或原始档遇到临时网络、限流或未知 CDN。程序已暂停后续队列，避免把全部作品连续标失败，也没有改下低清版本；请稍等后点击继续任务${details ? `。本次原因：${details}` : ""}。`;
+      return `抖音 Live Photo 的作者直连或原始档遇到临时网络、限流或未知 CDN。当前作品未完成，也没有改下低清版本；请查看上方任务状态，网络类单项错误会留待补试，限流和安全问题仍会暂停${details ? `。本次原因：${details}` : ""}。`;
     }
     if (
       text.includes("Douyin Live Photo author-feed quality source could not be verified") ||
@@ -2265,6 +2397,12 @@
         retryButton.setAttribute("aria-label", `重试：${itemTitle(item, index)}`);
         retryButton.addEventListener("click", () => retryJob(job._id, id, retryButton));
       }
+      const copyButton = node.querySelector(".item-copy-button");
+      const sourceLink = itemSourceLink(item, job);
+      copyButton.disabled = state.versionBlocked || !sourceLink;
+      copyButton.title = sourceLink ? "复制作品网页链接；不包含临时下载签名，网站可能需要登录" : "尚无可确认的作品网页链接";
+      copyButton.setAttribute("aria-label", `复制作品链接：${itemTitle(item, index)}`);
+      copyButton.addEventListener("click", () => copyItemLink(item, job, copyButton));
       fragment.append(node);
     });
     elements.itemsList.append(fragment);
@@ -2350,6 +2488,11 @@
       elements.activeCountLabel.textContent = activeCountLabel(job, counts.active);
     }
     elements.totalCount.textContent = counts.total === null ? "—" : String(counts.total);
+    if (elements.batchStatus) {
+      const batchMessage = batchStatusMessage(job);
+      elements.batchStatus.hidden = !batchMessage;
+      elements.batchStatus.textContent = batchMessage;
+    }
 
     elements.authAlert.hidden = !needsAuth;
     elements.authRetryButton.hidden = job?.retryable === false;
@@ -2397,10 +2540,10 @@
     elements.retryAllLabel.textContent = continueDiscovery
       ? "继续发现"
       : resumable
-        ? "继续任务"
+        ? "继续下载"
         : canRetryDiscovery
           ? "重试任务"
-        : "重试全部失败项";
+        : "继续下载";
     elements.cancelButton.hidden = !isRunning(job) && !needsAuth;
     elements.cancelButton.disabled = Boolean(job?.cancel_requested);
     elements.cancelButton.title = job?.cancel_requested ? "当前步骤结束后会停止" : "取消任务";

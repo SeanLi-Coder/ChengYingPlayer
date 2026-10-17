@@ -4,7 +4,7 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime
@@ -181,9 +181,19 @@ QUEUE_PAUSE_SITE_ISSUES = frozenset(
         SiteIssueCode.MEDIA_LINK_EXPIRED,
         SiteIssueCode.SITE_UNAVAILABLE,
         SiteIssueCode.NETWORK_ERROR,
+        SiteIssueCode.LOGIN_REQUIRED,
+        SiteIssueCode.VERIFICATION_REQUIRED,
         SiteIssueCode.COOKIE_UNAVAILABLE,
         SiteIssueCode.SECURITY_BLOCKED,
         SiteIssueCode.LOCAL_CONFIGURATION,
+    }
+)
+AUTO_RETRY_SITE_ISSUES = frozenset(
+    {
+        SiteIssueCode.MEDIA_LINK_EXPIRED,
+        SiteIssueCode.SITE_UNAVAILABLE,
+        SiteIssueCode.NETWORK_ERROR,
+        SiteIssueCode.SITE_PROCESSING,
     }
 )
 LEGACY_DOUYIN_RESULT_ERROR = (
@@ -294,7 +304,10 @@ class DownloadManager:
         max_workers: int = 2,
         downloader_config: DownloaderConfig | None = None,
         new_job_output_layout: OutputLayout = OutputLayout.PLATFORM_AUTHOR,
+        auto_retry_failed_items: bool = False,
     ) -> None:
+        # Native host opt-in; keep the independent upstream queue policy intact.
+        self.auto_retry_failed_items = auto_retry_failed_items
         self.new_job_output_layout = OutputLayout(new_job_output_layout)
         self.store = JsonJobStore(state_dir)
         self.default_output_root = Path(default_output_root).expanduser().resolve()
@@ -780,6 +793,7 @@ class DownloadManager:
             cookie_browser=cookie_browser,
             cookie_profile=cookie_profile,
             cookie_profile_auto_selected=cookie_profile_auto_selected,
+            auto_retry_enabled=self.auto_retry_failed_items,
         )
         with self._lock:
             self._jobs[job.id] = job
@@ -1056,6 +1070,9 @@ class DownloadManager:
         job.diagnostic_code = None
         job.verification_url = None
         job.finished_at = None
+        job.auto_retry_enabled = self.auto_retry_failed_items
+        job.auto_retry_round = 0
+        job.auto_retry_total = 0
         job.updated_at = utc_now()
         if rediscover:
             job.discovery_complete = False
@@ -1120,6 +1137,7 @@ class DownloadManager:
             requested_media_ids: set[str] = set()
             with self._lock:
                 job = self._require_job(job_id)
+                job.auto_retry_enabled = self.auto_retry_failed_items
                 (
                     job.cookie_profile,
                     job.cookie_profile_auto_selected,
@@ -1295,7 +1313,9 @@ class DownloadManager:
                     self._commit_locked(job)
 
             targets = set(item_ids or [])
-            for item_id in list(item_ids or []):
+            for item_id in self._download_round_items(
+                job_id, list(item_ids or []), cancel_event
+            ):
                 if cancel_event.is_set():
                     raise DownloadCancelledError("Task cancelled")
                 binding_error: str | None = None
@@ -1371,6 +1391,18 @@ class DownloadManager:
                                 engine,
                                 cancel_event,
                             )
+                        except TemporaryAccessError as exc:
+                            # A transport retry budget can expire for one file
+                            # without invalidating the rest of the queue. Keep
+                            # source-refresh, access and unknown gates paused.
+                            code = classify_site_issue(exc)
+                            if (not self.auto_retry_failed_items
+                                    or code not in AUTO_RETRY_SITE_ISSUES):
+                                raise
+                            raise MediaDownloadError(
+                                "This item remains unavailable after its bounded transfer retries.",
+                                issue_code=code,
+                            ) from exc
                     with self._lock:
                         job = self._require_job(job_id)
                         item = self._find_item(job, item_id)
@@ -1519,7 +1551,11 @@ class DownloadManager:
                         item.retryable = (
                             item.issue_code not in NON_RETRYABLE_SITE_ISSUES
                         )
-                        pause_queue = item.issue_code in QUEUE_PAUSE_SITE_ISSUES or (
+                        pause_queue = (
+                            item.issue_code in QUEUE_PAUSE_SITE_ISSUES
+                            and not (self.auto_retry_failed_items
+                                     and item.issue_code in AUTO_RETRY_SITE_ISSUES)
+                        ) or (
                             job.platform == Platform.DOUYIN
                             and item.issue_code == SiteIssueCode.SITE_RESPONSE_CHANGED
                         )
@@ -1548,6 +1584,8 @@ class DownloadManager:
                     if pause_queue:
                         return
 
+            if cancel_event.is_set():
+                raise DownloadCancelledError("Task cancelled")
             self._finish_job(job_id)
         except TemporaryAccessError as exc:
             safe_message = safe_external_error_message(exc)
@@ -1631,6 +1669,60 @@ class DownloadManager:
                     job.refresh_counts()
                 self._commit_locked(job)
             self._notify(self.get_job(job_id), "cancelled" if cancelled else "failed")
+
+    def _download_round_items(
+        self,
+        job_id: str,
+        item_ids: list[str],
+        cancel_event: threading.Event,
+    ) -> Iterator[str]:
+        """Finish the requested queue before one bounded retry of transient errors.
+
+        Only IDs from this invocation are eligible. This never resubmits a job,
+        changes its identity, rediscovers unrelated media, or resets completed
+        items. Unknown, identity, authentication and security errors require an
+        explicit user action instead of an automatic retry.
+        """
+        yield from item_ids
+        if not self.auto_retry_failed_items:
+            return
+        with self._lock:
+            job = self._require_job(job_id)
+            if cancel_event.is_set() or job.cancel_requested:
+                raise DownloadCancelledError("Task cancelled")
+            if not job.retryable or job.status != JobStatus.DOWNLOADING:
+                return
+            retry_ids = [
+                item_id for item_id in dict.fromkeys(item_ids)
+                if self._can_auto_retry_item(self._find_item(job, item_id))
+            ]
+            if not retry_ids:
+                return
+            job.auto_retry_round = 1
+            job.auto_retry_total = len(retry_ids)
+            self._commit_locked(job)
+        self._notify(self.get_job(job_id), "auto_retry_started")
+        for item_id in retry_ids:
+            with self._lock:
+                job = self._require_job(job_id)
+                if cancel_event.is_set() or job.cancel_requested:
+                    raise DownloadCancelledError("Task cancelled")
+                item = self._find_item(job, item_id)
+                if not self._can_auto_retry_item(item):
+                    continue
+                # Preserve verified output paths, per-asset receipts and total
+                # attempt counts. The normal download path revalidates them.
+                self._reset_item(item)
+                self._commit_locked(job)
+            yield item_id
+
+    @staticmethod
+    def _can_auto_retry_item(item: DownloadItem) -> bool:
+        return (
+            item.status == ItemStatus.FAILED
+            and item.retryable
+            and item.issue_code in AUTO_RETRY_SITE_ISSUES
+        )
 
     def _refresh_douyin_media_during_run(
         self,
@@ -2247,6 +2339,8 @@ class DownloadManager:
     def _finish_job(self, job_id: str) -> None:
         with self._lock:
             job = self._require_job(job_id)
+            if job.cancel_requested:
+                raise DownloadCancelledError("Task cancelled")
             job.active_item_id = None
             self._clear_activity_locked(job)
             job.cancel_requested = False
@@ -2280,7 +2374,36 @@ class DownloadManager:
                 job.status = JobStatus.PARTIAL
                 job.error = "Some items were not processed"
             if job.status in {JobStatus.FAILED, JobStatus.PARTIAL}:
+                # A recovered tail item must not leave its old error on the job
+                # card. Select an error that still belongs to unfinished work.
+                remaining_errors = [
+                    item for item in job.items
+                    if item.status in {ItemStatus.FAILED, ItemStatus.NEEDS_AUTH}
+                    and item.error
+                ]
+                if remaining_errors:
+                    relevant = next(
+                        (item for item in remaining_errors
+                         if item.issue_code not in {None, SiteIssueCode.UNKNOWN}),
+                        remaining_errors[0],
+                    )
+                    job.issue_code = relevant.issue_code
+                    job.issue_message = relevant.auth_message or relevant.error
+                    job.diagnostic_code = relevant.diagnostic_code
+                else:
+                    job.issue_code = None
+                    job.issue_message = None
+                    job.diagnostic_code = None
+                    if job.warning:
+                        self._record_issue_locked(job, job.warning)
                 self._backfill_job_issue_locked(job)
+                if remaining_errors:
+                    job.retryable = not job.discovery_complete or any(
+                        item.retryable
+                        and (item.status == ItemStatus.QUEUED
+                             or item.status in RETRYABLE_ITEM_STATUSES)
+                        for item in job.items
+                    )
             job.finished_at = utc_now()
             self._commit_locked(job)
         self._notify(self.get_job(job_id), "finished")

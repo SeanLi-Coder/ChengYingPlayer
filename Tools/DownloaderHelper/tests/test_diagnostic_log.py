@@ -132,6 +132,18 @@ def test_worker_args_return_and_exception_identity_are_preserved():
     assert diagnostics._context.get() is None
 
 
+def test_tail_retry_event_is_exported_without_item_links_or_identity():
+    manager = Manager(jobs=[make_job(status="downloading", auto_retry_round=1)])
+    diagnostics.install_diagnostic_log(manager)
+    manager._notify(manager.jobs[0], "auto_retry_started", SECRET)
+    events = report(manager)["tasks"][0]["events"]
+    assert len(events) == 1
+    assert events[0]["event"] == "auto_retry_started"
+    assert events[0]["status"] == "downloading"
+    assert "source_url" not in events[0]
+    assert "cookie_profile" not in events[0]
+
+
 @pytest.mark.parametrize("control", [KeyboardInterrupt, SystemExit, GeneratorExit, DownloadCancelledError])
 def test_control_signals_propagate_and_context_resets(control):
     error = control(SECRET)

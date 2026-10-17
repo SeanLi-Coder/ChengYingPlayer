@@ -50,7 +50,7 @@ _EVENTS = frozenset({
     "created", "cancel_requested", "started", "discovered", "item_started", "item_completed",
     "interrupted", "needs_auth", "item_failed", "cancelled", "failed", "media_refreshed",
     "activity", "finished", "downloading", "postprocessing", "probing", "metadata",
-    "warning", "asset_completed", "completed",
+    "warning", "asset_completed", "completed", "auto_retry_started",
 })
 _DIRECT_EVENTS = frozenset({"downloading", "postprocessing", "probing", "metadata",
                             "warning", "asset_completed", "completed"})

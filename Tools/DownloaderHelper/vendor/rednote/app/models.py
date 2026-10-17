@@ -139,6 +139,10 @@ class DownloadJob(BaseModel):
     total_items: int = 0
     completed_items: int = 0
     failed_items: int = 0
+    # One bounded tail retry per explicit start/continue action, never a daemon.
+    auto_retry_enabled: bool = False
+    auto_retry_round: int = Field(default=0, ge=0, le=1)
+    auto_retry_total: int = Field(default=0, ge=0)
     active_item_id: str | None = None
     activity_message: str | None = None
     activity_started_at: datetime | None = None

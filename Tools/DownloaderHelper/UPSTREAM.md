@@ -25,6 +25,25 @@ and pytest caches are ignored; they are not source or redistribution assets.
 
 ## Deliberate patches
 
+### End-of-batch retry and per-item source links (2026-10-18)
+
+The native helper explicitly enables this policy; standalone construction keeps
+its previous default and does not advertise automatic tail retries. The task
+manager keeps recoverable item transport failures visible and proceeds
+to the remaining targets. After the first pass, one bounded retry pass considers
+only eligible failures from that submission. Completed items, persisted asset
+receipts, immutable task identity and the selected output directory are retained.
+Authentication, cancellation, rate limiting and security/configuration gates are
+not bypassed. Remaining failures stay in persisted task history for an explicit
+later retry; restarting the player does not start background retries by itself.
+
+Additive job counters expose the retry phase to the interface and default to zero
+for legacy records. The interface reports the retry phase and remaining failures,
+and provides a per-item copy action for strictly validated canonical work pages.
+It never copies a profile in place of a video, expiring CDN addresses, credentials
+or query tokens. Clipboard denial offers selected text for manual copying rather
+than reporting false success. These are integration patches, not upstream changes.
+
 ### 专用登录入口退役（2026-10-09，v0.2.76）
 
 用户要求恢复日常 Chrome Cookie 开关与 Profile 选择。原生宿主不再注册专用登录的
