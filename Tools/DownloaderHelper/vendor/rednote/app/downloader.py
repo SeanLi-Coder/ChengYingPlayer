@@ -316,6 +316,14 @@ FFPROBE_START_MESSAGE = (
 )
 
 
+class DouyinImageDimensionsError(MediaDownloadError):
+    """Every trusted candidate had readable but insufficient image dimensions."""
+
+
+class _DouyinImageBelowDeclaredError(MediaDownloadError):
+    """One candidate failed the dimension floor, not an aggregate queue decision."""
+
+
 class _DouyinProbeRejected(RuntimeError):
     pass
 
@@ -5123,6 +5131,8 @@ class MediaDownloader:
                 raise
             except TemporaryAccessError:
                 raise
+            except DouyinImageDimensionsError:
+                raise
             except Exception as exc:
                 label = "Live Photo" if live_asset else "Image"
                 raise MediaDownloadError(
@@ -6735,8 +6745,11 @@ class MediaDownloader:
         require_quality_fingerprint: bool = False,
         _douyin_transfer_attempt: int = 1,
         _douyin_transfer_budget: _DouyinNoProgressBudget | None = None,
+        _douyin_image_only_dimension_failures: bool = True,
     ) -> tuple[Path, RemoteAsset]:
         errors: list[str] = []
+        image_dimension_failures = 0
+        only_image_dimension_failures = _douyin_image_only_dimension_failures
         douyin_transient_errors: list[str] = []
         douyin_redirect_errors: list[TemporaryAccessError] = []
         douyin_refresh_errors: list[DouyinMediaRefreshRequiredError] = []
@@ -7066,9 +7079,14 @@ class MediaDownloader:
                                 < max(asset.width, asset.height)
                             )
                         ):
-                            raise MediaDownloadError(
+                            error_type = (
+                                _DouyinImageBelowDeclaredError
+                                if is_douyin_source else MediaDownloadError
+                            )
+                            raise error_type(
                                 "Media server returned an image below its declared "
-                                f"{asset.width}x{asset.height} resolution"
+                                f"{asset.width}x{asset.height} resolution; "
+                                f"measured {actual_width}x{actual_height}"
                             )
                         chosen = RemoteAsset(
                             candidates=list(asset.candidates),
@@ -7225,6 +7243,7 @@ class MediaDownloader:
                 except DownloadCancelledError:
                     raise
                 except TemporaryAccessError as exc:
+                    only_image_dimension_failures = False
                     if (
                         is_douyin_source
                         and "Douyin media redirect could not be trusted" in str(exc)
@@ -7247,6 +7266,10 @@ class MediaDownloader:
                         continue
                     raise
                 except Exception as exc:
+                    if isinstance(exc, _DouyinImageBelowDeclaredError):
+                        image_dimension_failures += 1
+                    else:
+                        only_image_dimension_failures = False
                     self._close_douyin_probe_error(exc)
                     if is_douyin_source and transfer_budget is not None:
                         transfer_budget.remaining()
@@ -7312,6 +7335,9 @@ class MediaDownloader:
                     require_quality_fingerprint=require_quality_fingerprint,
                     _douyin_transfer_attempt=_douyin_transfer_attempt + 1,
                     _douyin_transfer_budget=transfer_budget,
+                    _douyin_image_only_dimension_failures=(
+                        only_image_dimension_failures
+                    ),
                 )
             if douyin_redirect_errors:
                 raise douyin_redirect_errors[-1]
@@ -7329,6 +7355,18 @@ class MediaDownloader:
         if douyin_refresh_errors:
             raise douyin_refresh_errors[-1]
         detail = errors[-1] if errors else "No asset URLs were available"
+        if (
+            is_douyin_source
+            and media_type == MediaType.IMAGE
+            and verify_declared_dimensions
+            and only_image_dimension_failures
+            and image_dimension_failures > 0
+            and image_dimension_failures == len(errors)
+        ):
+            raise DouyinImageDimensionsError(
+                f"All highest-available media URLs failed: {detail}",
+                issue_code=SiteIssueCode.SITE_RESPONSE_CHANGED,
+            )
         raise MediaDownloadError(f"All highest-available media URLs failed: {detail}")
 
     @staticmethod

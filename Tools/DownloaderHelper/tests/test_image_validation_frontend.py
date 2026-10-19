@@ -22,6 +22,9 @@ EXPORT = """  window.imageTest = {
 """
 UNVERIFIED = "Highest-available image dimensions could not be verified"
 BELOW = "Media server returned an image below its declared 2160x3840 resolution"
+MEASURED = BELOW + "; measured 1080x1920"
+AGGREGATE = "All highest-available media URLs failed: Candidate 3: "
+KNOWN_PREFIXES = ["", "Image 2 failed: ", AGGREGATE, "Image 2 failed: " + AGGREGATE]
 LABELS = {
     "douyin": "抖音", "xiaohongshu": "小红书", "kuaishou": "快手",
     "instagram": "Instagram", "bilibili": "B站", "youtube": "YouTube",
@@ -96,6 +99,76 @@ def test_wrapped_image_failure_does_not_echo_raw_media_urls_or_tokens():
     assert "example.invalid" not in text
     assert "synthetic-private-token" not in text
     assert "Image 2 failed" not in text
+
+
+@pytest.mark.parametrize(("platform", "label"), LABELS.items())
+@pytest.mark.parametrize("prefix", KNOWN_PREFIXES)
+def test_measured_dimensions_only_add_bounded_numeric_evidence(platform, label, prefix):
+    text = localize(prefix + MEASURED, {"platform": platform})
+    assert text.startswith(label + "图片的实测尺寸低于作品声明值")
+    assert "声明尺寸：2160×3840；实测尺寸：1080×1920。" in text
+    assert "未通过校验的候选不会作为成功文件保存" in text
+    assert "会尝试下一条" not in text
+    assert "脱敏诊断" in text
+    assert "Image 2" not in text
+    assert "Candidate 3" not in text
+
+
+def test_dimensions_include_positive_integer_bounds():
+    message = "Media server returned an image below its declared 16384x16384 resolution; measured 1x1"
+    assert "声明尺寸：16384×16384；实测尺寸：1×1。" in localize(message, {"platform": "douyin"})
+
+
+def test_known_wrapper_indices_accept_only_bounded_positive_integers():
+    prefix = "Image 999 failed: All highest-available media URLs failed: Candidate 999: "
+    assert "声明尺寸：2160×3840；实测尺寸：1080×1920。" in localize(prefix + MEASURED, {"platform": "douyin"})
+
+
+@pytest.mark.parametrize("prefix", [
+    "Image 0 failed: ", "Image 1000 failed: ", "Image 01 failed: ", "Image -1 failed: ",
+    "All highest-available media URLs failed: Candidate 0: ",
+    "All highest-available media URLs failed: Candidate 1000: ",
+    "All highest-available media URLs failed: Candidate 03: ",
+    "All highest-available media URLs failed: Candidate -3: ",
+    "Candidate 3: ", "All highest-available media URLs failed: ", "Other failure: ",
+    AGGREGATE + AGGREGATE, AGGREGATE + "Image 2 failed: ", "Image 2 failed: Image 3 failed: ",
+])
+def test_unknown_or_invalid_wrappers_keep_generic_message(prefix):
+    assert localize(prefix + MEASURED, {"platform": "douyin"}) == localize(BELOW, {"platform": "douyin"})
+
+
+@pytest.mark.parametrize("position", range(4))
+@pytest.mark.parametrize("invalid", ["0", "-1", "01", "16385", "999999", "1.5", "1e3", "２"])
+def test_invalid_dimensions_keep_generic_message(position, invalid):
+    dimensions = ["2160", "3840", "1080", "1920"]
+    dimensions[position] = invalid
+    message = (
+        f"Media server returned an image below its declared {dimensions[0]}x{dimensions[1]} "
+        f"resolution; measured {dimensions[2]}x{dimensions[3]}"
+    )
+    assert localize(message, {"platform": "douyin"}) == localize(BELOW, {"platform": "douyin"})
+
+
+@pytest.mark.parametrize("message", [
+    MEASURED + "\n", MEASURED + "\r", MEASURED + ".", MEASURED + " extra",
+    UNVERIFIED + "; " + MEASURED,
+    MEASURED + "; https://example.invalid/media?token=synthetic-private-token",
+    MEASURED + '; <img src=x onerror="window.injected=true">',
+    "https://synthetic-user:synthetic-password@example.invalid/" + MEASURED,
+    AGGREGATE + MEASURED + "; https://example.invalid/media?token=synthetic-private-token",
+    "Image 2 failed: " + AGGREGATE + MEASURED + '; <img src=x onerror="window.injected=true">',
+    "Image 2 failed: " + AGGREGATE + MEASURED + "\n",
+])
+def test_wrapped_or_extended_dimensions_are_not_trusted_or_echoed(message):
+    text = localize(message, {"platform": "douyin"})
+    assert "声明尺寸：" not in text
+    assert "实测尺寸：" not in text
+    assert "2160" not in text
+    assert "example.invalid" not in text
+    assert "synthetic-" not in text
+    assert "img src" not in text
+    assert "window.injected" not in text
+    assert "未通过校验的候选不会作为成功文件保存" in text
 
 
 @pytest.fixture(scope="module")
@@ -183,5 +256,35 @@ def test_dom_uses_generic_safe_text_for_unknown_platform_and_wrapped_failure(pag
         expect(page.locator(selector)).to_contain_text("当前图片的尺寸未能读取或验证")
         expect(page.locator(selector)).not_to_contain_text("synthetic-private-token")
         expect(page.locator(selector)).not_to_contain_text("example.invalid")
+        assert page.locator(selector + " img").count() == 0
+    assert page.evaluate("window.injected === undefined")
+
+
+@pytest.mark.parametrize("prefix", KNOWN_PREFIXES)
+def test_actual_item_and_job_warning_update_measured_dimensions_without_stale_evidence(page, prefix):
+    render(page, sample_job("douyin", prefix + MEASURED))
+    for selector in (".item-error", "#warning-message"):
+        expect(page.locator(selector)).to_contain_text("声明尺寸：2160×3840；实测尺寸：1080×1920。")
+        expect(page.locator(selector)).to_contain_text("未通过校验的候选不会作为成功文件保存")
+    page.evaluate("job => imageTest.handleEvent({data: JSON.stringify(job)})", sample_job("douyin", BELOW, 2))
+    for selector in (".item-error", "#warning-message"):
+        expect(page.locator(selector)).to_contain_text("实测尺寸低于作品声明值")
+        expect(page.locator(selector)).not_to_contain_text("声明尺寸：")
+        expect(page.locator(selector)).not_to_contain_text("实测尺寸：")
+
+
+def test_actual_aggregate_shape_renders_evidence_and_rejects_appended_private_text(page):
+    message = AGGREGATE + "Media server returned an image below its declared 1000x2079 resolution; measured 924x1920"
+    render(page, sample_job("douyin", message))
+    for selector in (".item-error", "#warning-message"):
+        expect(page.locator(selector)).to_contain_text("声明尺寸：1000×2079；实测尺寸：924×1920。")
+    message += '; https://example.invalid/?token=synthetic-private-token <img src=x onerror="window.injected=true">'
+    page.evaluate("job => imageTest.handleEvent({data: JSON.stringify(job)})", sample_job("douyin", message, 2))
+    for selector in (".item-error", "#warning-message"):
+        expect(page.locator(selector)).to_contain_text("实测尺寸低于作品声明值")
+        expect(page.locator(selector)).not_to_contain_text("声明尺寸：")
+        expect(page.locator(selector)).not_to_contain_text("实测尺寸：")
+        expect(page.locator(selector)).not_to_contain_text("example.invalid")
+        expect(page.locator(selector)).not_to_contain_text("synthetic-private-token")
         assert page.locator(selector + " img").count() == 0
     assert page.evaluate("window.injected === undefined")

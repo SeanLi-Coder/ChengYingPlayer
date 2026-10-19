@@ -1849,12 +1849,18 @@
       const subject = Object.hasOwn(labels, platform) ? `${labels[platform]}图片` : "当前图片";
       const unverified = text.includes("Highest-available image dimensions could not be verified");
       const belowDeclared = text.includes("image below its declared");
+      const dimensions = text.match(/^(?:Image [1-9][0-9]{0,2} failed: )?(?:All highest-available media URLs failed: Candidate [1-9][0-9]{0,2}: )?Media server returned an image below its declared ([1-9][0-9]{0,4})x([1-9][0-9]{0,4}) resolution; measured ([1-9][0-9]{0,4})x([1-9][0-9]{0,4})$/);
+      const verifiedDimensions = dimensions?.[0] === text
+        && dimensions.slice(1).every(value => Number(value) <= 16384);
+      const measurements = verifiedDimensions
+        ? `声明尺寸：${dimensions[1]}×${dimensions[2]}；实测尺寸：${dimensions[3]}×${dimensions[4]}。`
+        : "";
       const reason = unverified && belowDeclared
         ? "候选同时报告了尺寸低于声明值和尺寸无法验证，不能只归因为低清。"
         : unverified
           ? "尺寸未能读取或验证，不能据此认定图片是低清。"
           : "实测尺寸低于作品声明值，未通过尺寸校验。";
-      return `${subject}的${reason}未通过校验的候选不会作为成功文件保存；请查看任务状态，稍后重试仍失败时复制脱敏诊断反馈。`;
+      return `${subject}的${reason}${measurements}未通过校验的候选不会作为成功文件保存；请查看任务状态，稍后重试仍失败时复制脱敏诊断反馈。`;
     }
     if (text.includes("FFprobe was found but could not be started")) {
       return "已找到 FFprobe，但程序无法启动它。请重新安装包含 FFprobe 的 FFmpeg，然后完全停止并重启程序。";

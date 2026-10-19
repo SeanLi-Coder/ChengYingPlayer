@@ -81,6 +81,7 @@ _LOADED_TYPES = {
     "app.browser": ("ChromeCookieAccessError",),
     "chrome_cookie_runtime": ("CookieSnapshotError",),
     "app.douyin_signing": ("_CookieAccessSigningFailure",),
+    "app.downloader": ("DouyinImageDimensionsError", "_DouyinImageBelowDeclaredError"),
     "app.errors": ("DownloadCancelledError", "DownloaderCoreError", "MediaDownloadError",
                    "AuthenticationRequiredError", "TemporaryAccessError"),
     "yt_dlp.cookies": ("CookieLoadError",),

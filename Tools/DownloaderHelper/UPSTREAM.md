@@ -25,6 +25,26 @@ and pytest caches are ignored; they are not source or redistribution assets.
 
 ## Deliberate patches
 
+### Item-local Douyin image dimension failures (2026-10-19)
+
+All image candidates still must pass the original trusted-URL, response and
+declared-dimension gates. A separate aggregate exception is emitted only when
+every attempted candidate had readable but insufficient dimensions. A mixed
+failure, including any prior transport retry, never receives this exception.
+The image wrapper preserves its type; public messages retain bounded numeric
+declared/measured dimensions, not media addresses. Native diagnostic export
+recognizes the fixed exception types without exporting their messages.
+
+The native opt-in queue uses current-invocation typed evidence to continue later
+works and retry these failed image works once at the end. No persisted text or
+issue code alone grants that exception. Generic Douyin response changes and all
+existing authentication, identity, rate-limit and security gates still pause.
+Standalone defaults, existing outputs, task identities and explicit continuation
+remain unchanged. Insufficient images are never published or counted completed.
+Synthetic tests cover mixed errors, retry history, cancellation, restarts and
+preservation of completed files. Real-site inspection confirmed undersized
+responses for one consented album; it did not recover its declared-size images.
+
 ### Douyin image headers and platform-specific validation messages (2026-10-18)
 
 The native Requests adapter can return a short `read1` fragment before a complete

@@ -308,6 +308,21 @@ if DownloadCenterService.supportsRuntime {
       if ready { break }
       pumpEvents(for: 0.01)
     } while Date() < deadline
+    if !ready {
+      let diagnostics = fullPageValue("""
+        JSON.stringify({
+          readiness: window.fixtureVendorReadiness?.() ?? null,
+          hasDirectory: Boolean(document.querySelector('#download-dir')?.value),
+          savedProfileSelected: document.querySelector('#desktop-chrome-profile')?.value === 'Profile 1',
+          bridgeProfileSelected: document.querySelector('#chrome-profile')?.value === 'Profile 1',
+          saveDisabled: document.querySelector('#save-settings-button')?.disabled ?? null,
+          profileDisabled: document.querySelector('#desktop-chrome-profile')?.disabled ?? null,
+          confirmedSaved: document.querySelector('#desktop-chrome-profile-status')?.textContent.includes('已保存 Profile 1') ?? false,
+          putCount: (window.fixtureRequests ?? []).filter(request => request.path === '/api/config' && request.method === 'PUT').length
+        })
+        """) as? String ?? "unavailable"
+      print("Native WebKit wait diagnostics: \(diagnostics)")
+    }
     // Do not evaluate successful expressions again: some perform one UI action.
     check(ready, description)
   }
@@ -808,6 +823,18 @@ if DownloadCenterService.supportsRuntime {
       document.querySelector('#download-button').click(); undefined
       """)
   }
+  // Independent profile inventory can finish before the original frontend's
+  // initial task detail. Exercise that ordering before the first profile save.
+  readGateFixture("job_detail", hold: true)
+  _ = fullPageValue("window.fixtureInitialProfileReloadMarker = true; undefined")
+  fullController.webView.reload()
+  waitForPage("A fresh profile document can be ready while initial task detail remains pending", """
+    !window.fixtureInitialProfileReloadMarker && document.querySelector('#desktop-chrome-profile')
+      && !document.querySelector('#desktop-chrome-profile').disabled
+      && document.querySelector('#download-dir').value === '/tmp/Fixture proxy settings'
+      && window.fixtureVendorReadiness().backendReady && !window.fixtureVendorReadiness().initialized
+    """)
+  readGateFixture("job_detail", waitForEntry: true)
   waitForPage("Real WebKit renders actual synthetic profile choices and preserves missing Default", """
     (() => {
       const select = document.querySelector('#desktop-chrome-profile');
@@ -839,6 +866,38 @@ if DownloadCenterService.supportsRuntime {
   profileFixture()
   check(fullPageValue("window.fixtureProfileSnapshot.selected_profile === 'Default' && window.fixtureProfileSnapshot.config_writes === 1 && window.fixtureProfileSnapshot.jobs.length === 0") as? Bool == true,
         "Choosing a dropdown item alone changes neither persisted identity nor task state")
+  check(fullPageValue("""
+    window.fixtureVendorReadiness().backendReady && !window.fixtureVendorReadiness().initialized
+      && document.querySelector('#download-dir').value === '/tmp/Fixture proxy settings'
+      && window.fixtureReadGateSnapshot.job_detail.held && window.fixtureReadGateSnapshot.job_detail.entered
+      && !window.fixtureReadGateSnapshot.job_detail.timed_out
+    """) as? Bool == true,
+        "Profile preflight checks can pass while the original frontend still awaits its task detail")
+  _ = fullPageValue("document.querySelector('#save-settings-button').click(); undefined")
+  waitForPage("The first profile save is rejected before initial task loading finishes", """
+    document.querySelector('#toast-region').textContent.includes('正在读取后台设置')
+      && !document.querySelector('#desktop-chrome-profile-refresh').disabled
+      && !document.querySelector('#save-settings-button').disabled
+    """)
+  profileFixture()
+  readGateFixture("job_detail")
+  check(fullPageValue("""
+    window.fixtureProfileSnapshot.selected_profile === 'Default' && window.fixtureProfileSnapshot.config_writes === 1
+      && window.fixtureProfileSnapshot.jobs.length === 0 && window.fixtureProfileSnapshot.use_chrome_cookies
+      && !window.fixtureVendorReadiness().initialized
+      && window.fixtureReadGateSnapshot.job_detail.held && window.fixtureReadGateSnapshot.job_detail.entered
+      && !window.fixtureReadGateSnapshot.job_detail.timed_out
+      && window.fixtureRequests.every(request => request.path !== '/api/config' || request.method !== 'PUT')
+    """) as? Bool == true,
+        "A premature explicit profile save performs no configuration write or task creation")
+  readGateFixture("job_detail", hold: false)
+  waitForPage("Actual initialization completes before the explicit profile save is retried", """
+    window.fixtureVendorReadiness().backendReady && window.fixtureVendorReadiness().initialized
+      && !document.querySelector('#desktop-chrome-profile').disabled
+      && document.querySelector('#desktop-chrome-profile').value === 'Profile 1'
+      && document.querySelector('#download-dir').value === '/tmp/Fixture proxy settings'
+      && !document.querySelector('#save-settings-button').disabled
+    """)
   _ = fullPageValue("document.querySelector('#save-settings-button').click(); undefined")
   waitForPage("The original save handler persists Profile 1 and the native refresh confirms it", """
     !document.querySelector('#desktop-chrome-profile').disabled

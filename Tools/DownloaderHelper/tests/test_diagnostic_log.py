@@ -664,3 +664,15 @@ def test_bad_attributes_and_non_numeric_system_codes_are_not_serialized():
     error.sqlite_errorcode = SECRET
     details = diagnostics._exception_details(error)
     assert details == {"exceptions": [{"type": "unknown", "frames": [], "frames_truncated": False}], "chain_truncated": False}
+
+
+def test_typed_image_quality_error_exports_only_fixed_type():
+    from app.downloader import DouyinImageDimensionsError
+    from diagnostic_log import _exception_details
+
+    result = _exception_details(DouyinImageDimensionsError(
+        "Private source https://example.invalid/image?token=do-not-export"
+    ))
+    assert result["exceptions"][0]["type"] == "DouyinImageDimensionsError"
+    assert "do-not-export" not in str(result)
+    assert "example.invalid" not in str(result)

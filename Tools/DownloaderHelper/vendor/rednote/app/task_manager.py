@@ -21,6 +21,7 @@ from .downloader import (
     DOUYIN_ITEM_EXPANSION_MESSAGE,
     KUAISHOU_SAVED_ASSETS_KEY,
     DiscoveryResult,
+    DouyinImageDimensionsError,
     DownloaderConfig,
     EngineEvent,
     MediaDownloader,
@@ -1313,8 +1314,12 @@ class DownloadManager:
                     self._commit_locked(job)
 
             targets = set(item_ids or [])
+            # Only current, typed image failures may bypass the broad Douyin
+            # response-change gate. Never derive this evidence from saved text.
+            image_dimension_retry_ids: set[str] = set()
             for item_id in self._download_round_items(
-                job_id, list(item_ids or []), cancel_event
+                job_id, list(item_ids or []), cancel_event,
+                image_dimension_retry_ids=image_dimension_retry_ids,
             ):
                 if cancel_event.is_set():
                     raise DownloadCancelledError("Task cancelled")
@@ -1324,6 +1329,7 @@ class DownloadManager:
                     item = self._find_item(job, item_id)
                     if item.id not in targets or item.status != ItemStatus.QUEUED:
                         continue
+                    image_dimension_retry_ids.discard(item_id)
                     item.status = ItemStatus.DOWNLOADING
                     item.attempts += 1
                     item.error = None
@@ -1551,6 +1557,15 @@ class DownloadManager:
                         item.retryable = (
                             item.issue_code not in NON_RETRYABLE_SITE_ISSUES
                         )
+                        isolated_image_failure = (
+                            self.auto_retry_failed_items
+                            and job.platform == Platform.DOUYIN
+                            and item.media_type == MediaType.IMAGE
+                            and isinstance(exc, DouyinImageDimensionsError)
+                            and item.issue_code == SiteIssueCode.SITE_RESPONSE_CHANGED
+                        )
+                        if isolated_image_failure:
+                            image_dimension_retry_ids.add(item_id)
                         pause_queue = (
                             item.issue_code in QUEUE_PAUSE_SITE_ISSUES
                             and not (self.auto_retry_failed_items
@@ -1558,6 +1573,7 @@ class DownloadManager:
                         ) or (
                             job.platform == Platform.DOUYIN
                             and item.issue_code == SiteIssueCode.SITE_RESPONSE_CHANGED
+                            and not isolated_image_failure
                         )
                         if (
                             binding_error == XIAOHONGSHU_ITEM_BINDING_ERROR
@@ -1675,13 +1691,17 @@ class DownloadManager:
         job_id: str,
         item_ids: list[str],
         cancel_event: threading.Event,
+        *,
+        image_dimension_retry_ids: set[str],
     ) -> Iterator[str]:
         """Finish the requested queue before one bounded retry of transient errors.
 
         Only IDs from this invocation are eligible. This never resubmits a job,
         changes its identity, rediscovers unrelated media, or resets completed
-        items. Unknown, identity, authentication and security errors require an
-        explicit user action instead of an automatic retry.
+        items. A typed image-dimension failure observed during this invocation
+        may also retry once; no saved error message grants this exception.
+        Unknown, identity, authentication and security errors require an explicit
+        user action instead of an automatic retry.
         """
         yield from item_ids
         if not self.auto_retry_failed_items:
@@ -1694,7 +1714,10 @@ class DownloadManager:
                 return
             retry_ids = [
                 item_id for item_id in dict.fromkeys(item_ids)
-                if self._can_auto_retry_item(self._find_item(job, item_id))
+                if self._can_auto_retry_item(
+                    self._find_item(job, item_id),
+                    image_dimensions_failed=item_id in image_dimension_retry_ids,
+                )
             ]
             if not retry_ids:
                 return
@@ -1708,7 +1731,10 @@ class DownloadManager:
                 if cancel_event.is_set() or job.cancel_requested:
                     raise DownloadCancelledError("Task cancelled")
                 item = self._find_item(job, item_id)
-                if not self._can_auto_retry_item(item):
+                if not self._can_auto_retry_item(
+                    item,
+                    image_dimensions_failed=item_id in image_dimension_retry_ids,
+                ):
                     continue
                 # Preserve verified output paths, per-asset receipts and total
                 # attempt counts. The normal download path revalidates them.
@@ -1717,11 +1743,20 @@ class DownloadManager:
             yield item_id
 
     @staticmethod
-    def _can_auto_retry_item(item: DownloadItem) -> bool:
+    def _can_auto_retry_item(
+        item: DownloadItem, *, image_dimensions_failed: bool = False,
+    ) -> bool:
         return (
             item.status == ItemStatus.FAILED
             and item.retryable
-            and item.issue_code in AUTO_RETRY_SITE_ISSUES
+            and (
+                item.issue_code in AUTO_RETRY_SITE_ISSUES
+                or (
+                    image_dimensions_failed
+                    and item.issue_code == SiteIssueCode.SITE_RESPONSE_CHANGED
+                    and item.media_type == MediaType.IMAGE
+                )
+            )
         )
 
     def _refresh_douyin_media_during_run(
