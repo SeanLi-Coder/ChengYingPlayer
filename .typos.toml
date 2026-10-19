@@ -11,6 +11,8 @@ ignore-hidden = false
 
 [default]
 extend-ignore-re = [
+    # Exact immutable release commit abbreviation, not the English fragment "ba".
+    '\b99ba920b\b',
     # Exact ISO BMFF/MOV track-box byte identifier; it is not the word "track".
     '\bb"trak"',
     # Exact upstream FFmpeg makefile extension and Rust crate identifiers.
