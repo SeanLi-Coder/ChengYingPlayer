@@ -24,6 +24,21 @@
 - Documentation-only handoffs do not require a new player version or release tag.
   Player releases must still satisfy every requirement below.
 
+# Live-test download cleanup
+
+- Downloaded videos, images, partial transfers and derived media created solely
+  for agent testing must be cleaned up after verification, including failed or
+  cancelled runs. Retain them only when the user explicitly asks to keep them.
+- Use a unique owned temporary directory and exception-safe cleanup. Keep test
+  output separate from the user's real download directory and task history.
+- Before reporting completion, verify that the run's owned media output is gone.
+  If interrupted cleanup left artifacts, resolve their exact ownership and check
+  that they are no longer in use before removing them. Report cleanup failures;
+  never delete broad directory trees or infer ownership from a filename alone.
+- Preserve user originals, normal downloads, models, browser profiles, tracked
+  synthetic fixtures and the release archives/evidence required below. Retain
+  only necessary redacted test results, never cookies or signed media URLs.
+
 # Local release verification hygiene
 
 - Use the tracked `other/verify_public_release.py` for public install validation,
