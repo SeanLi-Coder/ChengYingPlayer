@@ -100,6 +100,7 @@ class RemoteAsset:
     probe_prefix_size: int | None = None
     probe_prefix_sha256: str | None = None
     redirect_source_url: str | None = None
+    source_timing: dict[str, float] | None = None
 
 
 @dataclass(slots=True)

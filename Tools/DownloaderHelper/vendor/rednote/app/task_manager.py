@@ -58,6 +58,7 @@ from .models import (
     Platform,
     SourceKind,
     TransferProgress,
+    normalized_source_timing,
     utc_now,
 )
 from .platforms import identify_url
@@ -1336,6 +1337,7 @@ class DownloadManager:
                     item.auth_message = None
                     item.issue_code = None
                     item.diagnostic_code = None
+                    item.source_timing = None
                     item.updated_at = utc_now()
                     job.active_item_id = item.id
                     job.status = JobStatus.DOWNLOADING
@@ -1420,6 +1422,10 @@ class DownloadManager:
                         item.media_type = outcome.media_type or item.media_type
                         item.selected_format = outcome.selected_format
                         item.resolution = outcome.resolution
+                        item.source_timing = (
+                            normalized_source_timing(getattr(outcome, "source_timing", None))
+                            if job.platform == Platform.DOUYIN else None
+                        )
                         if (
                             job.platform == Platform.DOUYIN
                             and job.source_kind == SourceKind.PROFILE
@@ -2252,6 +2258,11 @@ class DownloadManager:
                 item.selected_format = event.selected_format
             if event.resolution:
                 item.resolution = event.resolution
+            if event.event == "completed":
+                item.source_timing = (
+                    normalized_source_timing(getattr(event, "source_timing", None))
+                    if job.platform == Platform.DOUYIN else None
+                )
             if event.output_paths:
                 if event.event == "asset_completed":
                     item.output_paths = list(
@@ -3636,6 +3647,7 @@ class DownloadManager:
             fresh.output_paths = list(old.output_paths)
             fresh.selected_format = old.selected_format
             fresh.resolution = old.resolution
+            fresh.source_timing = None
             fresh.error = old.error
             fresh.auth_message = old.auth_message
             fresh.retryable = old.retryable
@@ -3785,6 +3797,7 @@ class DownloadManager:
         item.auth_message = None
         item.issue_code = None
         item.diagnostic_code = None
+        item.source_timing = None
         item.progress = item.progress.model_copy(
             update={
                 "downloaded_bytes": 0,

@@ -202,7 +202,10 @@ def test_already_complete_range_body_never_downloads_same_file_again(
     entire_file = b"\x00\x00\x00\x18ftypisom-complete-file"
     origin = FixtureOrigin(prefix=entire_file, full_payload=entire_file)
     paths = install_origin(monkeypatch, engine, origin)
-    calls = install_ffprobe(monkeypatch, engine, prefix_duration=prefix_duration)
+    calls = install_ffprobe(
+        monkeypatch, engine, prefix_duration=prefix_duration,
+        full_duration=prefix_duration,
+    )
 
     if prefix_duration == 12.0:
         assert probe(engine, origin)["duration"] == 12.0
@@ -211,7 +214,8 @@ def test_already_complete_range_body_never_downloads_same_file_again(
             probe(engine, origin)
 
     assert len(origin.requests) == 1
-    assert len(calls) == 1
+    assert len(calls) == (1 if prefix_duration == 12.0 else 2)
+    assert all(path is None or not path.exists() for _, path in calls)
     assert not paths
     assert origin.responses[0].closed
 

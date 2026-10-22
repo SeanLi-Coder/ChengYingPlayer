@@ -18,6 +18,9 @@ PATCHED_FILES = {
     "app/static/styles.css",
     "app/browser.py", "app/douyin_signing.py", "app/douyin.py",
     "tests/test_stop.py", "tests/test_signing_diagnostics.py",
+    "tests/test_douyin_duration_probe.py",
+    "app/xiaohongshu.py",
+    "tests/test_downloader.py",
 }
 INTEGRATION_FILES = {"app/kuaishou.py", "app/instagram.py"}
 IGNORED_CACHE_DIRECTORIES = {"__pycache__", ".pytest_cache"}

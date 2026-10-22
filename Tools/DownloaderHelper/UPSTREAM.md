@@ -25,6 +25,49 @@ and pytest caches are ignored; they are not source or redistribution assets.
 
 ## Deliberate patches
 
+### Explicit original-source unequal-track timing (2026-10-22)
+
+The user approved saving the site's original highest-quality file when a complete
+video has a shorter video track than its audio. The native host explicitly enables
+`allow_douyin_unequal_tracks`; standalone defaults and album Live Photo probes stay
+strict. The exception requires a complete seekable object with a verified exact
+byte count, positive finite video/audio/container durations, and audio plus container
+durations matching the original site declaration within the unchanged tolerance.
+Missing, contradictory or prefix-only evidence cannot grant the exception.
+
+The original video-duration fingerprint is retained. A separate four-number
+`source_timing` record follows the chosen candidate through cache identity, final
+file re-verification, outcome, task persistence and the public completed-item notice.
+The final file must reproduce each timing value within one millisecond. The
+`app/xiaohongshu.py` RemoteAsset structure has one optional timing field solely to
+carry this evidence; other platform behavior is unchanged. Models and the public
+boundary whitelist finite numeric data, and the UI builds a fixed localized notice,
+not a remote message. New attempts clear stale timing, while completed records survive
+restarts. Identity, mandatory default quality, dimensions, content, trusted endpoints,
+exclusive publication and cleanup remain enforced. No transcoding, padded video,
+quality fallback or claim of missing video frames is introduced.
+
+One upstream parser test's exact dictionary assertion additionally checks the new
+three fields. All original values and rejection expectations remain unchanged.
+
+### Seekable confirmation of complete short probe bodies (2026-10-22)
+
+A fragmented MP4 read through a non-seekable pipe can report only the first
+fragment's duration even if the entire object fits in the 256 KiB probe prefix.
+Conflicting duration metadata now requires seekable verification in this case
+too. An exactly byte-bound complete HTTP 200 or 206 response is written to the
+existing owned temporary probe file without requesting it again. Unknown,
+incomplete or inconsistent range metadata still requires the full-file path.
+Size, content fingerprint, strict duration tolerance, cancellation and default
+quality checks are unchanged. Temporary media follows the existing cleanup and
+scoped reuse rules; no user output is published before validation.
+
+The upstream duration test's mock is narrowly corrected to expect local
+confirmation, not another HTTP request. Its genuinely short-file rejection stays
+intact. Additive native-helper regressions use real FFprobe and synthetic MP4s,
+including the 50.804-second versus 10.033-second diagnostic pattern; these
+synthetic results alone do not establish the reported website sample's cause.
+
 ### Item-local Douyin image dimension failures (2026-10-19)
 
 All image candidates still must pass the original trusted-URL, response and
@@ -635,12 +678,13 @@ Production `stop.py` and its strict refusal to signal unverified processes are
 unchanged. The native adapter must use its authenticated owned process lifecycle,
 not legacy listener discovery or global process termination.
 
-`tests/test_stop.py` and `tests/test_signing_diagnostics.py` are the two modified
-upstream test-source files; both changes are allowlisted and hashed in the
-manifest, and no other upstream test file is modified. The signing diagnostics
+`tests/test_stop.py`, `tests/test_signing_diagnostics.py`,
+`tests/test_douyin_duration_probe.py` and `tests/test_downloader.py` are the four modified upstream test-source
+files; each change is allowlisted and hashed in the manifest. The signing diagnostics
 file only gains additive tests for the Chrome Cookie diagnostic categories
-described above. Upstream hashes are preserved for both files, so the original
-sources remain verifiable.
+described above. Upstream hashes are preserved for all files, so the original
+sources remain verifiable. The duration test preserves the no-redownload
+assertion while requiring seekable confirmation of conflicting complete bodies.
 
 After the isolated-test correction, the complete vendored suite passed:
 **1381 passed in 65.23 seconds**. It ran from a temporary source copy with

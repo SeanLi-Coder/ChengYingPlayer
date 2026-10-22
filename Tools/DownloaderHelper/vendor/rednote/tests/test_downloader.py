@@ -7269,6 +7269,9 @@ def test_douyin_ffprobe_payload_parses_video_and_audio_streams() -> None:
         "acodec": "aac",
         "bit_rate": 1_088_835,
         "duration": "72.809002",
+        "video_duration": None,
+        "audio_duration": None,
+        "container_duration": "72.809002",
     }
 
 

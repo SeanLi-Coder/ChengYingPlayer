@@ -105,6 +105,8 @@ def configure_download_layout(engine):
     engine.manager.new_job_output_layout = OutputLayout.AUTHOR
     # Enable the player's bounded retry policy without changing standalone defaults.
     engine.manager.auto_retry_failed_items = True
+    # Preserve verified website originals while exposing unequal track durations.
+    engine.manager.downloader_config.allow_douyin_unequal_tracks = True
 
 
 class ShutdownController:

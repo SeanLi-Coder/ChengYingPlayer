@@ -1004,6 +1004,15 @@ svg {
   display: none;
 }
 
+.item-source-timing {
+  margin: 5px 0 0;
+  color: #e6be7e;
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .item-files {
   margin-top: 7px;
   color: var(--muted);

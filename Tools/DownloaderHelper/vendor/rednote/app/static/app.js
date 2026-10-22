@@ -992,6 +992,16 @@
     return parts.join(" · ");
   }
 
+  function itemSourceTimingNotice(item, job) {
+    if (getPlatform(job) !== "douyin" || rawStatus(item) !== "completed" || item?.media_type !== "video") return "";
+    const timing = item?.source_timing;
+    const fields = ["declared_duration", "video_duration", "audio_duration", "container_duration"];
+    if (!timing || typeof timing !== "object" || Array.isArray(timing) || Object.keys(timing).length !== fields.length) return "";
+    if (!fields.every((field) => typeof timing[field] === "number" && Number.isFinite(timing[field]) && timing[field] > 0)) return "";
+    if (timing.audio_duration <= timing.video_duration) return "";
+    return `网站原样文件：画面 ${timing.video_duration.toFixed(3)} 秒，音频 ${timing.audio_duration.toFixed(3)} 秒；音画时长不同，未转码或补帧。`;
+  }
+
   function itemSourceLink(item, job) {
     // Copy only a canonical work page, never a signed media URL or task profile.
     if (typeof item?.source_url !== "string" || item.source_url.length > 8192 || /[\u0000-\u0020\u007f]/.test(item.source_url)) return "";
@@ -2428,6 +2438,13 @@
       node.classList.add(tone);
       node.querySelector(".item-title").textContent = itemTitle(item, index);
       node.querySelector(".item-meta").textContent = itemMetadata(item);
+      const timingNotice = itemSourceTimingNotice(item, job);
+      if (timingNotice) {
+        const notice = document.createElement("p");
+        notice.className = "item-source-timing";
+        notice.textContent = timingNotice;
+        node.querySelector(".item-meta").after(notice);
+      }
       const status = node.querySelector(".item-status");
       status.classList.add(tone);
       status.textContent = statusLabel(item, job);

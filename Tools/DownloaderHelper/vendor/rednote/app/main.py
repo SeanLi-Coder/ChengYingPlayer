@@ -24,7 +24,7 @@ from .build_info import APP_ID, APP_VERSION, BUILD_ID, calculate_build_id
 from .downloader import DownloaderConfig
 from .errors import SiteIssueCode
 from .event_stream import JobEventBuffer
-from .models import DownloadJob, ItemStatus, JobStatus, Platform, SourceKind
+from .models import DownloadJob, ItemStatus, JobStatus, Platform, SourceKind, normalized_source_timing
 from .platforms import UnsupportedUrlError, identify_url
 from .runtime import (
     RUNTIME_STOP_EVENT,
@@ -238,6 +238,10 @@ def _public_job(job: DownloadJob) -> DownloadJob:
     if public.verification_url:
         public.verification_url = _redact_public_url(public.verification_url)
     for item in public.items:
+        item.source_timing = (
+            normalized_source_timing(item.source_timing)
+            if public.platform == Platform.DOUYIN else None
+        )
         item.source_url = _redact_public_url(item.source_url)
         item.metadata = _redact_public_value(item.metadata)
         for key in ("douyin_item_media", "douyin_profile_media"):

@@ -615,6 +615,7 @@ class DownloaderConfig:
     concurrent_fragments: int = 4
     filename_limit: int = 180
     preserve_existing_files: bool = False
+    allow_douyin_unequal_tracks: bool = False
 
 
 @dataclass(slots=True)
@@ -633,6 +634,7 @@ class EngineEvent:
     # Verified per-image completion records for album downloads. They carry no
     # media URL, so they are safe to persist across retries and restarts.
     asset_records: list[dict[str, Any]] = field(default_factory=list)
+    source_timing: dict[str, float] | None = None
 
 
 @dataclass(slots=True)
@@ -654,6 +656,7 @@ class DownloadOutcome:
     selected_format: str | None = None
     resolution: str | None = None
     cookie_fallback_used: bool = False
+    source_timing: dict[str, float] | None = None
 
 
 @dataclass(slots=True)
@@ -3432,6 +3435,7 @@ class MediaDownloader:
                     "_douyin_probe_bit_rate": bit_rate or None,
                     "filesize": probe.get("filesize"),
                     "duration": probe.get("duration"),
+                    "_douyin_source_timing": probe.get("source_timing"),
                     "_douyin_probe_prefix_size": probe.get("probe_prefix_size"),
                     "_douyin_probe_prefix_sha256": probe.get("probe_prefix_sha256"),
                     "_douyin_probe_source_url": probe.get("source_url"),
@@ -3717,6 +3721,15 @@ class MediaDownloader:
         callback: EventCallback | None = None,
         should_cancel: CancelCallback,
     ) -> dict[str, Any] | None:
+        if expected_duration is not None:
+            normalized_duration = self._float_or_none(expected_duration)
+            if (
+                isinstance(expected_duration, bool)
+                or normalized_duration is None
+                or normalized_duration <= 0
+            ):
+                raise _DouyinProbeRejected("The declared media duration is invalid")
+            expected_duration = normalized_duration
         ratio = (
             ratio
             or getattr(
@@ -3855,6 +3868,28 @@ class MediaDownloader:
                 and int(content_length) >= len(payload)
             ):
                 filesize = int(content_length)
+            complete_range = re.fullmatch(r"bytes 0-(\d+)/(\d+)", content_range.strip())
+            complete_payload = filesize == len(payload) and (
+                (
+                    response_status == 200
+                    and not content_range
+                    and content_length.isdigit()
+                    and int(content_length) == len(payload)
+                )
+                or (
+                    response_status == 206
+                    and complete_range is not None
+                    and int(complete_range.group(1)) + 1 == len(payload)
+                    and int(complete_range.group(2)) == len(payload)
+                    and (
+                        not content_length
+                        or (
+                            content_length.isdigit()
+                            and int(content_length) == len(payload)
+                        )
+                    )
+                )
+            )
         finally:
             with contextlib.suppress(Exception):
                 response.close()
@@ -3872,14 +3907,14 @@ class MediaDownloader:
             prefix_duration = (
                 self._float_or_none(media.get("duration")) if media else None
             )
-            # A fragmented MP4 prefix can report a positive fragment duration.
-            # Confirm the complete, byte-bound file before rejecting its identity.
+            # A non-seekable fragmented MP4 can report only its first fragment,
+            # even when all bytes fit in the prefix. Recheck a seekable file
+            # before treating that duration as an identity mismatch.
             confirm_full_duration = (
                 expected_duration is not None
                 and prefix_duration is not None
                 and abs(prefix_duration - expected_duration)
                 > self._douyin_duration_tolerance(expected_duration)
-                and (filesize is None or filesize > len(payload))
             )
             if confirm_full_duration or not self._douyin_probe_metadata_complete(
                 media, filesize=filesize
@@ -3898,16 +3933,24 @@ class MediaDownloader:
                         prefix="original-media-douyin-probe-"
                     )
                     local_path = Path(temporary_directory.name) / "candidate.mp4"
-                self._download_douyin_probe_file(
-                    ydl,
-                    candidate_url,
-                    local_path,
-                    ratio=ratio,
-                    expected_prefix=bytes(payload),
-                    expected_filesize=filesize,
-                    callback=callback,
-                    should_cancel=should_cancel,
-                )
+                if complete_payload:
+                    if should_cancel():
+                        raise DownloadCancelled("Task cancelled")
+                    # Reuse only an HTTP response proven to contain the entire
+                    # object; do not refetch or concatenate signed versions.
+                    with local_path.open("wb") as output:
+                        output.write(payload)
+                else:
+                    self._download_douyin_probe_file(
+                        ydl,
+                        candidate_url,
+                        local_path,
+                        ratio=ratio,
+                        expected_prefix=bytes(payload),
+                        expected_filesize=filesize,
+                        callback=callback,
+                        should_cancel=should_cancel,
+                    )
                 media = self._ffprobe_douyin_media(
                     bytes(payload),
                     local_path=local_path,
@@ -3922,14 +3965,26 @@ class MediaDownloader:
             duration = self._float_or_none(media.get("duration"))
             if duration is None or duration <= 0:
                 raise _DouyinProbeRejected("FFprobe returned no media duration")
+            source_timing = None
             if expected_duration is not None:
                 tolerance = self._douyin_duration_tolerance(expected_duration)
                 if abs(duration - expected_duration) > tolerance:
-                    raise _DouyinProbeRejected(
-                        "media duration did not match the requested Douyin item "
-                        f"(expected {expected_duration:.3f}s, "
-                        f"measured {duration:.3f}s, tolerance {tolerance:.3f}s)"
-                    )
+                    if (
+                        self.config.allow_douyin_unequal_tracks
+                        and not getattr(self._douyin_probe_context, "strict_track_duration", False)
+                        and local_path is not None
+                        and filesize is not None
+                        and local_path.stat().st_size == filesize
+                    ):
+                        source_timing = self._verified_douyin_source_timing(
+                            media, expected_duration
+                        )
+                    if source_timing is None:
+                        raise _DouyinProbeRejected(
+                            "media duration did not match the requested Douyin item "
+                            f"(expected {expected_duration:.3f}s, "
+                            f"measured {duration:.3f}s, tolerance {tolerance:.3f}s)"
+                        )
             bit_rate = int(media.get("bit_rate") or 0)
             if bit_rate <= 0 and filesize and duration and duration > 0:
                 bit_rate = int(filesize * 8 / duration)
@@ -3945,6 +4000,7 @@ class MediaDownloader:
                 "probe_prefix_size": len(payload),
                 "probe_prefix_sha256": hashlib.sha256(payload).hexdigest(),
                 "source_url": candidate_url,
+                "source_timing": source_timing,
             }
             if local_path is not None:
                 reuse_registered = self._register_douyin_probe_file(
@@ -3961,6 +4017,42 @@ class MediaDownloader:
     @staticmethod
     def _douyin_duration_tolerance(duration: float) -> float:
         return max(0.5, min(2.0, duration * 0.01))
+
+    @classmethod
+    def _verified_douyin_source_timing(
+        cls, media: dict[str, Any], expected_duration: Any,
+    ) -> dict[str, float] | None:
+        # Only call with a complete seekable file. A prefix or a container-only
+        # duration must never establish that a short video is the full source.
+        values = {
+            "declared_duration": expected_duration,
+            "video_duration": media.get("video_duration"),
+            "audio_duration": media.get("audio_duration"),
+            "container_duration": media.get("container_duration"),
+        }
+        timing = {}
+        for key, value in values.items():
+            if isinstance(value, bool):
+                return None
+            parsed = cls._float_or_none(value)
+            if parsed is None or parsed <= 0:
+                return None
+            timing[key] = parsed
+        declared = timing["declared_duration"]
+        video = timing["video_duration"]
+        tolerance = cls._douyin_duration_tolerance(declared)
+        measured = cls._float_or_none(media.get("duration"))
+        if (
+            str(media.get("acodec") or "none").lower() == "none"
+            or measured is None
+            or abs(measured - video) > 0.001
+            or declared - video <= tolerance
+            or timing["audio_duration"] - video <= tolerance
+            or abs(timing["audio_duration"] - declared) > tolerance
+            or abs(timing["container_duration"] - declared) > tolerance
+        ):
+            return None
+        return timing
 
     def _download_douyin_probe_file(
         self,
@@ -4428,7 +4520,11 @@ class MediaDownloader:
             data = json.loads(payload.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return None
+        if not isinstance(data, dict):
+            return None
         streams = data.get("streams") or []
+        if not isinstance(streams, list):
+            return None
         video = next(
             (
                 stream
@@ -4448,6 +4544,8 @@ class MediaDownloader:
             None,
         )
         format_data = data.get("format") or {}
+        if not isinstance(format_data, dict):
+            return None
 
         def safe_int(value: Any) -> int:
             try:
@@ -4475,6 +4573,9 @@ class MediaDownloader:
                 safe_number(video.get("bit_rate"), format_data.get("bit_rate"))
             ),
             "duration": safe_number(video.get("duration"), format_data.get("duration")),
+            "video_duration": safe_number(video.get("duration")),
+            "audio_duration": safe_number(audio.get("duration")) if audio else None,
+            "container_duration": safe_number(format_data.get("duration")),
         }
 
     @staticmethod
@@ -4821,6 +4922,7 @@ class MediaDownloader:
                         )
                         or None,
                         redirect_source_url=redirect_source_url or None,
+                        source_timing=selected.get("_douyin_source_timing"),
                     )
                     path, chosen = self._download_first_available_asset(
                         ydl,
@@ -4851,6 +4953,7 @@ class MediaDownloader:
                         "_verified_local_resolution": (
                             f"{chosen.width}x{chosen.height}"
                         ),
+                        "_verified_source_timing": chosen.source_timing,
                     }
                     candidates = [str(path)]
                 else:
@@ -4931,6 +5034,7 @@ class MediaDownloader:
                 else self._resolution(info)
             ),
             cookie_fallback_used=fallback,
+            source_timing=(info.get("_verified_source_timing") if expected_douyin_id else None),
         )
         emit(
             EngineEvent(
@@ -4943,6 +5047,7 @@ class MediaDownloader:
                 resolution=outcome.resolution,
                 output_paths=outcome.output_paths,
                 cookie_fallback_used=fallback,
+                source_timing=outcome.source_timing,
             )
         )
         return outcome
@@ -5217,13 +5322,20 @@ class MediaDownloader:
         callback: EventCallback | None,
         should_cancel: CancelCallback,
     ) -> RemoteAsset:
-        with self._douyin_quality_probe_scope():
-            return self._select_highest_douyin_live_photo_asset_scoped(
-                ydl,
-                asset,
-                callback=callback,
-                should_cancel=should_cancel,
-            )
+        # Album motion clips do not have per-video timing notices. Keep their
+        # original strict duration policy rather than silently accepting them.
+        previous = getattr(self._douyin_probe_context, "strict_track_duration", False)
+        self._douyin_probe_context.strict_track_duration = True
+        try:
+            with self._douyin_quality_probe_scope():
+                return self._select_highest_douyin_live_photo_asset_scoped(
+                    ydl,
+                    asset,
+                    callback=callback,
+                    should_cancel=should_cancel,
+                )
+        finally:
+            self._douyin_probe_context.strict_track_duration = previous
 
     def _select_highest_douyin_live_photo_asset_scoped(
         self,
@@ -5485,6 +5597,13 @@ class MediaDownloader:
             round(duration, 6) if duration is not None else None,
             int(value.get("probe_prefix_size") or 0),
             str(value.get("probe_prefix_sha256") or "").lower(),
+            tuple(
+                (value.get("source_timing") or {}).get(key)
+                for key in (
+                    "declared_duration", "video_duration",
+                    "audio_duration", "container_duration",
+                )
+            ),
         )
 
     @classmethod
@@ -5503,6 +5622,7 @@ class MediaDownloader:
                 "duration": asset.duration,
                 "probe_prefix_size": asset.probe_prefix_size,
                 "probe_prefix_sha256": asset.probe_prefix_sha256,
+                "source_timing": asset.source_timing,
             }
         )
 
@@ -7535,6 +7655,22 @@ class MediaDownloader:
                     "Downloaded video duration did not match its verified media "
                     "metadata"
                 )
+        verified_timing = None
+        if asset.source_timing is not None:
+            if self.config.allow_douyin_unequal_tracks and isinstance(asset.source_timing, dict):
+                verified_timing = self._verified_douyin_source_timing(
+                    media or {}, asset.source_timing.get("declared_duration")
+                )
+            if verified_timing is None or any(
+                isinstance(asset.source_timing.get(key), bool)
+                or self._float_or_none(asset.source_timing.get(key)) is None
+                or abs(value - float(asset.source_timing[key])) > 0.001
+                for key, value in (verified_timing or {}).items()
+            ):
+                raise MediaDownloadError(
+                    "Downloaded video duration did not match its verified source "
+                    "track timing"
+                )
         return RemoteAsset(
             candidates=list(asset.candidates),
             index=asset.index,
@@ -7551,6 +7687,7 @@ class MediaDownloader:
             probe_prefix_size=asset.probe_prefix_size,
             probe_prefix_sha256=asset.probe_prefix_sha256,
             redirect_source_url=asset.redirect_source_url,
+            source_timing=verified_timing,
         )
 
     @staticmethod

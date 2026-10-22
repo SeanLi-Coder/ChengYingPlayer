@@ -5,7 +5,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from .errors import SiteIssueCode
 
@@ -90,6 +90,29 @@ class TransferProgress(BaseModel):
     filename: str | None = None
 
 
+class SourceTiming(BaseModel):
+    """Numeric evidence only; never store remote metadata or media addresses."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+    declared_duration: float = Field(gt=0)
+    video_duration: float = Field(gt=0)
+    audio_duration: float = Field(gt=0)
+    container_duration: float = Field(gt=0)
+
+
+def normalized_source_timing(value: Any) -> SourceTiming | None:
+    if isinstance(value, SourceTiming):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        return None
+    try:
+        return SourceTiming.model_validate(value)
+    except ValidationError:
+        # A malformed optional notice must not discard an existing saved job.
+        return None
+
+
 class DownloadItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -108,6 +131,7 @@ class DownloadItem(BaseModel):
     output_paths: list[str] = Field(default_factory=list)
     selected_format: str | None = None
     resolution: str | None = None
+    source_timing: SourceTiming | None = None
     error: str | None = None
     auth_message: str | None = None
     issue_code: SiteIssueCode | None = None
@@ -118,6 +142,11 @@ class DownloadItem(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+    @field_validator("source_timing", mode="before")
+    @classmethod
+    def validate_source_timing(cls, value: Any) -> SourceTiming | None:
+        return normalized_source_timing(value)
 
 
 class DownloadJob(BaseModel):
