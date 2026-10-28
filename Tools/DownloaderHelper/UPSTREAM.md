@@ -697,3 +697,24 @@ The isolated runner also supplies a per-test temporary Chrome diagnostic root,
 so generic error-classification tests cannot probe the developer's Chrome
 directories. Explicit browser fixtures remain free to supply their own temporary
 roots. The runner does not replace HOME or change production runtime settings.
+
+### Signing HTML fallback session continuity
+
+When a trusted source HTML response lacks SDK glue, its newly issued, updated or
+expired cookies must reach the same browser context before the fallback GET.
+The adapter compares the response jar with that session's original baseline and
+applies only changed name/domain/path tuples, preserving host-only/domain scope,
+Secure, HttpOnly and expiry. Unchanged source cookies do not overwrite fresher
+browser state. Natural expiration never revokes a newer browser cookie. Failed
+cookie synchronization discards the current context before its fallback GET and
+uses the existing bounded fresh-session retry. No other Chrome profile is read
+and nothing is persisted to Chrome.
+Explicit authentication, identity and network-filter failures, including wrapped
+cancellation signals, still stop the attempt. Media identity, quality, URL and
+queue gates are unchanged.
+
+`test_douyin_signer_cookie_fallback.py` exercises complete synthetic signing
+sessions with real CookieJar Set-Cookie processing, including deletion, scoped
+paths, concurrent isolation and control failures. It blocks network and real
+browser access. These fixtures establish a reproducible fallback defect; they do
+not establish that every real-site `signer-html` response has the same cause.

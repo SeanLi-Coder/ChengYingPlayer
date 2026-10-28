@@ -299,6 +299,10 @@ class _TransientSigningFailure(_SigningFailure):
         self.category = category
 
 
+class _CookieSyncSigningFailure(_TransientSigningFailure):
+    """Discard a context whose response cookies could not be synchronized."""
+
+
 class _NetworkFilterSigningFailure(_SigningFailure):
     pass
 
@@ -708,7 +712,9 @@ def _load_chrome_cookie_jar(cookie_profile: str | None) -> CookieJar:
         ) from exc
 
 
-def _cookie_jar_to_playwright(cookie_jar: CookieJar) -> list[dict[str, Any]]:
+def _cookie_jar_to_playwright(
+    cookie_jar: CookieJar, *, allow_empty: bool = False,
+) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     now = time.time()
     for cookie in cookie_jar:
@@ -733,7 +739,7 @@ def _cookie_jar_to_playwright(cookie_jar: CookieJar) -> list[dict[str, Any]]:
         if cookie.has_nonstandard_attr("HttpOnly"):
             item["httpOnly"] = True
         result.append(item)
-    if not result:
+    if not result and not allow_empty:
         raise _AuthenticationSigningFailure(
             "No current Douyin Chrome cookies were available"
         )
@@ -982,6 +988,46 @@ def _read_limited_source_body(
             raise _SigningFailure("Douyin HTML response was unexpectedly large")
 
 
+def _sync_changed_source_cookies(
+    context: Any,
+    cookie_jar: CookieJar,
+    baseline: list[dict[str, Any]],
+) -> None:
+    """Apply source-response changes without replacing newer browser cookies."""
+    def key(cookie: dict[str, Any]) -> tuple[str, str, str]:
+        return cookie["name"], cookie["domain"], cookie["path"]
+
+    previous = {key(cookie): cookie for cookie in baseline}
+    current = {
+        key(cookie): cookie
+        for cookie in _cookie_jar_to_playwright(cookie_jar, allow_empty=True)
+    }
+    changes = [cookie for identity, cookie in current.items() if previous.get(identity) != cookie]
+    removed = previous.keys() - current.keys()
+    raw_members = (
+        {(cookie.name, cookie.domain, cookie.path or "/") for cookie in cookie_jar}
+        if removed else set()
+    )
+    now = time.time()
+    deletions = [
+        {**cookie, "value": "", "expires": 1}
+        for identity, cookie in previous.items()
+        if identity in removed and identity not in raw_members
+        # Conversion omits expired cookies; urllib also clears them on requests.
+        # Neither event revokes a newer cookie already issued to the browser.
+        and ("expires" not in cookie or cookie["expires"] > now)
+    ]
+    if not current and len(deletions) == len(previous):
+        raise _AuthenticationSigningFailure(
+            "Douyin source response revoked all available session cookies"
+        )
+    changes.extend(deletions)
+    if changes:
+        # Keep the original domain, path and flags, including host-only cookies.
+        # An expired cookie deletes only the same name/domain/path tuple.
+        context.add_cookies(changes)
+
+
 def _extract_glue_with_context_fallback(
     context: Any,
     verification_url: str,
@@ -992,6 +1038,7 @@ def _extract_glue_with_context_fallback(
     *,
     budget: _NoProgressBudget | None = None,
     status_callback: StatusCallback | None = None,
+    source_cookie_baseline: list[dict[str, Any]] | None = None,
 ) -> tuple[tuple[str, ...], bool]:
     budget = budget or _NoProgressBudget(_SIGNED_NO_PROGRESS_TIMEOUT_SECONDS)
     _emit_status(status_callback, "Fetching Douyin signing HTML")
@@ -1005,14 +1052,40 @@ def _extract_glue_with_context_fallback(
             should_cancel=should_cancel,
         )
         budget.remaining_seconds()
-        return _extract_sdk_glue_tags(source_html), True
+        try:
+            glue_tags = _extract_sdk_glue_tags(source_html)
+        except _TransientSigningFailure as exc:
+            if exc.category == "signer-html" and source_cookie_baseline is not None:
+                # A trusted HTML shell may update its session before returning
+                # usable SDK tags. The fallback GET must receive those updates.
+                try:
+                    _sync_changed_source_cookies(context, cookie_jar, source_cookie_baseline)
+                except (
+                    _AuthenticationSigningFailure,
+                    _IdentitySigningFailure,
+                    _NetworkFilterSigningFailure,
+                ):
+                    raise
+                except Exception as sync_error:
+                    raise_cookie_control_signal(sync_error)
+                    raise _CookieSyncSigningFailure(
+                        "Douyin signing session cookies could not be synchronized",
+                        category="signer-cookie-sync",
+                    ) from sync_error
+            raise
+        return glue_tags, True
     except DownloadCancelledError:
         raise
     except _AuthenticationSigningFailure:
         raise
     except _NetworkFilterSigningFailure:
         raise
+    except _IdentitySigningFailure:
+        raise
+    except _CookieSyncSigningFailure:
+        raise
     except Exception as exc:
+        raise_cookie_control_signal(exc)
         _raise_if_cancelled(should_cancel)
         budget.note_failure(exc)
         budget.remaining_seconds()
@@ -1026,7 +1099,14 @@ def _extract_glue_with_context_fallback(
                 verification_url,
                 timeout=budget.clamp_timeout_ms(timeout_ms),
             )
+        except (
+            _AuthenticationSigningFailure,
+            _IdentitySigningFailure,
+            _NetworkFilterSigningFailure,
+        ):
+            raise
         except Exception as exc:
+            raise_cookie_control_signal(exc)
             budget.remaining_seconds()
             raise _TransientSigningFailure(
                 "Douyin browser HTML request temporarily failed",
@@ -2151,6 +2231,7 @@ def _run_with_signing_page(
                     should_cancel,
                     budget=budget,
                     status_callback=status_callback,
+                    source_cookie_baseline=browser_cookies,
                 )
                 if cookie_jar_updated:
                     context.add_cookies(_cookie_jar_to_playwright(cookie_jar))

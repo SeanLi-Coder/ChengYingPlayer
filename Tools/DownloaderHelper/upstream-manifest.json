@@ -21,7 +21,7 @@
     "tests/test_stop.py": "Isolate the no-server test from real localhost services and cover a disappearing legacy listener; production stop.py is unchanged.",
     "tests/test_douyin_duration_probe.py": "Correct the complete-body mock expectation: conflicting pipe durations require a seekable check of existing bytes, without a second HTTP request or relaxing rejection of genuinely short media.",
     "app/browser.py": "Add whitelisted Cookie diagnostics and a private-output logger compatible with yt-dlp warning arguments; preserve diagnosed extractor errors and safely classify bounded exception chains and SQLite/storage/reader failures; keep usable site session cookies on unrelated-cookie failure, reject authentication loss, and avoid assuming an automatic profile is Default.",
-    "app/douyin_signing.py": "Use the compatible private Cookie logger, optional native task-local reader scope and bounded control-signal unwrapping; carry sanitized Cookie diagnostics without relabelling them as signing integrity failures.",
+    "app/douyin_signing.py": "Use the compatible private Cookie logger, optional native task-local reader scope and bounded control-signal unwrapping; carry sanitized Cookie diagnostics without relabelling them as signing integrity failures. Synchronize only trusted source-response cookie changes into the same browser context before a missing-glue HTML retry, preserving exact scope and expiry; retain explicit authentication, identity, network-filter and wrapped cancellation failures.",
     "app/douyin.py": "Use the shared Cookie extraction adapter and optional native cancellation scope for browser fallback, preserve wrapped cancellation and explicit failure diagnostics, and prevent silent anonymous fallback after a diagnosed extraction failure.",
     "tests/test_signing_diagnostics.py": "Test sanitized Chrome Cookie diagnostic categories, the diagnostic helper's own filesystem-error fallback, control-signal propagation, and whitelisted structured codes through the signing chain."
   },
@@ -64,7 +64,7 @@
     {
       "path": "app/douyin_signing.py",
       "upstream_sha256": "ea11f7a2545a82dd20e3bb5db2b8e2a80856281aed23efd30d62c426767e4cb8",
-      "vendored_sha256": "80e242965eca7bf9182311eb8697a2f123134905fb3711c17a4afb2000590248"
+      "vendored_sha256": "6891f60ea385a3fe3e75259cb953e9c9da0f91c9ba78d7d9567aa5f804feb6ae"
     },
     {
       "path": "app/downloader.py",
