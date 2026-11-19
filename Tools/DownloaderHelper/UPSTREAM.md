@@ -25,6 +25,20 @@ and pytest caches are ignored; they are not source or redistribution assets.
 
 ## Deliberate patches
 
+### Default playback routes supplied by a Douyin work
+
+Video and Live Photo probes try the four built-in default playback routes first.
+If those fail, the engine can use up to four additional official play requests
+present in the same work's rendition metadata. Each request must explicitly
+select `ratio=default` for the exact media URI. The parser accepts a fixed set of
+play hosts and query fields, then rebuilds the request from the validated fields.
+When an official origin directs a probe to an unrecognized CDN or nonstandard
+port and an author rendition has already been verified, the same official
+origin can also select its own line. That probe omits the explicit `line`
+parameter and preserves the video URI, default ratio, source and play mode.
+Every hop, probe result and final transfer must pass the original checks.
+A declared direct rendition alone cannot satisfy the mandatory default probe.
+
 ### Explicit original-source unequal-track timing (2026-10-22)
 
 The user approved saving the site's original highest-quality file when a complete

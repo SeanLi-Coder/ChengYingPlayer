@@ -20,6 +20,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from http.cookiejar import CookieJar
+from itertools import chain
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlsplit, urlunsplit
@@ -109,7 +110,13 @@ DOUYIN_PROGRESS_INTERVAL_SECONDS = 0.5
 DOUYIN_LOCK_STATUS_INTERVAL_SECONDS = 5.0
 DOUYIN_DEFAULT_PROBE_HOST = "api-play-hl.amemv.com"
 DOUYIN_RATIO_PROBE_HOST = "api-play.amemv.com"
-DOUYIN_DEFAULT_ROUTE_LINES = ("0", "1")
+DOUYIN_DEFAULT_PROBE_ROUTES = (
+    (DOUYIN_DEFAULT_PROBE_HOST, "0"),
+    (DOUYIN_RATIO_PROBE_HOST, "1"),
+    (DOUYIN_RATIO_PROBE_HOST, "0"),
+    (DOUYIN_DEFAULT_PROBE_HOST, "1"),
+)
+DOUYIN_MAX_ADVERTISED_DEFAULT_ROUTES = 4
 DOUYIN_PROBE_HTTP_TIMEOUT_SECONDS = 10.0
 DOUYIN_PROBE_ATTEMPTS = 3
 DOUYIN_PROBE_RETRY_BASE_SECONDS = 1.0
@@ -3065,51 +3072,121 @@ class MediaDownloader:
         ratio: str,
         *,
         hostname: str | None = None,
-        line: str = "0",
+        line: str | None = "0",
     ) -> str:
         hostname = hostname or (
             DOUYIN_DEFAULT_PROBE_HOST if ratio == "default" else DOUYIN_RATIO_PROBE_HOST
         )
-        query = urlencode(
-            {
-                "video_id": video_uri,
-                "ratio": ratio,
-                "line": line,
-                "is_play_url": "1",
-                "source": "PackSourceEnum_AWEME_DETAIL",
-            }
-        )
-        return f"https://{hostname}/aweme/v1/play/?{query}"
+        params = {
+            "video_id": video_uri,
+            "ratio": ratio,
+            "line": line,
+            "is_play_url": "1",
+            "source": "PackSourceEnum_AWEME_DETAIL",
+        }
+        if line is None:
+            del params["line"]
+        return f"https://{hostname}/aweme/v1/play/?{urlencode(params)}"
 
     @classmethod
-    def _douyin_default_probe_urls(cls, video_uri: str) -> list[str]:
-        return [
-            cls._douyin_ratio_url(
-                video_uri,
-                "default",
-                hostname=hostname,
-                line=line,
+    def _douyin_advertised_default_route(
+        cls,
+        value: str,
+        video_uri: str,
+    ) -> str | None:
+        host = cls._strict_https_hostname(value)
+        if host not in {
+            DOUYIN_DEFAULT_PROBE_HOST, DOUYIN_RATIO_PROBE_HOST, "www.douyin.com",
+        }:
+            return None
+        parsed = urlsplit(value)
+        if (
+            parsed.netloc.lower() not in {host, f"{host}:443"}
+            or parsed.path != "/aweme/v1/play/"
+            or "#" in value
+        ):
+            return None
+        try:
+            query = parse_qs(
+                parsed.query,
+                strict_parsing=True,
+                keep_blank_values=True,
+                max_num_fields=5,
             )
-            for hostname, line in (
-                (DOUYIN_DEFAULT_PROBE_HOST, DOUYIN_DEFAULT_ROUTE_LINES[0]),
-                (DOUYIN_RATIO_PROBE_HOST, DOUYIN_DEFAULT_ROUTE_LINES[1]),
-                (DOUYIN_RATIO_PROBE_HOST, DOUYIN_DEFAULT_ROUTE_LINES[0]),
-                (DOUYIN_DEFAULT_PROBE_HOST, DOUYIN_DEFAULT_ROUTE_LINES[1]),
+        except ValueError:
+            return None
+        # A file ID, codec selector or other extra parameter can pin a lower
+        # rendition even when the query also says ratio=default.
+        fields = ("video_id", "ratio", "line", "is_play_url", "source")
+        if (
+            any(key not in fields or len(values) != 1 for key, values in query.items())
+            or query.get("video_id") != [video_uri]
+            or query.get("ratio") != ["default"]
+            or ("is_play_url" in query and query["is_play_url"] != ["1"])
+            or (
+                "source" in query
+                and query["source"] != ["PackSourceEnum_AWEME_DETAIL"]
             )
+        ):
+            return None
+        line = query["line"][0] if "line" in query else None
+        if line is not None and not re.fullmatch(r"0|[1-9][0-9]{0,2}", line):
+            return None
+        safe_query = urlencode([(key, query[key][0]) for key in fields if key in query])
+        return f"https://{host}/aweme/v1/play/?{safe_query}"
+
+    @classmethod
+    def _douyin_default_probe_urls(
+        cls,
+        video_uri: str,
+        direct_candidates: Iterable[dict[str, Any]] = (),
+    ) -> list[str]:
+        urls = [
+            cls._douyin_ratio_url(video_uri, "default", hostname=host, line=line)
+            for host, line in DOUYIN_DEFAULT_PROBE_ROUTES
         ]
+        limit = len(urls) + DOUYIN_MAX_ADVERTISED_DEFAULT_ROUTES
+        for candidate in direct_candidates:
+            if (
+                not isinstance(candidate, dict)
+                or candidate.get("video_uri", video_uri) != video_uri
+            ):
+                continue
+            values = candidate.get("urls")
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                if not isinstance(value, str):
+                    continue
+                route = cls._douyin_advertised_default_route(value, video_uri)
+                if route is None or route in urls:
+                    continue
+                urls.append(route)
+                if len(urls) == limit:
+                    return urls
+        return urls
 
     def _probe_douyin_default_with_fallback(
         self,
         ydl: YoutubeDL,
         video_uri: str,
         *,
+        direct_candidates: Iterable[dict[str, Any]] = (),
+        author_rendition_verified: bool = False,
         expected_duration: float | None,
         callback: EventCallback | None,
         should_cancel: CancelCallback,
     ) -> dict[str, Any] | None:
         failures: list[Exception] = []
-        candidate_urls = self._douyin_default_probe_urls(video_uri)
-        for candidate_url in candidate_urls:
+        candidate_urls = self._douyin_default_probe_urls(video_uri, direct_candidates)
+        server_selected_routes: list[str] = []
+        for candidate_url in chain(candidate_urls, server_selected_routes):
+            if should_cancel():
+                raise DownloadCancelled("Task cancelled")
+            if server_selected_routes and candidate_url == server_selected_routes[0]:
+                quality_run = getattr(self._douyin_probe_context, "quality_run", None)
+                if isinstance(quality_run, _DouyinQualityProbeRun):
+                    quality_run.candidate_total += len(server_selected_routes)
             try:
                 probe = self._probe_douyin_ratio_with_retry(
                     ydl,
@@ -3119,16 +3196,38 @@ class MediaDownloader:
                     callback=callback,
                     should_cancel=should_cancel,
                 )
-            except _DouyinNoProgressTimeout:
-                raise
-            except (DownloadCancelled, MediaDownloadError):
+            except (
+                _DouyinNoProgressTimeout,
+                AuthenticationRequiredError,
+                DownloadCancelled,
+                DownloadCancelledError,
+                MediaDownloadError,
+            ):
                 raise
             except Exception as exc:
                 failures.append(exc)
+                if (
+                    author_rendition_verified
+                    and isinstance(exc, _DouyinRedirectRejected)
+                    and exc.redirect_reason in {"nonstandard-port", "unrecognized-host"}
+                ):
+                    host = urlsplit(candidate_url).hostname
+                    if host in {DOUYIN_DEFAULT_PROBE_HOST, DOUYIN_RATIO_PROBE_HOST}:
+                        # Ask the same official origin to select its delivery
+                        # line. Never derive an endpoint from a rejected hop.
+                        route = self._douyin_ratio_url(
+                            video_uri, "default", hostname=host, line=None,
+                        )
+                        if (
+                            route not in candidate_urls
+                            and route not in server_selected_routes
+                        ):
+                            server_selected_routes.append(route)
                 continue
             if probe:
+                fixed_urls = candidate_urls[:len(DOUYIN_DEFAULT_PROBE_ROUTES)]
                 probe["source_candidates"] = list(
-                    dict.fromkeys([candidate_url, *candidate_urls])
+                    dict.fromkeys([candidate_url, *fixed_urls])
                 )
                 return probe
         if failures:
@@ -3227,7 +3326,7 @@ class MediaDownloader:
                 len(candidate.get("urls") or [])
                 for candidate in direct_candidates
                 if isinstance(candidate, dict)
-            ) + len(self._douyin_default_probe_urls(video_uri))
+            ) + len(self._douyin_default_probe_urls(video_uri, direct_candidates))
         direct_count = len(direct_candidates)
         direct_failures: list[_DouyinDirectProbeFailure] = []
         for index, candidate in enumerate(direct_candidates, start=1):
@@ -3273,15 +3372,19 @@ class MediaDownloader:
             default_probe = self._probe_douyin_default_with_fallback(
                 ydl,
                 video_uri,
+                direct_candidates=direct_candidates,
+                author_rendition_verified=bool(probes),
                 expected_duration=expected_duration,
                 callback=callback,
                 should_cancel=should_cancel,
             )
-        except _DouyinNoProgressTimeout:
-            raise
-        except DownloadCancelled:
-            raise
-        except MediaDownloadError:
+        except (
+            _DouyinNoProgressTimeout,
+            AuthenticationRequiredError,
+            DownloadCancelled,
+            DownloadCancelledError,
+            MediaDownloadError,
+        ):
             raise
         except Exception as exc:
             reason = self._safe_douyin_probe_failure(exc)
@@ -5363,7 +5466,7 @@ class MediaDownloader:
                 len(rendition.get("urls") or [])
                 for rendition in renditions
                 if isinstance(rendition, dict)
-            ) + len(self._douyin_default_probe_urls(video_uri))
+            ) + len(self._douyin_default_probe_urls(video_uri, renditions))
         direct_probes: list[dict[str, Any]] = []
         direct_failures: list[_DouyinDirectProbeFailure] = []
         probe_count = len(renditions) + 1
@@ -5411,6 +5514,8 @@ class MediaDownloader:
             default_probe = self._probe_douyin_default_with_fallback(
                 ydl,
                 video_uri,
+                direct_candidates=renditions,
+                author_rendition_verified=bool(direct_probes),
                 expected_duration=asset.duration,
                 callback=callback,
                 should_cancel=should_cancel,
@@ -5419,7 +5524,7 @@ class MediaDownloader:
             raise
         except DownloadCancelled as exc:
             raise DownloadCancelledError("Task cancelled") from exc
-        except MediaDownloadError:
+        except (AuthenticationRequiredError, DownloadCancelledError, MediaDownloadError):
             raise
         except Exception as exc:
             reason = self._safe_douyin_probe_failure(exc)
