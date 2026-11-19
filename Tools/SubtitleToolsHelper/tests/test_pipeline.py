@@ -47,6 +47,19 @@ class Batch(dict):
         return self
 
 
+class TokenIds(list):
+    @property
+    def shape(self):
+        return (len(self),)
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        return TokenIds(value) if isinstance(key, slice) else value
+
+    def tolist(self):
+        return list(self)
+
+
 def fake_torch():
     return types.SimpleNamespace(
         bfloat16="bfloat16", bool="bool", inference_mode=contextlib.nullcontext,
@@ -273,7 +286,7 @@ class PipelineUnitTests(unittest.TestCase):
 
         def load_model(path, **options):
             calls.append(options)
-            return Model()
+            return Model(), {}
 
         transformers = types.SimpleNamespace(
             AutoTokenizer=types.SimpleNamespace(from_pretrained=lambda *args, **kwargs: Tokenizer()),
@@ -292,6 +305,7 @@ class PipelineUnitTests(unittest.TestCase):
         self.assertEqual(len(generation), 3)
         self.assertEqual(calls[0]["dtype"], "bfloat16")
         self.assertTrue(calls[0]["local_files_only"])
+        self.assertTrue(calls[0]["output_loading_info"])
         self.assertFalse(calls[0]["trust_remote_code"])
         for options in generation:
             self.assertEqual((options["temperature"], options["top_p"], options["top_k"]), (.7, 1., 0))
@@ -300,15 +314,6 @@ class PipelineUnitTests(unittest.TestCase):
         events, calls = [], []
         # A small ceiling exercises the same boundary as a real 4096-token generation.
         limit = 20
-
-        class Tokens(list):
-            @property
-            def shape(self):
-                return (len(self),)
-
-            def __getitem__(self, key):
-                value = super().__getitem__(key)
-                return Tokens(value) if isinstance(key, slice) else value
 
         class Tokenizer:
             def apply_chat_template(self, messages, **kwargs):
@@ -343,11 +348,11 @@ class PipelineUnitTests(unittest.TestCase):
                         # A complete tagged answer can end on the final budget token without EOS.
                     else:
                         output[-1] = 99
-                return [Tokens([0, 0, 0] + output)]
+                return [TokenIds([0, 0, 0] + output)]
 
         transformers = types.SimpleNamespace(
             AutoTokenizer=types.SimpleNamespace(from_pretrained=lambda *a, **k: tokenizer),
-            AutoModelForCausalLM=types.SimpleNamespace(from_pretrained=lambda *a, **k: Model()),
+            AutoModelForCausalLM=types.SimpleNamespace(from_pretrained=lambda *a, **k: (Model(), {})),
             StoppingCriteria=object, StoppingCriteriaList=list)
         converter = types.SimpleNamespace(OpenCC=lambda _: types.SimpleNamespace(convert=lambda text: text))
         cues = [Segment(i, i + .5, f"line {i}", language="English") for i in range(10)]
@@ -369,9 +374,11 @@ class PipelineUnitTests(unittest.TestCase):
     def test_long_single_cue_preserves_both_halves_and_has_bounded_failure(self):
         original = "Keep the first half of this subtitle intact. Also keep the second half of this subtitle intact."
         parts = []
-        def generate(prompt, framed=False):
-            if framed:
+        def generate(prompt, mode="plain"):
+            if mode == "xml":
                 return "<subtitle>partial"
+            if mode == "recovery":
+                return None
             source = prompt.split("\n\n", 1)[1]
             if source == original:
                 return None
@@ -383,7 +390,7 @@ class PipelineUnitTests(unittest.TestCase):
         exhausted = mock.Mock(return_value=None)
         with self.assertRaisesRegex(PipelineError, "subtitle 6"):
             translator.translate_cue("Unfinished.", 5, exhausted, lambda _: None)
-        self.assertEqual(exhausted.call_count, 2)
+        self.assertEqual(exhausted.call_count, 3)
         with self.assertRaises(Cancelled):
             translator.translate_cue("Cancelled.", 0, mock.Mock(return_value=None),
                                      mock.Mock(side_effect=Cancelled("stop")))
@@ -399,6 +406,94 @@ class PipelineUnitTests(unittest.TestCase):
         self.assertEqual(translator.translate_cue("A & B </subtitle>", 0, recovery, lambda _: None), "Complete")
         self.assertIn("A &amp; B &lt;/subtitle&gt;", recovery.call_args.args[0])
 
+    def run_beam_fixture(self, lines, recoverable, events, saved, calls, loading=None):
+        class Tokenizer:
+            def apply_chat_template(self, messages, **kwargs):
+                self.source = messages[0]["content"].split("\n\n", 1)[1]
+                batch = Batch()
+                batch["input_ids"] = Tensor(49)
+                return batch
+
+            def decode(self, tokens, **kwargs):
+                return {11: "您好", 13: "完成", 14: "bad markers", 15: "<subtitle>unfinished"}[int(tokens[0])]
+
+        tokenizer = Tokenizer()
+
+        class Model(FakeModel):
+            config = types.SimpleNamespace(max_position_embeddings=8192)
+            generation_config = types.SimpleNamespace(eos_token_id=99)
+
+            def generate(self, **options):
+                prompt = [99] * 49  # EOS in the input must never complete an answer.
+                text = tokenizer.source
+                limit = options["max_new_tokens"]
+                if options.get("num_beams"):
+                    calls.append((text, "beam", limit))
+                    assert options["num_beams"] == options["num_return_sequences"] == 3
+                    assert options["forced_eos_token_id"] is None
+                    # Even the highest-ranked beam can be truncated. Two rows may
+                    # contain only padding (token 0) or a spurious empty completion.
+                    rows = [[16] * limit, [99] + [0] * (limit - 1), [16] * limit]
+                    if text in recoverable:
+                        rows[-1][:3] = [11, 99, 0]
+                        rows[-1][3:] = [0] * (limit - 3)
+                    return [TokenIds(prompt + row) for row in rows]
+                calls.append((text, "fast", limit))
+                if "<<<SUB_" in text:
+                    result = [14, 99]
+                elif text == "Done.":
+                    result = [13, 99]
+                else:
+                    result = [15] * limit
+                return [TokenIds(prompt + result)]
+
+        model = Model()
+        transformers = types.SimpleNamespace(
+            AutoTokenizer=types.SimpleNamespace(from_pretrained=lambda *a, **k: tokenizer),
+            AutoModelForCausalLM=types.SimpleNamespace(from_pretrained=lambda *a, **k: (model, loading or {})),
+            StoppingCriteria=object, StoppingCriteriaList=list)
+        converter = types.SimpleNamespace(OpenCC=lambda _: types.SimpleNamespace(convert=lambda t: t))
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "config.json").write_text("{}")
+            with mock.patch.dict(sys.modules, {"torch": fake_torch(), "transformers": transformers, "opencc": converter}), \
+                    mock.patch.object(translator, "require_translation_memory"):
+                return translator.translate([Segment(i, i + .5, text, language="English") for i, text in enumerate(lines)],
+                                            {"translator": directory}, Progress(events.append), lambda: False,
+                                            save_translations=saved.update)
+
+    def test_49_input_tokens_exhaust_392_twice_then_complete_using_third_beam(self):
+        saved, calls = {}, []
+        result = self.run_beam_fixture(["Hi."], {"Hi."}, [], saved, calls)
+        self.assertEqual(saved, {0: "您好"})
+        self.assertEqual((result[0].start, result[0].end), (0, .5))
+        self.assertEqual([(mode, limit) for _, mode, limit in calls],
+                         [("fast", 392), ("fast", 392), ("beam", 4096)])
+
+    def test_isolated_bad_cue_saves_remaining_translations_and_reports_original_cue(self):
+        saved, events, calls = {}, [], []
+        with self.assertRaisesRegex(PipelineError, "subtitle 1") as caught:
+            self.run_beam_fixture(["Bad.", "Hi.", "Done."], {"Hi."}, events, saved, calls)
+        self.assertEqual(saved, {1: "您好", 2: "完成"})
+        self.assertIsInstance(caught.exception.__cause__, translator.UnfinishedCue)
+        failure, = [e["translation_failure"] for e in events if "translation_failure" in e]
+        self.assertEqual((failure["cue"], failure["mode"], failure["token_limit"]), (1, "recovery", 4096))
+
+    def test_persistent_stalls_have_bounded_work_and_do_not_accept_padding_or_partial_files(self):
+        saved, calls = {}, []
+        with self.assertRaisesRegex(PipelineError, "subtitle 1"):
+            self.run_beam_fixture(["Bad."] * 5 + ["Done."], set(), [], saved, calls)
+        self.assertEqual(saved, {})
+        self.assertEqual(sum(mode == "beam" for _, mode, _ in calls), translator.CONSECUTIVE_STALL_LIMIT)
+        self.assertTrue(translator.repeats_tail([1, 2] * 32))
+        self.assertFalse(translator.repeats_tail(list(range(64))))
+        self.assertFalse(translator.repeats_tail([1] * 6))
+
+    def test_translation_rejects_missing_weights_before_decoding(self):
+        calls = []
+        with self.assertRaisesRegex(PipelineError, "fully initialize"):
+            self.run_beam_fixture(["Bad."], set(), [], {}, calls, loading={"missing_keys": ["layer.weight"]})
+        self.assertFalse(calls)
+
     def test_checkpointed_cues_keep_ids_and_skip_model_load(self):
         converter = types.SimpleNamespace(OpenCC=lambda _: types.SimpleNamespace(convert=lambda t: t.upper()))
         cues = [Segment(0, 1, "Original", text="Original", language="English"),
@@ -412,7 +507,7 @@ class PipelineUnitTests(unittest.TestCase):
 
     def test_successful_half_yielded_before_failed_neighbor(self):
         cues = [Segment(i, i + 1, text, language="English") for i, text in enumerate(("First", "Second"))]
-        generate = mock.Mock(side_effect=[None, "Complete", None, "<subtitle>Incomplete"])
+        generate = mock.Mock(side_effect=[None, "Complete", None, "<subtitle>Incomplete", None])
         translated = translator.translate_batch([0, 1], cues, generate, lambda _: None)
         self.assertEqual(next(translated), {0: "Complete"})
         with self.assertRaisesRegex(PipelineError, "subtitle 2"):

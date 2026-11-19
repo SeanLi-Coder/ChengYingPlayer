@@ -36,6 +36,12 @@ final class SubtitleToolsViewController: NSViewController {
   private let revealButton = NSButton(title: subtitleToolsString("task.reveal"), target: nil, action: nil)
   private let statusLabel = NSTextField(labelWithString: "")
   private let rateLabel = NSTextField(labelWithString: "")
+  private let reviewButton = NSButton(title: "", target: nil, action: nil)
+  private let submitCorrectionButton = NSButton(title: subtitleToolsString("translation.save_and_continue"), target: nil, action: nil)
+  private let reviewSource = NSTextView()
+  private let correctionInput = NSTextView()
+  private var correctionGroup: NSStackView!
+  private var editingTaskID: String?
   private let progress = NSProgressIndicator()
   private var generationGroup: NSStackView!
   private var modelsGroup: NSStackView!
@@ -93,6 +99,8 @@ final class SubtitleToolsViewController: NSViewController {
     sourceLabel.lineBreakMode = .byTruncatingMiddle
     sourceLabel.setAccessibilityLabel(subtitleToolsString("generate.source"))
     for code in Self.languages { languagePopup.addItem(withTitle: subtitleToolsString("language.\(code)")) }
+    languagePopup.target = self
+    languagePopup.action = #selector(languageChanged(_:))
     languagePopup.setAccessibilityLabel(subtitleToolsString("generate.language"))
     if #available(macOS 11.0, *) { languagePopup.controlSize = .large }
     languagePopup.font = .systemFont(ofSize: 13)
@@ -185,11 +193,21 @@ final class SubtitleToolsViewController: NSViewController {
     rateLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
     configure(cancelButton, action: #selector(cancel(_:)))
     configure(revealButton, action: #selector(reveal(_:)))
+    configure(reviewButton, action: #selector(toggleReview(_:)))
+    configure(submitCorrectionButton, action: #selector(submitCorrection(_:)))
     ChengYingStyle.secondaryButton(cancelButton)
     ChengYingStyle.secondaryButton(revealButton)
+    ChengYingStyle.secondaryButton(reviewButton)
+    ChengYingStyle.primaryButton(submitCorrectionButton)
+    correctionGroup = vertical([
+      label(subtitleToolsString("translation.source"), secondary: true),
+      subtitleTextBox(reviewSource, editable: false),
+      label(subtitleToolsString("translation.your_text"), secondary: true),
+      subtitleTextBox(correctionInput, editable: true), submitCorrectionButton,
+    ])
     stack.addArrangedSubview(ChengYingStyle.card(vertical([
       sectionLabel(subtitleToolsString("task.heading")), statusLabel, progress, rateLabel,
-      cancelButton, revealButton,
+      cancelButton, revealButton, reviewButton, correctionGroup,
     ])))
     for child in stack.arrangedSubviews {
       child.translatesAutoresizingMaskIntoConstraints = false
@@ -204,6 +222,9 @@ final class SubtitleToolsViewController: NSViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
+    observers.append(NotificationCenter.default.addObserver(forName: NSText.didChangeNotification, object: correctionInput, queue: .main) { [weak self] _ in
+      self?.updateCorrectionAction()
+    })
     observers.append(NotificationCenter.default.addObserver(forName: .subtitleToolsChanged, object: service, queue: .main) { [weak self] _ in
       self?.updateUI()
       self?.loadCompletedSubtitleIfAppropriate()
@@ -246,17 +267,57 @@ final class SubtitleToolsViewController: NSViewController {
   }
 
   @objc private func generate(_ sender: NSButton) {
+    startGeneration()
+  }
+
+  private var selectedLanguage: String? {
+    let index = languagePopup.indexOfSelectedItem
+    return Self.languages.indices.contains(index) ? Self.languages[index] : nil
+  }
+
+  @objc private func languageChanged(_ sender: NSPopUpButton) { updateUI() }
+
+  private func startGeneration(correction: SubtitleCueCorrection? = nil) {
     guard let input = currentMediaURL, let player,
-          Self.languages.indices.contains(languagePopup.indexOfSelectedItem) else {
+          let language = selectedLanguage else {
       showError(SubtitleToolsError.invalidInput.localizedDescription)
       return
     }
     do {
       ownedMediaGeneration = player.videoToolsMediaGeneration
-      ownedTaskID = try service.start(inputURL: input, language: Self.languages[languagePopup.indexOfSelectedItem], burnSubtitles: burnCheckbox.state == .on)
+      ownedTaskID = try service.start(inputURL: input, language: language, burnSubtitles: burnCheckbox.state == .on,
+                                     correction: correction)
       handledCompletionID = nil
       updateUI()
     } catch { showError(error.localizedDescription) }
+  }
+
+  private var reviewableCue: SubtitleCueReview? {
+    guard tabs.selectedSegment == 0 else { return nil }
+    return service.task?.review(for: currentMediaURL, language: selectedLanguage)
+  }
+
+  @objc private func toggleReview(_ sender: NSButton) {
+    guard let review = reviewableCue, let id = service.task?.id else { return }
+    if editingTaskID == id {
+      editingTaskID = nil
+    } else {
+      editingTaskID = id
+      reviewSource.string = review.source
+    }
+    updateUI()
+    if editingTaskID == id { view.window?.makeFirstResponder(correctionInput) }
+  }
+
+  private func updateCorrectionAction() {
+    submitCorrectionButton.isEnabled = editingTaskID != nil && service.isReady &&
+      reviewableCue?.correction(for: correctionInput.string) != nil
+  }
+
+  @objc private func submitCorrection(_ sender: NSButton) {
+    guard let id = editingTaskID, id == service.task?.id, let review = reviewableCue,
+          let correction = review.correction(for: correctionInput.string) else { updateUI(); return }
+    startGeneration(correction: correction)
   }
 
   @objc private func prepare(_ sender: NSButton) {
@@ -337,7 +398,21 @@ final class SubtitleToolsViewController: NSViewController {
     hardwareLabel.textColor = service.hardware.canGenerate ? .secondaryLabelColor : .systemOrange
     let task = service.task
     let active = task?.isActive == true
-    generateButton.isEnabled = currentMediaURL != nil && service.hardware.canGenerate && service.isReady && !active
+    let review = reviewableCue
+    let editing = review != nil && editingTaskID != nil && editingTaskID == task?.id
+    if !editing {
+      editingTaskID = nil
+      if !reviewSource.string.isEmpty { reviewSource.string = "" }
+      if !correctionInput.string.isEmpty { correctionInput.string = "" }
+    }
+    reviewButton.isHidden = review == nil
+    if let review {
+      reviewButton.title = editing ? subtitleToolsString("translation.close_review")
+        : String(format: subtitleToolsString("translation.review_cue"), review.cue)
+    }
+    correctionGroup.isHidden = !editing
+    updateCorrectionAction()
+    generateButton.isEnabled = currentMediaURL != nil && service.hardware.canGenerate && service.isReady && !active && !editing
     languagePopup.isEnabled = !active
     burnCheckbox.isEnabled = !active
     prepareButton.isEnabled = service.hardware.supportsRuntime && !active
@@ -458,6 +533,25 @@ final class SubtitleToolsViewController: NSViewController {
     field.font = .systemFont(ofSize: 12)
     field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     field.setContentCompressionResistancePriority(.required, for: .vertical)
+  }
+
+  private func subtitleTextBox(_ text: NSTextView, editable: Bool) -> NSScrollView {
+    let scroll = NSScrollView()
+    scroll.borderType = .bezelBorder
+    scroll.hasVerticalScroller = true
+    scroll.autohidesScrollers = true
+    text.isRichText = false
+    text.isEditable = editable
+    text.isSelectable = true
+    text.isVerticallyResizable = true
+    text.isHorizontallyResizable = false
+    text.autoresizingMask = [.width]
+    text.textContainer?.widthTracksTextView = true
+    text.font = .systemFont(ofSize: 13)
+    text.setAccessibilityLabel(subtitleToolsString(editable ? "translation.your_text" : "translation.source"))
+    scroll.documentView = text
+    scroll.heightAnchor.constraint(equalToConstant: 68).isActive = true
+    return scroll
   }
 
   private func vertical(_ children: [NSView]) -> NSStackView {

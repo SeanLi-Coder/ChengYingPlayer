@@ -6,12 +6,17 @@ import hashlib
 import json
 import math
 import os
+import re
+import secrets
 import sqlite3
 import stat
 from contextlib import closing, contextmanager
 from pathlib import Path
 
 from .common import PipelineError, Segment
+from .subtitles import clean_text
+
+STALE_CORRECTION = "The failed subtitle no longer matches this checkpoint. Start the task again to review the current subtitle."
 
 
 def _stamp(value):
@@ -93,6 +98,8 @@ class SubtitleCheckpoint:
             db.execute("""CREATE TABLE IF NOT EXISTS cues (
                 id INTEGER PRIMARY KEY, start REAL NOT NULL, end REAL NOT NULL,
                 source TEXT NOT NULL, language TEXT NOT NULL, translation TEXT)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS cue_review (
+                slot INTEGER PRIMARY KEY CHECK(slot = 1), cue INTEGER NOT NULL, token TEXT NOT NULL)""")
 
     def check_source(self):
         if _stamp(self.source.stat()) != self.stamp:
@@ -122,6 +129,7 @@ class SubtitleCheckpoint:
         # ASR normalization may populate Segment.text with the original language.
         # Only the translator may populate the separate translation column.
         with self.db:
+            self.db.execute("DELETE FROM cue_review")
             self.db.execute("DELETE FROM transcript")
             self.db.execute("DELETE FROM cues")
             self.db.executemany("INSERT INTO cues (id, start, end, source, language) VALUES (?, ?, ?, ?, ?)",
@@ -137,12 +145,53 @@ class SubtitleCheckpoint:
             if cursor.rowcount != len(translated):
                 raise PipelineError("The translation checkpoint does not match the aligned subtitles")
 
+    def offer_correction(self, cue):
+        """Create a one-use review for an unresolved cue in a persistent transcript."""
+        if not self.identity:
+            return None
+        self.check_source()
+        row = self.db.execute("""SELECT source FROM cues WHERE id = ? AND translation IS NULL
+                              AND EXISTS (SELECT 1 FROM transcript WHERE identity = ?)""",
+                              (cue - 1, self.identity)).fetchone()
+        if row is None:
+            return None
+        token = secrets.token_hex(32)
+        with self.db:
+            self.db.execute("INSERT OR REPLACE INTO cue_review (slot, cue, token) VALUES (1, ?, ?)", (cue, token))
+        return {"cue": cue, "token": token, "source": row[0]}
+
+    def apply_correction(self, correction):
+        if not isinstance(correction, dict):
+            raise PipelineError("Invalid manual subtitle correction")
+        cue, token, value = (correction.get(key) for key in ("cue", "token", "text"))
+        if (type(cue) is not int or not 1 <= cue < 2**63 or not isinstance(token, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", token)):
+            raise PipelineError(STALE_CORRECTION)
+        if (not isinstance(value, str) or re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ud800-\udfff]", value)
+                or len(value.encode("utf-8")) > 16384):
+            raise PipelineError("Enter a valid subtitle translation of at most 16384 UTF-8 bytes")
+        text = clean_text(value)
+        if not text:
+            raise PipelineError("Enter a nonempty subtitle translation")
+        self.check_source()
+        with self.db:
+            updated = self.db.execute("""UPDATE cues SET translation = ? WHERE id = ? AND translation IS NULL
+                                      AND EXISTS (SELECT 1 FROM transcript WHERE identity = ?)
+                                      AND EXISTS (SELECT 1 FROM cue_review WHERE cue = ? AND token = ?)""",
+                                      (text, cue - 1, self.identity, cue, token))
+            if updated.rowcount != 1:
+                raise PipelineError(STALE_CORRECTION)
+            self.db.execute("DELETE FROM cue_review")
+        return {cue - 1: text}
+
 
 @contextmanager
-def open_checkpoint(data_dir, source, language, paths, on_retained=None):
+def open_checkpoint(data_dir, source, language, paths, on_retained=None, *, existing_only=False):
     stamp, sample = _source_identity(source)
     data = Path(data_dir).expanduser() if data_dir else None
     if data is None or not data.is_absolute():
+        if existing_only:
+            raise PipelineError(STALE_CORRECTION)
         # Preserve standalone requests without persisting subtitles in an implicit cwd.
         with closing(sqlite3.connect(":memory:")) as db:
             yield SubtitleCheckpoint(db, "", source, stamp)
@@ -162,6 +211,8 @@ def open_checkpoint(data_dir, source, language, paths, on_retained=None):
         except BlockingIOError as exc:
             raise PipelineError("Another subtitle operation is using the local checkpoints") from exc
         target = root / (_digest([str(source), language]) + ".sqlite")
+        if existing_only and not target.exists():
+            raise PipelineError(STALE_CORRECTION)
         identity = _digest([1, str(source), stamp, sample, language, _model_identity(paths)])
         companions = []
         for suffix in ("-journal", "-wal", "-shm"):
@@ -172,6 +223,8 @@ def open_checkpoint(data_dir, source, language, paths, on_retained=None):
         db = _private_database(target)
         try:
             if not _intact(db):
+                if existing_only:
+                    raise PipelineError(STALE_CORRECTION)
                 db.close()
                 for path in companions:
                     path.unlink(missing_ok=True)

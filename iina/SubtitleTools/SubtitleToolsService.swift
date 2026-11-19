@@ -81,7 +81,7 @@ final class SubtitleToolsService {
   }
 
   @discardableResult
-  func start(inputURL: URL, language: String, burnSubtitles: Bool) throws -> String {
+  func start(inputURL: URL, language: String, burnSubtitles: Bool, correction: SubtitleCueCorrection? = nil) throws -> String {
     try requireAvailable()
     guard hardware.canGenerate else { throw SubtitleToolsError.insufficientMemory }
     guard isReady else { throw SubtitleToolsError.modelsNotReady }
@@ -90,8 +90,15 @@ final class SubtitleToolsService {
       throw SubtitleToolsError.invalidInput
     }
     let input = inputURL.standardizedFileURL.resolvingSymlinksInPath()
+    if let correction {
+      guard let review = task?.review(for: input, language: language), review.token == correction.token,
+            review.cue == correction.cue, review.correction(for: correction.text)?.text == correction.text else {
+        throw SubtitleToolsError.invalidInput
+      }
+    }
     existingSiblingNames = Set(try FileManager.default.contentsOfDirectory(atPath: input.deletingLastPathComponent().path))
-    return try launch(operation: .subtitles, inputURL: input, language: language, burnSubtitles: burnSubtitles)
+    return try launch(operation: .subtitles, inputURL: input, language: language, burnSubtitles: burnSubtitles,
+                      cueCorrection: correction)
   }
 
   func cancelCurrent() {
@@ -127,10 +134,13 @@ final class SubtitleToolsService {
   }
 
   private func launch(operation: SubtitleToolsOperation, inputURL: URL?, language: String?, burnSubtitles: Bool?,
-                      sourceURL: URL? = nil, purpose: String? = nil, modelID: String? = nil) throws -> String {
+                      sourceURL: URL? = nil, purpose: String? = nil, modelID: String? = nil,
+                      cueCorrection: SubtitleCueCorrection? = nil) throws -> String {
     let id = UUID().uuidString
     task = SubtitleToolsTask(id: id, operation: operation, inputURL: inputURL)
     task?.burnSubtitles = burnSubtitles == true
+    task?.language = language
+    task?.inputIdentity = inputURL.flatMap(SubtitleInputIdentity.init)
     task?.sourceURL = sourceURL
     task?.purpose = purpose
     // Explicit work and automatic verification both consume this helper lifetime's scan.
@@ -141,7 +151,7 @@ final class SubtitleToolsService {
       try transport.send(SubtitleToolsRequest(
         id: id, command: operation.command,
         inputPath: inputURL?.path, language: language, burnSubtitles: burnSubtitles,
-        sourceURL: sourceURL?.absoluteString, purpose: purpose, modelID: modelID
+        sourceURL: sourceURL?.absoluteString, purpose: purpose, modelID: modelID, cueCorrection: cueCorrection
       ))
     } catch {
       handleFailure(error)
@@ -214,6 +224,7 @@ final class SubtitleToolsService {
       }
       if let retained = event.checkpointRetained { current.checkpointRetained = retained }
       if let failure = event.translationFailure { current.translationFailure = failure }
+      if let review = event.cueReview { current.cueReview = review }
     }
     if current.operation == .summary || current.operation == .verify || current.operation == .deleteModel || current.purpose == "summary" {
       // Missing progress means unknown, including when the next stage has no denominator.

@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import chdir
+from contextlib import chdir, closing
 from pathlib import Path
 from unittest import mock
 
@@ -15,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from subtitle_worker import pipeline
 from subtitle_worker.checkpoint import open_checkpoint
 from subtitle_worker.common import Cancelled, PipelineError, Segment
+from subtitle_worker.translator import UnfinishedCue
 
 
 class CheckpointTests(unittest.TestCase):
@@ -211,3 +213,103 @@ with open_checkpoint(sys.argv[2], Path(sys.argv[3]), 'auto', {'asr': sys.argv[4]
             self.video.write_bytes(b"changed source")
             checkpoint.check_source()
         callback.assert_not_called()
+
+    def test_upgrade_review_correct_and_finish_last_cue_without_model_or_recognition(self):
+        request = {"input_path": str(self.video), "data_dir": str(self.data), "language": "en",
+                   "ffmpeg": sys.executable, "ffprobe": sys.executable}
+        paths = pipeline.resolve_model_paths(request)
+        with self.open(language="English", paths=paths) as ck:
+            ck.save_transcript(self.cues)
+            ck.save_translations({0: "已翻译", 2: "已完成"})
+        # v0.2.94 databases only contain transcript and cues.
+        database, = self.cache.iterdir()
+        with closing(sqlite3.connect(database)) as db, db:
+            db.execute("DROP TABLE cue_review")
+
+        def fail_second(cues, models, progress, cancelled, restored, save):
+            self.assertEqual(restored, {0: "已翻译", 2: "已完成"})
+            progress.report("translating", .7, "Retry exhausted", translation_failure={"cue": 2})
+            raise PipelineError("Incomplete translation") from UnfinishedCue(1)
+
+        events = []
+        with (mock.patch.object(pipeline, "probe", return_value={"duration": 3}),
+              mock.patch.object(pipeline, "extract_audio") as extract,
+              mock.patch.object(pipeline, "transcribe") as transcribe,
+              mock.patch.object(pipeline, "require_translation_memory", side_effect=AssertionError("ASR reran"))):
+            with (mock.patch.object(pipeline, "translate", side_effect=fail_second),
+                  self.assertRaisesRegex(PipelineError, "Incomplete translation")):
+                pipeline.run_pipeline(request, events.append)
+            review, = (e["cue_review"] for e in events if "cue_review" in e)
+            self.assertEqual((review["cue"], review["source"]), (2, self.cues[1].source_text))
+            self.assertRegex(review["token"], "^[0-9a-f]{64}$")
+            self.assertTrue(events[-1]["checkpoint_retained"])
+            for e in events:
+                if "cue_review" not in e:
+                    self.assertNotIn(review["source"], str(e))
+                    self.assertNotIn(review["token"], str(e))
+            self.assertFalse(list(self.root.glob("*.srt")))
+
+            request["cue_correction"] = {"cue": 2, "token": review["token"], "text": "我确认的译文"}
+            with self.assertRaises(Cancelled):
+                pipeline.run_pipeline(request, events.append, cancelled=lambda: True)
+            with self.open(language="English", paths=paths) as ck:
+                self.assertNotIn(1, ck.load()[1])
+            with (mock.patch.dict(sys.modules, {"opencc": mock.Mock()}),
+                  mock.patch("subtitle_worker.translator.require_translation_memory",
+                             side_effect=AssertionError("Model inferred a manually translated cue"))):
+                result = pipeline.run_pipeline(request, events.append)
+            extract.assert_not_called()
+            transcribe.assert_not_called()
+        for path in result["outputs"].values():
+            text = Path(path).read_text()
+            self.assertLess(text.index("已翻译"), text.index("我确认的译文"))
+            self.assertLess(text.index("我确认的译文"), text.index("已完成"))
+            self.assertNotIn("source", text)
+        self.assertEqual(list(self.cache.iterdir()), [])
+
+    def test_review_is_one_use_and_bound_to_actual_unfinished_cue(self):
+        self.save()
+        with self.open() as ck:
+            self.assertIsNone(ck.offer_correction(1))  # Already translated.
+            self.assertIsNone(ck.offer_correction(4))
+            stale = ck.offer_correction(2)
+            current = ck.offer_correction(2)
+        self.assertNotEqual(current["token"], stale["token"])
+        correction = {"cue": 2, "token": current["token"], "text": "确认"}
+        with self.open() as ck:
+            for change in ({"token": stale["token"]}, {"cue": 3}, {"cue": False}, {"cue": 0},
+                           {"cue": 2**64}, {"text": ""}, {"text": "<|endoftext|>"}, {"text": "中" * 5462},
+                           {"text": "\ud800"}, {"text": "a\x00b"}, {"token": "\ud800" * 64}):
+                with self.subTest(fields=list(change)), self.assertRaises(PipelineError):
+                    ck.apply_correction({**correction, **change})
+            self.assertEqual(ck.load()[1], {0: "translation zero", 2: "translation two"})
+            self.assertEqual(ck.apply_correction(correction), {1: "确认"})
+            with self.assertRaisesRegex(PipelineError, "no longer matches"):
+                ck.apply_correction(correction)
+
+    def test_correction_cannot_start_over_or_apply_to_other_media_language_or_models(self):
+        self.save()
+        with self.open() as ck:
+            token = ck.offer_correction(2)["token"]
+        other = self.root / "other.mov"
+        other.write_bytes(self.video.read_bytes())
+        request = {"input_path": str(self.video), "data_dir": str(self.data), "language": "auto",
+                   "ffmpeg": sys.executable, "ffprobe": sys.executable,
+                   "cue_correction": {"cue": 2, "token": token, "text": "修订"}}
+        with (mock.patch.object(pipeline, "probe", return_value={"duration": 3}),
+              mock.patch.object(pipeline, "extract_audio", side_effect=AssertionError("Unexpected extraction")),
+              mock.patch.object(pipeline, "translate", side_effect=AssertionError("Unexpected translation"))):
+            for change in ({"input_path": str(other)}, {"language": "ja"}, {"model_paths": {"asr": "changed"}}):
+                with self.subTest(fields=list(change)), self.assertRaisesRegex(PipelineError, "no longer matches"):
+                    pipeline.run_pipeline({**request, **change}, lambda e: None)
+            self.assertEqual(len(list(self.cache.iterdir())), 1)
+            with self.open() as ck:
+                self.assertNotIn(1, ck.load()[1])
+            self.video.write_bytes(b"new source")
+            with self.assertRaisesRegex(PipelineError, "no longer matches"):
+                pipeline.run_pipeline(request, lambda e: None)
+
+    def test_ephemeral_checkpoint_never_exposes_unrecoverable_source(self):
+        with open_checkpoint(None, self.video, "auto", self.paths) as ck:
+            ck.save_transcript(self.cues)
+            self.assertIsNone(ck.offer_correction(1))

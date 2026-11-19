@@ -20,6 +20,27 @@ from .subtitles import clean_text, smart_join
 
 MARKER = re.compile(r"<<<SUB_(\d+)>>>\s*(.*?)(?=<<<SUB_\d+>>>|\Z)", re.DOTALL)
 OUTPUT_LIMIT = 4096
+CONSECUTIVE_STALL_LIMIT = 3
+
+
+def repeats_tail(tokens):
+    """Detect a short exact cycle spanning the last 64 generated tokens."""
+    tail = tokens[-64:]
+    return len(tail) == 64 and any(tail[width:] == tail[:-width] for width in range(1, 17))
+
+
+def stop_repeating_beams(torch, transformers, prompt_length):
+    class RepeatedGeneration(transformers.StoppingCriteria):
+        def __call__(self, input_ids, scores, **kwargs):
+            generated = input_ids.shape[-1] - prompt_length
+            stalled = False
+            if generated > 64 and generated % 32 == 0:
+                # Beam search considers several candidates per step. A variation on
+                # the last token is normal. Check the preceding common cycle instead.
+                tails = input_ids[:, -65:-1].tolist()
+                stalled = all(repeats_tail(row) for row in tails)
+            return torch.full((input_ids.shape[0],), stalled, device=input_ids.device, dtype=torch.bool)
+    return RepeatedGeneration()
 
 
 def split_source(text: str) -> tuple[str, str] | None:
@@ -55,8 +76,7 @@ def read_subtitle_element(answer):
 
 
 def translate_cue(text, index, generate, retrying, depth=0):
-    prompt = ("Translate the following text into Simplified Chinese. "
-              "Output only the translation.\n\n" + text)
+    prompt = "将以下文本翻译为简体中文，只输出译文，无需额外解释。\n\n" + text
     answer = clean_text(generate(prompt) or "")
     if not answer or "<<<SUB_" in answer:
         retrying(index)
@@ -64,7 +84,11 @@ def translate_cue(text, index, generate, retrying, depth=0):
         framed = ("Translate the text inside this XML element into Simplified Chinese. "
                   "Preserve the opening and closing tags and output only the translated element.\n\n"
                   f"<subtitle>{escape(text)}</subtitle>")
-        answer = read_subtitle_element(generate(framed, framed=True))
+        answer = read_subtitle_element(generate(framed, mode="xml"))
+    if not answer or "<<<SUB_" in answer:
+        # A plain translation needn't learn a markup protocol. Search alternative
+        # completions with the same model and accept only a naturally finished beam.
+        answer = clean_text(generate(prompt, mode="recovery") or "")
     if answer and "<<<SUB_" not in answer:
         return answer
     parts = split_source(text) if depth < 5 else None
@@ -142,11 +166,16 @@ def translate(segments, paths, progress, cancelled, restored=None, save_translat
         progress.report("translating", 0.69, "Loading Hy-MT2-30B-A3B full BF16 from local files")
         path = model_path(paths, "translator")
         tokenizer = transformers.AutoTokenizer.from_pretrained(str(path), **local_options())
-        model = transformers.AutoModelForCausalLM.from_pretrained(str(path), **model_options(torch, device)).eval()
+        model, loading = transformers.AutoModelForCausalLM.from_pretrained(
+            str(path), output_loading_info=True, **model_options(torch, device))
+        if any(loading.get(key) for key in ("missing_keys", "mismatched_keys", "error_msgs", "conversion_errors")):
+            raise PipelineError("The translation checkpoint did not fully initialize the local model. "
+                                "Verify the translation model in AI Models before retrying.")
+        model.eval()
 
         diagnostic = {}
 
-        def generate(prompt, framed=False):
+        def generate(prompt, mode="plain"):
             nonlocal diagnostic
             check_cancelled(cancelled)
             inputs = tokenizer.apply_chat_template([{"role": "user", "content": prompt}],
@@ -155,30 +184,56 @@ def translate(segments, paths, progress, cancelled, restored=None, save_translat
             prompt_tokens = inputs["input_ids"].shape[-1]
             # Aligned cues are short. Bound runaway generations by input length,
             # retaining the full budget for legitimately long passages.
-            limit = min(OUTPUT_LIMIT, max(256, 8 * prompt_tokens))
-            diagnostic = {"mode": "xml" if framed else "plain", "input_tokens": prompt_tokens,
+            limit = OUTPUT_LIMIT if mode == "recovery" else min(OUTPUT_LIMIT, max(256, 8 * prompt_tokens))
+            diagnostic = {"mode": mode, "input_tokens": prompt_tokens,
                           "output_tokens": 0, "token_limit": 0, "reason": "context_exhausted"}
             context = getattr(model.config, "max_position_embeddings", None)
             if isinstance(context, int) and context > 0:
                 limit = min(limit, context - prompt_tokens)
                 if limit <= 0:
                     return None
-            options = {"do_sample": False, "repetition_penalty": 1.05,
-                       "stop_strings": ["</subtitle>"], "tokenizer": tokenizer} if framed else {
-                "do_sample": True, "temperature": 0.7, "top_p": 1.0, "top_k": 0, "repetition_penalty": 1.0}
+            stopping = criteria
+            if mode == "recovery":
+                options = {"do_sample": False, "num_beams": 3, "num_return_sequences": 3, "early_stopping": True,
+                           "length_penalty": 0.7, "repetition_penalty": 1.05}
+                stopping = transformers.StoppingCriteriaList(
+                    [*criteria, stop_repeating_beams(torch, transformers, prompt_tokens)])
+            elif mode == "xml":
+                options = {"do_sample": False, "repetition_penalty": 1.05,
+                           "stop_strings": ["</subtitle>"], "tokenizer": tokenizer}
+            else:
+                options = {"do_sample": True, "temperature": 0.7, "top_p": 1.0, "top_k": 0, "repetition_penalty": 1.0}
             with torch.inference_mode():
                 output = model.generate(**inputs, max_new_tokens=limit, forced_eos_token_id=None, **options,
-                                        stopping_criteria=criteria)
+                                        stopping_criteria=stopping)
             check_cancelled(cancelled)
             generated = output[0][prompt_tokens:]
             count = generated.shape[-1]
             diagnostic.update(output_tokens=count, token_limit=limit, reason="invalid_response")
+            if mode == "recovery":
+                # Transformers also ranks sequences stopped by the length or loop
+                # guard. Only accept a candidate containing an actual generated EOS.
+                # Shorter beams may have padding after EOS in the returned matrix.
+                eos = model.generation_config.eos_token_id
+                eos_ids = {eos} if isinstance(eos, int) else set(eos or ())
+                for row in output:
+                    tokens = row[prompt_tokens:].tolist()
+                    end = next((i for i, token in enumerate(tokens) if token in eos_ids), None)
+                    if not end or repeats_tail(tokens[:end]):
+                        continue
+                    answer = clean_text(tokenizer.decode(tokens[:end], skip_special_tokens=True))
+                    if answer and "<<<SUB_" not in answer and "<subtitle>" not in answer:
+                        return answer
+                diagnostic["reason"] = "unfinished" if count >= limit else "invalid_response"
+                if count >= 65 and repeats_tail(generated[-65:-1].tolist()):
+                    diagnostic["reason"] = "repetition"
+                return None
             if count >= limit:
                 eos = model.generation_config.eos_token_id
                 eos_ids = (eos,) if isinstance(eos, int) else (eos or ())
-                if int(generated[-1]) not in eos_ids:
+                if not count or int(generated[-1]) not in eos_ids:
                     diagnostic["reason"] = "unfinished"
-                    if not framed:
+                    if mode != "xml":
                         return None
             answer = tokenizer.decode(generated, skip_special_tokens=True).strip()
             # A structured retry must prove that the entire element was returned,
@@ -193,21 +248,37 @@ def translate(segments, paths, progress, cancelled, restored=None, save_translat
             progress.report("translating", progress.last,
                             f"Retrying translation at subtitle {index + 1} of {len(segments)}")
 
+        first_failure = None
+        consecutive_stalls = 0
         for number, batch in enumerate(batches, 1):
-            try:
-                for translated in translate_batch(batch, segments, generate, retrying):
-                    completed = {i: converter.convert(value) for i, value in translated.items()}
-                    if save_translations:
-                        save_translations(completed)
-                    for i, value in completed.items():
-                        segments[i].text = value
-            except UnfinishedCue as exc:
-                progress.report("translating", progress.last, str(exc),
-                                translation_failure={"cue": exc.cue, **diagnostic})
-                raise PipelineError(f"{exc} ({diagnostic['mode']}, input tokens={diagnostic['input_tokens']}, "
-                                    f"output tokens={diagnostic['output_tokens']}/{diagnostic['token_limit']}, "
-                                    f"{diagnostic['reason']}). No incomplete subtitles were published.") from exc
+            pending = batch
+            while pending:
+                try:
+                    for translated in translate_batch(pending, segments, generate, retrying):
+                        completed = {i: converter.convert(value) for i, value in translated.items()}
+                        if save_translations:
+                            save_translations(completed)
+                        for i, value in completed.items():
+                            segments[i].text = value
+                        consecutive_stalls = 0
+                    break
+                except UnfinishedCue as exc:
+                    if first_failure is None:
+                        first_failure = exc.cue, diagnostic.copy()
+                    consecutive_stalls += 1
+                    pending = [i for i in pending if i + 1 > exc.cue]
+                    if consecutive_stalls >= CONSECUTIVE_STALL_LIMIT:
+                        break
+            if consecutive_stalls >= CONSECUTIVE_STALL_LIMIT:
+                break
             progress.chunks("translating", number, len(batches), started, 0.69, 0.90)
+        if first_failure:
+            cue, details = first_failure
+            error = UnfinishedCue(cue - 1)
+            progress.report("translating", progress.last, str(error), translation_failure={"cue": cue, **details})
+            raise PipelineError(f"{error} ({details['mode']}, input tokens={details['input_tokens']}, "
+                                f"output tokens={details['output_tokens']}/{details['token_limit']}, "
+                                f"{details['reason']}). No incomplete subtitles were published.") from error
     finally:
         model = tokenizer = None
         release_memory(torch)

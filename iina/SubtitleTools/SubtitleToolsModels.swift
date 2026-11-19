@@ -32,6 +32,7 @@ struct SubtitleToolsRequest: Encodable {
   var sourceURL: String? = nil
   var purpose: String? = nil
   var modelID: String? = nil
+  var cueCorrection: SubtitleCueCorrection? = nil
 
   enum CodingKeys: String, CodingKey {
     case id, command, language, purpose
@@ -40,6 +41,7 @@ struct SubtitleToolsRequest: Encodable {
     case burnSubtitles = "burn_subtitles"
     case targetID = "target_id"
     case modelID = "model_id"
+    case cueCorrection = "cue_correction"
   }
 }
 
@@ -135,14 +137,61 @@ struct SubtitleTranslationFailure: Decodable {
   }
 
   var localizedDescription: String? {
-    guard cue > 0, ["unfinished", "invalid_response", "context_exhausted"].contains(reason) else { return nil }
+    guard cue > 0, ["unfinished", "invalid_response", "context_exhausted", "repetition"].contains(reason) else { return nil }
     let message = String(format: subtitleToolsString("translation.failure.\(reason)"), cue)
-    guard ["plain", "xml"].contains(mode), inputTokens >= 0, outputTokens >= 0, tokenLimit >= outputTokens else {
+    guard ["plain", "xml", "recovery"].contains(mode), inputTokens >= 0, outputTokens >= 0, tokenLimit >= outputTokens else {
       return message
     }
     let diagnostics = String(format: subtitleToolsString("translation.token_counts"),
                              subtitleToolsString("translation.mode.\(mode)"), inputTokens, outputTokens, tokenLimit)
     return message + "\n" + diagnostics
+  }
+}
+
+struct SubtitleCueReview: Decodable {
+  let cue: Int
+  let token: String
+  let source: String
+
+  var isValid: Bool {
+    cue > 0 && !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+      token.utf8.count == 64 && token.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+  }
+
+  func correction(for input: String) -> SubtitleCueCorrection? {
+    let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty, text.utf8.count <= 16_384, !text.utf8.contains(where: {
+      ($0 < 32 && $0 != 9 && $0 != 10 && $0 != 13) || $0 == 127
+    }) else { return nil }
+    return SubtitleCueCorrection(cue: cue, token: token, text: text)
+  }
+}
+
+struct SubtitleCueCorrection: Encodable {
+  let cue: Int
+  let token: String
+  let text: String
+}
+
+struct SubtitleInputIdentity: Equatable {
+  private let device: dev_t
+  private let inode: ino_t
+  private let size: off_t
+  private let modifiedSeconds: Int
+  private let modifiedNanos: Int
+  private let changedSeconds: Int
+  private let changedNanos: Int
+
+  init?(_ input: URL) {
+    var info = stat()
+    guard input.withUnsafeFileSystemRepresentation({ path in path.map { lstat($0, &info) == 0 } ?? false }) else { return nil }
+    device = info.st_dev
+    inode = info.st_ino
+    size = info.st_size
+    modifiedSeconds = info.st_mtimespec.tv_sec
+    modifiedNanos = info.st_mtimespec.tv_nsec
+    changedSeconds = info.st_ctimespec.tv_sec
+    changedNanos = info.st_ctimespec.tv_nsec
   }
 }
 
@@ -180,6 +229,7 @@ struct SubtitleToolsEvent: Decodable {
   var resumedTranslations: Int? = nil
   var checkpointRetained: Bool? = nil
   var translationFailure: SubtitleTranslationFailure? = nil
+  var cueReview: SubtitleCueReview? = nil
 
   enum CodingKeys: String, CodingKey {
     case type, id, operation, stage, progress, message, models, outputs, warnings, partial, error
@@ -202,6 +252,7 @@ struct SubtitleToolsEvent: Decodable {
     case resumedTranslations = "resumed_translations"
     case checkpointRetained = "checkpoint_retained"
     case translationFailure = "translation_failure"
+    case cueReview = "cue_review"
   }
 }
 
@@ -257,6 +308,8 @@ struct SubtitleToolsTask {
   var videoURL: URL?
   var error: String?
   var burnSubtitles = false
+  var language: String?
+  var inputIdentity: SubtitleInputIdentity?
   var warnings = [String]()
   var purpose: String?
   var sourceURL: URL?
@@ -272,6 +325,14 @@ struct SubtitleToolsTask {
   var restoredSubtitles: (cues: Int, translations: Int)?
   var checkpointRetained = false
   var translationFailure: SubtitleTranslationFailure?
+  var cueReview: SubtitleCueReview?
+
+  func review(for input: URL?, language: String?) -> SubtitleCueReview? {
+    guard phase == .failed, operation == .subtitles, checkpointRetained, let input, input == inputURL,
+          let language, language == self.language, let cueReview, cueReview.isValid,
+          cueReview.cue == translationFailure?.cue, let inputIdentity, inputIdentity == SubtitleInputIdentity(input) else { return nil }
+    return cueReview
+  }
   var isActive: Bool { phase == .starting || phase == .running || phase == .cancelling }
 }
 

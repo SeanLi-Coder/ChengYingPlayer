@@ -282,6 +282,9 @@ class Supervisor:
         payload = {"input_path": str(video), "language": language, "burn_subtitles": burn,
                    "ffmpeg": self.ffmpeg, "ffprobe": self.ffprobe, "data_dir": str(self.store.root),
                    "models": model_paths, "model_paths": {"qwen-asr": model_paths["asr"], "qwen-aligner": model_paths["aligner"], "hy-mt": model_paths["translator"]}}
+        if "cue_correction" in request:
+            # Only the worker holding the matching checkpoint can validate and apply a correction.
+            payload["cue_correction"] = request["cue_correction"]
         self._worker(payload, emit)
 
     def _summarize(self, request: dict, emit: Callable[[dict], None], download_progress: Callable) -> None:
@@ -368,7 +371,8 @@ class Supervisor:
             try:
                 event = json.loads(line)
             except ValueError:
-                diagnostic(line)
+                # Stdout can carry a private cue review. A truncated frame is not a log line.
+                diagnostic("The subtitle worker emitted a malformed protocol event.")
                 return
             if not isinstance(event, dict) or event.get("type") not in {"progress", "completed", "failed", "cancelled"}:
                 return

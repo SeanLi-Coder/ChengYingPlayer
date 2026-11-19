@@ -225,8 +225,18 @@ let restoredText = String(format: subtitleToolsString("translation.restored"), 3
 try emitSubtitleFields(["type": "progress", "stage": "translating", "message": "Loading model"])
 check(status.stringValue.contains(restoredText), "Restored cue and translation counts stay visible after ordinary worker progress")
 let failure: [String: Any] = ["reason": "unfinished", "cue": 13, "mode": "xml", "input_tokens": 30, "output_tokens": 256, "token_limit": 256]
+let reviewButton = property("reviewButton", of: controller, as: NSButton.self)
+let submitCorrection = property("submitCorrectionButton", of: controller, as: NSButton.self)
+let reviewSource = property("reviewSource", of: controller, as: NSTextView.self)
+let correctionInput = property("correctionInput", of: controller, as: NSTextView.self)
+let cueToken = String(repeating: "ab", count: 32)
+let privateSource = "Private recognized text for this cue."
+let reviewInfo: [String: Any] = ["cue": 13, "token": cueToken, "source": privateSource]
 try emitSubtitleFields(["type": "progress", "translation_failure": failure])
+try emitSubtitleFields(["type": "progress", "cue_review": reviewInfo])
 try emitSubtitleFields(["type": "progress", "checkpoint_retained": true])
+check(reviewButton.isHidden && reviewSource.string.isEmpty && !status.stringValue.contains(privateSource),
+      "An active task never offers premature cue correction or reveals its private source")
 try emitSubtitleFields(["type": "failed", "stage": "failed", "error": "Generic worker error"])
 let failedCue = String(format: subtitleToolsString("translation.failure.unfinished"), 13)
 let tokenCounts = String(format: subtitleToolsString("translation.token_counts"), subtitleToolsString("translation.mode.xml"), 30, 256, 256)
@@ -239,7 +249,52 @@ check(status.stringValue.contains(failedCue) && status.stringValue.contains(toke
 check(status.stringValue.contains(restoredText) && status.stringValue.contains(resumeHint) && generate.isEnabled,
       "The subsequent checkpoint event preserves the error and allows another generation")
 
-action(generate)
+check(!reviewButton.isHidden && reviewSource.string.isEmpty && !status.stringValue.contains(privateSource),
+      "A terminal saved failure exposes an explicit review action without disclosing text in diagnostics")
+action(reviewButton)
+check(reviewSource.string == privateSource && !reviewSource.isHiddenOrHasHiddenAncestor && !reviewSource.isEditable
+      && correctionInput.isEditable && correctionInput.string.isEmpty && !submitCorrection.isEnabled && !generate.isEnabled,
+      "Review explicitly shows the recognized source with a blank, editable translation")
+checkPanelWidth([("Review source", reviewSource.enclosingScrollView!), ("Correction field", correctionInput.enclosingScrollView!)])
+func typeCorrection(_ value: String) {
+  correctionInput.insertText(value, replacementRange: NSRange(location: 0, length: correctionInput.string.utf16.count))
+}
+typeCorrection("  \n")
+check(!submitCorrection.isEnabled, "Whitespace cannot be confirmed as a translation")
+typeCorrection(String(repeating: "字", count: 6_000))
+check(!submitCorrection.isEnabled, "The limit applies to UTF-8 bytes, including multibyte translations")
+typeCorrection("未提交的文字")
+languages.selectItem(at: 3); action(languages)
+check(reviewButton.isHidden && reviewSource.string.isEmpty && correctionInput.string.isEmpty,
+      "Selecting a different language clears the private review and unconfirmed draft")
+languages.selectItem(at: 0); action(languages)
+action(reviewButton)
+typeCorrection("未提交的文字")
+action(reviewButton)
+check(correctionInput.string.isEmpty && reviewSource.string.isEmpty && generate.isEnabled,
+      "Cancelling a cue review does not create a task or apply the draft")
+let secondSource = directory.appendingPathComponent("another.mp4")
+try Data("Other video fixture".utf8).write(to: secondSource)
+let staleCorrection = SubtitleCueCorrection(cue: 13, token: cueToken, text: "字幕")
+do {
+  try service.start(inputURL: secondSource, language: "auto", burnSubtitles: false, correction: staleCorrection)
+  fatalError("A correction from another file must not launch")
+} catch SubtitleToolsError.invalidInput { check(true, "Corrections are bound to the original media file") }
+do {
+  try service.start(inputURL: source, language: "auto", burnSubtitles: false,
+                    correction: SubtitleCueCorrection(cue: 12, token: cueToken, text: "字幕"))
+  fatalError("A correction for another cue must not launch")
+} catch SubtitleToolsError.invalidInput { check(true, "Corrections for a different cue cannot launch") }
+action(reviewButton)
+typeCorrection("  这是一条完整的字幕。  ")
+check(submitCorrection.isEnabled, "Nonempty user text enables explicit submission")
+action(submitCorrection)
+let correctionRequest = try JSONSerialization.jsonObject(with: JSONEncoder().encode(transport.requests.last!)) as! [String: Any]
+let actualCorrection = correctionRequest["cue_correction"] as! [String: Any]
+check(correctionRequest["command"] as? String == "start" && actualCorrection["cue"] as? Int == 13
+      && actualCorrection["token"] as? String == cueToken && actualCorrection["text"] as? String == "这是一条完整的字幕。"
+      && actualCorrection["source"] == nil && correctionInput.string.isEmpty && reviewSource.string.isEmpty,
+      "Explicit confirmation starts the same job with only the matching correction and dismisses the review")
 try emitSubtitleFields(["type": "failed", "error": "Legacy worker error"])
 check(status.stringValue.contains("Legacy worker error") && !status.stringValue.contains(resumeHint) && !status.stringValue.contains(restoredText),
       "A fresh task without a confirmed checkpoint preserves its original failure and offers no resume promise")
@@ -249,6 +304,44 @@ try emitSubtitleFields(["type": "failed", "translation_failure": ["reason": "con
                                                                   "input_tokens": 262144, "output_tokens": 0, "token_limit": 0]])
 check(status.stringValue.contains(String(format: subtitleToolsString("translation.failure.context_exhausted"), 7))
       && !status.stringValue.contains(resumeHint), "A zero output budget reports the actual context limit without promising a checkpoint")
+
+action(generate)
+try emitSubtitleFields(["type": "failed", "translation_failure": ["reason": "repetition", "cue": 1, "mode": "recovery",
+                                                                     "input_tokens": 49, "output_tokens": 35, "token_limit": 392],
+                        "cue_review": reviewInfo, "checkpoint_retained": true])
+check(status.stringValue.contains(String(format: subtitleToolsString("translation.failure.repetition"), 1))
+      && status.stringValue.contains(subtitleToolsString("translation.mode.recovery")) && reviewButton.isHidden,
+      "Recovery diagnostics identify repeated text; a private review for a different cue is refused")
+
+player.info.currentURL = secondSource
+controller.refreshCurrentMedia()
+action(generate)
+try emitSubtitleFields(["type": "progress", "translation_failure": failure, "cue_review": reviewInfo, "checkpoint_retained": true])
+action(cancel)
+try emitSubtitleFields(["type": "cancelled"])
+try emitSubtitleFields(["type": "failed", "translation_failure": failure, "cue_review": reviewInfo, "checkpoint_retained": true])
+check(service.task?.phase == .cancelled && reviewButton.isHidden && reviewSource.string.isEmpty,
+      "A late failure cannot revive a cancelled review or reveal its original text")
+action(generate)
+check(transport.requests.last?.cueCorrection == nil, "Ordinary generation after cancellation carries no prior correction")
+try emitSubtitleFields(["type": "failed", "translation_failure": failure, "cue_review": reviewInfo, "checkpoint_retained": true])
+action(reviewButton)
+typeCorrection("尚未确认")
+player.info.currentURL = source
+controller.refreshCurrentMedia()
+check(reviewButton.isHidden && reviewSource.string.isEmpty && correctionInput.string.isEmpty,
+      "Changing videos dismisses a review and discards its unconfirmed private text")
+player.info.currentURL = secondSource
+controller.refreshCurrentMedia()
+action(reviewButton)
+typeCorrection("已被替换的原视频")
+try Data("Replaced file at the same URL".utf8).write(to: secondSource, options: .atomic)
+let preReplacementRequests = transport.requests.count
+action(submitCorrection)
+check(transport.requests.count == preReplacementRequests && reviewButton.isHidden && reviewSource.string.isEmpty
+      && correctionInput.string.isEmpty, "Replacing a file at its existing URL prevents submission and clears an open review")
+player.info.currentURL = source
+controller.refreshCurrentMedia()
 
 languages.selectItem(at: 4)
 burn.state = .on

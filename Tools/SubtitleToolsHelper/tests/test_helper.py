@@ -136,6 +136,7 @@ class HelperTests(unittest.TestCase):
     def test_worker_receives_verified_local_models_and_offline_environment(self):
         video = self.root / "video.mp4"
         video.write_bytes(b"video")
+        correction = {"cue": 1, "token": "ab" * 32, "text": "private fixture translation"}
         for _, artifacts in self.supervisor.models:
             for artifact in artifacts:
                 path = self.supervisor.store.path(artifact)
@@ -151,18 +152,23 @@ class HelperTests(unittest.TestCase):
             self.assertEqual(env["TRANSFORMERS_OFFLINE"], "1")
             self.assertEqual(env["HF_DEACTIVATE_ASYNC_LOAD"], "1")
             self.assertEqual(payload["models"]["asr"], str(self.root / "models/asr"))
+            self.assertEqual(payload["cue_correction"], correction)
+            self.assertEqual(Path(command[-1]).stat().st_mode & 0o777, 0o600)
+            self.assertNotIn(correction["text"], " ".join(command))
             on_stderr('{"type":"failed","error":"This is a diagnostic, not a protocol event."}')
             output(json.dumps({"type": "completed", "outputs": {"srt": "/output.srt"}, "partial": True, "warnings": ["Burn skipped."]}))
             return 0
 
         with patch.object(self.supervisor.runtime, "ready", return_value=True), patch.object(self.supervisor.runtime, "python", return_value=Path(sys.executable)), patch("helper.run_process", side_effect=worker):
-            self.supervisor.request({"id": "job", "command": "start", "input_path": str(video), "burn_subtitles": True})
+            self.supervisor.request({"id": "job", "command": "start", "input_path": str(video),
+                                     "burn_subtitles": True, "cue_correction": correction})
             self.supervisor._thread.join(3)
         self.assertEqual(len(captured), 1)
         terminal = self.events[-1]
         self.assertEqual(terminal["type"], "completed")
         self.assertEqual(terminal["warnings"], ["Burn skipped."])
         self.assertTrue(terminal["partial"])
+        self.assertNotIn(correction["text"], str(self.events))
         self.assertEqual(list((self.root / "requests").iterdir()), [])
 
     def test_missing_model_does_not_start_worker_or_download(self):
@@ -267,6 +273,18 @@ raise SystemExit(main())
         self.assertEqual(result, 0)
         self.assertEqual(output, ['{"type":"progress"}'])
         self.assertEqual(diagnostics, ['{"type":"completed"}'])
+
+    def test_truncated_private_review_is_never_exposed_in_worker_diagnostics(self):
+        def worker(command, cancel, output, **options):
+            output('{"type":"progress","cue_review":{"source":"private source fixture')
+            return 1
+
+        with (patch("helper.run_process", side_effect=worker),
+              patch.object(self.supervisor.runtime, "python", return_value=Path(sys.executable)),
+              self.assertRaisesRegex(AssetError, "malformed protocol event") as error):
+            self.supervisor._worker({}, self.events.append)
+        self.assertNotIn("private source fixture", str(error.exception))
+        self.assertFalse(self.events)
 
 
 class RuntimeInstallationTests(unittest.TestCase):

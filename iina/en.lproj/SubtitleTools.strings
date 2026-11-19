@@ -92,6 +92,13 @@
 "translation.failure.context_exhausted" = "The input for subtitle %ld filled the model’s context window, leaving no room for the translation.";
 "translation.mode.plain" = "Plain translation";
 "translation.mode.xml" = "Tagged translation";
+"translation.mode.recovery" = "Single-cue translation";
+"translation.failure.repetition" = "The model repeatedly generated the same text for subtitle %ld.";
+"translation.review_cue" = "Review and translate subtitle %ld…";
+"translation.source" = "Recognized speech";
+"translation.your_text" = "Your Simplified Chinese translation";
+"translation.save_and_continue" = "Use this translation and continue";
+"translation.close_review" = "Cancel editing";
 "translation.token_counts" = "%@ · %ld input tokens, %ld output tokens, limit of %ld output tokens.";
 "stage.saving" = "Saving Chinese subtitles";
 "stage.burning" = "Writing the lossless subtitled video";

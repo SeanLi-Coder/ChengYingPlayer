@@ -89,6 +89,13 @@
 "translation.failure.context_exhausted" = "第 %ld 条字幕的输入已用完模型的上下文空间，无法生成译文。";
 "translation.mode.plain" = "常规翻译";
 "translation.mode.xml" = "带标签翻译";
+"translation.mode.recovery" = "单句翻译";
+"translation.failure.repetition" = "翻译第 %ld 条字幕时，模型持续重复相同内容。";
+"translation.review_cue" = "查看并补译第 %ld 条字幕…";
+"translation.source" = "识别出的原文";
+"translation.your_text" = "你的简体中文译文";
+"translation.save_and_continue" = "采用这条译文并继续";
+"translation.close_review" = "取消补译";
 "translation.token_counts" = "%@ · 输入 %ld 个 token，输出 %ld 个，本次输出上限为 %ld 个。";
 "stage.saving" = "正在保存中文字幕";
 "stage.burning" = "正在写入无损字幕视频";

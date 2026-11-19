@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from .asr import normalize_language, transcribe
-from .checkpoint import open_checkpoint
+from .checkpoint import STALE_CORRECTION, open_checkpoint
 from .common import (
     Cancelled,
     PipelineError,
@@ -18,7 +18,7 @@ from .common import (
 )
 from .media import burn_subtitles, extract_audio, probe
 from .subtitles import normalize_segments, write_ass, write_srt
-from .translator import is_mandarin, translate
+from .translator import UnfinishedCue, is_mandarin, translate
 
 
 def resolve_model_paths(request: dict) -> dict:
@@ -107,8 +107,6 @@ def run_pipeline(request: dict, emit, cancelled=lambda: False) -> dict:
         raise PipelineError("burn_subtitles must be a boolean")
     language = str(request.get("language", "auto"))
     normalized_language = normalize_language(language)
-    if normalized_language and not is_mandarin(normalized_language):
-        require_translation_memory()
     paths = resolve_model_paths(request)
     ffmpeg, ffprobe = request.get("ffmpeg"), request.get("ffprobe")
     if not all(isinstance(exe, str) and Path(exe).is_file() and os.access(exe, os.X_OK)
@@ -121,17 +119,25 @@ def run_pipeline(request: dict, emit, cancelled=lambda: False) -> dict:
     def report_retained():
         emit({"type": "progress", "progress": progress.last, "checkpoint_retained": True})
 
+    has_correction = "cue_correction" in request
     with (open_checkpoint(request.get("data_dir"), source, normalized_language or "auto", paths,
-                          on_retained=report_retained) as checkpoint,
+                          on_retained=report_retained, existing_only=has_correction) as checkpoint,
           tempfile.TemporaryDirectory(prefix=".chengying-subtitles-", dir=source.parent) as temporary_name):
         info = probe(source, ffprobe)
         temporary = Path(temporary_name)
         segments, restored = checkpoint.load()
+        if has_correction:
+            if not segments:
+                raise PipelineError(STALE_CORRECTION)
+            check_cancelled(cancelled)
+            restored.update(checkpoint.apply_correction(request["cue_correction"]))
         if segments:
             progress.report("translating", 0.68, f"Resumed {len(segments)} aligned subtitles and "
                             f"{len(restored)} completed translations from the local checkpoint",
                             resumed_cues=len(segments), resumed_translations=len(restored))
         else:
+            if normalized_language and not is_mandarin(normalized_language):
+                require_translation_memory()
             audio_path = temporary / "speech.wav"
             extract_audio(source, audio_path, info, ffmpeg, progress, cancelled)
             segments = transcribe(audio_path, paths, language, progress, cancelled)
@@ -139,7 +145,17 @@ def run_pipeline(request: dict, emit, cancelled=lambda: False) -> dict:
         for segment in segments:
             if not is_mandarin(segment.language):
                 segment.text = ""
-        segments = translate(segments, paths, progress, cancelled, restored, checkpoint.save_translations)
+        try:
+            segments = translate(segments, paths, progress, cancelled, restored, checkpoint.save_translations)
+        except PipelineError as exc:
+            failure = exc if isinstance(exc, UnfinishedCue) else exc.__cause__
+            if isinstance(failure, UnfinishedCue):
+                check_cancelled(cancelled)
+                review = checkpoint.offer_correction(failure.cue)
+                if review:
+                    # Local UI payload only. Keep the transcript out of messages and diagnostic fields.
+                    emit({"type": "progress", "progress": progress.last, "cue_review": review})
+            raise
         if any(not segment.text.strip() for segment in segments):
             raise PipelineError("Translation did not finish every subtitle; the local checkpoint was retained")
         segments = normalize_segments(segments, info["duration"])
