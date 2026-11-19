@@ -296,6 +296,90 @@ class PipelineUnitTests(unittest.TestCase):
         for options in generation:
             self.assertEqual((options["temperature"], options["top_p"], options["top_k"]), (.7, 1., 0))
 
+    def test_output_limit_retries_only_affected_subtitles(self):
+        events, calls = [], []
+        # A small ceiling exercises the same boundary as a real 4096-token generation.
+        limit = 20
+
+        class Tokens(list):
+            @property
+            def shape(self):
+                return (len(self),)
+
+            def __getitem__(self, key):
+                value = super().__getitem__(key)
+                return Tokens(value) if isinstance(key, slice) else value
+
+        class Tokenizer:
+            def apply_chat_template(self, messages, **kwargs):
+                self.prompt = messages[0]["content"].split("\n\n", 1)[1]
+                return Batch()
+
+            def decode(self, tokens, **kwargs):
+                if tokens[-1] != 99:
+                    raise AssertionError("A truncated output reached the parser")
+                return self.answer
+
+        tokenizer = Tokenizer()
+
+        class Model(FakeModel):
+            config = types.SimpleNamespace(max_position_embeddings=limit + 3)
+            generation_config = types.SimpleNamespace(eos_token_id=[98, 99])
+
+            def generate(self, **kwargs):
+                sources = [line for line in tokenizer.prompt.splitlines() if line.startswith("line ")]
+                calls.append((tuple(sources), kwargs["do_sample"]))
+                if kwargs["max_new_tokens"] != limit or kwargs["forced_eos_token_id"] is not None:
+                    raise AssertionError("Unexpected generation budget or forced EOS")
+                output = [1] * limit
+                if len(calls) == 2 or (sources == ["line 8"] and kwargs["do_sample"]):
+                    tokenizer.answer = "incomplete"
+                else:
+                    tokenizer.answer = tokenizer.prompt.replace("line ", "translated ")
+                    output[-1] = 99
+                return [Tokens([0, 0, 0] + output)]
+
+        transformers = types.SimpleNamespace(
+            AutoTokenizer=types.SimpleNamespace(from_pretrained=lambda *a, **k: tokenizer),
+            AutoModelForCausalLM=types.SimpleNamespace(from_pretrained=lambda *a, **k: Model()),
+            StoppingCriteria=object, StoppingCriteriaList=list)
+        converter = types.SimpleNamespace(OpenCC=lambda _: types.SimpleNamespace(convert=lambda text: text))
+        cues = [Segment(i, i + .5, f"line {i}", language="English") for i in range(10)]
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "config.json").write_text("{}")
+            with mock.patch.dict(sys.modules, {"torch": fake_torch(), "transformers": transformers, "opencc": converter}), \
+                    mock.patch.object(translator, "require_translation_memory"), \
+                    mock.patch.object(translator, "OUTPUT_LIMIT", limit + 1):
+                result = translator.translate(cues, {"translator": directory}, Progress(events.append), lambda: False)
+        self.assertEqual([(s.start, s.end, s.source_text, s.text) for s in result],
+                         [(i, i + .5, f"line {i}", f"translated {i}") for i in range(10)])
+        self.assertEqual(calls, [(tuple(f"line {i}" for i in range(8)), True),
+                                 (("line 8", "line 9"), True), (("line 8",), True),
+                                 (("line 8",), False), (("line 9",), True)])
+        fractions = [event["progress"] for event in events]
+        self.assertEqual(fractions, sorted(fractions))
+        self.assertAlmostEqual(fractions[-1], .90)
+
+    def test_long_single_cue_preserves_both_halves_and_has_bounded_failure(self):
+        original = "Keep the first half of this subtitle intact. Also keep the second half of this subtitle intact."
+        parts = []
+        def generate(prompt, greedy=False):
+            source = prompt.split("\n\n", 1)[1]
+            if source == original:
+                return None
+            parts.append(source)
+            return source
+        self.assertEqual(translator.translate_cue(original, 5, generate, lambda _: None), original)
+        self.assertEqual(len(parts), 2)
+        self.assertTrue(parts[0].endswith("intact."))
+        exhausted = mock.Mock(return_value=None)
+        with self.assertRaisesRegex(PipelineError, "subtitle 6"):
+            translator.translate_cue("Unfinished.", 5, exhausted, lambda _: None)
+        self.assertEqual(exhausted.call_count, 2)
+        with self.assertRaises(Cancelled):
+            translator.translate_cue("Cancelled.", 0, mock.Mock(return_value=None),
+                                     mock.Mock(side_effect=Cancelled("stop")))
+
     def test_worker_failure_stdout_is_jsonl_only(self):
         with tempfile.TemporaryDirectory() as directory:
             request = Path(directory) / "request.json"
