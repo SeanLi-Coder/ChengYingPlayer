@@ -179,6 +179,7 @@ final class SubtitleToolsViewController: NSViewController {
     progress.minValue = 0
     progress.maxValue = 1
     styleDescription(statusLabel)
+    statusLabel.isSelectable = true
     styleDescription(rateLabel)
     rateLabel.textColor = .secondaryLabelColor
     rateLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
@@ -379,7 +380,13 @@ final class SubtitleToolsViewController: NSViewController {
       if let stage = task.stage, stage != "complete" || (task.operation != .deleteModel && task.operation != .verify) {
         parts.append(stageTitle(stage))
       }
+      if let restored = task.restoredSubtitles {
+        parts.append(String(format: subtitleToolsString("translation.restored"), restored.cues, restored.translations))
+      }
       if let error = task.error { parts.append(error) }
+      if task.checkpointRetained && (task.phase == .failed || task.phase == .cancelled) {
+        parts.append(subtitleToolsString("translation.resume_hint"))
+      }
       parts.append(contentsOf: task.warnings)
       if task.phase == .completed, !task.warnings.isEmpty { statusLabel.textColor = .systemOrange }
       statusLabel.stringValue = parts.joined(separator: "\n")

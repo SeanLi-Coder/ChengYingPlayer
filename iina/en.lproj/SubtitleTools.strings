@@ -85,6 +85,14 @@
 "stage.recognizing" = "Recognizing speech";
 "stage.aligning" = "Aligning subtitle timestamps";
 "stage.translating" = "Translating subtitles";
+"translation.restored" = "Restored %ld timed subtitles and %ld completed translations from the checkpoint.";
+"translation.resume_hint" = "Progress saved. Choose Generate subtitles again for the same video with the same source language setting to continue.";
+"translation.failure.unfinished" = "The model could not finish translating subtitle %ld after retrying.";
+"translation.failure.invalid_response" = "The model returned an invalid format for subtitle %ld, so its translation could not be verified.";
+"translation.failure.context_exhausted" = "The input for subtitle %ld filled the model’s context window, leaving no room for the translation.";
+"translation.mode.plain" = "Plain translation";
+"translation.mode.xml" = "Tagged translation";
+"translation.token_counts" = "%@ · %ld input tokens, %ld output tokens, limit of %ld output tokens.";
 "stage.saving" = "Saving Chinese subtitles";
 "stage.burning" = "Writing the lossless subtitled video";
 "stage.runtime_extract" = "Extracting the verified runtime";

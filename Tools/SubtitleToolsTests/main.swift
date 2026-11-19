@@ -211,6 +211,45 @@ check(player.mpv.addedSubtitles.count == 1, "Later status notifications do not r
 let sourceAfterGeneration = try Data(contentsOf: source)
 check(sourceAfterGeneration == originalBytes, "External subtitle generation never writes to the source video in this workflow")
 
+func emitSubtitleFields(_ fields: [String: Any]) throws {
+  var payload = fields
+  payload["id"] = service.task!.id
+  payload["operation"] = "subtitles"
+  let data = try JSONSerialization.data(withJSONObject: payload)
+  transport.emit(try JSONDecoder().decode(SubtitleToolsEvent.self, from: data))
+}
+
+action(generate)
+try emitSubtitleFields(["type": "progress", "stage": "translating", "resumed_cues": 37, "resumed_translations": 12])
+let restoredText = String(format: subtitleToolsString("translation.restored"), 37, 12)
+try emitSubtitleFields(["type": "progress", "stage": "translating", "message": "Loading model"])
+check(status.stringValue.contains(restoredText), "Restored cue and translation counts stay visible after ordinary worker progress")
+let failure: [String: Any] = ["reason": "unfinished", "cue": 13, "mode": "xml", "input_tokens": 30, "output_tokens": 256, "token_limit": 256]
+try emitSubtitleFields(["type": "progress", "translation_failure": failure])
+try emitSubtitleFields(["type": "progress", "checkpoint_retained": true])
+try emitSubtitleFields(["type": "failed", "stage": "failed", "error": "Generic worker error"])
+let failedCue = String(format: subtitleToolsString("translation.failure.unfinished"), 13)
+let tokenCounts = String(format: subtitleToolsString("translation.token_counts"), subtitleToolsString("translation.mode.xml"), 30, 256, 256)
+let resumeHint = subtitleToolsString("translation.resume_hint")
+let language = UserDefaults.standard.stringArray(forKey: "AppleLanguages")?.first
+check(failedCue.contains(language?.hasPrefix("zh") == true ? "第 13 条字幕" : "subtitle 13"),
+      "The task renders the cue number in the selected panel language")
+check(status.stringValue.contains(failedCue) && status.stringValue.contains(tokenCounts) && !status.stringValue.contains("Generic worker error"),
+      "The localized error identifies the failed cue and displays only typed token diagnostics")
+check(status.stringValue.contains(restoredText) && status.stringValue.contains(resumeHint) && generate.isEnabled,
+      "The subsequent checkpoint event preserves the error and allows another generation")
+
+action(generate)
+try emitSubtitleFields(["type": "failed", "error": "Legacy worker error"])
+check(status.stringValue.contains("Legacy worker error") && !status.stringValue.contains(resumeHint) && !status.stringValue.contains(restoredText),
+      "A fresh task without a confirmed checkpoint preserves its original failure and offers no resume promise")
+
+action(generate)
+try emitSubtitleFields(["type": "failed", "translation_failure": ["reason": "context_exhausted", "cue": 7, "mode": "plain",
+                                                                  "input_tokens": 262144, "output_tokens": 0, "token_limit": 0]])
+check(status.stringValue.contains(String(format: subtitleToolsString("translation.failure.context_exhausted"), 7))
+      && !status.stringValue.contains(resumeHint), "A zero output budget reports the actual context limit without promising a checkpoint")
+
 languages.selectItem(at: 4)
 burn.state = .on
 action(generate)

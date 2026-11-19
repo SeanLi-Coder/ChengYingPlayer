@@ -119,6 +119,33 @@ struct SubtitleToolsOutputs: Decodable {
   var transcript: String? = nil
 }
 
+struct SubtitleTranslationFailure: Decodable {
+  let cue: Int
+  let reason: String
+  let mode: String
+  let inputTokens: Int
+  let outputTokens: Int
+  let tokenLimit: Int
+
+  enum CodingKeys: String, CodingKey {
+    case cue, reason, mode
+    case inputTokens = "input_tokens"
+    case outputTokens = "output_tokens"
+    case tokenLimit = "token_limit"
+  }
+
+  var localizedDescription: String? {
+    guard cue > 0, ["unfinished", "invalid_response", "context_exhausted"].contains(reason) else { return nil }
+    let message = String(format: subtitleToolsString("translation.failure.\(reason)"), cue)
+    guard ["plain", "xml"].contains(mode), inputTokens >= 0, outputTokens >= 0, tokenLimit >= outputTokens else {
+      return message
+    }
+    let diagnostics = String(format: subtitleToolsString("translation.token_counts"),
+                             subtitleToolsString("translation.mode.\(mode)"), inputTokens, outputTokens, tokenLimit)
+    return message + "\n" + diagnostics
+  }
+}
+
 struct SubtitleToolsEvent: Decodable {
   enum Kind: String, Decodable {
     case ready, status, accepted, progress, completed, failed, cancelled
@@ -149,6 +176,10 @@ struct SubtitleToolsEvent: Decodable {
   var chunkIndex: Int? = nil
   var chunkCount: Int? = nil
   var elapsedSeconds: Double? = nil
+  var resumedCues: Int? = nil
+  var resumedTranslations: Int? = nil
+  var checkpointRetained: Bool? = nil
+  var translationFailure: SubtitleTranslationFailure? = nil
 
   enum CodingKeys: String, CodingKey {
     case type, id, operation, stage, progress, message, models, outputs, warnings, partial, error
@@ -167,6 +198,10 @@ struct SubtitleToolsEvent: Decodable {
     case chunkIndex = "chunk_index"
     case chunkCount = "chunk_count"
     case elapsedSeconds = "elapsed_seconds"
+    case resumedCues = "resumed_cues"
+    case resumedTranslations = "resumed_translations"
+    case checkpointRetained = "checkpoint_retained"
+    case translationFailure = "translation_failure"
   }
 }
 
@@ -234,6 +269,9 @@ struct SubtitleToolsTask {
   var chunkIndex: Int?
   var chunkCount: Int?
   var elapsedSeconds: Double?
+  var restoredSubtitles: (cues: Int, translations: Int)?
+  var checkpointRetained = false
+  var translationFailure: SubtitleTranslationFailure?
   var isActive: Bool { phase == .starting || phase == .running || phase == .cancelling }
 }
 

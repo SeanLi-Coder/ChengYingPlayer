@@ -36,12 +36,12 @@ class Progress:
         self.last = 0.0
 
     def report(self, stage: str, progress: float, message: str,
-               eta: float | None = None) -> None:
+               eta: float | None = None, **details) -> None:
         if not math.isfinite(progress):
             raise ValueError("Progress must be finite")
         self.last = max(self.last, min(0.999, max(0.0, progress)))
         event = {"type": "progress", "stage": stage, "progress": self.last,
-                 "message": message, "elapsed_seconds": time.monotonic() - self.started}
+                 "message": message, "elapsed_seconds": time.monotonic() - self.started, **details}
         if eta is not None and math.isfinite(eta) and eta >= 0:
             event.update(eta_seconds=eta, eta_scope="stage")
         self.emit(event)

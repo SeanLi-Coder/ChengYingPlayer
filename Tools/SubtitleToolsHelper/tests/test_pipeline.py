@@ -316,7 +316,7 @@ class PipelineUnitTests(unittest.TestCase):
                 return Batch()
 
             def decode(self, tokens, **kwargs):
-                if tokens[-1] != 99:
+                if tokens[-1] != 99 and not self.answer.startswith("<subtitle>"):
                     raise AssertionError("A truncated output reached the parser")
                 return self.answer
 
@@ -327,7 +327,8 @@ class PipelineUnitTests(unittest.TestCase):
             generation_config = types.SimpleNamespace(eos_token_id=[98, 99])
 
             def generate(self, **kwargs):
-                sources = [line for line in tokenizer.prompt.splitlines() if line.startswith("line ")]
+                plain = translator.read_subtitle_element(tokenizer.prompt) or tokenizer.prompt
+                sources = [line for line in plain.splitlines() if line.startswith("line ")]
                 calls.append((tuple(sources), kwargs["do_sample"]))
                 if kwargs["max_new_tokens"] != limit or kwargs["forced_eos_token_id"] is not None:
                     raise AssertionError("Unexpected generation budget or forced EOS")
@@ -336,7 +337,12 @@ class PipelineUnitTests(unittest.TestCase):
                     tokenizer.answer = "incomplete"
                 else:
                     tokenizer.answer = tokenizer.prompt.replace("line ", "translated ")
-                    output[-1] = 99
+                    if kwargs.get("stop_strings") == ["</subtitle>"]:
+                        if kwargs["tokenizer"] is not tokenizer or kwargs["do_sample"]:
+                            raise AssertionError("Framed retry must use the same tokenizer and deterministic decoding")
+                        # A complete tagged answer can end on the final budget token without EOS.
+                    else:
+                        output[-1] = 99
                 return [Tokens([0, 0, 0] + output)]
 
         transformers = types.SimpleNamespace(
@@ -363,7 +369,9 @@ class PipelineUnitTests(unittest.TestCase):
     def test_long_single_cue_preserves_both_halves_and_has_bounded_failure(self):
         original = "Keep the first half of this subtitle intact. Also keep the second half of this subtitle intact."
         parts = []
-        def generate(prompt, greedy=False):
+        def generate(prompt, framed=False):
+            if framed:
+                return "<subtitle>partial"
             source = prompt.split("\n\n", 1)[1]
             if source == original:
                 return None
@@ -379,6 +387,36 @@ class PipelineUnitTests(unittest.TestCase):
         with self.assertRaises(Cancelled):
             translator.translate_cue("Cancelled.", 0, mock.Mock(return_value=None),
                                      mock.Mock(side_effect=Cancelled("stop")))
+
+    def test_only_complete_single_element_recovery_accepts_a_missing_eos(self):
+        self.assertEqual(translator.read_subtitle_element("<subtitle>A &amp; B</subtitle>"), "A & B")
+        for invalid in ("", "<subtitle>partial", "text</subtitle>", "<subtitle></subtitle>",
+                        "<subtitle>x</subtitle>more", "<subtitle>x</subtitle><subtitle>y</subtitle>",
+                        "<subtitle><nested>y</nested></subtitle>", "<subtitle> & </subtitle>"):
+            with self.subTest(invalid=invalid):
+                self.assertIsNone(translator.read_subtitle_element(invalid))
+        recovery = mock.Mock(side_effect=[None, "<subtitle>Complete</subtitle>"])
+        self.assertEqual(translator.translate_cue("A & B </subtitle>", 0, recovery, lambda _: None), "Complete")
+        self.assertIn("A &amp; B &lt;/subtitle&gt;", recovery.call_args.args[0])
+
+    def test_checkpointed_cues_keep_ids_and_skip_model_load(self):
+        converter = types.SimpleNamespace(OpenCC=lambda _: types.SimpleNamespace(convert=lambda t: t.upper()))
+        cues = [Segment(0, 1, "Original", text="Original", language="English"),
+                Segment(1, 2, "Chinese", language="Chinese")]
+        save = mock.Mock()
+        with mock.patch.dict(sys.modules, {"opencc": converter, "torch": None, "transformers": None}):
+            result = translator.translate(cues, {}, Progress(lambda e: None), lambda: False,
+                                          {0: "Already translated"}, save)
+        self.assertEqual([s.text for s in result], ["Already translated", "CHINESE"])
+        save.assert_called_once_with({1: "CHINESE"})
+
+    def test_successful_half_yielded_before_failed_neighbor(self):
+        cues = [Segment(i, i + 1, text, language="English") for i, text in enumerate(("First", "Second"))]
+        generate = mock.Mock(side_effect=[None, "Complete", None, "<subtitle>Incomplete"])
+        translated = translator.translate_batch([0, 1], cues, generate, lambda _: None)
+        self.assertEqual(next(translated), {0: "Complete"})
+        with self.assertRaisesRegex(PipelineError, "subtitle 2"):
+            next(translated)
 
     def test_worker_failure_stdout_is_jsonl_only(self):
         with tempfile.TemporaryDirectory() as directory:

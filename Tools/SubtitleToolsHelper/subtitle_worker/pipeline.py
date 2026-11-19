@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from .asr import normalize_language, transcribe
+from .checkpoint import open_checkpoint
 from .common import (
     Cancelled,
     PipelineError,
@@ -115,19 +116,38 @@ def run_pipeline(request: dict, emit, cancelled=lambda: False) -> dict:
         raise PipelineError("Bundled FFmpeg and FFprobe executables are required")
     check_cancelled(cancelled)
     progress.report("inspecting", 0.0, "Inspecting the selected local video")
-    info = probe(source, ffprobe)
     outputs, warnings = {}, []
-    with tempfile.TemporaryDirectory(prefix=".chengying-subtitles-", dir=source.parent) as temporary_name:
+
+    def report_retained():
+        emit({"type": "progress", "progress": progress.last, "checkpoint_retained": True})
+
+    with (open_checkpoint(request.get("data_dir"), source, normalized_language or "auto", paths,
+                          on_retained=report_retained) as checkpoint,
+          tempfile.TemporaryDirectory(prefix=".chengying-subtitles-", dir=source.parent) as temporary_name):
+        info = probe(source, ffprobe)
         temporary = Path(temporary_name)
-        audio_path = temporary / "speech.wav"
-        extract_audio(source, audio_path, info, ffmpeg, progress, cancelled)
-        segments = transcribe(audio_path, paths, language, progress, cancelled)
-        segments = translate(segments, paths, progress, cancelled)
+        segments, restored = checkpoint.load()
+        if segments:
+            progress.report("translating", 0.68, f"Resumed {len(segments)} aligned subtitles and "
+                            f"{len(restored)} completed translations from the local checkpoint",
+                            resumed_cues=len(segments), resumed_translations=len(restored))
+        else:
+            audio_path = temporary / "speech.wav"
+            extract_audio(source, audio_path, info, ffmpeg, progress, cancelled)
+            segments = transcribe(audio_path, paths, language, progress, cancelled)
+            checkpoint.save_transcript(segments)
+        for segment in segments:
+            if not is_mandarin(segment.language):
+                segment.text = ""
+        segments = translate(segments, paths, progress, cancelled, restored, checkpoint.save_translations)
+        if any(not segment.text.strip() for segment in segments):
+            raise PipelineError("Translation did not finish every subtitle; the local checkpoint was retained")
         segments = normalize_segments(segments, info["duration"])
         check_cancelled(cancelled)
         progress.report("saving", 0.92, "Saving Simplified Chinese SRT and ASS beside the original video")
         write_srt(temporary / "subtitles.srt", segments)
         write_ass(temporary / "subtitles.ass", segments)
+        checkpoint.check_source()
         outputs = publish_sidecars(source, temporary)
         if request.get("burn_subtitles", False):
             try:
@@ -135,11 +155,13 @@ def run_pipeline(request: dict, emit, cancelled=lambda: False) -> dict:
                 video = temporary / "burned.mkv"
                 burn_subtitles(source, video, info, ffmpeg, ffprobe, progress, cancelled)
                 check_cancelled(cancelled)
+                checkpoint.check_source()
                 outputs["video"] = str(publish_video(video, Path(outputs["ass"])))
             except Cancelled:
                 raise
             except Exception as exc:  # noqa: BLE001 - Preserve complete sidecars on every optional burn failure.
                 warnings.append(f"External subtitles are complete, but video burn-in failed: {exc}")
+        checkpoint.completed = not warnings
     return {"type": "completed", "stage": "completed", "progress": 1.0,
             "message": "External subtitles completed; video burn-in needs attention" if warnings else "Chinese subtitles are ready",
             "outputs": outputs, "warnings": warnings, "partial": bool(warnings),

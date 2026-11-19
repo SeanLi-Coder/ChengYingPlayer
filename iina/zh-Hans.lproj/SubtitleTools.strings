@@ -82,6 +82,14 @@
 "stage.recognizing" = "正在识别语音";
 "stage.aligning" = "正在对齐字幕时间轴";
 "stage.translating" = "正在翻译字幕";
+"translation.restored" = "已从检查点恢复 %ld 条带时间轴的字幕，其中 %ld 条已有译文。";
+"translation.resume_hint" = "已保存进度。在这个视频上保持源语言设置不变，再点“生成字幕”即可继续。";
+"translation.failure.unfinished" = "模型重试后仍未完整翻译第 %ld 条字幕。";
+"translation.failure.invalid_response" = "第 %ld 条字幕的译文格式有误，无法确认译文是否完整。";
+"translation.failure.context_exhausted" = "第 %ld 条字幕的输入已用完模型的上下文空间，无法生成译文。";
+"translation.mode.plain" = "常规翻译";
+"translation.mode.xml" = "带标签翻译";
+"translation.token_counts" = "%@ · 输入 %ld 个 token，输出 %ld 个，本次输出上限为 %ld 个。";
 "stage.saving" = "正在保存中文字幕";
 "stage.burning" = "正在写入无损字幕视频";
 "stage.runtime_extract" = "正在解压已校验的运行环境";

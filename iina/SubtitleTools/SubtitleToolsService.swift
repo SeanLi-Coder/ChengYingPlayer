@@ -207,6 +207,14 @@ final class SubtitleToolsService {
     }
     current.stage = event.stage ?? current.stage
     current.message = event.message ?? current.message
+    if current.operation == .subtitles {
+      if let cues = event.resumedCues, cues > 0, let translations = event.resumedTranslations,
+         (0...cues).contains(translations) {
+        current.restoredSubtitles = (cues, translations)
+      }
+      if let retained = event.checkpointRetained { current.checkpointRetained = retained }
+      if let failure = event.translationFailure { current.translationFailure = failure }
+    }
     if current.operation == .summary || current.operation == .verify || current.operation == .deleteModel || current.purpose == "summary" {
       // Missing progress means unknown, including when the next stage has no denominator.
       current.progress = event.progress.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil }
@@ -264,7 +272,7 @@ final class SubtitleToolsService {
       }
     case .failed:
       current.phase = .failed
-      current.error = event.error ?? event.message ?? subtitleToolsString("status.failed")
+      current.error = current.translationFailure?.localizedDescription ?? event.error ?? event.message ?? subtitleToolsString("status.failed")
     case .cancelled:
       current.phase = .cancelled
     case .ready, .status: break
