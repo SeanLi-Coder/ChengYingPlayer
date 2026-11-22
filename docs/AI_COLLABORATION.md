@@ -12,7 +12,64 @@
 这是澄影视界播放器，不是独立的 Local Video Cutter 项目。
 文档中的历史观察截至 **2026-09-25**；开始前以当前源码、用户新要求和实际测试为准。
 
-## 2026-11-20 单条字幕达到输出上限后的自动恢复及补译（v0.2.95 / build 106）
+## 2026-11-22 抖音 signer-html 中途暂停修复与两个主页交付（进行中）
+
+用户报告两个抖音主页（大叶子✨、小丸子💕）批量下载在中途某 1 个作品处报
+`signer-html`（“网站返回的数据发生变化”）后整轮暂停。基于最新主线 `9825038b`
+（本地两个 Instagram 提交已变基保留），分支 `qwen/douyin-signer-html-queue`。
+
+根因有两层：
+1. 队列策略：运行中媒体刷新重新签名失败抛 `TemporaryAccessError`，
+   `task_manager` 对抖音主页无条件整轮暂停；v0.2.85/v0.2.89 的续队例外不覆盖
+   `SITE_RESPONSE_CHANGED` 的签名失败。
+2. 站点变化：抖音对普通 HTML GET 返回 JavaScript VM 验证壳（`_$jsvmprt`），
+   需要真实浏览器渲染执行站点自己的验证脚本后才返回含 SecSDK glue 的页面；
+   原 urllib＋context GET 回退永远拿不到 glue。部分会话还会停在“验证码中间页”。
+
+修复（不放宽身份、画质、可信域与取消门禁）：
+- 新增 `DouyinSignerHtmlError`（errors.py），仅携带固定 `signer-html` 类别；
+  文案与分类不变。
+- 定向作品发现在签名详情失败后，先用同一签名作者主页接口定向刷新
+  （douyin.py），身份与完整性校验不变。
+- 原生 opt-in 抖音主页队列把当轮 typed signer-html 失败记为单项失败并续队，
+  末尾一轮重试；`discovery_complete` 不再被单项失败重置；独立引擎与其他门禁
+  保持原暂停策略（task_manager.py）。
+- 签名 HTML 回退耗尽后，用真实页面渲染兜底提取 glue（douyin_signing.py）：
+  复用已打开页面、给站点脚本自动完成验证的时间；持续交互式验证码按既有
+  verification_required 认证错误上报，不绕过验证。glue 标记、可信脚本与
+  尺寸校验不变。
+- 可选 `CHENGYING_DOUYIN_SIGNING_PROFILE_DIR` 持久专用 Chrome 环境（默认不启用）
+  及对应代理钩子（proxy_transport.py）。实测持久环境下合成签名页路由返回 404
+  （临时环境正常），本轮交付未启用持久环境；该差异待后续单独排查。
+
+回归：新增 `tests/test_douyin_signer_queue.py` 31 项、
+`tests/test_douyin_render_glue.py` 11 项；helper 全量 2015 项＋65 子测试、
+隔离上游 1405 项、ruff 检查全部通过。
+
+实站：用户 Chrome 自动选择配置经渲染兜底恢复签名。交付使用生产
+DownloadManager（原生 opt-in、Chrome Cookie、作者目录、不覆盖发布），
+输出到用户既有 `/Users/lixiang/Downloads/大叶子✨`、
+`/Users/lixiang/Downloads/小丸子💕`。
+
+最终交付（2026-11-22，均已核验）：
+- 大叶子✨：131/131 个作品全部完成（125 视频＋6 图集），135 个文件、
+  1,492,743,757 字节，discovery_complete=True，失败 0。分辨率含 2160x3840、
+  1440x2560、1080x1920 等，均为逐作品验证过的网站最高可用档。
+- 小丸子💕：69/69 个作品全部完成（69 视频），69 个文件、1,137,614,415 字节，
+  discovery_complete=True，失败 0，全部 1080x1920。
+- 逐文件存在性与非零大小核对通过；抽样 FFprobe 分辨率与任务记录一致。
+  每个文件在保存前已通过引擎自身的完整性/画质门禁。
+
+小丸子主页中途另有 1 个作品（7658589604492715249）的默认画质入口被站点
+重定向到未知主机（4b19a02d-9.sjxydc.com，含非标准端口 4430），按既有安全
+门禁暂停（security_blocked，未降档）。直连与代理均复现，属站点侧 CDN 行为。
+先完成其余 68 个作品后单独重试该作品，新一轮官方路由探测通过并完成下载；
+未放宽任何主机/端口/画质校验。
+
+验证边界：交付经修补后的生产源码队列完成，不等于已安装 App（v0.2.95）的
+GUI 验收；用户 App 内旧任务仍保留，可在升级后继续或直接用已交付文件。
+持久签名环境（CHENGYING_DOUYIN_SIGNING_PROFILE_DIR）下合成签名页路由 404
+的差异未定因，默认不启用。发布状态：not released（功能分支待整合）。
 
 v0.2.94 的真实报错显示第 1 条字幕的 XML 重试输入 49 个 token、生成 392 个 token 后触顶。
 这个上限来自程序按输入长度乘八的计算。输入数包含模板、指令及标签；未取得原句或模型的生成内容。

@@ -304,6 +304,29 @@ def install_proxy_transports(get_proxy: Callable[[], str | None]) -> Callable[[]
                 _sanitize_exception(error, proxy)
                 raise
 
+        original_launch_persistent = BrowserType.launch_persistent_context
+
+        @functools.wraps(original_launch_persistent)
+        def launch_persistent_context(browser_type, *args, **kwargs):
+            proxy = get_proxy()
+            kwargs = dict(kwargs)
+            arguments = [
+                argument
+                for argument in (kwargs.get("args") or [])
+                if not argument.startswith(("--proxy-", "--no-proxy-server"))
+            ]
+            if proxy:
+                kwargs["proxy"] = _browser_proxy(proxy)
+            else:
+                kwargs["proxy"] = None
+                arguments.append("--no-proxy-server")
+            kwargs["args"] = arguments
+            try:
+                return original_launch_persistent(browser_type, *args, **kwargs)
+            except Exception as error:
+                _sanitize_exception(error, proxy)
+                raise
+
         original_request = RequestsSession.request
 
         @functools.wraps(original_request)
@@ -321,6 +344,7 @@ def install_proxy_transports(get_proxy: Callable[[], str | None]) -> Callable[[]
         replace(xiaohongshu, "YoutubeDL", DesktopYoutubeDL)
         replace(signing, "build_opener", build_opener)
         replace(BrowserType, "launch", launch)
+        replace(BrowserType, "launch_persistent_context", launch_persistent_context)
         replace(RequestsSession, "request", session_request)
 
         def cleanup():

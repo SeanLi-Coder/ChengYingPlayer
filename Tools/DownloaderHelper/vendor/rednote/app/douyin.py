@@ -27,6 +27,7 @@ from .douyin_signing import (
 from .errors import (
     AuthenticationRequiredError,
     DiscoveryError,
+    DouyinSignerHtmlError,
     DownloadCancelledError,
     SiteIssueCode,
     TemporaryAccessError,
@@ -998,6 +999,42 @@ def discover_item_metadata_from_profile(
             )
         except (AuthenticationRequiredError, DownloadCancelledError):
             raise
+        except DouyinSignerHtmlError as exc:
+            # The detail signing page lost its SDK glue. The author-feed API
+            # uses a separate signed route, so try the same target there
+            # before surfacing the failure. Identity and completeness checks
+            # below are unchanged; other response changes keep pausing.
+            detail_error = exc
+            try:
+                awemes = fetch_signed_profile_awemes(
+                    profile_url,
+                    profile_id,
+                    target_aweme_id=media_id,
+                    cookie_profile=cookie_profile,
+                    should_cancel=should_cancel,
+                    status_callback=status_callback,
+                    progress_budget=progress_budget,
+                )
+            except (AuthenticationRequiredError, DownloadCancelledError):
+                raise
+            except TemporaryAccessError as feed_exc:
+                raise feed_exc from exc
+            for aweme in awemes:
+                if str(aweme.get("aweme_id") or "").strip() != media_id:
+                    continue
+                metadata = verified_aweme_metadata(
+                    aweme,
+                    media_id,
+                    expected_profile_id=profile_id,
+                )
+                if not metadata:
+                    raise TemporaryAccessError(
+                        "Douyin returned the requested profile item without complete, "
+                        "verified media metadata. Retry after a short wait.",
+                        issue_code=SiteIssueCode.SITE_RESPONSE_CHANGED,
+                    ) from exc
+                return metadata
+            raise exc
         except TemporaryAccessError as exc:
             detail_error = exc
         else:

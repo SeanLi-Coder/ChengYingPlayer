@@ -398,6 +398,16 @@ class TemporaryAccessError(DownloaderCoreError):
     pass
 
 
+class DouyinSignerHtmlError(TemporaryAccessError):
+    """The signing page lacked verifiable SDK glue after bounded retries.
+
+    Raised only for the fixed ``signer-html`` transient category. The opt-in
+    native queue may keep this failure item-local on a verified author profile;
+    identity, quality, authentication and every other response-change gate are
+    unchanged, and the standalone engine keeps its original pause policy.
+    """
+
+
 class DouyinMediaRefreshRequiredError(TemporaryAccessError):
     """A verified Douyin source must be rediscovered before one safe retry."""
 

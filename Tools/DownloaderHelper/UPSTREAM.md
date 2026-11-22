@@ -732,3 +732,60 @@ sessions with real CookieJar Set-Cookie processing, including deletion, scoped
 paths, concurrent isolation and control failures. It blocks network and real
 browser access. These fixtures establish a reproducible fallback defect; they do
 not establish that every real-site `signer-html` response has the same cause.
+
+### Item-local signer-html failures on native profile queues (2026-11-22)
+
+A mid-run media refresh signs the exact item detail again. When that signing
+page loses its SDK glue after the existing bounded session retries, the final
+failure now carries the additive `DouyinSignerHtmlError` type
+(`app/errors.py`) for the fixed `signer-html` transient category only. The
+message, `SITE_RESPONSE_CHANGED` classification and every authentication,
+identity, rate-limit and security gate are unchanged.
+
+Targeted item discovery (`app/douyin.py`) uses that type to try the same target
+through the signed author-feed route once, with the same progress budget and
+the unchanged identity and completeness validation, before surfacing the
+failure. Authentication and cancellation still propagate immediately, and
+every other detail response change keeps its previous fallback semantics.
+
+Under the native opt-in continuation policy, a typed current-invocation
+signer-html failure on a verified Douyin author profile is recorded as one
+failed item while the remaining works continue; discovery completeness is not
+reset because the profile enumeration itself was verified. One bounded tail
+retry gives the item a fresh signing session. Explicit gates carried by the
+typed exception, untyped response changes, non-profile tasks and the standalone
+default keep the original whole-task pause. No persisted message or issue code
+grants the exception, completed files and receipts are preserved, and no
+quality, identity or trusted-endpoint check is relaxed.
+
+`tests/test_douyin_signer_queue.py` covers continuation, the single tail retry,
+restart and manual continue, evidence expiry across submissions, gate
+overrides, cancellation, the targeted author-feed recovery and its identity
+and authentication negative controls, plus the unchanged standalone policy.
+These synthetic results do not establish that every real-site signer-html
+interruption has this cause or that a specific profile has fully downloaded.
+
+### Rendered verification-page glue recovery (2026-11-22)
+
+The site now answers plain HTML GETs with a JavaScript VM shell that computes
+a verification cookie and reloads the real document; neither the urllib fetch
+nor the browser-context GET ever receives SDK glue from that shell. After both
+existing fallbacks fail with `signer-html`, the signing session renders the
+same trusted URL in its real Chrome page and re-runs the unchanged glue
+validation on the rendered document. It reuses an already-open target page
+instead of re-navigating, gives the site's own verification script bounded
+time to finish, and keeps every origin, DNS-filter, glue-marker, trusted-script
+and size check. A persistent interactive CAPTCHA page is reported as the
+existing verification-required authentication error; nothing is solved or
+bypassed. An optional native-configured absolute
+`CHENGYING_DOUYIN_SIGNING_PROFILE_DIR` reuses a dedicated persistent Chrome
+profile across signing sessions (with the same explicit proxy hook); without
+it the ephemeral context is unchanged. Real-site observation: the persistent
+context currently receives a 404 for the synthetic signing route while the
+ephemeral context fulfills it normally, so deliveries keep the ephemeral
+default until that difference is separately diagnosed.
+
+`tests/test_douyin_render_glue.py` covers shell-then-glue recovery, navigation
+reuse, the CAPTCHA grace window and its authentication classification,
+untrusted redirects and glue scripts, cancellation, and the persistent-profile
+opt-in with its unchanged default.
