@@ -12,7 +12,45 @@
 这是澄影视界播放器，不是独立的 Local Video Cutter 项目。
 文档中的历史观察截至 **2026-09-25**；开始前以当前源码、用户新要求和实际测试为准。
 
-## 2026-11-20 单条字幕达到输出上限后的自动恢复及补译（v0.2.95 / build 106）
+## 2026-11-22 抖音 signer-html 中途暂停修复与两个主页交付（进行中）
+
+用户报告两个抖音主页（大叶子✨、小丸子💕）批量下载在中途某 1 个作品处报
+`signer-html`（“网站返回的数据发生变化”）后整轮暂停。基于最新主线 `9825038b`
+（本地两个 Instagram 提交已变基保留），分支 `qwen/douyin-signer-html-queue`。
+
+根因有两层：
+1. 队列策略：运行中媒体刷新重新签名失败抛 `TemporaryAccessError`，
+   `task_manager` 对抖音主页无条件整轮暂停；v0.2.85/v0.2.89 的续队例外不覆盖
+   `SITE_RESPONSE_CHANGED` 的签名失败。
+2. 站点变化：抖音对普通 HTML GET 返回 JavaScript VM 验证壳（`_$jsvmprt`），
+   需要真实浏览器渲染执行站点自己的验证脚本后才返回含 SecSDK glue 的页面；
+   原 urllib＋context GET 回退永远拿不到 glue。部分会话还会停在“验证码中间页”。
+
+修复（不放宽身份、画质、可信域与取消门禁）：
+- 新增 `DouyinSignerHtmlError`（errors.py），仅携带固定 `signer-html` 类别；
+  文案与分类不变。
+- 定向作品发现在签名详情失败后，先用同一签名作者主页接口定向刷新
+  （douyin.py），身份与完整性校验不变。
+- 原生 opt-in 抖音主页队列把当轮 typed signer-html 失败记为单项失败并续队，
+  末尾一轮重试；`discovery_complete` 不再被单项失败重置；独立引擎与其他门禁
+  保持原暂停策略（task_manager.py）。
+- 签名 HTML 回退耗尽后，用真实页面渲染兜底提取 glue（douyin_signing.py）：
+  复用已打开页面、给站点脚本自动完成验证的时间；持续交互式验证码按既有
+  verification_required 认证错误上报，不绕过验证。glue 标记、可信脚本与
+  尺寸校验不变。
+- 可选 `CHENGYING_DOUYIN_SIGNING_PROFILE_DIR` 持久专用 Chrome 环境（默认不启用）
+  及对应代理钩子（proxy_transport.py）。实测持久环境下合成签名页路由返回 404
+  （临时环境正常），本轮交付未启用持久环境；该差异待后续单独排查。
+
+回归：新增 `tests/test_douyin_signer_queue.py` 31 项、
+`tests/test_douyin_render_glue.py` 11 项；helper 全量 2004 项＋65 子测试、
+隔离上游 1405 项通过（渲染兜底加入前的全量；加入后定向 81 项通过，全量复跑见后续记录）。
+
+实站：用户 Chrome 自动选择配置经渲染兜底恢复签名（大叶子✨取得 131 个作品，
+discovery_complete=True）。交付使用生产 DownloadManager（原生 opt-in、
+Chrome Cookie、作者目录、不覆盖发布），输出到用户既有
+`/Users/lixiang/Downloads/大叶子✨`、`/Users/lixiang/Downloads/小丸子💕`。
+交付完成数与逐文件核对结果见本轮最终记录；未完成前不宣称全部下载成功。
 
 v0.2.94 的真实报错显示第 1 条字幕的 XML 重试输入 49 个 token、生成 392 个 token 后触顶。
 这个上限来自程序按输入长度乘八的计算。输入数包含模板、指令及标签；未取得原句或模型的生成内容。

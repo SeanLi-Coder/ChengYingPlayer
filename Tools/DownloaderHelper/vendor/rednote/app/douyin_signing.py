@@ -1165,6 +1165,114 @@ def _extract_glue_with_context_fallback(
                 response.dispose()
 
 
+_RENDER_GLUE_MAX_ROUNDS = 15
+_RENDER_GLUE_SETTLE_MS = 2_000
+_RENDER_CAPTCHA_TITLE = "验证码中间页"
+
+
+def _rendered_page_glue_fallback(
+    context: Any,
+    page: Any,
+    verification_url: str,
+    navigation_timeout_ms: int,
+    should_cancel: CancelCallback | None,
+    *,
+    budget: _NoProgressBudget,
+    status_callback: StatusCallback | None = None,
+) -> tuple[str, ...]:
+    """Recover SDK glue from the site's own rendered verification page.
+
+    The site may answer a plain HTML GET with a JavaScript VM shell that
+    computes a verification cookie and reloads the real document. Only a real
+    Chrome navigation executes that site-generated code; no signing or
+    verification logic is copied or replayed here. The rendered document must
+    still pass the unchanged glue-marker, trusted-script and size checks.
+    A persistent interactive CAPTCHA page is reported as the existing
+    verification-required authentication error so the user can complete it.
+    """
+    _emit_status(
+        status_callback,
+        "Rendering the Douyin verification page in the browser",
+    )
+    _raise_if_cancelled(should_cancel)
+    if str(getattr(page, "url", "") or "").split("#", 1)[0] != verification_url:
+        page.goto(
+            verification_url,
+            wait_until="domcontentloaded",
+            timeout=budget.clamp_timeout_ms(navigation_timeout_ms),
+        )
+    last_error: Exception | None = None
+    captcha_rounds = 0
+    for round_index in range(_RENDER_GLUE_MAX_ROUNDS):
+        _raise_if_cancelled(should_cancel)
+        budget.remaining_seconds()
+        redirect_issue = _explicit_auth_url_issue_code(page.url)
+        if redirect_issue is not None:
+            raise _AuthenticationSigningFailure(
+                "Douyin rendered page redirected to an explicit login or "
+                "verification page",
+                issue_code=redirect_issue,
+            )
+        if _is_dns_filter_block_url(page.url):
+            raise _NetworkFilterSigningFailure(
+                "A local DNS or web filter redirected the Douyin request"
+            )
+        if not _is_allowed_douyin_origin(page.url):
+            raise _SigningFailure(
+                "Douyin rendered page redirected outside the trusted origin"
+            )
+        _wait_with_cancel(
+            page,
+            _RENDER_GLUE_SETTLE_MS,
+            should_cancel,
+            budget=budget,
+        )
+        rendered_html = page.content()
+        budget.remaining_seconds()
+        try:
+            return _extract_sdk_glue_tags(rendered_html)
+        except _AuthenticationSigningFailure:
+            raise
+        except _TransientSigningFailure as exc:
+            last_error = exc
+        # The site's own script may still be solving its intermediate
+        # verification challenge. Give it time before declaring an
+        # interactive CAPTCHA; never solve or bypass the challenge here.
+        if _RENDER_CAPTCHA_TITLE in page.title():
+            captcha_rounds += 1
+            if captcha_rounds >= 3 and round_index >= 5:
+                raise _AuthenticationSigningFailure(
+                    "Douyin displayed an interactive verification page",
+                    issue_code=SiteIssueCode.VERIFICATION_REQUIRED,
+                )
+        else:
+            captcha_rounds = 0
+    raise last_error or _TransientSigningFailure(
+        "Douyin rendered page did not provide SecSDK glue",
+        category="signer-html",
+    )
+
+
+def _persistent_signing_user_data_dir() -> str | None:
+    """Optional native opt-in: a dedicated, task-owned Chrome profile directory.
+
+    The site's rendered verification flow may require a persistent browser
+    identity. When the native host configures this absolute directory, signing
+    sessions reuse it so a user-completed verification survives across
+    sessions. Without the setting the original ephemeral context is unchanged.
+    """
+    import os
+    from pathlib import Path
+
+    value = os.environ.get("CHENGYING_DOUYIN_SIGNING_PROFILE_DIR", "").strip()
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise _SigningFailure("Douyin signing profile directory must be absolute")
+    return str(path)
+
+
 def _raise_if_cancelled(should_cancel: CancelCallback | None) -> None:
     if should_cancel and should_cancel():
         raise DownloadCancelledError("Task cancelled")
@@ -2190,22 +2298,39 @@ def _run_with_signing_page(
             try:
                 budget.remaining_seconds()
                 _emit_status(status_callback, "Starting the Douyin signing browser")
-                browser = playwright.chromium.launch(
-                    channel="chrome",
-                    headless=True,
-                    timeout=budget.clamp_timeout_ms(navigation_timeout_ms),
-                )
-                budget.remaining_seconds()
-                context = browser.new_context(
-                    locale="zh-CN",
-                    viewport={"width": 1440, "height": 1100},
-                    user_agent=chrome_user_agent(browser.version),
-                )
+                persistent_dir = _persistent_signing_user_data_dir()
+                if persistent_dir:
+                    context = playwright.chromium.launch_persistent_context(
+                        persistent_dir,
+                        channel="chrome",
+                        headless=True,
+                        locale="zh-CN",
+                        viewport={"width": 1440, "height": 1100},
+                        timeout=budget.clamp_timeout_ms(navigation_timeout_ms),
+                    )
+                    probe_page = context.pages[0] if context.pages else context.new_page()
+                    user_agent = probe_page.evaluate("() => navigator.userAgent")
+                else:
+                    browser = playwright.chromium.launch(
+                        channel="chrome",
+                        headless=True,
+                        timeout=budget.clamp_timeout_ms(navigation_timeout_ms),
+                    )
+                    context = browser.new_context(
+                        locale="zh-CN",
+                        viewport={"width": 1440, "height": 1100},
+                        user_agent=chrome_user_agent(browser.version),
+                    )
+                    user_agent = chrome_user_agent(browser.version)
                 context.add_cookies(browser_cookies)
                 _raise_if_cancelled(should_cancel)
                 budget.remaining_seconds()
 
-                page = context.new_page()
+                page = (
+                    probe_page
+                    if persistent_dir and context.pages
+                    else context.new_page()
+                )
 
                 if page_detail_aweme_id is not None:
                     captured_detail = _capture_detail_from_item_page(
@@ -2222,18 +2347,33 @@ def _run_with_signing_page(
                     if captured_detail is not None:
                         return captured_detail
 
-                user_agent = chrome_user_agent(browser.version)
-                glue_tags, cookie_jar_updated = _extract_glue_with_context_fallback(
-                    context,
-                    verification_url,
-                    cookie_jar,
-                    user_agent,
-                    navigation_timeout_ms,
-                    should_cancel,
-                    budget=budget,
-                    status_callback=status_callback,
-                    source_cookie_baseline=browser_cookies,
-                )
+                try:
+                    glue_tags, cookie_jar_updated = _extract_glue_with_context_fallback(
+                        context,
+                        verification_url,
+                        cookie_jar,
+                        user_agent,
+                        navigation_timeout_ms,
+                        should_cancel,
+                        budget=budget,
+                        status_callback=status_callback,
+                        source_cookie_baseline=browser_cookies,
+                    )
+                except _TransientSigningFailure as exc:
+                    if exc.category != "signer-html":
+                        raise
+                    # A JavaScript VM shell needs a real navigation to compute
+                    # its verification cookie; plain GETs never receive glue.
+                    glue_tags = _rendered_page_glue_fallback(
+                        context,
+                        page,
+                        verification_url,
+                        navigation_timeout_ms,
+                        should_cancel,
+                        budget=budget,
+                        status_callback=status_callback,
+                    )
+                    cookie_jar_updated = False
                 if cookie_jar_updated:
                     context.add_cookies(_cookie_jar_to_playwright(cookie_jar))
                 signing_document = _build_signing_document(glue_tags)

@@ -764,3 +764,28 @@ overrides, cancellation, the targeted author-feed recovery and its identity
 and authentication negative controls, plus the unchanged standalone policy.
 These synthetic results do not establish that every real-site signer-html
 interruption has this cause or that a specific profile has fully downloaded.
+
+### Rendered verification-page glue recovery (2026-11-22)
+
+The site now answers plain HTML GETs with a JavaScript VM shell that computes
+a verification cookie and reloads the real document; neither the urllib fetch
+nor the browser-context GET ever receives SDK glue from that shell. After both
+existing fallbacks fail with `signer-html`, the signing session renders the
+same trusted URL in its real Chrome page and re-runs the unchanged glue
+validation on the rendered document. It reuses an already-open target page
+instead of re-navigating, gives the site's own verification script bounded
+time to finish, and keeps every origin, DNS-filter, glue-marker, trusted-script
+and size check. A persistent interactive CAPTCHA page is reported as the
+existing verification-required authentication error; nothing is solved or
+bypassed. An optional native-configured absolute
+`CHENGYING_DOUYIN_SIGNING_PROFILE_DIR` reuses a dedicated persistent Chrome
+profile across signing sessions (with the same explicit proxy hook); without
+it the ephemeral context is unchanged. Real-site observation: the persistent
+context currently receives a 404 for the synthetic signing route while the
+ephemeral context fulfills it normally, so deliveries keep the ephemeral
+default until that difference is separately diagnosed.
+
+`tests/test_douyin_render_glue.py` covers shell-then-glue recovery, navigation
+reuse, the CAPTCHA grace window and its authentication classification,
+untrusted redirects and glue scripts, cancellation, and the persistent-profile
+opt-in with its unchanged default.
