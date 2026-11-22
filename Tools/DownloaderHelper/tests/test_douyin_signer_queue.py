@@ -454,7 +454,7 @@ def test_targeted_discovery_rejects_crosswired_feed_identity(monkeypatch):
     monkeypatch.setattr(
         douyin, "fetch_signed_profile_awemes",
         lambda *args, **kwargs: [
-            _feed_aweme(media_id, "MS4wLjABAAAAanother-author")
+            _feed_aweme(media_id, "MS4wLjABAAAAforeign-author")
         ],
     )
     with pytest.raises(TemporaryAccessError) as captured:
