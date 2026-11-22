@@ -43,8 +43,8 @@
   （临时环境正常），本轮交付未启用持久环境；该差异待后续单独排查。
 
 回归：新增 `tests/test_douyin_signer_queue.py` 31 项、
-`tests/test_douyin_render_glue.py` 11 项；helper 全量 2004 项＋65 子测试、
-隔离上游 1405 项通过（渲染兜底加入前的全量；加入后定向 81 项通过，全量复跑见后续记录）。
+`tests/test_douyin_render_glue.py` 11 项；helper 全量 2015 项＋65 子测试、
+隔离上游 1405 项、ruff 检查全部通过。
 
 实站：用户 Chrome 自动选择配置经渲染兜底恢复签名（大叶子✨取得 131 个作品，
 discovery_complete=True）。交付使用生产 DownloadManager（原生 opt-in、
