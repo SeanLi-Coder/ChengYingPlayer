@@ -26,6 +26,7 @@ from .browser import (
 from .errors import (
     AuthenticationRequiredError,
     DiscoveryError,
+    DouyinSignerHtmlError,
     DownloadCancelledError,
     SiteIssueCode,
     TemporaryAccessError,
@@ -2430,7 +2431,12 @@ def _raise_signing_error(
                 "was paused without downloading a fallback."
             ),
         }[code]
-        raise TemporaryAccessError(
+        error_type = (
+            DouyinSignerHtmlError
+            if cause.category == "signer-html"
+            else TemporaryAccessError
+        )
+        raise error_type(
             f"{message} Reason category: {cause.category}.",
             issue_code=code,
         ) from cause

@@ -39,6 +39,7 @@ from .errors import (
     AuthenticationRequiredError,
     DiscoveryError,
     DouyinMediaRefreshRequiredError,
+    DouyinSignerHtmlError,
     DownloadCancelledError,
     MediaDownloadError,
     SiteIssueCode,
@@ -1318,9 +1319,13 @@ class DownloadManager:
             # Only current, typed image failures may bypass the broad Douyin
             # response-change gate. Never derive this evidence from saved text.
             image_dimension_retry_ids: set[str] = set()
+            # Same rule for the typed signing-page failure: only this
+            # invocation's observed exception grants one tail retry.
+            signer_html_retry_ids: set[str] = set()
             for item_id in self._download_round_items(
                 job_id, list(item_ids or []), cancel_event,
                 image_dimension_retry_ids=image_dimension_retry_ids,
+                signer_html_retry_ids=signer_html_retry_ids,
             ):
                 if cancel_event.is_set():
                     raise DownloadCancelledError("Task cancelled")
@@ -1331,6 +1336,7 @@ class DownloadManager:
                     if item.id not in targets or item.status != ItemStatus.QUEUED:
                         continue
                     image_dimension_retry_ids.discard(item_id)
+                    signer_html_retry_ids.discard(item_id)
                     item.status = ItemStatus.DOWNLOADING
                     item.attempts += 1
                     item.error = None
@@ -1456,6 +1462,20 @@ class DownloadManager:
                         job = self._require_job(job_id)
                         item = self._find_item(job, item_id)
                         cancelled = cancel_event.is_set() or job.cancel_requested
+                        # A typed signing-page failure on a verified author
+                        # profile stays item-local under the opt-in native
+                        # policy: the remaining works are independent, and one
+                        # bounded tail retry gets a fresh signing session. All
+                        # other temporary gates keep pausing the whole queue.
+                        signer_html_item_failure = (
+                            not cancelled
+                            and self.auto_retry_failed_items
+                            and job.platform == Platform.DOUYIN
+                            and job.source_kind == SourceKind.PROFILE
+                            and isinstance(exc, DouyinSignerHtmlError)
+                            and classify_site_issue(exc)
+                            == SiteIssueCode.SITE_RESPONSE_CHANGED
+                        )
                         if cancelled:
                             self._mark_cancelled_locked(job)
                         else:
@@ -1476,23 +1496,31 @@ class DownloadManager:
                                 item.metadata[
                                     DOUYIN_PROFILE_REFRESH_REQUIRED_MARKER
                                 ] = True
-                                job.discovery_complete = False
+                                if not signer_html_item_failure:
+                                    job.discovery_complete = False
+                            if signer_html_item_failure:
+                                signer_html_retry_ids.add(item_id)
                             item.updated_at = utc_now()
-                            job.status = JobStatus.INTERRUPTED
-                            job.error = safe_message
-                            job.auth_message = None
-                            job.verification_url = None
                             job.active_item_id = None
-                            job.finished_at = utc_now()
-                            job.retryable = True
+                            if not signer_html_item_failure:
+                                job.status = JobStatus.INTERRUPTED
+                                job.error = safe_message
+                                job.auth_message = None
+                                job.verification_url = None
+                                job.finished_at = utc_now()
+                                job.retryable = True
                             job.refresh_counts()
                         self._commit_locked(job)
                     self._notify(
                         self.get_job(job_id),
-                        "cancelled" if cancelled else "interrupted",
+                        "cancelled" if cancelled
+                        else "item_failed" if signer_html_item_failure
+                        else "interrupted",
                         item_id,
                     )
-                    return
+                    if cancelled or not signer_html_item_failure:
+                        return
+                    continue
                 except AuthenticationRequiredError as exc:
                     with self._lock:
                         job = self._require_job(job_id)
@@ -1699,15 +1727,16 @@ class DownloadManager:
         cancel_event: threading.Event,
         *,
         image_dimension_retry_ids: set[str],
+        signer_html_retry_ids: set[str],
     ) -> Iterator[str]:
         """Finish the requested queue before one bounded retry of transient errors.
 
         Only IDs from this invocation are eligible. This never resubmits a job,
         changes its identity, rediscovers unrelated media, or resets completed
-        items. A typed image-dimension failure observed during this invocation
-        may also retry once; no saved error message grants this exception.
-        Unknown, identity, authentication and security errors require an explicit
-        user action instead of an automatic retry.
+        items. A typed image-dimension or signing-page failure observed during
+        this invocation may also retry once; no saved error message grants
+        these exceptions. Unknown, identity, authentication and security errors
+        require an explicit user action instead of an automatic retry.
         """
         yield from item_ids
         if not self.auto_retry_failed_items:
@@ -1723,6 +1752,7 @@ class DownloadManager:
                 if self._can_auto_retry_item(
                     self._find_item(job, item_id),
                     image_dimensions_failed=item_id in image_dimension_retry_ids,
+                    signer_html_failed=item_id in signer_html_retry_ids,
                 )
             ]
             if not retry_ids:
@@ -1740,6 +1770,7 @@ class DownloadManager:
                 if not self._can_auto_retry_item(
                     item,
                     image_dimensions_failed=item_id in image_dimension_retry_ids,
+                    signer_html_failed=item_id in signer_html_retry_ids,
                 ):
                     continue
                 # Preserve verified output paths, per-asset receipts and total
@@ -1750,7 +1781,10 @@ class DownloadManager:
 
     @staticmethod
     def _can_auto_retry_item(
-        item: DownloadItem, *, image_dimensions_failed: bool = False,
+        item: DownloadItem,
+        *,
+        image_dimensions_failed: bool = False,
+        signer_html_failed: bool = False,
     ) -> bool:
         return (
             item.status == ItemStatus.FAILED
@@ -1761,6 +1795,11 @@ class DownloadManager:
                     image_dimensions_failed
                     and item.issue_code == SiteIssueCode.SITE_RESPONSE_CHANGED
                     and item.media_type == MediaType.IMAGE
+                )
+                or (
+                    signer_html_failed
+                    and item.issue_code == SiteIssueCode.SITE_RESPONSE_CHANGED
+                    and item.extractor_key == "Douyin"
                 )
             )
         )
